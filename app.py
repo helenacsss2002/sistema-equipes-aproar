@@ -636,7 +636,7 @@ else:
         else:
             st.warning("Nenhuma equipe convocada para este engenheiro nesta data.")
 
-    # 4. RELATÓRIOS (PDF E EXCEL PROFISSIONAL)
+    # 4. RELATÓRIOS (PDF E EXCEL COM ABAS SEPARADAS POR DIA)
     elif menu_escolhido == "📊 RELATÓRIOS":
         st.markdown("## 📊 RELATÓRIO DE CUSTOS E FECHAMENTO")
         col_rel_eng, _ = st.columns(2)
@@ -682,7 +682,6 @@ else:
                             pdf.cell(0, 8, txt=to_latin(f"Período: {data_inicio_rel.strftime('%d/%m/%Y')} a {data_fim_rel.strftime('%d/%m/%Y')} | Eng: {eng}"), ln=True, align='C')
                             pdf.ln(5)
                             
-                            custo_total_engenheiro = 0.0
                             for o_id, apontamentos in obras_eng.items():
                                 dados_ob = dict_obras.get(o_id, {"nome": "N/A", "unidade": "N/A"})
                                 pdf.set_font("Arial", 'B', 10)
@@ -701,7 +700,6 @@ else:
                                 pdf.cell(51, 6, to_latin("Obs"), border=1, ln=True)
                                 
                                 pdf.set_font("Arial", '', 8)
-                                custo_total_obra = 0.0
                                 for row in apontamentos:
                                     colab = dict_colaboradores.get(row['colaborador_id'], {})
                                     nome = colab.get('nome', 'N/A')
@@ -710,39 +708,123 @@ else:
                                     extra = float(row.get('valor_extra', 0) or 0)
                                     obs = row.get('observacao', '')
                                     diaria_base = calcular_diaria_proporcional(status, colab.get('valor_diaria'))
-                                    custo_total_obra += (diaria_base + extra)
                                     
                                     pdf.cell(25, 6, to_latin(row.get('data', '')), border=1, align='C')
                                     pdf.cell(65, 6, to_latin(nome[:28]), border=1)
                                     pdf.cell(50, 6, to_latin(funcao[:20]), border=1)
                                     pdf.cell(32, 6, to_latin(status[:14]), border=1, align='C')
-                                    pdf.cell(24, 6, to_latin(fCom certeza! Separar os dias por abas (planilhas) dentro do mesmo arquivo Excel é a melhor forma de manter o relatório organizado e fácil de visualizar, sem criar uma bagunça de dados misturados ou vários arquivos diferentes.
+                                    pdf.cell(24, 6, to_latin(f"R$ {diaria_base:.2f}"), border=1, align='C')
+                                    pdf.cell(24, 6, to_latin(f"R$ {extra:.2f}"), border=1, align='C')
+                                    pdf.cell(51, 6, to_latin(obs[:30]), border=1, ln=True)
+                                pdf.ln(3)
 
-Para fazer isso usando Python com a biblioteca **pandas**, a solução ideal é utilizar o `pd.ExcelWriter`. A lógica consiste em identificar os dias únicos no seu período, filtrar os dados para cada um desses dias e gravar esse filtro em uma nova aba nomeada com a respectiva data.
+                        pdf_output = pdf.output(dest='S').encode('latin1')
+                        st.download_button(
+                            label="📥 Baixar PDF Gerado",
+                            data=pdf_output,
+                            file_name=f"relatorio_custos_{data_inicio_rel.strftime('%d-%m-%Y')}_a_{data_fim_rel.strftime('%d-%m-%Y')}.pdf",
+                            mime="application/pdf"
+                        )
+                except Exception as e:
+                    st.error(f"Erro ao gerar PDF: {e}")
 
-Aqui está a estrutura de como você pode implementar isso no seu script:
+        with col_btn2:
+            if st.button("📊 Gerar Excel", use_container_width=True):
+                try:
+                    if data_inicio_rel > data_fim_rel:
+                        st.error("Data inicial maior que a final.")
+                    elif not dados_relatorio:
+                        st.warning("Sem dados no período.")
+                    else:
+                        lista_excel = []
+                        for row in dados_relatorio:
+                            ob = dict_obras.get(row['obra_id'], {"nome": "N/A", "unidade": "N/A"})
+                            colab = dict_colaboradores.get(row['colaborador_id'], {})
+                            status = row.get('status', 'Presente (Integral)')
+                            diaria_calc = calcular_diaria_proporcional(status, colab.get('valor_diaria'))
+                            extra = float(row.get('valor_extra') or 0.0)
+                            
+                            lista_excel.append({
+                                "Data": row.get('data'),
+                                "Engenheiro": row.get('engenheiro'),
+                                "Unidade": ob['unidade'],
+                                "Obra": ob['nome'],
+                                "Colaborador": colab.get('nome', 'N/A'),
+                                "Função": colab.get('funcao', 'N/A'),
+                                "Status": status,
+                                "Diária (R$)": diaria_calc,
+                                "Extra (R$)": extra,
+                                "Custo Total (R$)": diaria_calc + extra,
+                                "Observação": row.get('observacao', '')
+                            })
+                        
+                        df_excel = pd.DataFrame(lista_excel)
+                        
+                        buffer = io.BytesIO()
+                        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                            datas_unicas = sorted(df_excel['Data'].unique())
+                            for data_str in datas_unicas:
+                                df_dia = df_excel[df_excel['Data'] == data_str]
+                                try:
+                                    dt_obj = datetime.date.fromisoformat(data_str)
+                                    nome_aba = dt_obj.strftime('%d-%m-%Y')
+                                except:
+                                    nome_aba = str(data_str)
+                                
+                                df_dia.to_excel(writer, sheet_name=nome_aba, index=False)
+                                
+                        st.download_button(
+                            label="📥 Baixar Excel por Dias",
+                            data=buffer.getvalue(),
+                            file_name=f"relatorio_custos_{data_inicio_rel.strftime('%d-%m-%Y')}_a_{data_fim_rel.strftime('%d-%m-%Y')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
+                except Exception as e:
+                    st.error(f"Erro ao gerar Excel: {e}")
 
-```python
-import pandas as pd
-from datetime import datetime
+    # 5. INDICADORES
+    elif menu_escolhido == "📈 INDICADORES":
+        st.markdown("## 📈 INDICADORES E MÉTRICAS")
+        st.info("Painel de indicadores em desenvolvimento.")
 
-# Certifique-se de que a sua coluna de data (ex: 'Data_Pedido') esteja no formato datetime
-# df['Data_Pedido'] = pd.to_datetime(df['Data_Pedido'])
+    # 6. DISPONIBILIDADE
+    elif menu_escolhido == "👥 DISPONIBILIDADE":
+        render_aba_disponibilidade("admin")
 
-nome_arquivo = 'relatorios_compras_periodo.xlsx'
-
-# Inicia o ExcelWriter
-with pd.ExcelWriter(nome_arquivo, engine='xlsxwriter') as writer:
-    
-    # Extrai apenas as datas únicas do período (ignorando horários, se houver)
-    datas_unicas = df['Data_Pedido'].dt.date.unique()
-    
-    for data in datas_unicas:
-        # Filtra o DataFrame apenas para o dia atual do loop
-        df_dia = df[df['Data_Pedido'].dt.date == data]
+    # 7. CONFIGURAÇÕES
+    elif menu_escolhido == "⚙️ CONFIGURAÇÕES":
+        st.markdown("## ⚙️ CONFIGURAÇÕES E CADASTROS")
+        tab_cad_obra, tab_cad_colab = st.tabs(["🏗️ Obras", "👷 Colaboradores"])
         
-        # Formata a data para usar como nome da aba (ex: '20-08-2026')
-        nome_aba = data.strftime('%d-%m-%Y')
-        
-        # Salva os dados daquele dia na aba correspondente
-        df_dia.to_excel(writer, sheet_name=nome_aba, index=False)
+        with tab_cad_obra:
+            st.markdown("### Cadastrar Nova Obra")
+            with st.form("form_cad_obra"):
+                nome_obra = st.text_input("Nome da Obra:")
+                unidade_obra = st.text_input("Unidade (Ex: FIEC, MARACANAÚ...):")
+                submit_obra = st.form_submit_button("Cadastrar Obra")
+                if submit_obra:
+                    if nome_obra and unidade_obra:
+                        supabase.table("obras").insert({"nome": nome_obra, "unidade": unidade_obra.upper()}).execute()
+                        st.success("Obra cadastrada com sucesso!")
+                        st.rerun()
+                    else:
+                        st.warning("Preencha todos os campos.")
+
+        with tab_cad_colab:
+            st.markdown("### Cadastrar Novo Colaborador")
+            with st.form("form_cad_colab"):
+                nome_colab = st.text_input("Nome Completo:")
+                funcao_colab = st.text_input("Função / Cargo:")
+                diaria_colab = st.number_input("Valor Diária Base (R$):", value=240.0, step=10.0)
+                submit_colab = st.form_submit_button("Cadastrar Colaborador")
+                if submit_colab:
+                    if nome_colab and funcao_colab:
+                        supabase.table("colaboradores").insert({
+                            "nome": nome_colab, 
+                            "funcao": limpar_funcao(funcao_colab), 
+                            "valor_diaria": diaria_colab
+                        }).execute()
+                        st.success("Colaborador cadastrado com sucesso!")
+                        st.rerun()
+                    else:
+                        st.warning("Preencha todos os campos.")
