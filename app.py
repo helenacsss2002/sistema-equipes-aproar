@@ -122,6 +122,14 @@ def get_cor_funcao(funcao):
     hash_num = sum(ord(c) for c in str(funcao))
     return cores[hash_num % len(cores)]
 
+def calcular_diaria_proporcional(status, valor_diaria_base):
+    diaria = float(valor_diaria_base or 240.0)
+    if status in ["Presente (Integral)", "Presente", "Extra"]:
+        return diaria
+    elif status in ["Presente (Só Manhã)", "Presente (Só Tarde)", "Saída Antecipada"]:
+        return diaria / 2.0
+    return 0.0
+
 def to_latin(texto):
     if not texto: return ""
     return str(texto).encode('latin-1', 'replace').decode('latin-1')
@@ -243,30 +251,31 @@ if modo_campo:
             
             if st.button("✅ Marcar Todos como Presentes"):
                 for c in convocacoes_render:
-                    supabase.table("convocacoes").update({"status": "Presente"}).eq("id", c['id']).execute()
+                    supabase.table("convocacoes").update({"status": "Presente (Integral)"}).eq("id", c['id']).execute()
                 st.success("Atualizado!")
                 st.rerun()
 
-            opcoes_status = ["Presente", "Falta", "Atestado", "Extra"]
+            opcoes_status = ["Presente (Integral)", "Presente (Só Manhã)", "Presente (Só Tarde)", "Saída Antecipada", "Falta", "Atestado", "Extra"]
             for conv in convocacoes_render:
                 with st.container(border=True):
                     c_id = conv['id']
                     dados_colab = dict_colaboradores.get(conv['colaborador_id'], {"nome": "Desconhecido", "funcao": "-"})
                     nome = dados_colab['nome']
                     funcao = dados_colab['funcao']
-                    status_atual = conv.get("status", "Presente")
+                    status_atual = conv.get("status", "Presente (Integral)")
                     idx = opcoes_status.index(status_atual) if status_atual in opcoes_status else 0
                     
                     st.markdown(f"**{nome}** (`{funcao}`)")
-                    status_sel = st.radio("Status", opcoes_status, index=idx, key=f"st_{c_id}", horizontal=True, label_visibility="collapsed")
+                    status_sel = st.selectbox("Status", opcoes_status, index=idx, key=f"st_{c_id}")
                     if status_sel != status_atual:
                         supabase.table("convocacoes").update({"status": status_sel}).eq("id", c_id).execute()
+                        st.rerun()
                     
                     with st.expander("💸 Extra / Obs"):
                         val_atual = float(conv.get("valor_extra") or 0.0)
                         obs_atual = conv.get("observacao") or ""
                         val_extra = st.number_input("Extra (R$)", value=val_atual, step=10.0, key=f"v_{c_id}")
-                        obs = st.text_input("Obs", value=obs_atual, key=f"o_{c_id}")
+                        obs = st.text_input("Obs / Justificativa", value=obs_atual, key=f"o_{c_id}")
                         if st.button("Salvar", key=f"btn_{c_id}"):
                             supabase.table("convocacoes").update({"valor_extra": val_extra, "observacao": obs}).eq("id", c_id).execute()
                             st.success("Salvo!")
@@ -285,6 +294,7 @@ if modo_campo:
             obras_da_unidade = {o['nome']: o['id'] for o in obras if o['unidade'] == unidade_selecionada}
             obra_selecionada = st.selectbox("Obra:", list(obras_da_unidade.keys()), key="o_c_sel")
 
+            turno_conv = st.selectbox("Turno / Período:", ["Integral", "Manhã", "Tarde"], key="turno_c_sel")
             funcoes_disponiveis = sorted(list(set([c['funcao'] for c in colaboradores])))
             frente_selecionada = st.selectbox("Função:", funcoes_disponiveis, key="f_c_sel")
 
@@ -313,30 +323,20 @@ if modo_campo:
                 else:
                     obra_id = obras_da_unidade[obra_selecionada]
                     sucessos = 0
-                    erros = []
                     for nome in equipe_selecionada:
                         c_id = opcoes_colaboradores[nome]
-                        checagem = supabase.table("convocacoes").select("id").eq("colaborador_id", c_id).eq("data", data_conv.isoformat()).execute().data
-                        if checagem:
-                            erros.append(nome)
-                        else:
-                            supabase.table("convocacoes").insert({
-                                "obra_id": obra_id,
-                                "colaborador_id": c_id,
-                                "data": data_conv.isoformat(),
-                                "engenheiro": engenheiro_conv,
-                                "status": "Presente",
-                                "valor_extra": 0,
-                                "observacao": ""
-                            }).execute()
-                            sucessos += 1
-                    
-                    if sucessos > 0:
-                        st.success(f"✅ {sucessos} colaborador(es) convocado(s) com sucesso!")
-                    if erros:
-                        st.error(f"⚠️ Não convocado(s) (já possui(em) convocação no dia): {', '.join(erros)}")
-                    if sucessos > 0:
-                        st.rerun()
+                        supabase.table("convocacoes").insert({
+                            "obra_id": obra_id,
+                            "colaborador_id": c_id,
+                            "data": data_conv.isoformat(),
+                            "engenheiro": engenheiro_conv,
+                            "status": "Presente (Integral)",
+                            "valor_extra": 0,
+                            "observacao": f"Turno: {turno_conv}"
+                        }).execute()
+                        sucessos += 1
+                    st.success(f"✅ {sucessos} colaborador(es) convocado(s) para o turno {turno_conv}!")
+                    st.rerun()
         else:
             st.info("Cadastre obras e colaboradores na administração.")
 
@@ -365,7 +365,7 @@ else:
         with col_f3:
             busca_colab = st.text_input("Buscar colaborador:", placeholder="Ex: Erivaldo...", key="busca_colab_dash")
         with col_f4:
-            status_filtro_dash = st.selectbox("Status:", ["Todos", "Presente", "Falta", "Atestado", "Extra"], key="st_dash")
+            status_filtro_dash = st.selectbox("Status:", ["Todos", "Presente (Integral)", "Presente (Só Manhã)", "Presente (Só Tarde)", "Saída Antecipada", "Falta", "Atestado", "Extra"], key="st_dash")
 
         try:
             if busca_colab:
@@ -392,10 +392,11 @@ else:
                 if normalizar(busca_colab) not in normalizar(colab['nome']):
                     continue
 
-            if status_filtro_dash != "Todos" and c.get('status') != status_filtro_dash:
+            status_item = c.get('status', 'Presente (Integral)')
+            if status_filtro_dash != "Todos" and status_item != status_filtro_dash:
                 continue
 
-            diaria = float(colab.get('valor_diaria') or 240.0) if c.get('status') in ["Presente", "Extra"] else 0.0
+            diaria_calc = calcular_diaria_proporcional(status_item, colab.get('valor_diaria'))
             extra = float(c.get('valor_extra') or 0.0)
             
             lista_processada.append({
@@ -406,15 +407,15 @@ else:
                 "obra_nome": ob['nome'],
                 "colab_nome": colab['nome'],
                 "colab_funcao": colab['funcao'],
-                "status": c.get('status', 'Presente'),
+                "status": status_item,
                 "valor_extra": extra,
                 "observacao": c.get('observacao', ''),
-                "custo": diaria + extra
+                "custo": diaria_calc + extra
             })
 
         # Métricas do dia
         total_conv = len(lista_processada)
-        total_pres = len([x for x in lista_processada if x['status'] == 'Presente'])
+        total_pres = len([x for x in lista_processada if "Presente" in x['status'] or x['status'] == 'Extra'])
         total_atest = len([x for x in lista_processada if x['status'] == 'Atestado'])
         total_falt = len([x for x in lista_processada if x['status'] == 'Falta'])
         total_extra_st = len([x for x in lista_processada if x['status'] == 'Extra'])
@@ -433,9 +434,9 @@ else:
         if not lista_processada:
             st.info("Nenhum registro encontrado.")
         else:
-            if st.button("✅ Marcar Todos como Presentes"):
+            if st.button("✅ Marcar Todos como Presentes (Integral)"):
                 for item in lista_processada:
-                    supabase.table("convocacoes").update({"status": "Presente"}).eq("id", item['id']).execute()
+                    supabase.table("convocacoes").update({"status": "Presente (Integral)"}).eq("id", item['id']).execute()
                 st.success("Atualizado!")
                 st.rerun()
 
@@ -456,10 +457,10 @@ else:
                             if obs_val != row['observacao']:
                                 supabase.table("convocacoes").update({"observacao": obs_val}).eq("id", c_id).execute()
                         with c2:
-                            opcoes_st = ["Presente", "Atestado", "Falta", "Extra"]
+                            opcoes_st = ["Presente (Integral)", "Presente (Só Manhã)", "Presente (Só Tarde)", "Saída Antecipada", "Falta", "Atestado", "Extra"]
                             st_atual = row['status']
                             idx_st = opcoes_st.index(st_atual) if st_atual in opcoes_st else 0
-                            novo_st = st.radio("Status", opcoes_st, index=idx_st, key=f"st_{c_id}", horizontal=True, label_visibility="collapsed")
+                            novo_st = st.selectbox("Status", opcoes_st, index=idx_st, key=f"st_{c_id}", label_visibility="collapsed")
                             if novo_st != st_atual:
                                 supabase.table("convocacoes").update({"status": novo_st}).eq("id", c_id).execute()
                                 st.rerun()
@@ -488,6 +489,7 @@ else:
             with col_o:
                 obra_selecionada = st.selectbox("Obra:", list(obras_da_unidade.keys()))
 
+            turno_conv_adm = st.selectbox("Turno / Período:", ["Integral", "Manhã", "Tarde"], key="turno_conv_adm")
             funcoes_disponiveis = sorted(list(set([c['funcao'] for c in colaboradores])))
             frente_selecionada = st.selectbox("Função:", funcoes_disponiveis)
 
@@ -514,30 +516,20 @@ else:
                 else:
                     obra_id = obras_da_unidade[obra_selecionada]
                     sucessos = 0
-                    erros = []
                     for nome in equipe_selecionada:
                         c_id = opcoes_colaboradores[nome]
-                        checagem = supabase.table("convocacoes").select("id").eq("colaborador_id", c_id).eq("data", data_conv.isoformat()).execute().data
-                        if checagem:
-                            erros.append(nome)
-                        else:
-                            supabase.table("convocacoes").insert({
-                                "obra_id": obra_id,
-                                "colaborador_id": c_id,
-                                "data": data_conv.isoformat(),
-                                "engenheiro": engenheiro_conv,
-                                "status": "Presente",
-                                "valor_extra": 0,
-                                "observacao": ""
-                            }).execute()
-                            sucessos += 1
-                    
-                    if sucessos > 0:
-                        st.success(f"✅ {sucessos} colaborador(es) convocado(s) com sucesso!")
-                    if erros:
-                        st.error(f"⚠️ Não convocado(s) (já possui(em) convocação no dia): {', '.join(erros)}")
-                    if sucessos > 0:
-                        st.rerun()
+                        supabase.table("convocacoes").insert({
+                            "obra_id": obra_id,
+                            "colaborador_id": c_id,
+                            "data": data_conv.isoformat(),
+                            "engenheiro": engenheiro_conv,
+                            "status": "Presente (Integral)",
+                            "valor_extra": 0,
+                            "observacao": f"Turno: {turno_conv_adm}"
+                        }).execute()
+                        sucessos += 1
+                    st.success(f"✅ {sucessos} colaborador(es) convocado(s) para o turno {turno_conv_adm}!")
+                    st.rerun()
         else:
             st.info("Cadastre obras e colaboradores na administração.")
 
@@ -570,11 +562,11 @@ else:
             
             if st.button("✅ Marcar Todos como Presentes", key="btn_all_present_adm"):
                 for c in convocacoes_render:
-                    supabase.table("convocacoes").update({"status": "Presente"}).eq("id", c['id']).execute()
+                    supabase.table("convocacoes").update({"status": "Presente (Integral)"}).eq("id", c['id']).execute()
                 st.success("Atualizado!")
                 st.rerun()
 
-            opcoes_status = ["Presente", "Falta", "Atestado", "Extra"]
+            opcoes_status = ["Presente (Integral)", "Presente (Só Manhã)", "Presente (Só Tarde)", "Saída Antecipada", "Falta", "Atestado", "Extra"]
             for conv in convocacoes_render:
                 with st.container(border=True):
                     c_id = conv['id']
@@ -582,19 +574,20 @@ else:
                     nome = dados_colab['nome']
                     funcao = dados_colab['funcao']
                     cor = get_cor_funcao(funcao)
-                    status_atual = conv.get("status", "Presente")
+                    status_atual = conv.get("status", "Presente (Integral)")
                     idx = opcoes_status.index(status_atual) if status_atual in opcoes_status else 0
                     
                     st.markdown(f"**{nome}** &nbsp; {cor} `{funcao}`")
-                    status_sel = st.radio("Status", opcoes_status, index=idx, key=f"status_adm_{c_id}", horizontal=True, label_visibility="collapsed")
+                    status_sel = st.selectbox("Status", opcoes_status, index=idx, key=f"status_adm_{c_id}")
                     if status_sel != status_atual:
                         supabase.table("convocacoes").update({"status": status_sel}).eq("id", c_id).execute()
+                        st.rerun()
                     
                     with st.expander("💸 Extra / Obs"):
                         val_atual = float(conv.get("valor_extra") or 0.0)
                         obs_atual = conv.get("observacao") or ""
                         val_extra = st.number_input("Extra (R$)", value=val_atual, step=10.0, key=f"val_adm_{c_id}")
-                        obs = st.text_input("Obs", value=obs_atual, key=f"obs_adm_field_{c_id}")
+                        obs = st.text_input("Obs / Justificativa", value=obs_atual, key=f"obs_adm_field_{c_id}")
                         if st.button("Salvar Detalhes", key=f"btn_save_adm_{c_id}"):
                             supabase.table("convocacoes").update({"valor_extra": val_extra, "observacao": obs}).eq("id", c_id).execute()
                             st.success("Salvo!")
@@ -665,10 +658,10 @@ else:
                                     colab = dict_colaboradores.get(row['colaborador_id'], {})
                                     nome = colab.get('nome', 'N/A')
                                     funcao = colab.get('funcao', 'N/A')
-                                    status = row.get('status', 'Presente')
+                                    status = row.get('status', 'Presente (Integral)')
                                     extra = float(row.get('valor_extra', 0) or 0)
                                     obs = row.get('observacao', '')
-                                    diaria_base = float(colab.get('valor_diaria') or 240.0) if status in ["Presente", "Extra"] else 0.0
+                                    diaria_base = calcular_diaria_proporcional(status, colab.get('valor_diaria'))
                                     custo_total_obra += (diaria_base + extra)
                                     
                                     pdf.cell(25, 6, to_latin(row.get('data', '')), border=1, align='C')
@@ -704,7 +697,7 @@ else:
                 df_conv['nome_colab'] = df_conv['colaborador_id'].map(lambda cid: dict_colaboradores.get(cid, {}).get('nome', 'Desconhecido'))
                 df_conv['funcao_colab'] = df_conv['colaborador_id'].map(lambda cid: dict_colaboradores.get(cid, {}).get('funcao', 'Desconhecido'))
 
-                taxa_assiduidade = (len(df_conv[df_conv['status'].isin(['Presente', 'Extra'])]) / len(df_conv) * 100) if len(df_conv) > 0 else 0.0
+                taxa_assiduidade = (len(df_conv[df_conv['status'].isin(['Presente (Integral)', 'Presente (Só Manhã)', 'Presente (Só Tarde)', 'Extra'])]) / len(df_conv) * 100) if len(df_conv) > 0 else 0.0
                 st.metric("Taxa de Assiduidade Geral", value=f"{taxa_assiduidade:.1f}%")
                 st.markdown("---")
 
@@ -725,7 +718,7 @@ else:
                         st.caption("Sem atestados.")
                 with col_i3:
                     st.markdown("**Top 10 Mais Presentes**")
-                    df_p = df_conv[df_conv['status'].isin(['Presente', 'Extra'])]
+                    df_p = df_conv[df_conv['status'].isin(['Presente (Integral)', 'Presente (Só Manhã)', 'Presente (Só Tarde)', 'Extra'])]
                     if not df_p.empty:
                         st.dataframe(df_p.groupby(['nome_colab', 'funcao_colab']).size().reset_index(name='Total').sort_values(by='Total', ascending=False).head(10).rename(columns={'nome_colab':'Colaborador', 'funcao_colab':'Função'}), hide_index=True, use_container_width=True)
                     else:
