@@ -150,13 +150,45 @@ def get_cor_funcao(funcao):
     hash_num = sum(ord(c) for c in str(funcao))
     return cores[hash_num % len(cores)]
 
+VALOR_DIARIA_PROFISSIONAL = 241.74
+VALOR_DIARIA_AJUDANTE = 182.34
+
+def inferir_tipo_colaborador(funcao):
+    """Classifica cadastros antigos quando a diária ainda não está nos novos valores fixos."""
+    f = normalizar(funcao or "")
+    termos_ajudante = ["AJUDANTE", "AUXILIAR", "AUX.", "AUX ", "SERVENTE"]
+    return "Ajudante" if any(t in f for t in termos_ajudante) else "Profissional"
+
+def valor_diaria_por_tipo(tipo):
+    return VALOR_DIARIA_AJUDANTE if normalizar(tipo) == "AJUDANTE" else VALOR_DIARIA_PROFISSIONAL
+
+def obter_valor_diaria_colaborador(colab):
+    """Aplica R$ 241,74 para profissional e R$ 182,34 para ajudante em todo o sistema."""
+    colab = colab or {}
+    try:
+        valor_cadastrado = float(colab.get("valor_diaria") or 0.0)
+    except Exception:
+        valor_cadastrado = 0.0
+
+    # Novos cadastros já persistem exatamente um dos dois valores oficiais.
+    if abs(valor_cadastrado - VALOR_DIARIA_PROFISSIONAL) < 0.01:
+        return VALOR_DIARIA_PROFISSIONAL
+    if abs(valor_cadastrado - VALOR_DIARIA_AJUDANTE) < 0.01:
+        return VALOR_DIARIA_AJUDANTE
+
+    # Compatibilidade com cadastros antigos (ex.: diária antiga de R$ 240,00).
+    return valor_diaria_por_tipo(inferir_tipo_colaborador(colab.get("funcao", "")))
+
 def calcular_diaria_proporcional(status, valor_diaria_base):
-    diaria = float(valor_diaria_base or 240.0)
+    diaria = float(valor_diaria_base or VALOR_DIARIA_PROFISSIONAL)
     if status in ["Presente (Integral)", "Presente", "Extra"]:
         return diaria
     elif status in ["Presente (Só Manhã)", "Presente (Só Tarde)", "Saída Antecipada"]:
         return diaria / 2.0
     return 0.0
+
+def formatar_reais(valor):
+    return f"R$ {float(valor):,.2f}".replace(',', 'X').replace('.', ',').replace('X', '.')
 
 def to_latin(texto):
     if not texto: return ""
@@ -223,6 +255,72 @@ def montar_observacao_operacional(turno, observacao_livre=""):
     if str(observacao_livre or "").strip():
         partes.append(f"Obs: {str(observacao_livre).strip()}")
     return " | ".join(partes)
+
+def criar_ou_obter_colaborador_manual(nome, tipo, funcao_livre="", avulso=False):
+    """Cria um colaborador digitado pelo engenheiro sem exigir novas colunas no Supabase."""
+    nome_limpo = " ".join(str(nome or "").strip().split())
+    if not nome_limpo:
+        return None, None, "Informe o nome do colaborador."
+
+    try:
+        atuais = supabase.table("colaboradores").select("*").execute().data or []
+        existente = next((c for c in atuais if normalizar(c.get("nome", "")) == normalizar(nome_limpo)), None)
+        if existente:
+            return existente.get("id"), existente, "Cadastro existente localizado e reutilizado."
+
+        funcao_texto = str(funcao_livre or "").strip()
+        if avulso:
+            funcao_salva = f"AVULSO - {funcao_texto}" if funcao_texto else f"AVULSO - {str(tipo).upper()}"
+        else:
+            funcao_salva = funcao_texto if funcao_texto else str(tipo).upper()
+
+        valor = valor_diaria_por_tipo(tipo)
+        criado = supabase.table("colaboradores").insert({
+            "nome": nome_limpo.upper(),
+            "funcao": limpar_funcao(funcao_salva),
+            "valor_diaria": valor
+        }).execute().data or []
+
+        if criado:
+            st.cache_data.clear()
+            return criado[0].get("id"), criado[0], "Novo colaborador cadastrado."
+        return None, None, "O cadastro não retornou um identificador."
+    except Exception:
+        return None, None, "Não foi possível cadastrar o nome informado."
+
+def buscar_convocacao_existente(colaborador_id, data_convocacao):
+    try:
+        return (
+            supabase.table("convocacoes")
+            .select("*")
+            .eq("colaborador_id", colaborador_id)
+            .eq("data", data_convocacao.isoformat())
+            .execute().data or []
+        )
+    except Exception:
+        return []
+
+def inserir_convocacao_segura(obra_id, colaborador_id, data_convocacao, engenheiro, turno):
+    """Evita o APIError mais comum: tentar convocar o mesmo colaborador duas vezes no mesmo dia."""
+    existente = buscar_convocacao_existente(colaborador_id, data_convocacao)
+    if existente:
+        reg = existente[0]
+        return False, f"já estava convocado(a) para esta data (Eng.: {reg.get('engenheiro', 'N/A')})"
+
+    try:
+        supabase.table("convocacoes").insert({
+            "obra_id": obra_id,
+            "colaborador_id": colaborador_id,
+            "data": data_convocacao.isoformat(),
+            "engenheiro": engenheiro,
+            "status": "Presente (Integral)",
+            "valor_extra": 0,
+            "observacao": montar_observacao_operacional(turno, "")
+        }).execute()
+        return True, "convocado(a) com sucesso"
+    except Exception:
+        # O erro do PostgREST deixa de derrubar a tela inteira; a operação daquele nome é isolada.
+        return False, "não pôde ser convocado(a); verifique se já existe uma convocação ou se o cadastro está válido"
 
 # --- SINCRONIZAÇÃO COM TRELLO (MÊS VIGENTE OU SELEÇÃO MANUAL) ---
 def obter_listas_trello():
@@ -472,7 +570,7 @@ if modo_campo:
             st.warning("Nenhuma equipe convocada para este engenheiro na data selecionada.")
 
     with tab_convocacao_campo:
-        if obras and colaboradores:
+        if obras:
             engenheiro_conv = st.selectbox("Seu Nome (Engenheiro):", ENGENHEIROS, key="eng_c_conv")
             data_conv_auto = proximo_dia_util(datetime.date.today())
 
@@ -485,44 +583,115 @@ if modo_campo:
             unidades_unicas = sorted(list(set([o['unidade'] for o in obras])))
             unidade_selecionada = st.selectbox("Unidade:", unidades_unicas, key="u_c_sel")
 
-            funcoes_disponiveis = sorted(list(set([c['funcao'] for c in colaboradores])))
+            funcoes_disponiveis = sorted(list(set([c.get('funcao', '') for c in colaboradores if c.get('funcao')])))
             filtro_funcao = st.selectbox("Filtrar por Função (Opcional):", ["TODAS"] + funcoes_disponiveis, key="f_c_sel_campo")
 
             if filtro_funcao != "TODAS":
-                colabs_filtrados = [c for c in colaboradores if c['funcao'] == filtro_funcao]
+                colabs_filtrados = [c for c in colaboradores if c.get('funcao') == filtro_funcao]
             else:
                 colabs_filtrados = colaboradores
 
-            mapa_colab_opcoes = {f"{c['nome']}  ({c['funcao']})": c['id'] for c in colabs_filtrados}
-            equipe_selecionada = st.multiselect("Buscar / Selecionar Colaboradores:", list(mapa_colab_opcoes.keys()), key="eq_c_sel_campo")
+            mapa_colab_opcoes = {f"{c['nome']}  ({c.get('funcao','-')})": c['id'] for c in colabs_filtrados}
+            equipe_selecionada = st.multiselect(
+                "Buscar / Selecionar Colaboradores Cadastrados:",
+                list(mapa_colab_opcoes.keys()),
+                key="eq_c_sel_campo"
+            )
 
-            st.caption("A demanda específica de cada colaborador será definida individualmente no Apontamento Diário.")
+            st.markdown("#### ➕ Incluir nome digitado")
+            avulso_campo = st.checkbox("É avulso?", key="avulso_conv_campo")
+            nome_manual_campo = st.text_input(
+                "Nome do avulso:" if avulso_campo else "Adicionar colaborador pelo nome (opcional):",
+                placeholder="Digite o nome completo...",
+                key="nome_manual_conv_campo"
+            )
+
+            tipo_manual_campo = "Profissional"
+            funcao_manual_campo = ""
+            if avulso_campo or nome_manual_campo.strip():
+                cm1, cm2 = st.columns(2)
+                with cm1:
+                    tipo_manual_campo = st.selectbox(
+                        "Categoria da diária:",
+                        ["Profissional", "Ajudante"],
+                        key="tipo_manual_conv_campo"
+                    )
+                with cm2:
+                    funcao_manual_campo = st.text_input(
+                        "Função (opcional):",
+                        placeholder="Ex.: pintor, eletricista...",
+                        key="funcao_manual_conv_campo"
+                    )
+                st.caption(
+                    f"Diária aplicada: Profissional = {formatar_reais(VALOR_DIARIA_PROFISSIONAL)} • "
+                    f"Ajudante = {formatar_reais(VALOR_DIARIA_AJUDANTE)}"
+                )
+
+            st.caption("A Obra/Serviço específica de cada colaborador será definida individualmente no Apontamento Diário.")
 
             if st.button("CONFIRMAR CONVOCAÇÃO", type="primary", use_container_width=True, key="btn_conv_campo"):
-                if not equipe_selecionada:
-                    st.warning("Selecione pelo menos um colaborador.")
+                if avulso_campo and not nome_manual_campo.strip():
+                    st.warning("Para convocar como avulso, digite o nome do colaborador.")
+                elif not equipe_selecionada and not nome_manual_campo.strip():
+                    st.warning("Selecione um colaborador cadastrado ou digite um nome.")
                 else:
                     obra_id_placeholder = obter_obra_placeholder_unidade(unidade_selecionada)
                     if not obra_id_placeholder:
                         st.error("Não foi possível preparar a Unidade para a convocação. Tente novamente.")
                     else:
-                        sucessos = 0
+                        pessoas = []
                         for label_colab in equipe_selecionada:
                             c_id = mapa_colab_opcoes[label_colab]
-                            supabase.table("convocacoes").insert({
-                                "obra_id": obra_id_placeholder,
-                                "colaborador_id": c_id,
-                                "data": data_conv_auto.isoformat(),
-                                "engenheiro": engenheiro_conv,
-                                "status": "Presente (Integral)",
-                                "valor_extra": 0,
-                                "observacao": montar_observacao_operacional(turno_conv_campo, "")
-                            }).execute()
-                            sucessos += 1
-                        st.success(f"✅ {sucessos} colaborador(es) convocado(s) para {unidade_selecionada} em {data_conv_auto.strftime('%d/%m/%Y')} • Turno {turno_conv_campo}.")
-                        st.rerun()
+                            nome_existente = dict_colaboradores.get(c_id, {}).get('nome', label_colab.split('  (')[0])
+                            pessoas.append((c_id, nome_existente))
+
+                        if nome_manual_campo.strip():
+                            c_id_manual, colab_manual, msg_manual = criar_ou_obter_colaborador_manual(
+                                nome_manual_campo,
+                                tipo_manual_campo,
+                                funcao_manual_campo,
+                                avulso=avulso_campo
+                            )
+                            if c_id_manual:
+                                pessoas.append((c_id_manual, colab_manual.get('nome', nome_manual_campo)))
+                                if "existente" in msg_manual.lower():
+                                    st.info(msg_manual)
+                            else:
+                                st.error(msg_manual)
+
+                        # Remove repetição caso o mesmo nome tenha sido selecionado e digitado.
+                        pessoas_unicas = []
+                        ids_vistos = set()
+                        for cid, nome_pessoa in pessoas:
+                            if cid and cid not in ids_vistos:
+                                pessoas_unicas.append((cid, nome_pessoa))
+                                ids_vistos.add(cid)
+
+                        sucessos = 0
+                        avisos = []
+                        for c_id, nome_pessoa in pessoas_unicas:
+                            ok, motivo = inserir_convocacao_segura(
+                                obra_id_placeholder,
+                                c_id,
+                                data_conv_auto,
+                                engenheiro_conv,
+                                turno_conv_campo
+                            )
+                            if ok:
+                                sucessos += 1
+                            else:
+                                avisos.append(f"{nome_pessoa}: {motivo}.")
+
+                        if sucessos:
+                            st.cache_data.clear()
+                            st.success(
+                                f"✅ {sucessos} colaborador(es) convocado(s) para {unidade_selecionada} "
+                                f"em {data_conv_auto.strftime('%d/%m/%Y')} • Turno {turno_conv_campo}."
+                            )
+                        for aviso in avisos:
+                            st.warning(aviso)
         else:
-            st.info("Cadastre obras e colaboradores na administração.")
+            st.info("Cadastre pelo menos uma Unidade/Obra na administração.")
 
     with tab_disp_campo:
         render_aba_disponibilidade("campo")
@@ -603,7 +772,7 @@ else:
         lista_processada = []
         for c in convs_dash:
             ob = dict_obras.get(c['obra_id'], {"unidade": "GERAL", "nome": "Desconhecida"})
-            colab = dict_colaboradores.get(c['colaborador_id'], {"nome": "Desconhecido", "funcao": "-", "valor_diaria": 240.0})
+            colab = dict_colaboradores.get(c['colaborador_id'], {"nome": "Desconhecido", "funcao": "-", "valor_diaria": VALOR_DIARIA_PROFISSIONAL})
             
             if busca_colab:
                 if normalizar(busca_colab) not in normalizar(colab['nome']):
@@ -613,7 +782,7 @@ else:
             if status_filtro_dash != "Todos" and status_item != status_filtro_dash:
                 continue
 
-            diaria_calc = calcular_diaria_proporcional(status_item, colab.get('valor_diaria'))
+            diaria_calc = calcular_diaria_proporcional(status_item, obter_valor_diaria_colaborador(colab))
             extra = float(c.get('valor_extra') or 0.0)
             
             lista_processada.append({
@@ -696,7 +865,7 @@ else:
         tab_nova_conv, tab_corrigir_conv = st.tabs(["➕ Nova Convocação", "✏️ Correção / Exclusão Administrativa"])
 
         with tab_nova_conv:
-            if obras and colaboradores:
+            if obras:
                 col_eng, col_info, col_turno = st.columns(3)
                 with col_eng:
                     engenheiro_conv = st.selectbox("Engenheiro responsável:", ENGENHEIROS, key="eng_conv_adm")
@@ -710,16 +879,49 @@ else:
                 unidades_unicas = sorted(list(set([o['unidade'] for o in obras])))
                 unidade_selecionada = st.selectbox("Unidade:", unidades_unicas, key="u_adm_sel")
 
-                funcoes_disponiveis = sorted(list(set([c['funcao'] for c in colaboradores])))
+                funcoes_disponiveis = sorted(list(set([c.get('funcao', '') for c in colaboradores if c.get('funcao')])))
                 filtro_funcao_adm = st.selectbox("Filtrar por Função (Opcional):", ["TODAS"] + funcoes_disponiveis, key="f_adm_sel")
 
                 if filtro_funcao_adm != "TODAS":
-                    colabs_filtrados_adm = [c for c in colaboradores if c['funcao'] == filtro_funcao_adm]
+                    colabs_filtrados_adm = [c for c in colaboradores if c.get('funcao') == filtro_funcao_adm]
                 else:
                     colabs_filtrados_adm = colaboradores
 
-                mapa_colab_adm = {f"{c['nome']}  ({c['funcao']})": c['id'] for c in colabs_filtrados_adm}
-                equipe_selecionada = st.multiselect("Buscar ou Selecionar Colaboradores:", list(mapa_colab_adm.keys()), key="eq_adm_sel")
+                mapa_colab_adm = {f"{c['nome']}  ({c.get('funcao','-')})": c['id'] for c in colabs_filtrados_adm}
+                equipe_selecionada = st.multiselect(
+                    "Buscar ou Selecionar Colaboradores Cadastrados:",
+                    list(mapa_colab_adm.keys()),
+                    key="eq_adm_sel"
+                )
+
+                st.markdown("#### ➕ Incluir nome digitado")
+                avulso_adm = st.checkbox("É avulso?", key="avulso_conv_adm")
+                nome_manual_adm = st.text_input(
+                    "Nome do avulso:" if avulso_adm else "Adicionar colaborador pelo nome (opcional):",
+                    placeholder="Digite o nome completo...",
+                    key="nome_manual_conv_adm"
+                )
+
+                tipo_manual_adm = "Profissional"
+                funcao_manual_adm = ""
+                if avulso_adm or nome_manual_adm.strip():
+                    ca1, ca2 = st.columns(2)
+                    with ca1:
+                        tipo_manual_adm = st.selectbox(
+                            "Categoria da diária:",
+                            ["Profissional", "Ajudante"],
+                            key="tipo_manual_conv_adm"
+                        )
+                    with ca2:
+                        funcao_manual_adm = st.text_input(
+                            "Função (opcional):",
+                            placeholder="Ex.: pintor, eletricista...",
+                            key="funcao_manual_conv_adm"
+                        )
+                    st.caption(
+                        f"Diária aplicada: Profissional = {formatar_reais(VALOR_DIARIA_PROFISSIONAL)} • "
+                        f"Ajudante = {formatar_reais(VALOR_DIARIA_AJUDANTE)}"
+                    )
 
                 with st.container(border=True):
                     st.markdown(f"**Panorama de {engenheiro_conv} ({data_conv_auto.strftime('%d/%m/%Y')} • {turno_conv_adm})**")
@@ -730,36 +932,73 @@ else:
                     ids_ja_alocados_eng = {c['colaborador_id'] for c in convs_eng_data}
                     nomes_ja_alocados = [dict_colaboradores.get(cid, {}).get('nome', '') for cid in ids_ja_alocados_eng]
                     if nomes_ja_alocados:
-                        st.caption("Já escalados por você nesta data: " + ", ".join(nomes_ja_alocados))
+                        st.caption("Já escalados por este engenheiro nesta data: " + ", ".join([n for n in nomes_ja_alocados if n]))
                     else:
-                        st.caption("Nenhum escalado por você ainda para o próximo dia útil.")
+                        st.caption("Nenhum escalado por este engenheiro ainda para o próximo dia útil.")
                     st.caption("A demanda específica será escolhida individualmente no Apontamento Diário.")
 
                 if st.button("CONFIRMAR CONVOCAÇÃO", type="primary", use_container_width=True, key="btn_confirm_conv_adm"):
-                    if not equipe_selecionada:
-                        st.warning("Selecione pelo menos um colaborador.")
+                    if avulso_adm and not nome_manual_adm.strip():
+                        st.warning("Para convocar como avulso, digite o nome do colaborador.")
+                    elif not equipe_selecionada and not nome_manual_adm.strip():
+                        st.warning("Selecione um colaborador cadastrado ou digite um nome.")
                     else:
                         obra_id_placeholder = obter_obra_placeholder_unidade(unidade_selecionada)
                         if not obra_id_placeholder:
                             st.error("Não foi possível preparar a Unidade para a convocação. Tente novamente.")
                         else:
-                            sucessos = 0
+                            pessoas = []
                             for label_colab in equipe_selecionada:
                                 c_id = mapa_colab_adm[label_colab]
-                                supabase.table("convocacoes").insert({
-                                    "obra_id": obra_id_placeholder,
-                                    "colaborador_id": c_id,
-                                    "data": data_conv_auto.isoformat(),
-                                    "engenheiro": engenheiro_conv,
-                                    "status": "Presente (Integral)",
-                                    "valor_extra": 0,
-                                    "observacao": montar_observacao_operacional(turno_conv_adm, "")
-                                }).execute()
-                                sucessos += 1
-                            st.success(f"✅ {sucessos} colaborador(es) convocado(s) para {unidade_selecionada} em {data_conv_auto.strftime('%d/%m/%Y')} • Turno {turno_conv_adm}.")
-                            st.rerun()
+                                nome_existente = dict_colaboradores.get(c_id, {}).get('nome', label_colab.split('  (')[0])
+                                pessoas.append((c_id, nome_existente))
+
+                            if nome_manual_adm.strip():
+                                c_id_manual, colab_manual, msg_manual = criar_ou_obter_colaborador_manual(
+                                    nome_manual_adm,
+                                    tipo_manual_adm,
+                                    funcao_manual_adm,
+                                    avulso=avulso_adm
+                                )
+                                if c_id_manual:
+                                    pessoas.append((c_id_manual, colab_manual.get('nome', nome_manual_adm)))
+                                    if "existente" in msg_manual.lower():
+                                        st.info(msg_manual)
+                                else:
+                                    st.error(msg_manual)
+
+                            pessoas_unicas = []
+                            ids_vistos = set()
+                            for cid, nome_pessoa in pessoas:
+                                if cid and cid not in ids_vistos:
+                                    pessoas_unicas.append((cid, nome_pessoa))
+                                    ids_vistos.add(cid)
+
+                            sucessos = 0
+                            avisos = []
+                            for c_id, nome_pessoa in pessoas_unicas:
+                                ok, motivo = inserir_convocacao_segura(
+                                    obra_id_placeholder,
+                                    c_id,
+                                    data_conv_auto,
+                                    engenheiro_conv,
+                                    turno_conv_adm
+                                )
+                                if ok:
+                                    sucessos += 1
+                                else:
+                                    avisos.append(f"{nome_pessoa}: {motivo}.")
+
+                            if sucessos:
+                                st.cache_data.clear()
+                                st.success(
+                                    f"✅ {sucessos} colaborador(es) convocado(s) para {unidade_selecionada} "
+                                    f"em {data_conv_auto.strftime('%d/%m/%Y')} • Turno {turno_conv_adm}."
+                                )
+                            for aviso in avisos:
+                                st.warning(aviso)
             else:
-                st.info("Cadastre obras e colaboradores na aba Configurações.")
+                st.info("Cadastre pelo menos uma Unidade/Obra na aba Configurações.")
 
         with tab_corrigir_conv:
             st.markdown("### ✏️ Correção / Exclusão Administrativa")
@@ -1067,7 +1306,7 @@ else:
                                     status = row.get('status', 'Presente (Integral)')
                                     extra = float(row.get('valor_extra', 0) or 0)
                                     obs = row.get('observacao', '')
-                                    diaria_base = calcular_diaria_proporcional(status, colab.get('valor_diaria'))
+                                    diaria_base = calcular_diaria_proporcional(status, obter_valor_diaria_colaborador(colab))
                                     
                                     pdf.cell(25, 6, to_latin(row.get('data', '')), border=1, align='C')
                                     pdf.cell(65, 6, to_latin(nome[:28]), border=1)
@@ -1101,7 +1340,7 @@ else:
                             ob = dict_obras.get(row['obra_id'], {"nome": "N/A", "unidade": "N/A"})
                             colab = dict_colaboradores.get(row['colaborador_id'], {})
                             status = row.get('status', 'Presente (Integral)')
-                            diaria_calc = float(calcular_diaria_proporcional(status, colab.get('valor_diaria')))
+                            diaria_calc = float(calcular_diaria_proporcional(status, obter_valor_diaria_colaborador(colab)))
                             extra = float(row.get('valor_extra') or 0.0)
                             
                             lista_excel.append({
@@ -1249,7 +1488,7 @@ else:
                 if u_filtro_ind != "TODAS AS UNIDADES" and ob['unidade'] != u_filtro_ind:
                     continue
 
-                colab = dict_colaboradores.get(item['colaborador_id'], {"nome": "Desconhecido", "valor_diaria": 240.0})
+                colab = dict_colaboradores.get(item['colaborador_id'], {"nome": "Desconhecido", "funcao": "-", "valor_diaria": VALOR_DIARIA_PROFISSIONAL})
                 data_item = pd.to_datetime(item.get('data'), errors='coerce')
                 registros_ind.append({
                     "id": item['id'],
@@ -1257,7 +1496,7 @@ else:
                     "status": item.get('status', 'Presente (Integral)'),
                     "engenheiro": item.get('engenheiro', 'N/A'),
                     "colaborador": colab.get('nome', 'Desconhecido'),
-                    "valor_diaria": float(colab.get('valor_diaria') or 240.0),
+                    "valor_diaria": obter_valor_diaria_colaborador(colab),
                     "data": data_item
                 })
 
@@ -1453,21 +1692,27 @@ else:
             st.markdown("### Cadastrar Novo Colaborador")
             with st.form("form_cad_colab"):
                 nome_colab = st.text_input("Nome Completo:")
+                tipo_colab = st.selectbox("Categoria da diária:", ["Profissional", "Ajudante"], key="tipo_cad_colab")
                 funcao_colab = st.text_input("Função / Cargo:")
-                diaria_colab = st.number_input("Valor Diária Base (R$):", value=240.0, step=10.0)
+                diaria_colab = valor_diaria_por_tipo(tipo_colab)
+                st.caption(f"Valor aplicado automaticamente: {formatar_reais(diaria_colab)}")
                 submit_colab = st.form_submit_button("Cadastrar Colaborador")
                 if submit_colab:
-                    if nome_colab and funcao_colab:
-                        supabase.table("colaboradores").insert({
-                            "nome": nome_colab, 
-                            "funcao": limpar_funcao(funcao_colab), 
-                            "valor_diaria": diaria_colab
-                        }).execute()
-                        st.cache_data.clear()
-                        st.success("Colaborador cadastrado com sucesso!")
-                        st.rerun()
+                    if nome_colab:
+                        funcao_salva = limpar_funcao(funcao_colab) if funcao_colab.strip() else tipo_colab.upper()
+                        try:
+                            supabase.table("colaboradores").insert({
+                                "nome": nome_colab.strip().upper(),
+                                "funcao": funcao_salva,
+                                "valor_diaria": diaria_colab
+                            }).execute()
+                            st.cache_data.clear()
+                            st.success("Colaborador cadastrado com sucesso!")
+                            st.rerun()
+                        except Exception:
+                            st.error("Não foi possível cadastrar. Verifique se esse nome já existe.")
                     else:
-                        st.warning("Preencha todos os campos.")
+                        st.warning("Informe o nome do colaborador.")
 
         with tab_limpeza:
             st.markdown("### 🗑️ Limpeza e Manutenção de Registros")
