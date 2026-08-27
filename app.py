@@ -145,7 +145,6 @@ with col_l2:
             img = Image.open(logo_path).convert("RGBA")
             datas = img.getdata()
             new_data = []
-            # Remove pixels brancos ou muito claros transformando-os em transparentes
             for item in datas:
                 if item[0] > 230 and item[1] > 230 and item[2] > 230:
                     new_data.append((255, 255, 255, 0))
@@ -637,7 +636,7 @@ else:
             trello_data = json.load(arquivo_json)
             list_id = next((lst['id'] for lst in trello_data.get('lists', []) if lst.get('name', '').upper() == 'EM EXECUÇÃO'), None)
             if list_id:
-                cards = [c for c in trello_data.get('cards', []) if c.get('idList'] == list_id]
+                cards = [c for c in trello_data.get('cards', []) if c.get('idList') == list_id]
                 novas_obras = [{"unidade": identificar_unidade(c.get('name', '')), "nome": c.get('name', '').split('|')[0].strip()} for c in cards]
                 existentes = {f"{o['unidade']} - {o['nome']}" for o in supabase.table("obras").select("unidade, nome").execute().data}
                 inserir = [o for o in novas_obras if f"{o['unidade']} - {o['nome']}" not in existentes]
