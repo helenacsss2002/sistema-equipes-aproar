@@ -8,7 +8,7 @@ import unicodedata
 import re
 import os
 
-# --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR (LAYOUT WIDE COM SIDEBAR) ---
+# --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR ---
 st.set_page_config(page_title="APROAR - Controle de Presenças", page_icon="👷", layout="wide")
 
 # CSS Moderno, limpo e corporativo inspirado em painéis de controle
@@ -744,7 +744,7 @@ else:
             trello_data = json.load(arquivo_json)
             list_id = next((lst['id'] for lst in trello_data.get('lists', []) if lst.get('name', '').upper() == 'EM EXECUÇÃO'), None)
             if list_id:
-                cards = [c for c in trello_data.get('cards', []) if c.get('idList'] == list_id]
+                cards = [c for c in trello_data.get('cards', []) if c.get('idList') == list_id]
                 novas_obras = [{"unidade": identificar_unidade(c.get('name', '')), "nome": c.get('name', '').split('|')[0].strip()} for c in cards]
                 existentes = {f"{o['unidade']} - {o['nome']}" for o in supabase.table("obras").select("unidade, nome").execute().data}
                 inserir = [o for o in novas_obras if f"{o['unidade']} - {o['nome']}" not in existentes]
