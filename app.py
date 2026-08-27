@@ -716,217 +716,33 @@ else:
                                     pdf.cell(65, 6, to_latin(nome[:28]), border=1)
                                     pdf.cell(50, 6, to_latin(funcao[:20]), border=1)
                                     pdf.cell(32, 6, to_latin(status[:14]), border=1, align='C')
-                                    pdf.cell(24, 6, to_latin(f"R$ {diaria_base:.2f}"), border=1, align='C')
-                                    pdf.cell(24, 6, to_latin(f"R$ {extra:.2f}"), border=1, align='C')
-                                    pdf.cell(51, 6, to_latin(obs[:25]), border=1, ln=True)
-                                
-                                pdf.set_font("Arial", 'B', 9)
-                                pdf.set_fill_color(230, 230, 230)
-                                pdf.cell(224, 6, to_latin("TOTAL DA OBRA:"), border=1, align='R', fill=True)
-                                pdf.cell(53, 6, to_latin(f"R$ {custo_total_obra:.2f}"), border=1, align='C', fill=True, ln=True)
-                                pdf.ln(4)
-                                custo_total_engenheiro += custo_total_obra
-                            pdf.set_font("Arial", 'B', 10)
-                            pdf.cell(0, 7, to_latin(f"TOTAL GERAL ({eng}): R$ {custo_total_engenheiro:.2f}"), ln=True, align='R')
-                        
-                        pdf_bytes = pdf.output(dest='S').encode('latin1')
-                        st.download_button("📥 Baixar Relatório PDF", data=pdf_bytes, file_name=f"Relatorio_Custos_Aproar_{data_inicio_rel.strftime('%d%m%Y')}.pdf", mime="application/pdf", use_container_width=True)
-                except Exception as e:
-                    st.error(f"Erro ao gerar PDF: {e}")
+                                    pdf.cell(24, 6, to_latin(fCom certeza! Separar os dias por abas (planilhas) dentro do mesmo arquivo Excel é a melhor forma de manter o relatório organizado e fácil de visualizar, sem criar uma bagunça de dados misturados ou vários arquivos diferentes.
 
-        with col_btn2:
-            if st.button("📊 Gerar Excel", type="primary", use_container_width=True):
-                try:
-                    if data_inicio_rel > data_fim_rel:
-                        st.error("Data inicial maior que a final.")
-                    elif not dados_relatorio:
-                        st.warning("Sem dados no período.")
-                    else:
-                        registros_excel = []
-                        for row in dados_relatorio:
-                            colab = dict_colaboradores.get(row['colaborador_id'], {})
-                            ob = dict_obras.get(row['obra_id'], {})
-                            status = row.get('status', 'Presente (Integral)')
-                            diaria_base = calcular_diaria_proporcional(status, colab.get('valor_diaria'))
-                            extra = float(row.get('valor_extra', 0) or 0)
-                            
-                            registros_excel.append({
-                                "Data": row.get('data', ''),
-                                "Engenheiro": row.get('engenheiro', 'N/A'),
-                                "Unidade": ob.get('unidade', 'N/A'),
-                                "Obra / Serviço": ob.get('nome', 'N/A'),
-                                "Colaborador": colab.get('nome', 'N/A'),
-                                "Função": colab.get('funcao', 'N/A'),
-                                "Status": status,
-                                "Diária (R$)": diaria_base,
-                                "Extra (R$)": extra,
-                                "Custo Total (R$)": diaria_base + extra,
-                                "Observação": row.get('observacao', '')
-                            })
-                        
-                        df_excel = pd.DataFrame(registros_excel)
-                        
-                        buffer = io.BytesIO()
-                        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                            df_excel.to_excel(writer, index=False, sheet_name='Relatório de Custos')
-                        
-                        # --- ESTILIZAÇÃO PROFISSIONAL COM OPENPYXL (PADRÃO APROAR) ---
-                        buffer.seek(0)
-                        wb = openpyxl.load_workbook(buffer)
-                        ws = wb.active
-                        
-                        header_fill = PatternFill(start_color="2563EB", end_color="2563EB", fill_type="solid")
-                        header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
-                        data_font = Font(name="Calibri", size=10, color="000000")
-                        alt_fill = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
-                        white_fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
-                        
-                        thin_border = Border(
-                            left=Side(style='thin', color='CBD5E1'),
-                            right=Side(style='thin', color='CBD5E1'),
-                            top=Side(style='thin', color='CBD5E1'),
-                            bottom=Side(style='thin', color='CBD5E1')
-                        )
-                        
-                        # Formatar Cabeçalhos
-                        for col_num in range(1, len(df_excel.columns) + 1):
-                            cell = ws.cell(row=1, column=col_num)
-                            cell.fill = header_fill
-                            cell.font = header_font
-                            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-                            cell.border = thin_border
-                        ws.row_dimensions[1].height = 28
+Para fazer isso usando Python com a biblioteca **pandas**, a solução ideal é utilizar o `pd.ExcelWriter`. A lógica consiste em identificar os dias únicos no seu período, filtrar os dados para cada um desses dias e gravar esse filtro em uma nova aba nomeada com a respectiva data.
 
-                        # Formatar Linhas de Dados, Alinhamentos e Moedas
-                        currency_format = 'R$ #,##0.00'
-                        for row_num in range(2, len(df_excel) + 2):
-                            is_alt = (row_num % 2 == 0)
-                            row_fill = alt_fill if is_alt else white_fill
-                            ws.row_dimensions[row_num].height = 20
-                            
-                            for col_num in range(1, len(df_excel.columns) + 1):
-                                cell = ws.cell(row=row_num, column=col_num)
-                                cell.font = data_font
-                                cell.fill = row_fill
-                                cell.border = thin_border
-                                
-                                col_name = df_excel.columns[col_num - 1]
-                                if col_name in ["Diária (R$)", "Extra (R$)", "Custo Total (R$)"]:
-                                    cell.number_format = currency_format
-                                    cell.alignment = Alignment(horizontal="right", vertical="center")
-                                elif col_name in ["Data", "Status"]:
-                                    cell.alignment = Alignment(horizontal="center", vertical="center")
-                                else:
-                                    cell.alignment = Alignment(horizontal="left", vertical="center")
+Aqui está a estrutura de como você pode implementar isso no seu script:
 
-                        # Auto-ajustar largura das colunas
-                        for col in ws.columns:
-                            max_len = 0
-                            col_letter = col[0].column_letter
-                            for cell in col:
-                                val_str = str(cell.value or '')
-                                if len(val_str) > max_len:
-                                    max_len = len(val_str)
-                            ws.column_dimensions[col_letter].width = max(max_len + 4, 14)
+```python
+import pandas as pd
+from datetime import datetime
 
-                        final_buffer = io.BytesIO()
-                        wb.save(final_buffer)
-                        excel_bytes = final_buffer.getvalue()
+# Certifique-se de que a sua coluna de data (ex: 'Data_Pedido') esteja no formato datetime
+# df['Data_Pedido'] = pd.to_datetime(df['Data_Pedido'])
 
-                        st.download_button(
-                            label="📥 Baixar Planilha Excel (.xlsx)",
-                            data=excel_bytes,
-                            file_name=f"Relatorio_Custos_Aproar_{data_inicio_rel.strftime('%d%m%Y')}_a_{data_fim_rel.strftime('%d%m%Y')}.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            use_container_width=True
-                        )
-                except Exception as e:
-                    st.error(f"Erro ao gerar Excel: {e}")
+nome_arquivo = 'relatorios_compras_periodo.xlsx'
 
-    # 5. INDICADORES
-    elif menu_escolhido == "📈 INDICADORES":
-        st.markdown("## 📈 INDICADORES DE DESEMPENHO")
-        try:
-            all_conv = supabase.table("convocacoes").select("*").execute().data
-            if not all_conv:
-                st.info("Nenhum dado registrado para gerar indicadores.")
-            else:
-                df_conv = pd.DataFrame(all_conv)
-                df_conv['nome_colab'] = df_conv['colaborador_id'].map(lambda cid: dict_colaboradores.get(cid, {}).get('nome', 'Desconhecido'))
-                df_conv['funcao_colab'] = df_conv['colaborador_id'].map(lambda cid: dict_colaboradores.get(cid, {}).get('funcao', 'Desconhecido'))
-
-                taxa_assiduidade = (len(df_conv[df_conv['status'].isin(['Presente (Integral)', 'Presente (Só Manhã)', 'Presente (Só Tarde)', 'Extra'])]) / len(df_conv) * 100) if len(df_conv) > 0 else 0.0
-                st.metric("Taxa de Assiduidade Geral", value=f"{taxa_assiduidade:.1f}%")
-                st.markdown("---")
-
-                col_i1, col_i2, col_i3 = st.columns(3)
-                with col_i1:
-                    st.markdown("**Top 10 Faltas**")
-                    df_f = df_conv[df_conv['status'] == 'Falta']
-                    if not df_f.empty:
-                        st.dataframe(df_f.groupby(['nome_colab', 'funcao_colab']).size().reset_index(name='Total').sort_values(by='Total', ascending=False).head(10).rename(columns={'nome_colab':'Colaborador', 'funcao_colab':'Função'}), hide_index=True, use_container_width=True)
-                    else:
-                        st.caption("Sem faltas.")
-                with col_i2:
-                    st.markdown("**Top 10 Atestados**")
-                    df_a = df_conv[df_conv['status'] == 'Atestado']
-                    if not df_a.empty:
-                        st.dataframe(df_a.groupby(['nome_colab', 'funcao_colab']).size().reset_index(name='Total').sort_values(by='Total', ascending=False).head(10).rename(columns={'nome_colab':'Colaborador', 'funcao_colab':'Função'}), hide_index=True, use_container_width=True)
-                    else:
-                        st.caption("Sem atestados.")
-                with col_i3:
-                    st.markdown("**Top 10 Mais Presentes**")
-                    df_p = df_conv[df_conv['status'].isin(['Presente (Integral)', 'Presente (Só Manhã)', 'Presente (Só Tarde)', 'Extra'])]
-                    if not df_p.empty:
-                        st.dataframe(df_p.groupby(['nome_colab', 'funcao_colab']).size().reset_index(name='Total').sort_values(by='Total', ascending=False).head(10).rename(columns={'nome_colab':'Colaborador', 'funcao_colab':'Função'}), hide_index=True, use_container_width=True)
-                    else:
-                        st.caption("Sem presenças.")
-        except Exception as e:
-            st.error(f"Erro ao carregar indicadores: {e}")
-
-    # 6. DISPONIBILIDADE
-    elif menu_escolhido == "👥 DISPONIBILIDADE":
-        render_aba_disponibilidade("adm")
-
-    # 7. CONFIGURAÇÕES
-    elif menu_escolhido == "⚙️ CONFIGURAÇÕES":
-        st.markdown("## ⚙️ SINCRONIZAÇÃO E MANUTENÇÃO")
-        arquivo_json = st.file_uploader("JSON do Trello", type=["json"])
-        if arquivo_json and st.button("🔄 IMPORTAR OBRAS"):
-            trello_data = json.load(arquivo_json)
-            list_id = next((lst['id'] for lst in trello_data.get('lists', []) if lst.get('name', '').upper() == 'EM EXECUÇÃO'), None)
-            if list_id:
-                cards = [c for c in trello_data.get('cards', []) if c.get('idList') == list_id]
-                novas_obras = [{"unidade": identificar_unidade(c.get('name', '')), "nome": c.get('name', '').split('|')[0].strip()} for c in cards]
-                existentes = {f"{o['unidade']} - {o['nome']}" for o in supabase.table("obras").select("unidade, nome").execute().data}
-                inserir = [o for o in novas_obras if f"{o['unidade']} - {o['nome']}" not in existentes]
-                if inserir:
-                    supabase.table("obras").insert(inserir).execute()
-                    st.success("Obras importadas!")
-                    st.rerun()
-
-        st.divider()
-        arquivo_excel = st.file_uploader("Planilha Excel de Colaboradores", type=["xlsx"])
-        if arquivo_excel and st.button("🔄 IMPORTAR COLABORADORES"):
-            xls = pd.ExcelFile(arquivo_excel)
-            df = pd.read_excel(xls, sheet_name="Base de dados" if "Base de dados" in xls.sheet_names else xls.sheet_names[0])
-            existentes = {c['nome'] for c in colaboradores}
-            novos = [{"nome": str(r.get('NOME', '')).strip(), "funcao": limpar_funcao(str(r.get('FUNÇÃO', ''))), "valor_diaria": float(r.get('VALOR DIÁRIA (R$)', 240) or 240), "ativo": True} for _, r in df.iterrows() if str(r.get('NOME', '')).strip() and str(r.get('NOME', '')).strip() not in existentes]
-            if novos:
-                supabase.table("colaboradores").insert(novos).execute()
-                st.success("Colaboradores importados!")
-                st.rerun()
-
-        st.divider()
-        if st.button("🗑️ APAGAR TODAS AS CONVOCAÇÕES", type="secondary"):
-            try:
-                res = supabase.table("convocacoes").select("id").execute()
-                if res.data:
-                    for item in res.data:
-                        supabase.table("convocacoes").delete().eq("id", item['id']).execute()
-                    st.success("Convocações apagadas!")
-                    st.rerun()
-                else:
-                    st.info("Nenhuma convocação encontrada.")
-            except Exception as e:
-                st.error(f"Erro: {e}")
+# Inicia o ExcelWriter
+with pd.ExcelWriter(nome_arquivo, engine='xlsxwriter') as writer:
+    
+    # Extrai apenas as datas únicas do período (ignorando horários, se houver)
+    datas_unicas = df['Data_Pedido'].dt.date.unique()
+    
+    for data in datas_unicas:
+        # Filtra o DataFrame apenas para o dia atual do loop
+        df_dia = df[df['Data_Pedido'].dt.date == data]
+        
+        # Formata a data para usar como nome da aba (ex: '20-08-2026')
+        nome_aba = data.strftime('%d-%m-%Y')
+        
+        # Salva os dados daquele dia na aba correspondente
+        df_dia.to_excel(writer, sheet_name=nome_aba, index=False)
