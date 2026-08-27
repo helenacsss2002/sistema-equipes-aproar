@@ -11,7 +11,9 @@ import streamlit as st
 # CONFIGURAÇÃO
 # ============================================================
 
-BUILD = "PROTOTIPO-TRELLO-PUBLICO-2026-08-26"
+BUILD = "PROTOTIPO-TRELLO-PUBLICO-2026-08-27"
+
+TRELLO_SHORTLINK = "TX8hGvmI"
 
 st.set_page_config(
     page_title="Apontamentos APROAR",
@@ -19,12 +21,18 @@ st.set_page_config(
     layout="wide",
 )
 
-TRELLO_PUBLIC_JSON = "https://trello.com/b/TX8hGvmI.json"
+
+TRELLO_JSON_URLS = [
+    f"https://trello.com/b/{TRELLO_SHORTLINK}.json",
+    f"https://trello.com/b/{TRELLO_SHORTLINK}/orcamentos.json",
+]
+
 
 LISTAS_OBRAS_ATIVAS = {
     "EM EXECUÇÃO",
     "APROVADO - AGUARDANDO EXECUÇÃO",
 }
+
 
 UNIDADES = [
     "HORIZONTE",
@@ -39,20 +47,6 @@ UNIDADES = [
     "MARACANAÚ",
 ]
 
-MESES_PT = {
-    1: "JANEIRO",
-    2: "FEVEREIRO",
-    3: "MARÇO",
-    4: "ABRIL",
-    5: "MAIO",
-    6: "JUNHO",
-    7: "JULHO",
-    8: "AGOSTO",
-    9: "SETEMBRO",
-    10: "OUTUBRO",
-    11: "NOVEMBRO",
-    12: "DEZEMBRO",
-}
 
 FRENTES = [
     "PINTURA",
@@ -70,12 +64,29 @@ FRENTES = [
     "OUTROS",
 ]
 
+
 STATUS_APONTAMENTO = [
     "Pendente",
     "Presença",
     "Falta",
     "Atestado",
 ]
+
+
+MESES_PT = {
+    1: "JANEIRO",
+    2: "FEVEREIRO",
+    3: "MARÇO",
+    4: "ABRIL",
+    5: "MAIO",
+    6: "JUNHO",
+    7: "JULHO",
+    8: "AGOSTO",
+    9: "SETEMBRO",
+    10: "OUTUBRO",
+    11: "NOVEMBRO",
+    12: "DEZEMBRO",
+}
 
 
 # ============================================================
@@ -87,17 +98,18 @@ st.markdown(
     <style>
 
         .block-container {
-            padding-top: 1.15rem;
+            padding-top: 1.1rem;
             padding-bottom: 2rem;
+            max-width: 1450px;
         }
 
         div[data-testid="stMetric"] {
             border: 1px solid rgba(128,128,128,.18);
-            border-radius: 14px;
-            padding: 11px 13px;
+            border-radius: 12px;
+            padding: 10px 12px;
         }
 
-        .modo-prototipo {
+        .proto {
             padding: 10px 14px;
             border-radius: 10px;
             background: rgba(245,158,11,.08);
@@ -113,6 +125,13 @@ st.markdown(
             margin-top: 8px;
         }
 
+        .trello-ok {
+            padding: 9px 12px;
+            border-radius: 9px;
+            background: rgba(34,197,94,.07);
+            border: 1px solid rgba(34,197,94,.25);
+        }
+
     </style>
     """,
     unsafe_allow_html=True,
@@ -120,7 +139,7 @@ st.markdown(
 
 
 # ============================================================
-# FUNÇÕES
+# FUNÇÕES GERAIS
 # ============================================================
 
 def normalizar(texto):
@@ -136,11 +155,13 @@ def normalizar(texto):
         if unicodedata.category(c) != "Mn"
     )
 
-    return re.sub(
+    texto = re.sub(
         r"\s+",
         " ",
         texto,
-    ).strip().upper()
+    )
+
+    return texto.strip().upper()
 
 
 def inferir_frente(funcao):
@@ -221,6 +242,7 @@ def inferir_frente(funcao):
             termo in f
             for termo in termos
         ):
+
             return frente
 
     return "OUTROS"
@@ -325,7 +347,7 @@ def extrair_pipe(nome):
         for parte in str(nome).split("|")
     ]
 
-    if len(partes) >= 2:
+    if partes:
 
         match = re.search(
             r"(\d{6,})",
@@ -335,6 +357,7 @@ def extrair_pipe(nome):
         if match:
 
             return match.group(1)
+
 
     match = re.search(
         r"\bPIPE\s*:?\s*(\d+)\b",
@@ -350,7 +373,7 @@ def extrair_pipe(nome):
 
 def extrair_titulo(
     nome,
-    numero_obra,
+    obra,
 ):
 
     titulo = (
@@ -359,12 +382,12 @@ def extrair_titulo(
         .strip()
     )
 
-    if numero_obra:
+    if obra:
 
         titulo = re.sub(
             (
                 rf"^\s*OBRA\s*[:#-]?\s*"
-                rf"{re.escape(numero_obra)}"
+                rf"{re.escape(obra)}"
                 rf"\s*[-–—:]*\s*"
             ),
             "",
@@ -378,9 +401,13 @@ def extrair_titulo(
     )
 
 
+# ============================================================
+# TRELLO PÚBLICO
+# ============================================================
+
 def parsear_card(
     card,
-    nome_lista,
+    lista,
 ):
 
     nome = str(
@@ -390,18 +417,22 @@ def parsear_card(
         )
     ).strip()
 
+
     obra = extrair_numero_obra(
         nome
     )
+
 
     if not obra:
 
         return None
 
+
     partes = [
         parte.strip()
         for parte in nome.split("|")
     ]
+
 
     if len(partes) >= 3:
 
@@ -413,6 +444,7 @@ def parsear_card(
 
         trecho_unidade = nome
 
+
     unidade = (
         detectar_unidade(
             trecho_unidade
@@ -422,6 +454,7 @@ def parsear_card(
             nome
         )
     )
+
 
     return {
 
@@ -462,160 +495,211 @@ def parsear_card(
             ),
 
         "lista":
-            nome_lista,
+            lista,
 
     }
 
-
-# ============================================================
-# TRELLO PÚBLICO
-# ============================================================
 
 @st.cache_data(
     ttl=60,
     show_spinner=False,
 )
-def carregar_obras_trello_publico():
+def carregar_trello_publico():
 
-    resposta = requests.get(
-        TRELLO_PUBLIC_JSON,
-        timeout=15,
-        headers={
-            "User-Agent": (
-                "Mozilla/5.0 "
-                "(Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 "
-                "Chrome/151 Safari/537.36"
+    ultimo_erro = ""
+
+
+    for url in TRELLO_JSON_URLS:
+
+        try:
+
+            resposta = requests.get(
+                url,
+                timeout=15,
+                allow_redirects=True,
+                headers={
+                    "User-Agent":
+                        "Mozilla/5.0",
+
+                    "Accept":
+                        "application/json,text/plain,*/*",
+                },
             )
-        },
-    )
 
-    resposta.raise_for_status()
 
-    dados = resposta.json()
+            resposta.raise_for_status()
 
-    nomes_validos = {
-        normalizar(nome)
-        for nome in LISTAS_OBRAS_ATIVAS
-    }
 
-    listas = {
+            if not (
+                resposta.text
+                .lstrip()
+                .startswith("{")
+            ):
 
-        str(
-            lista.get(
-                "id"
-            )
-        ):
-        str(
-            lista.get(
-                "name",
-                "",
-            )
-        ).strip()
-
-        for lista in dados.get(
-            "lists",
-            [],
-        )
-
-        if (
-            not lista.get(
-                "closed"
-            )
-            and
-            normalizar(
-                lista.get(
-                    "name",
-                    "",
+                raise RuntimeError(
+                    "O Trello respondeu sem JSON. "
+                    "Isso normalmente significa que "
+                    "o quadro não está público."
                 )
-            )
-            in nomes_validos
-        )
-    }
 
-    obras = []
 
-    for card in dados.get(
-        "cards",
-        [],
-    ):
+            dados = resposta.json()
 
-        if card.get(
-            "closed"
-        ):
 
-            continue
+            listas_validas = {
+                normalizar(
+                    nome
+                )
+                for nome in (
+                    LISTAS_OBRAS_ATIVAS
+                )
+            }
 
-        id_lista = str(
-            card.get(
-                "idList",
-                "",
-            )
-        )
 
-        if id_lista not in listas:
+            listas = {
 
-            continue
+                str(
+                    item.get(
+                        "id"
+                    )
+                ):
+                str(
+                    item.get(
+                        "name",
+                        "",
+                    )
+                ).strip()
 
-        item = parsear_card(
-            card,
-            listas[id_lista],
-        )
+                for item in dados.get(
+                    "lists",
+                    [],
+                )
 
-        if item:
+                if (
+                    not item.get(
+                        "closed"
+                    )
+                    and
+                    normalizar(
+                        item.get(
+                            "name",
+                            "",
+                        )
+                    )
+                    in listas_validas
+                )
+            }
 
-            obras.append(
-                item
-            )
 
-    colunas = [
+            if not listas:
 
-        "trello_card_id",
+                raise RuntimeError(
+                    "O quadro abriu, mas as listas "
+                    "EM EXECUÇÃO e "
+                    "APROVADO - AGUARDANDO EXECUÇÃO "
+                    "não foram encontradas."
+                )
 
-        "short_link",
 
-        "nome_trello",
+            obras = []
 
-        "obra",
 
-        "titulo",
+            for card in dados.get(
+                "cards",
+                [],
+            ):
 
-        "unidade",
+                if card.get(
+                    "closed"
+                ):
 
-        "pipe",
+                    continue
 
-        "lista",
 
-    ]
+                id_lista = str(
+                    card.get(
+                        "idList",
+                        "",
+                    )
+                )
 
-    df = pd.DataFrame(
-        obras,
-        columns=colunas,
-    )
 
-    if not df.empty:
+                if id_lista not in listas:
 
-        df = (
-            df
-            .drop_duplicates(
-                subset=[
-                    "trello_card_id"
-                ]
-            )
-            .sort_values(
-                [
-                    "unidade",
+                    continue
+
+
+                item = parsear_card(
+                    card,
+                    listas[
+                        id_lista
+                    ],
+                )
+
+
+                if item:
+
+                    obras.append(
+                        item
+                    )
+
+
+            df = pd.DataFrame(
+                obras,
+                columns=[
+                    "trello_card_id",
+                    "short_link",
+                    "nome_trello",
                     "obra",
                     "titulo",
+                    "unidade",
+                    "pipe",
+                    "lista",
                 ],
-                kind="stable",
             )
-            .reset_index(
-                drop=True
-            )
-        )
 
-    return df
+
+            if not df.empty:
+
+                df = (
+                    df
+                    .drop_duplicates(
+                        subset=[
+                            "trello_card_id"
+                        ]
+                    )
+                    .sort_values(
+                        [
+                            "unidade",
+                            "obra",
+                            "titulo",
+                        ],
+                        kind="stable",
+                    )
+                    .reset_index(
+                        drop=True
+                    )
+                )
+
+
+            return (
+                df,
+                url,
+            )
+
+
+        except Exception as erro:
+
+            ultimo_erro = str(
+                erro
+            )
+
+
+    raise RuntimeError(
+        "Não foi possível ler o quadro "
+        "sem token. "
+        f"Último erro: {ultimo_erro}"
+    )
 
 
 def sincronizar_trello(
@@ -624,27 +708,38 @@ def sincronizar_trello(
 
     if forcar:
 
-        carregar_obras_trello_publico.clear()
+        carregar_trello_publico.clear()
+
 
     try:
 
-        df = (
-            carregar_obras_trello_publico()
+        df, url = (
+            carregar_trello_publico()
         )
+
 
         st.session_state.obras_trello = (
             df
         )
 
+
         st.session_state.trello_ok = (
             True
         )
+
 
         st.session_state.trello_erro = (
             ""
         )
 
+
+        st.session_state.trello_url = (
+            url
+        )
+
+
         return True
+
 
     except Exception as erro:
 
@@ -652,16 +747,19 @@ def sincronizar_trello(
             False
         )
 
+
         st.session_state.trello_erro = (
-            f"{type(erro).__name__}: "
-            f"{erro}"
+            str(
+                erro
+            )
         )
+
 
         return False
 
 
 # ============================================================
-# DADOS DE TESTE
+# DADOS TEMPORÁRIOS
 # ============================================================
 
 def iniciar_dados():
@@ -756,29 +854,36 @@ def iniciar_dados():
             )
         )
 
+
     if "convocacoes" not in st.session_state:
 
         st.session_state.convocacoes = []
+
 
     if "apontamentos" not in st.session_state:
 
         st.session_state.apontamentos = []
 
+
     if "equipe_rascunho" not in st.session_state:
 
         st.session_state.equipe_rascunho = []
+
 
     if "conv_select_version" not in st.session_state:
 
         st.session_state.conv_select_version = 0
 
+
     if "conv_editor_version" not in st.session_state:
 
         st.session_state.conv_editor_version = 0
 
+
     if "avulso_version" not in st.session_state:
 
         st.session_state.avulso_version = 0
+
 
     if "obras_trello" not in st.session_state:
 
@@ -797,6 +902,7 @@ def iniciar_dados():
             )
         )
 
+
     if "medicoes" not in st.session_state:
 
         st.session_state.medicoes = (
@@ -805,11 +911,14 @@ def iniciar_dados():
 
                     {
                         "id": 1,
-                        "competencia": "08/2026",
-                        "obra": "2450.1",
+                        "competencia":
+                            "08/2026",
+                        "obra":
+                            "2450.1",
                         "servico":
                             "CONSERTAR CERCA ELÉTRICA",
-                        "unidade": "CENTRO",
+                        "unidade":
+                            "CENTRO",
                         "pipe":
                             "1357123706",
                         "origem":
@@ -824,34 +933,18 @@ def iniciar_dados():
 
                     {
                         "id": 2,
-                        "competencia": "08/2026",
-                        "obra": "2467",
+                        "competencia":
+                            "08/2026",
+                        "obra":
+                            "2467",
                         "servico":
                             "MANUTENÇÃO DOS BANHEIROS",
-                        "unidade": "BARRA",
+                        "unidade":
+                            "BARRA",
                         "pipe":
                             "1377057280",
                         "origem":
                             "FIEC",
-                        "status":
-                            "Pendente",
-                        "valor_aprovado":
-                            0.0,
-                        "resultado":
-                            0.0,
-                    },
-
-                    {
-                        "id": 3,
-                        "competencia": "08/2026",
-                        "obra": "—",
-                        "servico":
-                            "SUBCONTRATAÇÃO / COMPRA DE MATERIAIS",
-                        "unidade": "—",
-                        "pipe":
-                            "1427648041",
-                        "origem":
-                            "QUARTEIRIZADOS",
                         "status":
                             "Pendente",
                         "valor_aprovado":
@@ -865,7 +958,106 @@ def iniciar_dados():
         )
 
 
+def compatibilizar_sessao_antiga():
+
+    # Corrige automaticamente o KeyError "unidade"
+    # causado pelos apontamentos das versões anteriores.
+
+    for item in st.session_state.get(
+        "apontamentos",
+        [],
+    ):
+
+        item.setdefault(
+            "unidade",
+            "",
+        )
+
+        item.setdefault(
+            "obra",
+            "",
+        )
+
+        item.setdefault(
+            "titulo_obra",
+            "",
+        )
+
+        item.setdefault(
+            "trello_card_id",
+            "",
+        )
+
+        item.setdefault(
+            "tipo",
+            "FIXO",
+        )
+
+        item.setdefault(
+            "funcao",
+            "",
+        )
+
+        item.setdefault(
+            "frente",
+            "OUTROS",
+        )
+
+        item.setdefault(
+            "status",
+            "Pendente",
+        )
+
+        item.setdefault(
+            "extra",
+            0.0,
+        )
+
+        item.setdefault(
+            "observacao",
+            "",
+        )
+
+
+    for item in st.session_state.get(
+        "convocacoes",
+        [],
+    ):
+
+        item.setdefault(
+            "unidade",
+            "",
+        )
+
+        item.setdefault(
+            "obra",
+            "",
+        )
+
+        item.setdefault(
+            "titulo_obra",
+            "",
+        )
+
+        item.setdefault(
+            "trello_card_id",
+            "",
+        )
+
+        item.setdefault(
+            "pipe",
+            "",
+        )
+
+        item.setdefault(
+            "lista_trello",
+            "",
+        )
+
+
 iniciar_dados()
+
+compatibilizar_sessao_antiga()
 
 
 # ============================================================
@@ -876,24 +1068,18 @@ st.title(
     "🏗️ Controle de Equipes e Apontamentos"
 )
 
+
 st.caption(
     "APROAR Engenharia"
 )
 
+
 st.markdown(
-    f"""
-    <div class="modo-prototipo">
-
-        🧪 <b>MODO PROTÓTIPO — SEM SUPABASE</b><br>
-
-        Tentativa de leitura do quadro público
-        do Trello sem token.<br>
-
-        Build:
-        <code>{BUILD}</code>
-
-    </div>
-    """,
+    '<div class="proto">'
+    '🧪 <b>MODO PROTÓTIPO — SEM SUPABASE</b><br>'
+    'Trello em teste por leitura pública, sem token.<br>'
+    f'Build: <code>{BUILD}</code>'
+    '</div>',
     unsafe_allow_html=True,
 )
 
@@ -908,6 +1094,7 @@ with st.sidebar:
         "⚙️ Operações"
     )
 
+
     engenheiro_atual = st.text_input(
         "Engenheiro / supervisor",
         value=st.session_state.get(
@@ -916,9 +1103,11 @@ with st.sidebar:
         ),
     )
 
+
     st.session_state.engenheiro_atual = (
         engenheiro_atual
     )
+
 
     menu = st.radio(
         "Menu",
@@ -931,11 +1120,14 @@ with st.sidebar:
         ],
     )
 
+
     st.divider()
+
 
     st.caption(
         f"Build: {BUILD}"
     )
+
 
     if st.button(
         "Restaurar demonstração",
@@ -968,9 +1160,12 @@ with st.sidebar:
 
             "trello_erro",
 
+            "trello_url",
+
             "trello_sync_inicial",
 
         ]
+
 
         for chave in chaves:
 
@@ -979,9 +1174,14 @@ with st.sidebar:
                 None,
             )
 
-        carregar_obras_trello_publico.clear()
+
+        carregar_trello_publico.clear()
+
 
         iniciar_dados()
+
+        compatibilizar_sessao_antiga()
+
 
         st.rerun()
 
@@ -996,77 +1196,115 @@ if menu == "Visão Geral":
         "Visão Geral"
     )
 
+
     total_convocados = sum(
         len(
-            convocacao["equipe"]
+            item.get(
+                "equipe",
+                [],
+            )
         )
-        for convocacao in (
-            st.session_state.convocacoes
+        for item in (
+            st.session_state
+            .convocacoes
         )
     )
+
 
     total_pendentes = sum(
         1
-        for apontamento in (
-            st.session_state.apontamentos
+        for item in (
+            st.session_state
+            .apontamentos
         )
-        if apontamento["status"]
-        == "Pendente"
+        if item.get(
+            "status"
+        )
+        ==
+        "Pendente"
     )
 
+
     c1, c2, c3, c4 = st.columns(4)
+
 
     c1.metric(
         "Colaboradores",
         len(
-            st.session_state.colaboradores
+            st.session_state
+            .colaboradores
         ),
     )
+
 
     c2.metric(
         "Convocados",
         total_convocados,
     )
 
+
     c3.metric(
         "Apontamentos pendentes",
         total_pendentes,
     )
 
+
     c4.metric(
         "Obras ativas do Trello",
         len(
-            st.session_state.obras_trello
+            st.session_state
+            .obras_trello
         ),
     )
+
 
     st.markdown(
         "### Fluxo"
     )
 
+
     st.write(
-        "Trello → Unidade/Obra → "
-        "Convocação por frente → "
-        "Apontamento → "
+        "Trello → Unidade + Obra → "
+        "Convocação → Apontamento → "
         "Medições / Resultados"
     )
+
 
     if st.session_state.apontamentos:
 
         df = pd.DataFrame(
-            st.session_state.apontamentos
+            st.session_state
+            .apontamentos
         )
+
+
+        for coluna in [
+            "data",
+            "unidade",
+            "obra",
+            "nome",
+            "frente",
+            "status",
+        ]:
+
+            if coluna not in df.columns:
+
+                df[coluna] = ""
+
 
         pendentes = df[
             df["status"]
-            == "Pendente"
+            ==
+            "Pendente"
         ]
+
 
         if not pendentes.empty:
 
             st.markdown(
                 "### Pendências"
             )
+
 
             st.dataframe(
                 pendentes[
@@ -1094,10 +1332,12 @@ elif menu == "Colaboradores":
         "Colaboradores"
     )
 
+
     st.caption(
         "A função cadastrada define em qual frente "
         "o colaborador aparece inicialmente."
     )
+
 
     with st.expander(
         "➕ Adicionar colaborador"
@@ -1105,17 +1345,21 @@ elif menu == "Colaboradores":
 
         c1, c2 = st.columns(2)
 
+
         nome = c1.text_input(
             "Nome"
         )
+
 
         funcao = c2.text_input(
             "Função / cargo"
         )
 
+
         frente_sugerida = inferir_frente(
             funcao
         )
+
 
         frente = st.selectbox(
             "Frente principal",
@@ -1124,6 +1368,7 @@ elif menu == "Colaboradores":
                 frente_sugerida
             ),
         )
+
 
         if st.button(
             "Adicionar colaborador"
@@ -1135,12 +1380,14 @@ elif menu == "Colaboradores":
                     "Informe o nome."
                 )
 
+
             else:
 
                 df = (
                     st.session_state
                     .colaboradores
                 )
+
 
                 if df.empty:
 
@@ -1150,10 +1397,13 @@ elif menu == "Colaboradores":
 
                     novo_id = (
                         int(
-                            df["id"].max()
+                            df["id"]
+                            .max()
                         )
-                        + 1
+                        +
+                        1
                     )
+
 
                 novo = pd.DataFrame(
                     [
@@ -1168,7 +1418,8 @@ elif menu == "Colaboradores":
 
                             "funcao":
                                 funcao.strip()
-                                or "NÃO INFORMADA",
+                                or
+                                "NÃO INFORMADA",
 
                             "frente":
                                 frente,
@@ -1178,6 +1429,7 @@ elif menu == "Colaboradores":
                         }
                     ]
                 )
+
 
                 st.session_state.colaboradores = (
                     pd.concat(
@@ -1189,7 +1441,9 @@ elif menu == "Colaboradores":
                     )
                 )
 
+
                 st.rerun()
+
 
     frentes_existentes = sorted(
         st.session_state
@@ -1201,13 +1455,16 @@ elif menu == "Colaboradores":
         .tolist()
     )
 
+
     filtro = st.selectbox(
         "Filtrar por frente",
         [
             "Todas"
         ]
-        + frentes_existentes,
+        +
+        frentes_existentes,
     )
+
 
     base = (
         st.session_state
@@ -1215,16 +1472,18 @@ elif menu == "Colaboradores":
         .copy()
     )
 
+
     if filtro != "Todas":
 
         base = base[
             base["frente"]
-            == filtro
+            ==
+            filtro
         ]
 
-    tabela = base.rename(
-        columns={
 
+    base = base.rename(
+        columns={
             "nome":
                 "Nome",
 
@@ -1236,12 +1495,12 @@ elif menu == "Colaboradores":
 
             "ativo":
                 "Ativo",
-
         }
     )
 
+
     st.dataframe(
-        tabela[
+        base[
             [
                 "Nome",
                 "Função",
@@ -1264,10 +1523,12 @@ elif menu == "Convocação":
         "Nova convocação"
     )
 
+
     st.caption(
-        "Escolha a unidade, informe o número "
-        "da obra e monte a equipe."
+        "Selecione a unidade, relacione a obra "
+        "do Trello e monte a equipe."
     )
+
 
     if (
         "ultima_convocacao_msg"
@@ -1294,6 +1555,7 @@ elif menu == "Convocação":
             True
         )
 
+
         with st.spinner(
             "Lendo obras do Trello..."
         ):
@@ -1301,76 +1563,52 @@ elif menu == "Convocação":
             sincronizar_trello()
 
 
-    coluna_sync, coluna_botao = st.columns(
+    c_status, c_refresh = st.columns(
         [
-            4,
+            5,
             1,
         ]
     )
 
 
-    with coluna_sync:
+    with c_status:
 
         if st.session_state.get(
             "trello_ok"
         ):
 
-            obras_lidas = (
-                st.session_state
-                .obras_trello
+            st.markdown(
+                '<div class="trello-ok">'
+                f'✅ Trello lido: '
+                f'<b>{len(st.session_state.obras_trello)}</b> '
+                'obra(s) em execução ou aguardando execução.'
+                '</div>',
+                unsafe_allow_html=True,
             )
 
-            if obras_lidas.empty:
-
-                sem_unidade = 0
-
-            else:
-
-                sem_unidade = int(
-                    (
-                        obras_lidas[
-                            "unidade"
-                        ]
-                        == ""
-                    ).sum()
-                )
-
-            st.success(
-                f"Trello sincronizado: "
-                f"{len(obras_lidas)} obra(s) "
-                "nas listas permitidas."
-            )
-
-            if sem_unidade:
-
-                st.caption(
-                    f"{sem_unidade} card(s) foram "
-                    "lidos, mas a unidade não pôde "
-                    "ser identificada pelo nome."
-                )
 
         else:
 
             st.error(
-                "Não foi possível ler o quadro "
-                "público do Trello."
+                "Não foi possível ler o quadro público do Trello."
             )
+
 
             if st.session_state.get(
                 "trello_erro"
             ):
 
                 with st.expander(
-                    "Ver erro"
+                    "Ver motivo"
                 ):
 
-                    st.code(
+                    st.write(
                         st.session_state
                         .trello_erro
                     )
 
 
-    with coluna_botao:
+    with c_refresh:
 
         if st.button(
             "🔄 Atualizar",
@@ -1378,18 +1616,19 @@ elif menu == "Convocação":
         ):
 
             with st.spinner(
-                "Atualizando Trello..."
+                "Atualizando..."
             ):
 
                 sincronizar_trello(
                     forcar=True
                 )
 
+
             st.rerun()
 
 
     # ========================================================
-    # DADOS DA CONVOCAÇÃO
+    # DATA + UNIDADE + ENGENHEIRO + OBRA
     # ========================================================
 
     with st.container(
@@ -1399,10 +1638,11 @@ elif menu == "Convocação":
         c1, c2, c3 = st.columns(
             [
                 1,
-                1.1,
-                1.5,
+                1.15,
+                1.6,
             ]
         )
+
 
         data_convocacao = c1.date_input(
             "Data",
@@ -1410,11 +1650,13 @@ elif menu == "Convocação":
             key="conv_data",
         )
 
+
         unidade = c2.selectbox(
             "Unidade",
             UNIDADES,
             key="conv_unidade",
         )
+
 
         engenheiro = c3.text_input(
             "Engenheiro responsável",
@@ -1426,15 +1668,12 @@ elif menu == "Convocação":
         )
 
 
-        # ====================================================
-        # BUSCA DA OBRA
-        # ====================================================
-
         obras_trello = (
             st.session_state
             .obras_trello
             .copy()
         )
+
 
         if obras_trello.empty:
 
@@ -1442,29 +1681,30 @@ elif menu == "Convocação":
                 obras_trello
             )
 
+
         else:
 
-            obras_unidade = (
+            obras_unidade = obras_trello[
                 obras_trello[
-                    obras_trello[
-                        "unidade"
-                    ]
-                    ==
-                    unidade
+                    "unidade"
                 ]
-                .copy()
-            )
+                ==
+                unidade
+            ].copy()
 
 
-        numero_digitado = st.text_input(
+        c_obra, c_resultado = st.columns(
+            [
+                1,
+                2.2,
+            ]
+        )
+
+
+        numero_digitado = c_obra.text_input(
             "Nº da obra",
             placeholder="Ex.: 140",
             key="conv_numero_obra",
-            help=(
-                "A busca considera somente cards "
-                "em EM EXECUÇÃO ou "
-                "APROVADO - AGUARDANDO EXECUÇÃO."
-            ),
         ).strip()
 
 
@@ -1473,32 +1713,26 @@ elif menu == "Convocação":
 
         if numero_digitado:
 
-            candidatos = (
+            candidatos = obras_unidade[
                 obras_unidade[
-                    obras_unidade[
-                        "obra"
-                    ]
-                    .astype(str)
-                    .str.startswith(
-                        numero_digitado,
-                        na=False,
-                    )
+                    "obra"
                 ]
-                .copy()
-            )
+                .astype(str)
+                .str.startswith(
+                    numero_digitado,
+                    na=False,
+                )
+            ].copy()
 
 
-            exatos = (
+            exatos = candidatos[
                 candidatos[
-                    candidatos[
-                        "obra"
-                    ]
-                    .astype(str)
-                    ==
-                    numero_digitado
+                    "obra"
                 ]
-                .copy()
-            )
+                .astype(str)
+                ==
+                numero_digitado
+            ].copy()
 
 
             if len(exatos) == 1:
@@ -1513,23 +1747,24 @@ elif menu == "Convocação":
                 opcoes = {
 
                     (
-                        f"OBRA {r.obra} — "
-                        f"{r.titulo} | "
-                        f"{r.lista}"
+                        f"OBRA {item.obra} — "
+                        f"{item.titulo} | "
+                        f"{item.lista}"
                     ):
-                    r.trello_card_id
+                    item.trello_card_id
 
-                    for r in (
+                    for item in (
                         exatos.itertuples()
                     )
                 }
 
 
-                escolha = st.selectbox(
-                    "Selecione a obra",
+                escolha = c_resultado.selectbox(
+                    "Correspondências",
                     list(
                         opcoes.keys()
                     ),
+                    key="obra_exata_opcoes",
                 )
 
 
@@ -1552,23 +1787,23 @@ elif menu == "Convocação":
                 opcoes = {
 
                     (
-                        f"OBRA {r.obra} — "
-                        f"{r.titulo}"
+                        f"OBRA {item.obra} — "
+                        f"{item.titulo}"
                     ):
-                    r.trello_card_id
+                    item.trello_card_id
 
-                    for r in (
+                    for item in (
                         candidatos.itertuples()
                     )
                 }
 
 
-                escolha = st.selectbox(
+                escolha = c_resultado.selectbox(
                     "Obras encontradas",
                     list(
                         opcoes.keys()
                     ),
-                    key="conv_obra_resultados",
+                    key="obra_parcial_opcoes",
                 )
 
 
@@ -1590,10 +1825,11 @@ elif menu == "Convocação":
                 "trello_ok"
             ):
 
-                st.warning(
-                    f"Nenhuma obra iniciada por "
-                    f"'{numero_digitado}' foi "
-                    f"encontrada em {unidade}."
+                c_resultado.warning(
+                    f"Nenhuma obra "
+                    f"'{numero_digitado}' "
+                    f"foi encontrada em "
+                    f"{unidade}."
                 )
 
 
@@ -1601,22 +1837,26 @@ elif menu == "Convocação":
             "trello_ok"
         ):
 
-            st.caption(
-                f"{len(obras_unidade)} obra(s) "
-                f"disponível(is) em {unidade} "
-                "nas duas listas permitidas."
+            c_resultado.caption(
+                f"{len(obras_unidade)} "
+                f"obra(s) disponíveis "
+                f"em {unidade}."
             )
 
 
         if obra_selecionada is not None:
 
-            if obra_selecionada[
-                "pipe"
-            ]:
+            pipe = str(
+                obra_selecionada[
+                    "pipe"
+                ]
+            ).strip()
+
+
+            if pipe:
 
                 pipe_txt = (
-                    " • PIPE "
-                    f"{obra_selecionada['pipe']}"
+                    f" • PIPE {pipe}"
                 )
 
             else:
@@ -1625,22 +1865,14 @@ elif menu == "Convocação":
 
 
             st.markdown(
-                f"""
-                <div class="obra-ok">
-
-                    ✅ <b>OBRA
-                    {obra_selecionada['obra']}</b>
-                    —
-                    {obra_selecionada['titulo']}
-                    <br>
-
-                    {obra_selecionada['unidade']}
-                    •
-                    {obra_selecionada['lista']}
-                    {pipe_txt}
-
-                </div>
-                """,
+                '<div class="obra-ok">'
+                f'✅ <b>OBRA '
+                f'{obra_selecionada["obra"]}</b> — '
+                f'{obra_selecionada["titulo"]}<br>'
+                f'{obra_selecionada["unidade"]} • '
+                f'{obra_selecionada["lista"]}'
+                f'{pipe_txt}'
+                '</div>',
                 unsafe_allow_html=True,
             )
 
@@ -1667,9 +1899,14 @@ elif menu == "Convocação":
 
         frentes_disponiveis = sorted(
             colaboradores[
-                colaboradores["ativo"]
-                == True
-            ]["frente"]
+                colaboradores[
+                    "ativo"
+                ]
+                ==
+                True
+            ][
+                "frente"
+            ]
             .dropna()
             .unique()
             .tolist()
@@ -1691,31 +1928,37 @@ elif menu == "Convocação":
         )
 
 
-        grupo = (
-            colaboradores[
-                (
-                    colaboradores["frente"]
-                    == frente_escolhida
-                )
-                &
-                (
-                    colaboradores["ativo"]
-                    == True
-                )
-            ]
-        )
+        grupo = colaboradores[
+            (
+                colaboradores[
+                    "frente"
+                ]
+                ==
+                frente_escolhida
+            )
+            &
+            (
+                colaboradores[
+                    "ativo"
+                ]
+                ==
+                True
+            )
+        ].copy()
 
 
         ids_ja_adicionados = {
 
-            pessoa["colaborador_id"]
+            item[
+                "colaborador_id"
+            ]
 
-            for pessoa in (
+            for item in (
                 st.session_state
                 .equipe_rascunho
             )
 
-            if pessoa.get(
+            if item.get(
                 "colaborador_id"
             )
             is not None
@@ -1723,7 +1966,9 @@ elif menu == "Convocação":
 
 
         grupo = grupo[
-            ~grupo["id"].isin(
+            ~grupo[
+                "id"
+            ].isin(
                 ids_ja_adicionados
             )
         ]
@@ -1732,14 +1977,14 @@ elif menu == "Convocação":
         labels = {
 
             (
-                f"{pessoa.nome} — "
-                f"{pessoa.funcao}"
+                f"{item.nome} — "
+                f"{item.funcao}"
             ):
             int(
-                pessoa.id
+                item.id
             )
 
-            for pessoa in (
+            for item in (
                 grupo.itertuples()
             )
         }
@@ -1769,18 +2014,19 @@ elif menu == "Convocação":
             for label in mao_obra:
 
                 colaborador_id = (
-                    labels[label]
-                )
-
-
-                row = (
-                    colaboradores[
-                        colaboradores["id"]
-                        ==
-                        colaborador_id
+                    labels[
+                        label
                     ]
-                    .iloc[0]
                 )
+
+
+                row = colaboradores[
+                    colaboradores[
+                        "id"
+                    ]
+                    ==
+                    colaborador_id
+                ].iloc[0]
 
 
                 st.session_state.equipe_rascunho.append(
@@ -1792,19 +2038,29 @@ elif menu == "Convocação":
                             ),
 
                         "nome":
-                            row["nome"],
+                            row[
+                                "nome"
+                            ],
 
                         "funcao_base":
-                            row["funcao"],
+                            row[
+                                "funcao"
+                            ],
 
                         "frente_base":
-                            row["frente"],
+                            row[
+                                "frente"
+                            ],
 
                         "funcao_dia":
-                            row["funcao"],
+                            row[
+                                "funcao"
+                            ],
 
                         "frente_dia":
-                            row["frente"],
+                            row[
+                                "frente"
+                            ],
 
                         "observacao":
                             "",
@@ -1820,11 +2076,12 @@ elif menu == "Convocação":
 
             st.session_state.conv_editor_version += 1
 
+
             st.rerun()
 
 
         # ====================================================
-        # AVULSOS
+        # MÃO DE OBRA AVULSA
         # ====================================================
 
         with st.expander(
@@ -1876,7 +2133,7 @@ elif menu == "Convocação":
                     avulsos.iterrows()
                 ):
 
-                    nome_avulso = str(
+                    nome = str(
                         avulso.get(
                             "Nome",
                             "",
@@ -1884,12 +2141,12 @@ elif menu == "Convocação":
                     ).strip()
 
 
-                    if not nome_avulso:
+                    if not nome:
 
                         continue
 
 
-                    funcao_avulso = str(
+                    funcao = str(
                         avulso.get(
                             "Função",
                             "",
@@ -1897,7 +2154,7 @@ elif menu == "Convocação":
                     ).strip()
 
 
-                    frente_avulso = str(
+                    frente = str(
                         avulso.get(
                             "Frente",
                             "",
@@ -1912,7 +2169,7 @@ elif menu == "Convocação":
                                 None,
 
                             "nome":
-                                nome_avulso.upper(),
+                                nome.upper(),
 
                             "funcao_base":
                                 "AVULSO",
@@ -1921,12 +2178,12 @@ elif menu == "Convocação":
                                 "AVULSO",
 
                             "funcao_dia":
-                                funcao_avulso
+                                funcao
                                 or
                                 "NÃO INFORMADA",
 
                             "frente_dia":
-                                frente_avulso
+                                frente
                                 or
                                 frente_escolhida,
 
@@ -1949,6 +2206,7 @@ elif menu == "Convocação":
 
                     st.session_state.conv_editor_version += 1
 
+
                     st.rerun()
 
 
@@ -1956,10 +2214,7 @@ elif menu == "Convocação":
     # EQUIPE MONTADA
     # ========================================================
 
-    if (
-        st.session_state
-        .equipe_rascunho
-    ):
+    if st.session_state.equipe_rascunho:
 
         st.markdown(
             "### Equipe montada"
@@ -1970,31 +2225,37 @@ elif menu == "Convocação":
             [
 
                 {
-
                     "Nome":
-                        pessoa["nome"],
+                        item[
+                            "nome"
+                        ],
 
                     "Função base":
-                        pessoa["funcao_base"],
+                        item[
+                            "funcao_base"
+                        ],
 
                     "Função no dia":
-                        pessoa["funcao_dia"],
+                        item[
+                            "funcao_dia"
+                        ],
 
                     "Frente no dia":
-                        pessoa["frente_dia"],
+                        item[
+                            "frente_dia"
+                        ],
 
                     "Observação":
-                        pessoa.get(
+                        item.get(
                             "observacao",
                             "",
                         ),
 
                     "Remover":
                         False,
-
                 }
 
-                for pessoa in (
+                for item in (
                     st.session_state
                     .equipe_rascunho
                 )
@@ -2025,8 +2286,7 @@ elif menu == "Convocação":
                         "Observação",
                         help=(
                             "Obrigatória se a função "
-                            "ou a frente do colaborador "
-                            "fixo for alterada."
+                            "ou a frente for alterada."
                         ),
                     ),
 
@@ -2053,7 +2313,9 @@ elif menu == "Convocação":
         ):
 
             if bool(
-                row["Remover"]
+                row[
+                    "Remover"
+                ]
             ):
 
                 continue
@@ -2061,7 +2323,9 @@ elif menu == "Convocação":
 
             original = (
                 st.session_state
-                .equipe_rascunho[i]
+                .equipe_rascunho[
+                    i
+                ]
                 .copy()
             )
 
@@ -2125,7 +2389,9 @@ elif menu == "Convocação":
                 nova_equipe
             )
 
+
             st.session_state.conv_editor_version += 1
+
 
             st.rerun()
 
@@ -2134,10 +2400,6 @@ elif menu == "Convocação":
             nova_equipe
         )
 
-
-        # ====================================================
-        # BOTÕES
-        # ====================================================
 
         c1, c2 = st.columns(2)
 
@@ -2152,6 +2414,7 @@ elif menu == "Convocação":
             st.session_state.conv_select_version += 1
 
             st.session_state.conv_editor_version += 1
+
 
             st.rerun()
 
@@ -2177,7 +2440,7 @@ elif menu == "Convocação":
             if obra_selecionada is None:
 
                 st.error(
-                    "Informe e relacione uma obra válida do Trello."
+                    "Digite e relacione uma obra válida do Trello."
                 )
 
                 st.stop()
@@ -2195,11 +2458,11 @@ elif menu == "Convocação":
                 st.stop()
 
 
-            # ================================================
-            # REALOCAÇÃO
-            # ================================================
+            # =================================================
+            # OBSERVAÇÃO OBRIGATÓRIA SE ALTERAR FUNÇÃO/FRENTE
+            # =================================================
 
-            realocacoes_sem_obs = []
+            sem_observacao = []
 
 
             for pessoa in (
@@ -2208,10 +2471,15 @@ elif menu == "Convocação":
             ):
 
                 mudou_funcao = (
-                    pessoa["tipo"]
+
+                    pessoa[
+                        "tipo"
+                    ]
                     ==
                     "FIXO"
+
                     and
+
                     normalizar(
                         pessoa[
                             "funcao_dia"
@@ -2227,10 +2495,15 @@ elif menu == "Convocação":
 
 
                 mudou_frente = (
-                    pessoa["tipo"]
+
+                    pessoa[
+                        "tipo"
+                    ]
                     ==
                     "FIXO"
+
                     and
+
                     normalizar(
                         pessoa[
                             "frente_dia"
@@ -2257,42 +2530,42 @@ elif menu == "Convocação":
                     ].strip()
                 ):
 
-                    realocacoes_sem_obs.append(
+                    sem_observacao.append(
                         pessoa[
                             "nome"
                         ]
                     )
 
 
-            if realocacoes_sem_obs:
+            if sem_observacao:
 
                 st.error(
-                    "Informe uma observação "
-                    "para quem foi realocado: "
+                    "Informe uma observação para "
+                    "quem foi realocado: "
                     +
                     ", ".join(
-                        realocacoes_sem_obs
+                        sem_observacao
                     )
                 )
 
                 st.stop()
 
 
-            # ================================================
-            # BLOQUEAR DUPLICAÇÃO
-            # ================================================
+            # =================================================
+            # BLOQUEAR CONVOCAÇÃO DUPLICADA
+            # =================================================
 
             nomes_chave = sorted(
                 [
 
                     (
-                        f"{p['tipo']}|"
-                        f"{p['nome']}|"
-                        f"{p['funcao_dia']}|"
-                        f"{p['frente_dia']}"
+                        f"{item['tipo']}|"
+                        f"{item['nome']}|"
+                        f"{item['funcao_dia']}|"
+                        f"{item['frente_dia']}"
                     )
 
-                    for p in (
+                    for item in (
                         st.session_state
                         .equipe_rascunho
                     )
@@ -2327,13 +2600,13 @@ elif menu == "Convocação":
 
             duplicada = any(
 
-                convocacao.get(
+                item.get(
                     "assinatura"
                 )
                 ==
                 assinatura
 
-                for convocacao in (
+                for item in (
                     st.session_state
                     .convocacoes
                 )
@@ -2350,16 +2623,17 @@ elif menu == "Convocação":
                 st.stop()
 
 
-            # ================================================
+            # =================================================
             # SALVAR CONVOCAÇÃO
-            # ================================================
+            # =================================================
 
             convocacao_id = (
                 len(
                     st.session_state
                     .convocacoes
                 )
-                + 1
+                +
+                1
             )
 
 
@@ -2368,38 +2642,38 @@ elif menu == "Convocação":
                 {
 
                     "colaborador_id":
-                        pessoa[
+                        item[
                             "colaborador_id"
                         ],
 
                     "nome":
-                        pessoa[
+                        item[
                             "nome"
                         ],
 
                     "funcao":
-                        pessoa[
+                        item[
                             "funcao_dia"
                         ],
 
                     "frente":
-                        pessoa[
+                        item[
                             "frente_dia"
                         ],
 
                     "tipo":
-                        pessoa[
+                        item[
                             "tipo"
                         ],
 
                     "observacao":
-                        pessoa[
+                        item[
                             "observacao"
                         ],
 
                 }
 
-                for pessoa in (
+                for item in (
                     st.session_state
                     .equipe_rascunho
                 )
@@ -2468,9 +2742,9 @@ elif menu == "Convocação":
             )
 
 
-            # ================================================
+            # =================================================
             # GERAR APONTAMENTOS
-            # ================================================
+            # =================================================
 
             for pessoa in equipe_salvar:
 
@@ -2482,7 +2756,8 @@ elif menu == "Convocação":
                                 st.session_state
                                 .apontamentos
                             )
-                            + 1,
+                            +
+                            1,
 
                         "convocacao_id":
                             convocacao_id,
@@ -2556,7 +2831,7 @@ elif menu == "Convocação":
             )
 
 
-            numero_salvo = str(
+            numero_obra = str(
                 obra_selecionada[
                     "obra"
                 ]
@@ -2565,16 +2840,18 @@ elif menu == "Convocação":
 
             st.session_state.equipe_rascunho = []
 
+
             st.session_state.conv_select_version += 1
+
 
             st.session_state.conv_editor_version += 1
 
 
             st.session_state.ultima_convocacao_msg = (
-                "✅ Convocação criada: "
+                f"✅ Convocação criada: "
                 f"{quantidade} pessoa(s) • "
                 f"{unidade} • "
-                f"OBRA {numero_salvo}."
+                f"OBRA {numero_obra}."
             )
 
 
@@ -2618,6 +2895,59 @@ elif menu == "Apontamentos":
         )
 
 
+        # ====================================================
+        # GARANTIR COLUNAS MESMO COM SESSÃO ANTIGA
+        # ====================================================
+
+        colunas = {
+
+            "data":
+                "",
+
+            "unidade":
+                "",
+
+            "obra":
+                "",
+
+            "titulo_obra":
+                "",
+
+            "nome":
+                "",
+
+            "tipo":
+                "FIXO",
+
+            "funcao":
+                "",
+
+            "frente":
+                "OUTROS",
+
+            "status":
+                "Pendente",
+
+            "extra":
+                0.0,
+
+            "observacao":
+                "",
+
+        }
+
+
+        for coluna, padrao in (
+            colunas.items()
+        ):
+
+            if coluna not in df.columns:
+
+                df[
+                    coluna
+                ] = padrao
+
+
         c1, c2, c3 = st.columns(3)
 
 
@@ -2625,6 +2955,7 @@ elif menu == "Apontamentos":
             df[
                 "data"
             ]
+            .astype(str)
             .unique()
             .tolist(),
             reverse=True,
@@ -2638,19 +2969,48 @@ elif menu == "Apontamentos":
 
 
         base_data = df[
-            df["data"]
+            df[
+                "data"
+            ]
+            .astype(str)
             ==
-            data_selecionada
-        ]
+            str(
+                data_selecionada
+            )
+        ].copy()
 
 
         unidades_disponiveis = sorted(
-            base_data[
-                "unidade"
+            [
+
+                item
+
+                for item in (
+                    base_data[
+                        "unidade"
+                    ]
+                    .fillna("")
+                    .astype(str)
+                    .unique()
+                    .tolist()
+                )
+
+                if item.strip()
+
             ]
-            .unique()
-            .tolist()
         )
+
+
+        if not unidades_disponiveis:
+
+            st.warning(
+                "Os apontamentos que estavam na memória "
+                "foram criados por uma versão antiga. "
+                "Clique em 'Restaurar demonstração' "
+                "uma vez para limpar esses testes."
+            )
+
+            st.stop()
 
 
         unidade_selecionada = c2.selectbox(
@@ -2665,20 +3025,41 @@ elif menu == "Apontamentos":
             ]
             ==
             unidade_selecionada
-        ]
+        ].copy()
 
 
         obras_disponiveis = sorted(
-            base_unidade[
-                "obra"
+            [
+
+                item
+
+                for item in (
+                    base_unidade[
+                        "obra"
+                    ]
+                    .fillna("")
+                    .astype(str)
+                    .unique()
+                    .tolist()
+                )
+
+                if item.strip()
+
             ]
-            .astype(str)
-            .unique()
-            .tolist()
         )
 
 
-        obra_filtro = c3.selectbox(
+        if not obras_disponiveis:
+
+            st.warning(
+                "Os apontamentos antigos não possuem "
+                "número de obra associado."
+            )
+
+            st.stop()
+
+
+        obra_selecionada = c3.selectbox(
             "Obra",
             obras_disponiveis,
         )
@@ -2691,17 +3072,26 @@ elif menu == "Apontamentos":
             .astype(str)
             ==
             str(
-                obra_filtro
+                obra_selecionada
             )
-        ]
+        ].copy()
 
 
         if not base.empty:
 
-            st.caption(
-                f"OBRA {obra_filtro} — "
-                f"{base['titulo_obra'].iloc[0]}"
-            )
+            titulo = str(
+                base[
+                    "titulo_obra"
+                ].iloc[0]
+            ).strip()
+
+
+            if titulo:
+
+                st.caption(
+                    f"OBRA {obra_selecionada} — "
+                    f"{titulo}"
+                )
 
 
         total = len(
@@ -2711,7 +3101,9 @@ elif menu == "Apontamentos":
 
         pendentes = int(
             (
-                base["status"]
+                base[
+                    "status"
+                ]
                 ==
                 "Pendente"
             ).sum()
@@ -2741,163 +3133,193 @@ elif menu == "Apontamentos":
         )
 
 
-        for frente in (
-            base[
-                "frente"
-            ].unique()
+        st.markdown(
+            "### Equipe"
+        )
+
+
+        tabela = base[
+            [
+                "id",
+                "nome",
+                "tipo",
+                "funcao",
+                "frente",
+                "status",
+                "extra",
+                "observacao",
+            ]
+        ].copy()
+
+
+        tabela = tabela.rename(
+            columns={
+
+                "nome":
+                    "Nome",
+
+                "tipo":
+                    "Vínculo",
+
+                "funcao":
+                    "Função",
+
+                "frente":
+                    "Frente",
+
+                "status":
+                    "Status",
+
+                "extra":
+                    "Extra (R$)",
+
+                "observacao":
+                    "Observação",
+
+            }
+        )
+
+
+        editada = st.data_editor(
+            tabela,
+            use_container_width=True,
+            hide_index=True,
+            disabled=[
+                "id",
+                "Nome",
+                "Vínculo",
+                "Função",
+                "Frente",
+            ],
+            column_config={
+
+                "id":
+                    None,
+
+                "Status":
+                    st.column_config
+                    .SelectboxColumn(
+                        "Status",
+                        options=(
+                            STATUS_APONTAMENTO
+                        ),
+                    ),
+
+                "Extra (R$)":
+                    st.column_config
+                    .NumberColumn(
+                        "Extra (R$)",
+                        min_value=0.0,
+                        step=10.0,
+                    ),
+
+            },
+            key=(
+                f"apont_"
+                f"{data_selecionada}_"
+                f"{unidade_selecionada}_"
+                f"{obra_selecionada}"
+            ),
+        )
+
+
+        if st.button(
+            "Salvar apontamentos",
+            type="primary",
+            use_container_width=True,
         ):
 
-            st.markdown(
-                f"### {frente}"
-            )
+            por_id = {
+
+                int(
+                    row[
+                        "id"
+                    ]
+                ):
+                row
+
+                for _, row in (
+                    editada.iterrows()
+                )
+            }
 
 
-            grupo = base[
-                base[
-                    "frente"
-                ]
-                ==
-                frente
-            ]
-
-
-            for _, row in (
-                grupo.iterrows()
+            for item in (
+                st.session_state
+                .apontamentos
             ):
 
-                apontamento_id = int(
-                    row[
+                item_id = int(
+                    item[
                         "id"
                     ]
                 )
 
 
-                with st.container(
-                    border=True
+                if item_id not in por_id:
+
+                    continue
+
+
+                row = por_id[
+                    item_id
+                ]
+
+
+                item[
+                    "status"
+                ] = str(
+                    row[
+                        "Status"
+                    ]
+                )
+
+
+                if pd.notna(
+                    row[
+                        "Extra (R$)"
+                    ]
                 ):
 
-                    nome = (
-                        f"**{row['nome']}**"
-                    )
-
-
-                    if (
+                    item[
+                        "extra"
+                    ] = float(
                         row[
-                            "tipo"
-                        ]
-                        ==
-                        "AVULSO"
-                    ):
-
-                        nome += (
-                            " • AVULSO"
-                        )
-
-
-                    st.markdown(
-                        nome
-                    )
-
-
-                    st.caption(
-                        f"{row['unidade']} • "
-                        f"OBRA {row['obra']} • "
-                        f"{row['funcao']}"
-                    )
-
-
-                    c1, c2, c3 = st.columns(
-                        [
-                            1.2,
-                            1,
-                            2,
+                            "Extra (R$)"
                         ]
                     )
 
+                else:
 
-                    status = c1.selectbox(
-                        "Status",
-                        STATUS_APONTAMENTO,
-                        index=(
-                            STATUS_APONTAMENTO
-                            .index(
-                                row[
-                                    "status"
-                                ]
-                            )
-                        ),
-                        key=(
-                            "status_"
-                            f"{apontamento_id}"
-                        ),
+                    item[
+                        "extra"
+                    ] = 0.0
+
+
+                if pd.notna(
+                    row[
+                        "Observação"
+                    ]
+                ):
+
+                    item[
+                        "observacao"
+                    ] = str(
+                        row[
+                            "Observação"
+                        ]
                     )
 
+                else:
 
-                    extra = c2.number_input(
-                        "Extra (R$)",
-                        min_value=0.0,
-                        value=float(
-                            row[
-                                "extra"
-                            ]
-                        ),
-                        step=10.0,
-                        key=(
-                            "extra_"
-                            f"{apontamento_id}"
-                        ),
-                    )
+                    item[
+                        "observacao"
+                    ] = ""
 
 
-                    observacao = c3.text_input(
-                        "Observação",
-                        value=row[
-                            "observacao"
-                        ],
-                        key=(
-                            "obs_"
-                            f"{apontamento_id}"
-                        ),
-                    )
-
-
-                    if st.button(
-                        "Salvar apontamento",
-                        key=(
-                            "salvar_"
-                            f"{apontamento_id}"
-                        ),
-                    ):
-
-                        for item in (
-                            st.session_state
-                            .apontamentos
-                        ):
-
-                            if (
-                                item[
-                                    "id"
-                                ]
-                                ==
-                                apontamento_id
-                            ):
-
-                                item[
-                                    "status"
-                                ] = status
-
-                                item[
-                                    "extra"
-                                ] = extra
-
-                                item[
-                                    "observacao"
-                                ] = observacao
-
-                                break
-
-
-                        st.rerun()
+            st.success(
+                "✅ Apontamentos salvos."
+            )
 
 
 # ============================================================
@@ -2912,10 +3334,8 @@ elif menu == "Medições":
 
 
     st.caption(
-        "Nesta etapa estamos validando "
-        "convocação e apontamento. "
-        "A sincronização mensal de medições "
-        "será ligada depois."
+        "Por enquanto esta tela continua "
+        "em modo de protótipo."
     )
 
 
@@ -2950,7 +3370,7 @@ elif menu == "Medições":
     )
 
 
-    lista_esperada = (
+    lista = (
         f"MEDIÇÃO "
         f"{MESES_PT[int(mes)]} "
         f"{int(ano)}"
@@ -2959,8 +3379,7 @@ elif menu == "Medições":
 
     st.info(
         "Lista mensal que será usada "
-        "no Trello: "
-        f"**{lista_esperada}**"
+        f"no Trello: **{lista}**"
     )
 
 
@@ -2990,82 +3409,8 @@ elif menu == "Medições":
 
     else:
 
-        fiec = base[
-            base[
-                "origem"
-            ]
-            ==
-            "FIEC"
-        ]
-
-
-        fora_fiec = base[
-            base[
-                "origem"
-            ]
-            !=
-            "FIEC"
-        ]
-
-
-        c1, c2, c3 = st.columns(3)
-
-
-        c1.metric(
-            "Total",
-            len(
-                base
-            ),
+        st.dataframe(
+            base,
+            use_container_width=True,
+            hide_index=True,
         )
-
-
-        c2.metric(
-            "FIEC",
-            len(
-                fiec
-            ),
-        )
-
-
-        c3.metric(
-            "Fora FIEC",
-            len(
-                fora_fiec
-            ),
-        )
-
-
-        tab1, tab2, tab3 = st.tabs(
-            [
-                "🏭 FIEC",
-                "↗️ Fora FIEC",
-                "📋 Todos",
-            ]
-        )
-
-
-        with tab1:
-
-            st.dataframe(
-                fiec,
-                use_container_width=True,
-                hide_index=True,
-            )
-
-
-        with tab2:
-
-            st.dataframe(
-                fora_fiec,
-                use_container_width=True,
-                hide_index=True,
-            )
-
-
-        with tab3:
-
-            st.dataframe(
-                base,
-                use_container_width=True,
-                hide_index=True,
-            )
