@@ -9,6 +9,7 @@ import unicodedata
 import re
 import os
 import io
+import requests
 import openpyxl
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 
@@ -160,6 +161,66 @@ def to_latin(texto):
     if not texto: return ""
     return str(texto).encode('latin-1', 'replace').decode('latin-1')
 
+# --- SINCRONIZAÇÃO COM TRELLO (QUADRO DE ORÇAMENTOS - EM EXECUÇÃO) ---
+def sincronizar_obras_trello_automatico():
+    # Cache/Verificação diária para rodar automaticamente a cada 1 dia
+    hoje_str = datetime.date.today().isoformat()
+    if st.session_state.get("ultima_sincronizacao_trello") == hoje_str:
+        return # Já sincronizou hoje
+    
+    sucesso, msg = executar_sincronizacao_trello()
+    if sucesso:
+        st.session_state["ultima_sincronizacao_trello"] = hoje_str
+
+def executar_sincronizacao_trello():
+    url_trello = "https://trello.com/b/TX8hGvmI.json"
+    try:
+        resp = requests.get(url_trello, timeout=10)
+        if resp.status_code != 200:
+            return False, "Erro ao acessar o quadro público do Trello."
+        
+        data = resp.json()
+        lists = data.get('lists', [])
+        cards = data.get('cards', [])
+        
+        # Encontrar a lista "EM EXECUÇÃO"
+        id_lista_execucao = None
+        for lst in lists:
+            nome_lista = normalizar(lst.get('name', ''))
+            if "EM EXECUCAO" in nome_lista or "EXECUCAO" in nome_lista:
+                id_lista_execucao = lst.get('id')
+                break
+        
+        if not id_lista_execucao:
+            return False, "Lista 'EM EXECUÇÃO' não foi encontrada no quadro do Trello."
+        
+        # Filtrar cards ativos da lista de execução
+        cards_execucao = [c for c in cards if c.get('idList') == id_lista_execucao and not c.get('closed', False)]
+        
+        # Obter obras já cadastradas no Supabase
+        obras_atuais = buscar_obras()
+        nomes_cadastrados = {normalizar(o['nome']) for o in obras_atuais}
+        
+        novas_inseridas = 0
+        for card in cards_execucao:
+            nome_card = card.get('name', '').strip()
+            if not nome_card:
+                continue
+            
+            unidade_card = identificar_unidade(nome_card)
+            
+            if normalizar(nome_card) not in nomes_cadastrados:
+                supabase.table("obras").insert({
+                    "unidade": unidade_card,
+                    "nome": nome_card
+                }).execute()
+                novas_inseridas += 1
+                nomes_cadastrados.add(normalizar(nome_card))
+                
+        return True, f"Sincronização realizada com sucesso! {novas_inseridas} nova(s) obra(s) da lista 'EM EXECUÇÃO' foram adicionadas."
+    except Exception as e:
+        return False, f"Erro na conexão com o Trello: {e}"
+
 # --- BUSCA DE DADOS ---
 def buscar_obras():
     try: return supabase.table("obras").select("*").execute().data
@@ -171,6 +232,12 @@ def buscar_colaboradores():
         return res if res else []
     except Exception: 
         return []
+
+# Executar sincronização automática diária em segundo plano
+try:
+    sincronizar_obras_trello_automatico()
+except:
+    pass
 
 obras = buscar_obras()
 colaboradores = buscar_colaboradores()
@@ -873,7 +940,7 @@ else:
                 except Exception as e:
                     st.error(f"Erro ao gerar Excel: {e}")
 
-    # 5. INDICADORES (ADICIONADO E CORRIGIDO)
+    # 5. INDICADORES
     elif menu_escolhido == "📈 INDICADORES":
         st.markdown("## 📈 INDICADORES E ANÁLISE DE DESEMPENHO")
         try:
@@ -912,17 +979,31 @@ else:
             st.markdown("### 📊 Status Gerais de Apontamento")
             st.dataframe(df_ind['status'].value_counts().reset_index(), use_container_width=True)
 
-    # 6. DISPONIBILIDADE (ADICIONADO E CORRIGIDO)
+    # 6. DISPONIBILIDADE
     elif menu_escolhido == "👥 DISPONIBILIDADE":
         render_aba_disponibilidade("admin_panel")
 
-    # 7. CONFIGURAÇÕES (ADICIONADO E CORRIGIDO)
+    # 7. CONFIGURAÇÕES (COM SINCRONIZAÇÃO DO TRELLO)
     elif menu_escolhido == "⚙️ CONFIGURAÇÕES":
         st.markdown("## ⚙️ CONFIGURAÇÕES E CADASTROS")
+        
+        # --- SEÇÃO DE SINCRONIZAÇÃO TRELLO ---
+        with st.container(border=True):
+            st.markdown("### 🔄 Sincronização com Trello (Orçamentos - EM EXECUÇÃO)")
+            st.write("O sistema sincroniza automaticamente as obras da lista **'EM EXECUÇÃO'** do quadro público do Trello a cada 1 dia. Você também pode forçar a atualização manualmente abaixo:")
+            if st.button("🔄 Sincronizar com Trello Agora", use_container_width=True):
+                with st.spinner("Buscando obras do Trello..."):
+                    sucesso, msg = executar_sincronizacao_trello()
+                    if sucesso:
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+        
         tab_c1, tab_c2 = st.tabs(["🏗️ Obras / Unidades", "👥 Colaboradores"])
         
         with tab_c1:
-            st.markdown("### Cadastrar Nova Obra")
+            st.markdown("### Cadastrar Nova Obra Manualmente")
             with st.form("form_nova_obra"):
                 nova_unidade = st.text_input("Unidade (Ex: MARACANAÚ, SEBRAE, FIEC...)")
                 novo_nome_obra = st.text_input("Nome da Obra / Serviço")
@@ -942,9 +1023,10 @@ else:
                         st.warning("Preencha todos os campos.")
             
             st.markdown("---")
-            st.markdown("### Obras Cadastradas")
-            if obras:
-                df_obras = pd.DataFrame(obras)
+            st.markdown("### Obras Cadastradas (Sincronizadas)")
+            obras_atuais_lista = buscar_obras()
+            if obras_atuais_lista:
+                df_obras = pd.DataFrame(obras_atuais_lista)
                 st.dataframe(df_obras[['id', 'unidade', 'nome']], use_container_width=True)
             else:
                 st.info("Nenhuma obra cadastrada.")
