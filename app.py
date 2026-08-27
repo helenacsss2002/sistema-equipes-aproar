@@ -134,10 +134,10 @@ dict_obras = {o['id']: o for o in obras} if obras else {}
 
 ENGENHEIROS = ["EDUARDO", "GABRIEL", "GUSTAVO", "JOEL", "NETO", "PAULO", "SOARES", "VICTOR"]
 
-# --- FUNÇÃO AUXILIAR PARA RENDERIZAR A ABA DE DISPONIBILIDADE ---
+# --- FUNÇÃO AUXILIAR PARA RENDERIZAR A ABA DE DISPONIBILIDADE (LAYOUT ABERTO) ---
 def render_aba_disponibilidade(key_suffix=""):
     st.markdown("### 👥 Disponibilidade de Equipe por Função")
-    st.write("Consulte quem já está convocado e quem está disponível (sobrando) para o dia selecionado.")
+    st.write("Consulte diretamente quem já está convocado e quem está disponível (sobrando) para a data selecionada.")
     
     data_disp = st.date_input("Verificar disponibilidade para a data:", value=datetime.date.today() + datetime.timedelta(days=1), format="DD/MM/YYYY", key=f"data_disp_{key_suffix}")
     
@@ -153,33 +153,35 @@ def render_aba_disponibilidade(key_suffix=""):
         st.info("Nenhum colaborador cadastrado.")
         return
 
+    st.markdown("---")
     for func in funcoes:
-        with st.expander(f"🔹 {func}"):
-            colabs_func = [c for c in colaboradores if c['funcao'] == func]
-            ocupados_func = [c for c in colabs_func if c['id'] in ids_ocupados]
-            disponiveis_func = [c for c in colabs_func if c['id'] not in ids_ocupados]
-            
-            c1, c2 = st.columns(2)
-            with c1:
-                st.markdown(f"**🔴 Convocados ({len(ocupados_func)})**")
-                if ocupados_func:
-                    for oc in ocupados_func:
-                        conv_info = next((item for item in convs_disp if item['colaborador_id'] == oc['id']), None)
-                        obra_nome = "Obra"
-                        if conv_info:
-                            ob_inf = dict_obras.get(conv_info['obra_id'], {})
-                            obra_nome = f"{ob_inf.get('unidade','')} - {ob_inf.get('nome','')}"
-                        st.markdown(f"• {oc['nome']} <br><small style='color:#94A3B8;'>({obra_nome})</small>", unsafe_allow_html=True)
-                else:
-                    st.caption("Nenhum convocado nesta função.")
-                    
-            with c2:
-                st.markdown(f"**🟢 Disponíveis / Sobrando ({len(disponiveis_func)})**")
-                if disponiveis_func:
-                    for disp in disponiveis_func:
-                        st.markdown(f"• {disp['nome']}")
-                else:
-                    st.caption("Nenhum disponível nesta função.")
+        st.markdown(f"#### 🔹 Função: {func}")
+        colabs_func = [c for c in colaboradores if c['funcao'] == func]
+        ocupados_func = [c for c in colabs_func if c['id'] in ids_ocupados]
+        disponiveis_func = [c for c in colabs_func if c['id'] not in ids_ocupados]
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            st.markdown(f"**🔴 Convocados ({len(ocupados_func)})**")
+            if ocupados_func:
+                for oc in ocupados_func:
+                    conv_info = next((item for item in convs_disp if item['colaborador_id'] == oc['id']), None)
+                    obra_nome = "Obra"
+                    if conv_info:
+                        ob_inf = dict_obras.get(conv_info['obra_id'], {})
+                        obra_nome = f"{ob_inf.get('unidade','')} - {ob_inf.get('nome','')}"
+                    st.markdown(f"• {oc['nome']} <br><small style='color:#94A3B8;'>({obra_nome})</small>", unsafe_allow_html=True)
+            else:
+                st.caption("Nenhum convocado nesta função.")
+                
+        with c2:
+            st.markdown(f"**🟢 Disponíveis / Sobrando ({len(disponiveis_func)})**")
+            if disponiveis_func:
+                for disp in disponiveis_func:
+                    st.markdown(f"• {disp['nome']}")
+            else:
+                st.caption("Nenhum disponível nesta função.")
+        st.markdown("---")
 
 # --- VERIFICAÇÃO DE MODO (CAMPO vs ADM) ---
 parametros_url = st.query_params
