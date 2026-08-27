@@ -8,10 +8,10 @@ import unicodedata
 import re
 import os
 
-# --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR (MINIMALISTA) ---
-st.set_page_config(page_title="APROAR - Controle de Presenças", page_icon="👷", layout="centered")
+# --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR ---
+st.set_page_config(page_title="APROAR - Controle de Presenças", page_icon="👷", layout="wide")
 
-# CSS Minimalista, elegante e focado em respiro visual
+# CSS Moderno, limpo e corporativo
 st.markdown("""
     <style>
     .stApp {
@@ -56,10 +56,6 @@ st.markdown("""
     }
     .stButton > button:hover {
         background-color: #1D4ED8 !important;
-    }
-    .stTabs [data-baseweb="tab-list"] button [data-testid="stMarkdownContainer"] p {
-        color: #0C102B !important;
-        font-weight: 600;
     }
     .streamlit-expanderHeader {
         background-color: #161B3D !important;
@@ -154,18 +150,20 @@ dict_obras = {o['id']: o for o in obras} if obras else {}
 
 ENGENHEIROS = ["EDUARDO", "GABRIEL", "GUSTAVO", "JOEL", "NETO", "PAULO", "SOARES", "VICTOR"]
 
-# --- EXIBIÇÃO DA LOGO OFICIAL (logo.png) ---
-col_l1, col_l2, col_l3 = st.columns([1, 2, 1])
+# --- CABEÇALHO COM LOGO ---
+col_l1, col_l2, col_l3 = st.columns([2, 3, 2])
 with col_l2:
     if os.path.exists("logo.png"):
         st.image("logo.png", use_container_width=True)
     else:
         st.markdown("""
-            <div style="background: linear-gradient(135deg, #0C102B 0%, #161B3D 100%); padding: 20px; border-radius: 12px; text-align: center; margin-bottom: 20px; border: 1px solid #2D3568;">
+            <div style="background: linear-gradient(135deg, #0C102B 0%, #161B3D 100%); padding: 15px; border-radius: 12px; text-align: center; margin-bottom: 15px; border: 1px solid #2D3568;">
                 <h2 style="color: #FFFFFF; font-family: sans-serif; letter-spacing: 2px; margin: 0;">APROAR</h2>
                 <p style="color: #60A5FA; font-size: 0.9rem; font-weight: bold; margin-top: 5px;">CONTROLE DE PRESENÇAS</p>
             </div>
         """, unsafe_allow_html=True)
+
+st.markdown("---")
 
 # --- FUNÇÃO AUXILIAR PARA RENDERIZAR A ABA DE DISPONIBILIDADE ---
 def render_aba_disponibilidade(key_suffix=""):
@@ -345,16 +343,25 @@ if modo_campo:
 
 else:
     # ==========================================
-    # VISÃO ADMINISTRATIVA MINIMALISTA
+    # VISÃO ADMINISTRATIVA MODERNA & FLUIDA
     # ==========================================
     st.markdown("### ⚙️ Painel Administrativo")
     
-    tab_dashboard, tab_convocacao, tab_apontamento, tab_relatorios, tab_indicadores, tab_disp_adm, tab_config = st.tabs([
-        "🎛️ Dashboard", "📋 Convocação", "✅ Apontamento", "📊 Relatório", "📈 Indicadores", "👥 Disponibilidade", "⚙️ Config"
-    ])
+    # Menu de Navegação Superior Clean (Substituindo abas aglomeradas)
+    menu_escolhido = st.radio(
+        "Navegação Administrativa",
+        ["🎛️ Dashboard", "📋 Convocação", "✅ Apontamento", "📊 Relatórios", "📈 Indicadores", "👥 Disponibilidade", "⚙️ Configurações"],
+        horizontal=True,
+        label_visibility="collapsed"
+    )
+    
+    st.markdown("---")
 
-    with tab_dashboard:
-        st.markdown("#### Controle e Auditoria de Presenças")
+    # ==========================================
+    # 1. DASHBOARD
+    # ==========================================
+    if menu_escolhido == "🎛️ Dashboard":
+        st.markdown("#### 🎛️ Dashboard e Auditoria de Presenças")
         
         col_f1, col_f2, col_f3, col_f4 = st.columns(4)
         with col_f1:
@@ -471,15 +478,18 @@ else:
                             st.caption(f"R$ {row['custo']:.2f}")
                         st.divider()
 
-    with tab_convocacao:
+    # ==========================================
+    # 2. CONVOCAÇÃO
+    # ==========================================
+    elif menu_escolhido == "📋 Convocação":
         if obras and colaboradores:
-            st.markdown("#### Nova Convocação")
+            st.markdown("#### 📋 Nova Convocação de Equipe")
             col_eng, col_data = st.columns(2)
             with col_eng:
-                engenheiro_conv = st.selectbox("Engenheiro:", ENGENHEIROS, key="eng_conv")
+                engenheiro_conv = st.selectbox("Engenheiro responsável:", ENGENHEIROS, key="eng_conv")
             with col_data:
                 amanha = datetime.date.today() + datetime.timedelta(days=1)
-                data_conv = st.date_input("Data:", value=amanha, format="DD/MM/YYYY")
+                data_conv = st.date_input("Data da Obra/Serviço:", value=amanha, format="DD/MM/YYYY")
 
             unidades_unicas = sorted(list(set([o['unidade'] for o in obras])))
             col_u, col_o = st.columns(2)
@@ -487,15 +497,15 @@ else:
                 unidade_selecionada = st.selectbox("Unidade:", unidades_unicas)
             obras_da_unidade = {o['nome']: o['id'] for o in obras if o['unidade'] == unidade_selecionada}
             with col_o:
-                obra_selecionada = st.selectbox("Obra:", list(obras_da_unidade.keys()))
+                obra_selecionada = st.selectbox("Obra/Serviço:", list(obras_da_unidade.keys()))
 
             turno_conv_adm = st.selectbox("Turno / Período:", ["Integral", "Manhã", "Tarde"], key="turno_conv_adm")
             funcoes_disponiveis = sorted(list(set([c['funcao'] for c in colaboradores])))
-            frente_selecionada = st.selectbox("Função:", funcoes_disponiveis)
+            frente_selecionada = st.selectbox("Frente de Trabalho (Função):", funcoes_disponiveis)
 
             colaboradores_filtrados = [c for c in colaboradores if c['funcao'] == frente_selecionada]
             opcoes_colaboradores = {c['nome']: c['id'] for c in colaboradores_filtrados}
-            equipe_selecionada = st.multiselect("Colaboradores:", list(opcoes_colaboradores.keys()))
+            equipe_selecionada = st.multiselect("Selecione os colaboradores:", list(opcoes_colaboradores.keys()))
 
             with st.container(border=True):
                 st.markdown(f"**Panorama de {engenheiro_conv} ({data_conv.strftime('%d/%m/%Y')})**")
@@ -531,15 +541,18 @@ else:
                     st.success(f"✅ {sucessos} colaborador(es) convocado(s) para o turno {turno_conv_adm}!")
                     st.rerun()
         else:
-            st.info("Cadastre obras e colaboradores na administração.")
+            st.info("Cadastre obras e colaboradores na aba Configurações.")
 
-    with tab_apontamento:
-        st.markdown("#### Apontamento Diário")
+    # ==========================================
+    # 3. APONTAMENTO
+    # ==========================================
+    elif menu_escolhido == "✅ Apontamento":
+        st.markdown("#### ✅ Apontamento Diário de Campo")
         col_eng_ap, col_data_ap = st.columns(2)
         with col_eng_ap:
             engenheiro_apont = st.selectbox("Engenheiro:", ENGENHEIROS, key="eng_apont_adm")
         with col_data_ap:
-            data_apont = st.date_input("Data:", value=datetime.date.today(), format="DD/MM/YYYY", key="dt_apont_adm")
+            data_apont = st.date_input("Data do Apontamento:", value=datetime.date.today(), format="DD/MM/YYYY", key="dt_apont_adm")
         
         try:
             convocacoes_hoje = supabase.table("convocacoes").select("*").eq("engenheiro", engenheiro_apont).eq("data", data_apont.isoformat()).execute().data
@@ -594,8 +607,11 @@ else:
         else:
             st.warning("Nenhuma equipe convocada para este engenheiro nesta data.")
 
-    with tab_relatorios:
-        st.markdown("#### Relatório de Custos")
+    # ==========================================
+    # 4. RELATÓRIOS
+    # ==========================================
+    elif menu_escolhido == "📊 Relatórios":
+        st.markdown("#### 📊 Relatório de Custos e Fechamento")
         col_rel_eng, _ = st.columns(2)
         with col_rel_eng:
             eng_relatorio = st.selectbox("Engenheiro:", ["TODOS OS ENGENHEIROS"] + ENGENHEIROS, key="eng_rel")
@@ -647,12 +663,12 @@ else:
                                 pdf.cell(25, 6, to_latin("Data"), border=1, align='C')
                                 pdf.cell(65, 6, to_latin("Colaborador"), border=1)
                                 pdf.cell(50, 6, to_latin("Função"), border=1)
-                                pdf.cell(22, 6, to_latin("Status"), border=1, align='C')
-                                pdf.cell(28, 6, to_latin("Diária"), border=1, align='C')
-                                pdf.cell(28, 6, to_latin("Extra"), border=1, align='C')
-                                pdf.cell(61, 6, to_latin("Obs"), border=1, ln=True)
+                                pdf.cell(32, 6, to_latin("Status"), border=1, align='C')
+                                pdf.cell(24, 6, to_latin("Diária"), border=1, align='C')
+                                pdf.cell(24, 6, to_latin("Extra"), border=1, align='C')
+                                pdf.cell(51, 6, to_latin("Obs"), border=1, ln=True)
                                 
-                                pdf.set_font("Arial", '', 9)
+                                pdf.set_font("Arial", '', 8)
                                 custo_total_obra = 0.0
                                 for row in apontamentos:
                                     colab = dict_colaboradores.get(row['colaborador_id'], {})
@@ -667,27 +683,30 @@ else:
                                     pdf.cell(25, 6, to_latin(row.get('data', '')), border=1, align='C')
                                     pdf.cell(65, 6, to_latin(nome[:28]), border=1)
                                     pdf.cell(50, 6, to_latin(funcao[:20]), border=1)
-                                    pdf.cell(22, 6, to_latin(status), border=1, align='C')
-                                    pdf.cell(28, 6, to_latin(f"R$ {diaria_base:.2f}"), border=1, align='C')
-                                    pdf.cell(28, 6, to_latin(f"R$ {extra:.2f}"), border=1, align='C')
-                                    pdf.cell(61, 6, to_latin(obs[:30]), border=1, ln=True)
+                                    pdf.cell(32, 6, to_latin(status[:14]), border=1, align='C')
+                                    pdf.cell(24, 6, to_latin(f"R$ {diaria_base:.2f}"), border=1, align='C')
+                                    pdf.cell(24, 6, to_latin(f"R$ {extra:.2f}"), border=1, align='C')
+                                    pdf.cell(51, 6, to_latin(obs[:25]), border=1, ln=True)
                                 
                                 pdf.set_font("Arial", 'B', 9)
                                 pdf.set_fill_color(245, 245, 245)
-                                pdf.cell(218, 6, to_latin("TOTAL DA OBRA:"), border=1, align='R', fill=True)
-                                pdf.cell(61, 6, to_latin(f"R$ {custo_total_obra:.2f}"), border=1, align='C', fill=True, ln=True)
+                                pdf.cell(224, 6, to_latin("TOTAL DA OBRA:"), border=1, align='R', fill=True)
+                                pdf.cell(53, 6, to_latin(f"R$ {custo_total_obra:.2f}"), border=1, align='C', fill=True, ln=True)
                                 pdf.ln(4)
                                 custo_total_engenheiro += custo_total_obra
                             pdf.set_font("Arial", 'B', 10)
                             pdf.cell(0, 7, to_latin(f"TOTAL GERAL ({eng}): R$ {custo_total_engenheiro:.2f}"), ln=True, align='R')
                         
                         pdf_bytes = pdf.output(dest='S').encode('latin1')
-                        st.download_button("📥 Baixar PDF", data=pdf_bytes, file_name="Relatorio_Custos_Aproar.pdf", mime="application/pdf")
+                        st.download_button("📥 Baixar Relatório PDF", data=pdf_bytes, file_name="Relatorio_Custos_Aproar.pdf", mime="application/pdf")
             except Exception as e:
                 st.error(f"Erro: {e}")
 
-    with tab_indicadores:
-        st.markdown("#### Indicadores de Desempenho")
+    # ==========================================
+    # 5. INDICADORES
+    # ==========================================
+    elif menu_escolhido == "📈 Indicadores":
+        st.markdown("#### 📈 Indicadores de Desempenho")
         try:
             all_conv = supabase.table("convocacoes").select("*").execute().data
             if not all_conv:
@@ -726,11 +745,17 @@ else:
         except Exception as e:
             st.error(f"Erro ao carregar indicadores: {e}")
 
-    with tab_disp_adm:
+    # ==========================================
+    # 6. DISPONIBILIDADE
+    # ==========================================
+    elif menu_escolhido == "👥 Disponibilidade":
         render_aba_disponibilidade("adm")
 
-    with tab_config:
-        st.markdown("#### Sincronização e Manutenção")
+    # ==========================================
+    # 7. CONFIGURAÇÕES
+    # ==========================================
+    elif menu_escolhido == "⚙️ Configurações":
+        st.markdown("#### ⚙️ Sincronização e Manutenção")
         arquivo_json = st.file_uploader("JSON do Trello", type=["json"])
         if arquivo_json and st.button("🔄 Importar Obras"):
             trello_data = json.load(arquivo_json)
