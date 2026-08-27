@@ -298,6 +298,7 @@ with tab_config:
                             if inserir:
                                 supabase.table("obras").insert(inserir).execute()
                                 st.success(f"🎉 {len(inserir)} novas obras padronizadas e salvas!")
+                                st.rerun() # Atualiza a tela automaticamente
                             else:
                                 st.info("👍 Obras atualizadas. Sem novos registros.")
                         else:
@@ -315,7 +316,6 @@ with tab_config:
         if st.button("🔄 Limpar e Importar Colaboradores", type="secondary"):
             with st.spinner("Lendo arquivo e padronizando funções..."):
                 try:
-                    # Leitura dinâmica da primeira aba, independente do nome
                     xls = pd.ExcelFile(arquivo_excel)
                     nome_aba = "Base de dados" if "Base de dados" in xls.sheet_names else xls.sheet_names[0]
                     df = pd.read_excel(xls, sheet_name=nome_aba)
@@ -347,6 +347,7 @@ with tab_config:
                     if novos_colaboradores:
                         supabase.table("colaboradores").insert(novos_colaboradores).execute()
                         st.success(f"🎉 {len(novos_colaboradores)} colaboradores importados sem duplicidade de funções.")
+                        st.rerun() # Atualiza a tela automaticamente
                     else:
                         st.info("Nenhum colaborador novo foi encontrado.")
                 except Exception as e:
