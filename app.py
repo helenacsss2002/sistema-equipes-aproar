@@ -786,7 +786,7 @@ else:
                         wb = openpyxl.Workbook()
                         wb.remove(wb.active) # Remove aba padrão
                         
-                        font_titulo = Font(name="Arial", size=11, bold=True, color="FFFFFF")
+                        font_titulo = Font(name="Arial", size=10, bold=True, color="FFFFFF")
                         fill_cabecalho = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
                         font_obra_hdr = Font(name="Arial", size=10, bold=True, color="1E293B")
                         fill_obra_hdr = PatternFill(start_color="E2E8F0", end_color="E2E8F0", fill_type="solid")
@@ -802,6 +802,7 @@ else:
                             df_dia = df_excel[df_excel['Data'] == data_str]
                             nome_aba = str(data_str) 
                             ws = wb.create_sheet(title=nome_aba)
+                            ws.views.sheetView[0].showGridLines = True
                             
                             current_row = 1
                             ws.cell(row=current_row, column=1, value=f"APONTAMENTO DIÁRIO DE EQUIPES - DATA: {data_str}").font = Font(name="Arial", size=12, bold=True)
@@ -815,130 +816,66 @@ else:
                                     df_obra = df_unidade[df_unidade['Obra'] == obra_nome]
                                     
                                     # Cabeçalho da Obra / Unidade
-                                    ws.cell(row=current_row, column=1, value=f"UNIDADE: {unidade_nome}  |  OBRA: {obra_nome}").font = font_obra_hdr
-                                    for c_idx in range(1, 9):
-                                        ws.cell(row=current_row, column=c_idx).fill = fill_obra_hdr
+                                    ws.cell(row=current_row, column=1, value=f"Unidade: {unidade_nome} | Obra: {obra_nome}").font = font_obra_hdr
+                                    for col_idx in range(1, 8):
+                                        ws.cell(row=current_row, column=col_idx).fill = fill_obra_hdr
+                                        ws.cell(row=current_row, column=col_idx).border = borda_fina
                                     current_row += 1
                                     
-                                    # Cabeçalhos da Tabela
-                                    colunas_tabela = ["Colaborador", "Função", "Engenheiro Resp.", "Status", "Diária (R$)", "Extra (R$)", "Custo Total (R$)", "Observação"]
-                                    for c_idx, col_nome in enumerate(colunas_tabela, 1):
-                                        cell = ws.cell(row=current_row, column=c_idx, value=col_nome)
+                                    # Cabeçalhos das Colunas
+                                    headers = ["Engenheiro", "Colaborador", "Função", "Status", "Diária (R$)", "Extra (R$)", "Observação"]
+                                    for col_idx, h_text in enumerate(headers, 1):
+                                        cell = ws.cell(row=current_row, column=col_idx, value=h_text)
                                         cell.font = font_titulo
                                         cell.fill = fill_cabecalho
                                         cell.alignment = Alignment(horizontal="center", vertical="center")
+                                        cell.border = borda_fina
                                     current_row += 1
                                     
-                                    inicio_dados_obra = current_row
-                                    
-                                    # Inserir registros da obra com cor diferenciada por engenheiro e fórmula SUM em inglês
-                                    for _, r in df_obra.iterrows():
-                                        eng_resp = r["Engenheiro"]
-                                        cor_hex = cores_engenheiros.get(str(eng_resp).upper(), "FFFFFF")
-                                        fill_engenheiro = PatternFill(start_color=cor_hex, end_color=cor_hex, fill_type="solid")
+                                    # Inserção das Linhas de Dados com Cores por Engenheiro
+                                    for _, row in df_obra.iterrows():
+                                        eng_val = str(row['Engenheiro'])
+                                        cor_hex = cores_engenheiros.get(eng_val.upper(), "FFFFFF")
+                                        fill_linha = PatternFill(start_color=cor_hex, end_color=cor_hex, fill_type="solid")
                                         
-                                        # Fórmula do Excel para o Custo Total do Colaborador (Diária + Extra)
-                                        celula_custo_formula = f"=E{current_row}+F{current_row}"
-                                        
-                                        linha_dados = [
-                                            r["Colaborador"], r["Funcao"], r["Engenheiro"], r["Status"],
-                                            r["Diaria"], r["Extra"], celula_custo_formula, r["Observacao"]
+                                        row_data = [
+                                            eng_val,
+                                            str(row['Colaborador']),
+                                            str(row['Funcao']),
+                                            str(row['Status']),
+                                            float(row['Diaria']),
+                                            float(row['Extra']),
+                                            str(row['Observacao'])
                                         ]
                                         
-                                        for c_idx, val in enumerate(linha_dados, 1):
-                                            c_cell = ws.cell(row=current_row, column=c_idx, value=val)
-                                            c_cell.font = Font(name="Arial", size=9)
-                                            c_cell.border = borda_fina
-                                            c_cell.fill = fill_engenheiro 
-                                            
-                                            if c_idx in [5, 6, 7]:
-                                                c_cell.number_format = 'R$ #,##0.00'
-                                                c_cell.alignment = Alignment(horizontal="right")
-                                            elif c_idx in [3, 4]:
-                                                c_cell.alignment = Alignment(horizontal="center")
+                                        for col_idx, val in enumerate(row_data, 1):
+                                            cell = ws.cell(row=current_row, column=col_idx, value=val)
+                                            cell.font = Font(name="Arial", size=9)
+                                            cell.fill = fill_linha
+                                            cell.border = borda_fina
+                                            if col_idx in [5, 6]:
+                                                cell.number_format = '#,##0.00'
+                                                cell.alignment = Alignment(horizontal="right")
+                                            elif col_idx in [4]:
+                                                cell.alignment = Alignment(horizontal="center")
                                         current_row += 1
-                                    
-                                    fim_dados_obra = current_row - 1
-                                    
-                                    # Linha de Subtotal da Obra com a função SUM em inglês exigida pelo openpyxl
-                                    ws.cell(row=current_row, column=5, value=f"TOTAL OBRA {obra_nome}:").font = Font(name="Arial", size=10, bold=True)
-                                    ws.cell(row=current_row, column=5).alignment = Alignment(horizontal="right")
-                                    
-                                    celula_subtotal = ws.cell(row=current_row, column=7, value=f"=SUM(G{inicio_dados_obra}:G{fim_dados_obra})")
-                                    celula_subtotal.font = Font(name="Arial", size=10, bold=True)
-                                    celula_subtotal.number_format = 'R$ #,##0.00'
-                                    celula_subtotal.border = borda_fina
-                                    
                                     current_row += 2 # Espaço entre obras
-
-                            # Ajuste de largura das colunas
+                            
+                            # Ajuste Automático de Largura das Colunas
                             for col in ws.columns:
-                                max_len = 0
+                                max_len = max(len(str(cell.value or '')) for cell in col)
                                 col_letter = openpyxl.utils.get_column_letter(col[0].column)
-                                for cell in col:
-                                    if cell.row in [1, 2, 3] or (cell.value and str(cell.value).startswith("UNIDADE:")):
-                                        continue
-                                    if cell.value:
-                                        val_str = str(cell.value)
-                                        if len(val_str) > max_len:
-                                            max_len = len(val_str)
-                                ws.column_dimensions[col_letter].width = max(min(max_len + 4, 35), 14)
+                                ws.column_dimensions[col_letter].width = max(max_len + 3, 12)
 
-                        buffer = io.BytesIO()
-                        wb.save(buffer)
+                        excel_buffer = io.BytesIO()
+                        wb.save(excel_buffer)
+                        excel_buffer.seek(0)
                         
                         st.download_button(
-                            label="📥 Baixar Excel (Abas por Dia + Cores de Engenheiros)",
-                            data=buffer.getvalue(),
-                            file_name=f"apontamentos_por_dia_{data_inicio_rel.strftime('%d-%m-%Y')}_a_{data_fim_rel.strftime('%d-%m-%Y')}.xlsx",
+                            label="📥 Baixar Excel Organizado (Abas por Dia)",
+                            data=excel_buffer,
+                            file_name=f"relatorio_presencas_{data_inicio_rel.strftime('%d-%m-%Y')}_a_{data_fim_rel.strftime('%d-%m-%Y')}.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                         )
                 except Exception as e:
-                    st.error(f"Erro ao gerar Excel por dias: {e}")
-
-    # 5. INDICADORES
-    elif menu_escolhido == "📈 INDICADORES":
-        st.markdown("## 📈 INDICADORES E MÉTRICAS")
-        st.info("Painel de indicadores em desenvolvimento.")
-
-    # 6. DISPONIBILIDADE
-    elif menu_escolhido == "👥 DISPONIBILIDADE":
-        render_aba_disponibilidade("admin")
-
-    # 7. CONFIGURAÇÕES
-    elif menu_escolhido == "⚙️ CONFIGURAÇÕES":
-        st.markdown("## ⚙️ CONFIGURAÇÕES E CADASTROS")
-        tab_cad_obra, tab_cad_colab = st.tabs(["🏗️ Obras", "👷 Colaboradores"])
-        
-        with tab_cad_obra:
-            st.markdown("### Cadastrar Nova Obra")
-            with st.form("form_cad_obra"):
-                nome_obra = st.text_input("Nome da Obra (Ex: 1863, 1383...):")
-                unidade_obra = st.text_input("Unidade (Ex: CENTRO, MUSEU, FIEC...):")
-                submit_obra = st.form_submit_button("Cadastrar Obra")
-                if submit_obra:
-                    if nome_obra and unidade_obra:
-                        supabase.table("obras").insert({"nome": nome_obra, "unidade": unidade_obra.upper()}).execute()
-                        st.success("Obra cadastrada com sucesso!")
-                        st.rerun()
-                    else:
-                        st.warning("Preencha todos os campos.")
-
-        with tab_cad_colab:
-            st.markdown("### Cadastrar Novo Colaborador")
-            with st.form("form_cad_colab"):
-                nome_colab = st.text_input("Nome Completo:")
-                funcao_colab = st.text_input("Função / Cargo:")
-                diaria_colab = st.number_input("Valor Diária Base (R$):", value=240.0, step=10.0)
-                submit_colab = st.form_submit_button("Cadastrar Colaborador")
-                if submit_colab:
-                    if nome_colab and funcao_colab:
-                        supabase.table("colaboradores").insert({
-                            "nome": nome_colab, 
-                            "funcao": limpar_funcao(funcao_colab), 
-                            "valor_diaria": diaria_colab
-                        }).execute()
-                        st.success("Colaborador cadastrado com sucesso!")
-                        st.rerun()
-                    else:
-                        st.warning("Preencha todos os campos.")
+                    st.error(f"Erro ao gerar Excel: {e}")
