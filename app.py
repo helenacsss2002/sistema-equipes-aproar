@@ -8,7 +8,7 @@ import unicodedata
 import re
 
 # --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR ---
-st.set_page_config(page_title="APROAR - Gestão de Obras", page_icon="👷", layout="centered")
+st.set_page_config(page_title="APROAR - Controle de Presenças", page_icon="👷", layout="centered")
 
 # CSS para o tema escuro APROAR, cards modernos e visibilidade perfeita dos inputs
 st.markdown("""
@@ -134,6 +134,14 @@ dict_obras = {o['id']: o for o in obras} if obras else {}
 
 ENGENHEIROS = ["EDUARDO", "GABRIEL", "GUSTAVO", "JOEL", "NETO", "PAULO", "SOARES", "VICTOR"]
 
+# --- CABEÇALHO COM LOGO INSTITUCIONAL APROAR ---
+st.markdown("""
+    <div style="background: linear-gradient(135deg, #0C102B 0%, #161B3D 100%); padding: 25px; border-radius: 12px; text-align: center; margin-bottom: 25px; border: 1px solid #2D3568;">
+        <h1 style="color: #FFFFFF; font-family: sans-serif; letter-spacing: 2px; margin: 0;">APROAR</h1>
+        <p style="color: #60A5FA; font-size: 1.1rem; font-weight: bold; margin-top: 5px;">CONTROLE DE PRESENÇAS</p>
+    </div>
+""", unsafe_allow_html=True)
+
 # --- FUNÇÃO AUXILIAR PARA RENDERIZAR A ABA DE DISPONIBILIDADE ---
 def render_aba_disponibilidade(key_suffix=""):
     st.markdown("### 👥 Disponibilidade de Equipe por Função")
@@ -189,12 +197,12 @@ modo_campo = parametros_url.get("modo") == "campo"
 
 if modo_campo:
     # VISÃO ESSENCIAL DO ENGENHEIRO NO CELULAR
-    st.title("👷 APROAR - Campo")
+    st.subheader("📲 Acesso Rápido - Campo")
     tab_apontamento_campo, tab_convocacao_campo, tab_disp_campo = st.tabs([
         "✅ Apontamento Hoje", "📋 Convocação Amanhã", "👥 Disponibilidade"
     ])
     
-    # --- ABA APONTAMENTO CAMPO (OTIMIZADA PARA OBRAS GRANDES) ---
+    # --- ABA APONTAMENTO CAMPO ---
     with tab_apontamento_campo:
         engenheiro_apont = st.selectbox("Seu Nome (Engenheiro):", ENGENHEIROS, key="eng_apont_c")
         data_apont = datetime.date.today()
@@ -217,7 +225,6 @@ if modo_campo:
             
             convocacoes_render = [c for c in convocacoes_hoje if c['dados_obra']['unidade'] == unidade_filtro and c['dados_obra']['nome'] == obra_filtro]
             
-            # ATALHO PARA OBRAS GRANDES: Marcar todos como presentes de uma vez
             col_b1, col_b2 = st.columns(2)
             with col_b1:
                 if st.button("✅ Marcar Todos como Presentes"):
@@ -226,7 +233,7 @@ if modo_campo:
                     st.success("Equipe atualizada para Presente!")
                     st.rerun()
 
-            st.info(f"💡 Exibindo {len(convocacoes_render)} colaboradores nesta obra. Por padrão todos iniciam como 'Presente' — altere apenas quem faltou ou teve atestado.")
+            st.info(f"💡 Exibindo {len(convocacoes_render)} colaboradores. Por padrão todos iniciam como 'Presente'.")
             opcoes_status = ["Presente", "Falta", "Atestado", "Extra"]
             
             for conv in convocacoes_render:
@@ -273,10 +280,8 @@ if modo_campo:
             colaboradores_filtrados = [c for c in colaboradores if c['funcao'] == frente_selecionada]
             opcoes_colaboradores = {c['nome']: c['id'] for c in colaboradores_filtrados}
             
-            # 1. SELEÇÃO EM CIMA
             equipe_selecionada = st.multiselect("Selecione os colaboradores para esta frente:", list(opcoes_colaboradores.keys()), key="eq_c_sel")
 
-            # 2. PANORAMA LOGO ABAIXO
             with st.container(border=True):
                 st.markdown(f"#### 👁️ Panorama: Suas Convocações ({data_conv.strftime('%d/%m/%Y')})")
                 try:
@@ -320,7 +325,7 @@ if modo_campo:
 
 else:
     # VISÃO COMPLETA DO ADMINISTRATIVO (PAINEL GERAL)
-    st.title("👷 APROAR - Painel Administrativo")
+    st.subheader("⚙️ Painel Administrativo")
     tab_convocacao, tab_apontamento, tab_relatorios, tab_indicadores, tab_disp_adm, tab_config = st.tabs([
         "📋 Convocação", "✅ Apontamento", "📊 Relatório", "📈 Indicadores", "👥 Disponibilidade", "⚙️ Config"
     ])
@@ -353,10 +358,8 @@ else:
             colaboradores_filtrados = [c for c in colaboradores if c['funcao'] == frente_selecionada]
             opcoes_colaboradores = {c['nome']: c['id'] for c in colaboradores_filtrados}
             
-            # 1. SELEÇÃO EM CIMA
             equipe_selecionada = st.multiselect("Selecione os colaboradores para esta frente:", list(opcoes_colaboradores.keys()))
 
-            # 2. PANORAMA LOGO ABAIXO
             with st.container(border=True):
                 st.markdown(f"#### 👁️ Panorama: Convocações de {engenheiro_conv} ({data_conv.strftime('%d/%m/%Y')})")
                 try:
