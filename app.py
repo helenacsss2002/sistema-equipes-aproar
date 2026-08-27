@@ -2,6 +2,7 @@ import streamlit as st
 from supabase import create_client, Client
 import datetime
 import pandas as pd
+json = pd.io.json # Compatibilidade
 import json
 from fpdf import FPDF
 import unicodedata
@@ -114,7 +115,7 @@ def identificar_unidade(nome_card):
     if not nome_card: return "GERAL"
     texto = unicodedata.normalize('NFKD', str(nome_card)).encode('ASCII', 'ignore').decode('utf-8').upper()
     
-    if "APRL005" in texto or "MARACANAU" in texto: return "MARACANAÚ"
+    if "APRL005" in texto or "MARACANAU" in texto: return "MARACANAú"
     if "SEBRAE" in texto: return "SEBRAE"
     if "UNIFOR" in texto: return "UNIFOR"
     if "IDALYA" in texto or "MATHEUS" in texto: return "IDALYA E MATHEUS"
@@ -213,10 +214,12 @@ def render_aba_disponibilidade(key_suffix=""):
                     for oc in ocupados_func:
                         conv_info = next((item for item in convs_disp if item['colaborador_id'] == oc['id']), None)
                         obra_nome = "Obra"
+                        eng_resp = ""
                         if conv_info:
                             ob_inf = dict_obras.get(conv_info['obra_id'], {})
                             obra_nome = f"{ob_inf.get('unidade','')} - {ob_inf.get('nome','')}"
-                        st.markdown(f"• {oc['nome']} <br><small style='color:#94A3B8;'>({obra_nome})</small>", unsafe_allow_html=True)
+                            eng_resp = f" (Eng: {conv_info.get('engenheiro', 'N/A')})"
+                        st.markdown(f"• {oc['nome']} <br><small style='color:#94A3B8;'>({obra_nome}{eng_resp})</small>", unsafe_allow_html=True)
                 else:
                     st.caption("Nenhum.")
                     
@@ -291,7 +294,7 @@ if modo_campo:
                             supabase.table("convocacoes").update({"valor_extra": val_extra, "observacao": obs}).eq("id", c_id).execute()
                             st.success("Salvo!")
         else:
-            st.warning("Nenhuma equipe convocada para hoje.")
+            st.warning("Nenhuma equipe convocada para hoje sob sua responsabilidade.")
 
     with tab_convocacao_campo:
         if obras and colaboradores:
@@ -315,7 +318,7 @@ if modo_campo:
             equipe_selecionada = st.multiselect("Colaboradores:", list(opcoes_colaboradores.keys()), key="eq_c_sel")
 
             with st.container(border=True):
-                st.markdown(f"#### 👁️ Panorama ({data_conv.strftime('%d/%m/%Y')})")
+                st.markdown(f"#### 👁️ Panorama de {engenheiro_conv} ({data_conv.strftime('%d/%m/%Y')})")
                 try:
                     convs_eng_data = supabase.table("convocacoes").select("*").eq("engenheiro", engenheiro_conv).eq("data", data_conv.isoformat()).execute().data
                 except:
@@ -324,9 +327,9 @@ if modo_campo:
                 ids_ja_alocados_eng = {c['colaborador_id'] for c in convs_eng_data}
                 nomes_ja_alocados = [dict_colaboradores.get(cid, {}).get('nome', '') for cid in ids_ja_alocados_eng]
                 if nomes_ja_alocados:
-                    st.caption("Já escalados hoje: " + ", ".join(nomes_ja_alocados))
+                    st.caption("Já escalados por você hoje: " + ", ".join(nomes_ja_alocados))
                 else:
-                    st.caption("Nenhum escalado.")
+                    st.caption("Nenhum escalado por você nesta data.")
 
             if st.button("CONFIRMAR CONVOCAÇÃO", type="primary", use_container_width=True):
                 if not equipe_selecionada:
@@ -397,15 +400,17 @@ else:
     if menu_escolhido == "🎛️ DASHBOARD":
         st.markdown("## 🎛️ DASHBOARD E AUDITORIA DE PRESENÇAS")
         
-        col_f1, col_f2, col_f3, col_f4 = st.columns(4)
+        col_f1, col_f2, col_f3, col_f4, col_f5 = st.columns(5)
         with col_f1:
             data_filtro_dash = st.date_input("Data:", value=datetime.date.today(), format="DD/MM/YYYY", key="d_dash")
         with col_f2:
             unidades_cadastradas = sorted(list(set([o['unidade'] for o in obras]))) if obras else []
             unidade_dash = st.selectbox("Unidade:", ["TODAS"] + unidades_cadastradas, key="u_dash")
         with col_f3:
-            busca_colab = st.text_input("Buscar colaborador:", placeholder="Ex: Erivaldo...", key="busca_colab_dash")
+            eng_dash_filtro = st.selectbox("Engenheiro:", ["TODOS"] + ENGENHEIROS, key="eng_dash_f")
         with col_f4:
+            busca_colab = st.text_input("Buscar colaborador:", placeholder="Ex: Erivaldo...", key="busca_colab_dash")
+        with col_f5:
             status_filtro_dash = st.selectbox("Status:", ["Todos", "Presente (Integral)", "Presente (Só Manhã)", "Presente (Só Tarde)", "Saída Antecipada", "Falta", "Atestado", "Extra"], key="st_dash")
 
         try:
@@ -420,6 +425,10 @@ else:
                     query_dash = query_dash.in_("obra_id", obras_ids_unidade)
                 else:
                     query_dash = query_dash.eq("obra_id", "00000000-0000-0000-0000-000000000000")
+            
+            if eng_dash_filtro != "TODOS":
+                query_dash = query_dash.eq("engenheiro", eng_dash_filtro)
+
             convs_dash = query_dash.execute().data
         except:
             convs_dash = []
@@ -472,7 +481,7 @@ else:
         st.markdown("---")
 
         if not lista_processada:
-            st.info("Nenhum registro encontrado.")
+            st.info("Nenhum registro encontrado para os filtros selecionados.")
         else:
             if st.button("✅ MARCAR TODOS COMO PRESENTES (INTEGRAL)"):
                 for item in lista_processada:
@@ -481,35 +490,40 @@ else:
                 st.rerun()
 
             df_view = pd.DataFrame(lista_processada)
-            for obra_n in df_view['obra_nome'].unique():
-                subset = df_view[df_view['obra_nome'] == obra_n]
-                unidade_nome = subset.iloc[0]['unidade']
-                eng_resp = subset.iloc[0]['engenheiro']
+            
+            # Agrupamento para separar por Engenheiro e Obra no mesmo dia
+            for eng_resp in df_view['engenheiro'].unique():
+                df_eng = df_view[df_view['engenheiro'] == eng_resp]
+                st.markdown(f"### 👷 Engenheiro Responsável: `{eng_resp}`")
                 
-                with st.container(border=True):
-                    st.markdown(f"**{unidade_nome}** — *{obra_n}* &nbsp;|&nbsp; Eng: `{eng_resp}`")
-                    for idx, row in subset.iterrows():
-                        c_id = row['id']
-                        c1, c2, c3 = st.columns([3, 2, 2])
-                        with c1:
-                            st.markdown(f"{row['colab_nome']} &nbsp; `{row['colab_funcao']}` &nbsp; <small style='color:#94A3B8;'>({row['data_item']})</small>", unsafe_allow_html=True)
-                            obs_val = st.text_input("Obs", value=row['observacao'], placeholder="Obs...", key=f"obs_{c_id}", label_visibility="collapsed")
-                            if obs_val != row['observacao']:
-                                supabase.table("convocacoes").update({"observacao": obs_val}).eq("id", c_id).execute()
-                        with c2:
-                            opcoes_st = ["Presente (Integral)", "Presente (Só Manhã)", "Presente (Só Tarde)", "Saída Antecipada", "Falta", "Atestado", "Extra"]
-                            st_atual = row['status']
-                            idx_st = opcoes_st.index(st_atual) if st_atual in opcoes_st else 0
-                            novo_st = st.selectbox("Status", opcoes_st, index=idx_st, key=f"st_{c_id}", label_visibility="collapsed")
-                            if novo_st != st_atual:
-                                supabase.table("convocacoes").update({"status": novo_st}).eq("id", c_id).execute()
-                                st.rerun()
-                        with c3:
-                            extra_val = st.number_input("Extra", value=float(row['valor_extra']), step=10.0, key=f"ext_{c_id}", label_visibility="collapsed")
-                            if extra_val != float(row['valor_extra']):
-                                supabase.table("convocacoes").update({"valor_extra": extra_val}).eq("id", c_id).execute()
-                            st.caption(f"R$ {row['custo']:.2f}")
-                        st.divider()
+                for obra_n in df_eng['obra_nome'].unique():
+                    subset = df_eng[df_eng['obra_nome'] == obra_n]
+                    unidade_nome = subset.iloc[0]['unidade']
+                    
+                    with st.container(border=True):
+                        st.markdown(f"**Unidade:** {unidade_nome} &nbsp;|&nbsp; **Obra:** {obra_n}")
+                        for idx, row in subset.iterrows():
+                            c_id = row['id']
+                            c1, c2, c3 = st.columns([3, 2, 2])
+                            with c1:
+                                st.markdown(f"{row['colab_nome']} &nbsp; `{row['colab_funcao']}` &nbsp; <small style='color:#94A3B8;'>({row['data_item']})</small>", unsafe_allow_html=True)
+                                obs_val = st.text_input("Obs", value=row['observacao'], placeholder="Obs...", key=f"obs_{c_id}", label_visibility="collapsed")
+                                if obs_val != row['observacao']:
+                                    supabase.table("convocacoes").update({"observacao": obs_val}).eq("id", c_id).execute()
+                            with c2:
+                                opcoes_st = ["Presente (Integral)", "Presente (Só Manhã)", "Presente (Só Tarde)", "Saída Antecipada", "Falta", "Atestado", "Extra"]
+                                st_atual = row['status']
+                                idx_st = opcoes_st.index(st_atual) if st_atual in opcoes_st else 0
+                                novo_st = st.selectbox("Status", opcoes_st, index=idx_st, key=f"st_{c_id}", label_visibility="collapsed")
+                                if novo_st != st_atual:
+                                    supabase.table("convocacoes").update({"status": novo_st}).eq("id", c_id).execute()
+                                    st.rerun()
+                            with c3:
+                                extra_val = st.number_input("Extra", value=float(row['valor_extra']), step=10.0, key=f"ext_{c_id}", label_visibility="collapsed")
+                                if extra_val != float(row['valor_extra']):
+                                    supabase.table("convocacoes").update({"valor_extra": extra_val}).eq("id", c_id).execute()
+                                st.caption(f"R$ {row['custo']:.2f}")
+                            st.divider()
 
     # 2. CONVOCAÇÃO
     elif menu_escolhido == "📋 CONVOCAÇÃO":
@@ -547,9 +561,9 @@ else:
                 ids_ja_alocados_eng = {c['colaborador_id'] for c in convs_eng_data}
                 nomes_ja_alocados = [dict_colaboradores.get(cid, {}).get('nome', '') for cid in ids_ja_alocados_eng]
                 if nomes_ja_alocados:
-                    st.caption("Já escalados hoje: " + ", ".join(nomes_ja_alocados))
+                    st.caption("Já escalados por você nesta data: " + ", ".join(nomes_ja_alocados))
                 else:
-                    st.caption("Nenhum escalado ainda.")
+                    st.caption("Nenhum escalado por você ainda nesta data.")
 
             if st.button("CONFIRMAR CONVOCAÇÃO", type="primary", use_container_width=True):
                 if not equipe_selecionada:
@@ -636,7 +650,7 @@ else:
         else:
             st.warning("Nenhuma equipe convocada para este engenheiro nesta data.")
 
-    # 4. RELATÓRIOS (PDF E EXCEL COM ABAS SEPARADAS POR DIA)
+    # 4. RELATÓRIOS (PDF E EXCEL MODELO CORPORATIVO COM SEPARAÇÃO DE ENGENHEIROS)
     elif menu_escolhido == "📊 RELATÓRIOS":
         st.markdown("## 📊 RELATÓRIO DE CUSTOS E FECHAMENTO")
         col_rel_eng, _ = st.columns(2)
@@ -677,15 +691,15 @@ else:
                         for eng, obras_eng in agrupado_eng.items():
                             pdf.add_page()
                             pdf.set_font("Arial", 'B', 14)
-                            pdf.cell(0, 10, txt=to_latin("APROAR - RELATÓRIO DE CUSTOS"), ln=True, align='C')
+                            pdf.cell(0, 10, txt=to_latin(f"APROAR - RELATÓRIO DE CUSTOS | ENG: {eng}"), ln=True, align='C')
                             pdf.set_font("Arial", size=10)
-                            pdf.cell(0, 8, txt=to_latin(f"Período: {data_inicio_rel.strftime('%d/%m/%Y')} a {data_fim_rel.strftime('%d/%m/%Y')} | Eng: {eng}"), ln=True, align='C')
+                            pdf.cell(0, 8, txt=to_latin(f"Período: {data_inicio_rel.strftime('%d/%m/%Y')} a {data_fim_rel.strftime('%d/%m/%Y')}"), ln=True, align='C')
                             pdf.ln(5)
                             
                             for o_id, apontamentos in obras_eng.items():
                                 dados_ob = dict_obras.get(o_id, {"nome": "N/A", "unidade": "N/A"})
                                 pdf.set_font("Arial", 'B', 10)
-                                pdf.set_fill_color(50, 60, 80)
+                                pdf.set_fill_color(30, 41, 59) # Tom escuro Aproar
                                 pdf.set_text_color(255, 255, 255)
                                 pdf.cell(0, 7, txt=to_latin(f"Unidade: {dados_ob['unidade']} | Obra: {dados_ob['nome']}"), ln=True, fill=True)
                                 pdf.set_text_color(0, 0, 0)
@@ -729,7 +743,7 @@ else:
                     st.error(f"Erro ao gerar PDF: {e}")
 
         with col_btn2:
-            if st.button("📊 Gerar Excel", use_container_width=True):
+            if st.button("📊 Gerar Excel (Modelo Corporativo)", use_container_width=True):
                 try:
                     if data_inicio_rel > data_fim_rel:
                         st.error("Data inicial maior que a final.")
@@ -760,27 +774,89 @@ else:
                         
                         df_excel = pd.DataFrame(lista_excel)
                         
-                        buffer = io.BytesIO()
-                        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                            datas_unicas = sorted(df_excel['Data'].unique())
-                            for data_str in datas_unicas:
-                                df_dia = df_excel[df_excel['Data'] == data_str]
-                                try:
-                                    dt_obj = datetime.date.fromisoformat(data_str)
-                                    nome_aba = dt_obj.strftime('%d-%m-%Y')
-                                except:
-                                    nome_aba = str(data_str)
-                                
-                                df_dia.to_excel(writer, sheet_name=nome_aba, index=False)
+                        # Criação do Workbook estilizado no modelo corporativo com openpyxl
+                        wb = openpyxl.Workbook()
+                        # Remove a aba padrão
+                        wb.remove(wb.active)
+                        
+                        # Estilos corporativos
+                        font_titulo = Font(name="Arial", size=11, bold=True, color="FFFFFF")
+                        fill_cabecalho = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid") # Azul escuro Aproar
+                        borda_fina = Border(
+                            left=Side(style='thin', color='CBD5E1'),
+                            right=Side(style='thin', color='CBD5E1'),
+                            top=Side(style='thin', color='CBD5E1'),
+                            bottom=Side(style='thin', color='CBD5E1')
+                        )
+                        
+                        # Criar abas separadas por ENGENHEIRO (Garante separação exata no mesmo dia)
+                        for engenheiro_nome in sorted(df_excel['Engenheiro'].unique()):
+                            df_eng = df_excel[df_excel['Engenheiro'] == engenheiro_nome]
+                            nome_aba = re.sub(r'[^a-zA-Z0-9]', '_', str(engenheiro_nome))[:31]
+                            ws = wb.create_sheet(title=nome_aba)
                             
+                            # Cabeçalho do Relatório Corporativo
+                            ws.append([f"RELATÓRIO DE CUSTOS E PRESENÇAS | ENGENHEIRO: {engenheiro_nome}"])
+                            ws.append([f"Período: {data_inicio_rel.strftime('%d/%m/%Y')} a {data_fim_rel.strftime('%d/%m/%Y')}"])
+                            ws.append([]) # Linha em branco
+                            
+                            # Cabeçalhos da Tabela
+                            colunas_tabela = ["Data", "Unidade", "Obra", "Colaborador", "Função", "Status", "Diária (R$)", "Extra (R$)", "Custo Total (R$)", "Observação"]
+                            ws.append(colunas_tabela)
+                            
+                            # Formatar linha de cabeçalho da tabela
+                            row_idx = 4
+                            for col_num in range(1, len(colunas_tabela) + 1):
+                                cell = ws.cell(row=row_idx, column=col_num)
+                                cell.font = font_titulo
+                                cell.fill = fill_cabecalho
+                                cell.alignment = Alignment(horizontal="center", vertical="center")
+                            
+                            # Inserir dados
+                            for _, r in df_eng.iterrows():
+                                linha_dados = [
+                                    r["Data"], r["Unidade"], r["Obra"], r["Colaborador"], 
+                                    r["Função"], r["Status"], r["Diária (R$)"], 
+                                    r["Extra (R$)"], r["Custo Total (R$)"], r["Observação"]
+                                ]
+                                ws.append(linha_dados)
+                                current_r = ws.max_row
+                                for c_num in range(1, len(colunas_tabela) + 1):
+                                    c_cell = ws.cell(row=current_r, column=c_num)
+                                    c_cell.border = borda_fina
+                                    if c_num in [7, 8, 9]:
+                                        c_cell.number_format = 'R$ #,##0.00'
+                                        c_cell.alignment = Alignment(horizontal="right")
+                                    elif c_num == 1:
+                                        c_cell.alignment = Alignment(horizontal="center")
+
+                            # Linha de Totais
+                            ws.append([])
+                            total_linha = ws.max_row + 1
+                            ws.cell(row=total_linha, column=6, value="TOTAL GERAL:").font = Font(name="Arial", size=10, bold=True)
+                            ws.cell(row=total_linha, column=6).alignment = Alignment(horizontal="right")
+                            
+                            celula_soma = ws.cell(row=total_linha, column=9, value=f"=SUM(I5:I{total_linha-2})")
+                            celula_soma.font = Font(name="Arial", size=10, bold=True)
+                            celula_soma.number_format = 'R$ #,##0.00'
+                            
+                            # Ajuste automático de largura das colunas
+                            for col in ws.columns:
+                                max_len = max(len(str(cell.value or '')) for cell in col)
+                                col_letter = openpyxl.utils.get_column_letter(col[0].column)
+                                ws.column_dimensions[col_letter].width = max(max_len + 3, 12)
+
+                        buffer = io.BytesIO()
+                        wb.save(buffer)
+                        
                         st.download_button(
-                            label="📥 Baixar Excel por Dias",
+                            label="📥 Baixar Excel Corporativo (Separado por Engenheiro)",
                             data=buffer.getvalue(),
-                            file_name=f"relatorio_custos_{data_inicio_rel.strftime('%d-%m-%Y')}_a_{data_fim_rel.strftime('%d-%m-%Y')}.xlsx",
+                            file_name=f"relatorio_corporativo_{data_inicio_rel.strftime('%d-%m-%Y')}_a_{data_fim_rel.strftime('%d-%m-%Y')}.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                         )
                 except Exception as e:
-                    st.error(f"Erro ao gerar Excel: {e}")
+                    st.error(f"Erro ao gerar Excel corporativo: {e}")
 
     # 5. INDICADORES
     elif menu_escolhido == "📈 INDICADORES":
