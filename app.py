@@ -2,7 +2,6 @@ import streamlit as st
 from supabase import create_client, Client
 import datetime
 import pandas as pd
-json = pd.io.json # Compatibilidade
 import json
 from fpdf import FPDF
 import unicodedata
@@ -849,8 +848,6 @@ else:
                         
                         font_titulo = Font(name="Arial", size=10, bold=True, color="FFFFFF")
                         fill_cabecalho = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
-                        font_obra_hdr = Font(name="Arial", size=10, bold=True, color="1E293B")
-                        fill_obra_hdr = PatternFill(start_color="E2E8F0", end_color="E2E8F0", fill_type="solid")
                         borda_fina = Border(
                             left=Side(style='thin', color='CBD5E1'),
                             right=Side(style='thin', color='CBD5E1'),
@@ -858,212 +855,60 @@ else:
                             bottom=Side(style='thin', color='CBD5E1')
                         )
                         
-                        for data_str in sorted(df_excel['Data'].unique()):
+                        datas_unicas = sorted(df_excel['Data'].unique()) if not df_excel.empty else []
+                        
+                        for data_str in datas_unicas:
                             df_dia = df_excel[df_excel['Data'] == data_str]
-                            nome_aba = str(data_str) 
+                            nome_aba = data_str.replace('/', '-')[:31]
                             ws = wb.create_sheet(title=nome_aba)
-                            ws.views.sheetView[0].showGridLines = True
                             
-                            current_row = 1
-                            ws.cell(row=current_row, column=1, value=f"APONTAMENTO DIÁRIO DE EQUIPES - DATA: {data_str}").font = Font(name="Arial", size=12, bold=True)
-                            current_row += 2
+                            headers = ["Data", "Engenheiro", "Unidade", "Obra", "Colaborador", "Função", "Status", "Diária (R$)", "Extra (R$)", "Observação"]
+                            ws.append(headers)
                             
-                            for unidade_nome in sorted(df_dia['Unidade'].unique()):
-                                df_unidade = df_dia[df_dia['Unidade'] == unidade_nome]
+                            for col_num in range(1, len(headers) + 1):
+                                cell = ws.cell(row=1, column=col_num)
+                                cell.font = font_titulo
+                                cell.fill = fill_cabecalho
+                                cell.alignment = Alignment(horizontal="center", vertical="center")
+                                cell.border = borda_fina
+                            
+                            for _, r in df_dia.iterrows():
+                                row_data = [
+                                    r["Data"], r["Engenheiro"], r["Unidade"], r["Obra"],
+                                    r["Colaborador"], r["Funcao"], r["Status"],
+                                    r["Diaria"], r["Extra"], r["Observacao"]
+                                ]
+                                ws.append(row_data)
+                                cur_row = ws.max_row
                                 
-                                for obra_nome in sorted(df_unidade['Obra'].unique()):
-                                    df_obra = df_unidade[df_unidade['Obra'] == obra_nome]
-                                    
-                                    ws.cell(row=current_row, column=1, value=f"Unidade: {unidade_nome} | Obra: {obra_nome}").font = font_obra_hdr
-                                    for col_idx in range(1, 8):
-                                        ws.cell(row=current_row, column=col_idx).fill = fill_obra_hdr
-                                        ws.cell(row=current_row, column=col_idx).border = borda_fina
-                                    current_row += 1
-                                    
-                                    headers = ["Engenheiro", "Colaborador", "Função", "Status", "Diária (R$)", "Extra (R$)", "Observação"]
-                                    for col_idx, h_text in enumerate(headers, 1):
-                                        cell = ws.cell(row=current_row, column=col_idx, value=h_text)
-                                        cell.font = font_titulo
-                                        cell.fill = fill_cabecalho
-                                        cell.alignment = Alignment(horizontal="center", vertical="center")
-                                        cell.border = borda_fina
-                                    current_row += 1
-                                    
-                                    for _, row in df_obra.iterrows():
-                                        eng_val = str(row['Engenheiro'])
-                                        cor_hex = cores_engenheiros.get(eng_val.upper(), "FFFFFF")
-                                        fill_linha = PatternFill(start_color=cor_hex, end_color=cor_hex, fill_type="solid")
-                                        
-                                        row_data = [
-                                            eng_val,
-                                            str(row['Colaborador']),
-                                            str(row['Funcao']),
-                                            str(row['Status']),
-                                            float(row['Diaria']),
-                                            float(row['Extra']),
-                                            str(row['Observacao'])
-                                        ]
-                                        
-                                        for col_idx, val in enumerate(row_data, 1):
-                                            cell = ws.cell(row=current_row, column=col_idx, value=val)
-                                            cell.font = Font(name="Arial", size=9)
-                                            cell.fill = fill_linha
-                                            cell.border = borda_fina
-                                            if col_idx in [5, 6]:
-                                                cell.number_format = '#,##0.00'
-                                                cell.alignment = Alignment(horizontal="right")
-                                            elif col_idx in [4]:
-                                                cell.alignment = Alignment(horizontal="center")
-                                        current_row += 1
-                                    current_row += 2
+                                eng_nome = str(r["Engenheiro"]).upper().strip()
+                                cor_hex = cores_engenheiros.get(eng_nome, "FFFFFF")
+                                fill_eng = PatternFill(start_color=cor_hex, end_color=cor_hex, fill_type="solid")
+                                
+                                for col_num in range(1, len(row_data) + 1):
+                                    cell = ws.cell(row=cur_row, column=col_num)
+                                    cell.border = borda_fina
+                                    cell.fill = fill_eng
+                                    if col_num in [8, 9]:
+                                        cell.number_format = '"R$ "#,##0.00'
+                                        cell.alignment = Alignment(horizontal="right", vertical="center")
+                                    else:
+                                        cell.alignment = Alignment(horizontal="left", vertical="center")
                             
                             for col in ws.columns:
                                 max_len = max(len(str(cell.value or '')) for cell in col)
                                 col_letter = openpyxl.utils.get_column_letter(col[0].column)
                                 ws.column_dimensions[col_letter].width = max(max_len + 3, 12)
-
+                        
                         excel_buffer = io.BytesIO()
                         wb.save(excel_buffer)
                         excel_buffer.seek(0)
                         
                         st.download_button(
-                            label="📥 Baixar Excel Organizado (Abas por Dia)",
+                            label="📥 Baixar Excel Gerado (Abas por Dia)",
                             data=excel_buffer,
                             file_name=f"relatorio_presencas_{data_inicio_rel.strftime('%d-%m-%Y')}_a_{data_fim_rel.strftime('%d-%m-%Y')}.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                         )
                 except Exception as e:
                     st.error(f"Erro ao gerar Excel: {e}")
-
-    # 5. INDICADORES
-    elif menu_escolhido == "📈 INDICADORES":
-        st.markdown("## 📈 INDICADORES E ANÁLISE DE DESEMPENHO")
-        try:
-            all_conv = supabase.table("convocacoes").select("*").execute().data
-        except:
-            all_conv = []
-        
-        if not all_conv:
-            st.info("Nenhum dado de convocação registrado para gerar indicadores.")
-        else:
-            df_ind = pd.DataFrame(all_conv)
-            df_ind['obra_nome'] = df_ind['obra_id'].apply(lambda x: dict_obras.get(x, {}).get('nome', 'N/A'))
-            df_ind['unidade'] = df_ind['obra_id'].apply(lambda x: dict_obras.get(x, {}).get('unidade', 'N/A'))
-            df_ind['colab_nome'] = df_ind['colaborador_id'].apply(lambda x: dict_colaboradores.get(x, {}).get('nome', 'N/A'))
-            df_ind['funcao'] = df_ind['colaborador_id'].apply(lambda x: dict_colaboradores.get(x, {}).get('funcao', 'N/A'))
-            df_ind['diaria_base'] = df_ind.apply(lambda r: calcular_diaria_proporcional(r.get('status', ''), dict_colaboradores.get(r['colaborador_id'], {}).get('valor_diaria', 240.0)), axis=1)
-            df_ind['custo_total'] = df_ind['diaria_base'] + df_ind['valor_extra'].fillna(0)
-
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Total de Apontamentos", len(df_ind))
-            c2.metric("Custo Acumulado", f"R$ {df_ind['custo_total'].sum():,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
-            c3.metric("Obras Ativas", df_ind['obra_id'].nunique())
-
-            st.markdown("---")
-            col_chart1, col_chart2 = st.columns(2)
-            with col_chart1:
-                st.markdown("### 💰 Custo por Unidade")
-                custo_unidade = df_ind.groupby('unidade')['custo_total'].sum().reset_index()
-                st.bar_chart(custo_unidade.set_index('unidade'))
-            with col_chart2:
-                st.markdown("### 👷 Apontamentos por Engenheiro")
-                eng_counts = df_ind['engenheiro'].value_counts().reset_index()
-                eng_counts.columns = ['Engenheiro', 'Quantidade']
-                st.bar_chart(eng_counts.set_index('Engenheiro'))
-
-            st.markdown("### 📊 Status Gerais de Apontamento")
-            st.dataframe(df_ind['status'].value_counts().reset_index(), use_container_width=True)
-
-    # 6. DISPONIBILIDADE
-    elif menu_escolhido == "👥 DISPONIBILIDADE":
-        render_aba_disponibilidade("admin_panel")
-
-    # 7. CONFIGURAÇÕES (COM SINCRONIZAÇÃO DO TRELLO E BOTÃO DE LIMPEZA)
-    elif menu_escolhido == "⚙️ CONFIGURAÇÕES":
-        st.markdown("## ⚙️ CONFIGURAÇÕES E CADASTROS")
-        
-        # --- SEÇÃO DE SINCRONIZAÇÃO TRELLO ---
-        with st.container(border=True):
-            st.markdown("### 🔄 Sincronização com Trello (Orçamentos - EM EXECUÇÃO)")
-            st.write("O sistema sincroniza automaticamente as obras da lista **'EM EXECUÇÃO'** do quadro público do Trello a cada 1 dia. Você também pode forçar a atualização manualmente abaixo:")
-            if st.button("🔄 Sincronizar com Trello Agora", use_container_width=True):
-                with st.spinner("Buscando obras do Trello..."):
-                    sucesso, msg = executar_sincronizacao_trello()
-                    if sucesso:
-                        st.success(msg)
-                        st.rerun()
-                    else:
-                        st.error(msg)
-        
-        # --- SEÇÃO DE LIMPEZA DE TESTES ---
-        with st.container(border=True):
-            st.markdown("### 🗑️ Limpeza de Convocações de Teste")
-            st.write("Use o botão abaixo para apagar todas as convocações e reiniciar os testes do zero:")
-            if st.button("🗑️ Apagar Todas as Convocações", type="secondary", use_container_width=True):
-                try:
-                    supabase.table("convocacoes").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
-                    st.success("Todas as convocações de teste foram apagadas com sucesso!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Erro ao limpar convocações: {e}")
-        
-        tab_c1, tab_c2 = st.tabs(["🏗️ Obras / Unidades", "👥 Colaboradores"])
-        
-        with tab_c1:
-            st.markdown("### Cadastrar Nova Obra Manualmente")
-            with st.form("form_nova_obra"):
-                nova_unidade = st.text_input("Unidade (Ex: MARACANAÚ, SEBRAE, FIEC...)")
-                novo_nome_obra = st.text_input("Nome da Obra / Serviço")
-                btn_cad_obra = st.form_submit_button("Cadastrar Obra")
-                if btn_cad_obra:
-                    if nova_unidade and novo_nome_obra:
-                        try:
-                            supabase.table("obras").insert({
-                                "unidade": nova_unidade.upper(),
-                                "nome": novo_nome_obra
-                            }).execute()
-                            st.success("Obra cadastrada com sucesso!")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Erro ao cadastrar obra: {e}")
-                    else:
-                        st.warning("Preencha todos os campos.")
-            
-            st.markdown("---")
-            st.markdown("### Obras Cadastradas (Sincronizadas)")
-            obras_atuais_lista = buscar_obras()
-            if obras_atuais_lista:
-                df_obras = pd.DataFrame(obras_atuais_lista)
-                st.dataframe(df_obras[['id', 'unidade', 'nome']], use_container_width=True)
-            else:
-                st.info("Nenhuma obra cadastrada.")
-
-        with tab_c2:
-            st.markdown("### Cadastrar Novo Colaborador")
-            with st.form("form_novo_colab"):
-                nome_colab = st.text_input("Nome Completo")
-                funcao_colab = st.text_input("Função / Cargo (Ex: PEDREIRO, CARPINTEIRO...)")
-                valor_diaria_colab = st.number_input("Valor da Diária Base (R$)", value=240.0, step=10.0)
-                btn_cad_colab = st.form_submit_button("Cadastrar Colaborador")
-                if btn_cad_colab:
-                    if nome_colab and funcao_colab:
-                        try:
-                            supabase.table("colaboradores").insert({
-                                "nome": nome_colab.upper(),
-                                "funcao": funcao_colab.upper(),
-                                "valor_diaria": float(valor_diaria_colab)
-                            }).execute()
-                            st.success("Colaborador cadastrado com sucesso!")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Erro ao cadastrar colaborador: {e}")
-                    else:
-                        st.warning("Preencha os campos obrigatórios.")
-
-            st.markdown("---")
-            st.markdown("### Colaboradores Cadastrados")
-            if colaboradores:
-                df_colabs = pd.DataFrame(colaboradores)
-                st.dataframe(df_colabs[['id', 'nome', 'funcao', 'valor_diaria']], use_container_width=True)
-            else:
-                st.info("Nenhum colaborador cadastrado.")
