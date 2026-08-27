@@ -766,7 +766,6 @@ else:
                                 "Status": status,
                                 "Diária (R$)": diaria_calc,
                                 "Extra (R$)": extra,
-                                "Custo Total (R$)": diaria_calc + extra,
                                 "Observação": row.get('observacao', '')
                             })
                         
@@ -801,7 +800,7 @@ else:
                         # CRIAR ABAS SEPARADAS POR DIA DISTINTO
                         for data_str in sorted(df_excel['Data'].unique()):
                             df_dia = df_excel[df_excel['Data'] == data_str]
-                            nome_aba = str(data_str) # Formato YYYY-MM-DD ou DD-MM-YYYY
+                            nome_aba = str(data_str) 
                             ws = wb.create_sheet(title=nome_aba)
                             
                             current_row = 1
@@ -832,22 +831,25 @@ else:
                                     
                                     inicio_dados_obra = current_row
                                     
-                                    # Inserir registros da obra com cor diferenciada por engenheiro
+                                    # Inserir registros da obra com cor diferenciada por engenheiro e fórmula de custo do colaborador
                                     for _, r in df_obra.iterrows():
                                         eng_resp = r["Engenheiro"]
                                         cor_hex = cores_engenheiros.get(str(eng_resp).upper(), "FFFFFF")
                                         fill_engenheiro = PatternFill(start_color=cor_hex, end_color=cor_hex, fill_type="solid")
                                         
+                                        # Fórmula do Excel para o Custo Total do Colaborador (Diária + Extra)
+                                        celula_custo_formula = f"=E{current_row}+F{current_row}"
+                                        
                                         linha_dados = [
                                             r["Colaborador"], r["Função"], r["Engenheiro"], r["Status"],
-                                            r["Diária (R$)"], r["Extra (R$)"], r["Custo Total (R$)"], r["Observação"]
+                                            r["Diária (R$)"], r["Extra (R$)"], celula_custo_formula, r["Observação"]
                                         ]
                                         
                                         for c_idx, val in enumerate(linha_dados, 1):
                                             c_cell = ws.cell(row=current_row, column=c_idx, value=val)
                                             c_cell.font = Font(name="Arial", size=9)
                                             c_cell.border = borda_fina
-                                            c_cell.fill = fill_engenheiro # Aplica a cor do engenheiro na linha
+                                            c_cell.fill = fill_engenheiro 
                                             
                                             if c_idx in [5, 6, 7]:
                                                 c_cell.number_format = 'R$ #,##0.00'
@@ -858,9 +860,9 @@ else:
                                     
                                     fim_dados_obra = current_row - 1
                                     
-                                    # Linha de Subtotal da Obra
-                                    ws.cell(row=current_row, column=6, value=f"TOTAL OBRA {obra_nome}:").font = Font(name="Arial", size=10, bold=True)
-                                    ws.cell(row=current_row, column=6).alignment = Alignment(horizontal="right")
+                                    # Linha de Subtotal da Obra com Fórmula SUM correta
+                                    ws.cell(row=current_row, column=5, value=f"TOTAL OBRA {obra_nome}:").font = Font(name="Arial", size=10, bold=True)
+                                    ws.cell(row=current_row, column=5).alignment = Alignment(horizontal="right")
                                     
                                     celula_subtotal = ws.cell(row=current_row, column=7, value=f"=SUM(G{inicio_dados_obra}:G{fim_dados_obra})")
                                     celula_subtotal.font = Font(name="Arial", size=10, bold=True)
@@ -869,11 +871,19 @@ else:
                                     
                                     current_row += 2 # Espaço entre obras
 
-                            # Ajuste automático de largura das colunas
+                            # Ajuste de largura das colunas (ignorando títulos longos e limitando o tamanho máximo para evitar distâncias excessivas)
                             for col in ws.columns:
-                                max_len = max(len(str(cell.value or '')) for cell in col)
+                                max_len = 0
                                 col_letter = openpyxl.utils.get_column_letter(col[0].column)
-                                ws.column_dimensions[col_letter].width = max(max_len + 3, 14)
+                                for cell in col:
+                                    # Ignora linhas de título principal e de unidade/obra para não inflar a largura
+                                    if cell.row in [1, 2, 3] or (cell.value and str(cell.value).startswith("UNIDADE:")):
+                                        continue
+                                    if cell.value:
+                                        val_str = str(cell.value)
+                                        if len(val_str) > max_len:
+                                            max_len = len(val_str)
+                                ws.column_dimensions[col_letter].width = max(min(max_len + 4, 35), 14)
 
                         buffer = io.BytesIO()
                         wb.save(buffer)
