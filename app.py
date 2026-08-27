@@ -11,7 +11,7 @@ import os
 # --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR ---
 st.set_page_config(page_title="APROAR - Controle de Presenças", page_icon="👷", layout="centered")
 
-# CSS para o tema escuro APROAR, cards modernos e visibilidade perfeita dos inputs
+# CSS para o tema escuro APROAR, cards modernos, transparência na logo e inputs
 st.markdown("""
     <style>
     .stApp {
@@ -20,6 +20,10 @@ st.markdown("""
     }
     h1, h2, h3, h4, p, label, .stMarkdown, span {
         color: #F8FAFC !important;
+    }
+    /* Deixa o fundo da logo transparente no tema escuro */
+    .logo-container img {
+        mix-blend-mode: multiply;
     }
     div[data-baseweb="select"] > div, 
     div[data-baseweb="base-input"] > div, 
@@ -135,13 +139,17 @@ dict_obras = {o['id']: o for o in obras} if obras else {}
 
 ENGENHEIROS = ["EDUARDO", "GABRIEL", "GUSTAVO", "JOEL", "NETO", "PAULO", "SOARES", "VICTOR"]
 
-# --- CABEÇALHO COM A LOGO DO REPOSITÓRIO (logo.jpg) ---
+# --- CABEÇALHO COM A LOGO COM FUNDO TRANSPARENTE (CSS MIX-BLEND-MODE) ---
 col_l1, col_l2, col_l3 = st.columns([1, 2, 1])
 with col_l2:
     if os.path.exists("logo.jpg"):
+        st.markdown('<div class="logo-container">', unsafe_allow_html=True)
         st.image("logo.jpg", use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
     elif os.path.exists("logo.png"):
+        st.markdown('<div class="logo-container">', unsafe_allow_html=True)
         st.image("logo.png", use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
     else:
         st.markdown("""
             <div style="background: linear-gradient(135deg, #0C102B 0%, #161B3D 100%); padding: 25px; border-radius: 12px; text-align: center; margin-bottom: 25px; border: 1px solid #2D3568;">
