@@ -134,7 +134,7 @@ dict_obras = {o['id']: o for o in obras} if obras else {}
 
 ENGENHEIROS = ["EDUARDO", "GABRIEL", "GUSTAVO", "JOEL", "NETO", "PAULO", "SOARES", "VICTOR"]
 
-# --- FUNÇÃO AUXILIAR PARA RENDERIZAR A ABA DE DISPONIBILIDADE (ABERTA POR FUNÇÃO) ---
+# --- FUNÇÃO AUXILIAR PARA RENDERIZAR A ABA DE DISPONIBILIDADE ---
 def render_aba_disponibilidade(key_suffix=""):
     st.markdown("### 👥 Disponibilidade de Equipe por Função")
     st.write("Consulte diretamente quem já está convocado e quem está disponível (sobrando) para a data selecionada.")
@@ -188,13 +188,13 @@ parametros_url = st.query_params
 modo_campo = parametros_url.get("modo") == "campo"
 
 if modo_campo:
-    # VISÃO ESSENCIAL DO ENGENHEIRO NO CELULAR (ESTILO APP / CARDS)
+    # VISÃO ESSENCIAL DO ENGENHEIRO NO CELULAR
     st.title("👷 APROAR - Campo")
     tab_apontamento_campo, tab_convocacao_campo, tab_disp_campo = st.tabs([
         "✅ Apontamento Hoje", "📋 Convocação Amanhã", "👥 Disponibilidade"
     ])
     
-    # --- ABA APONTAMENTO CAMPO ---
+    # --- ABA APONTAMENTO CAMPO (OTIMIZADA PARA OBRAS GRANDES) ---
     with tab_apontamento_campo:
         engenheiro_apont = st.selectbox("Seu Nome (Engenheiro):", ENGENHEIROS, key="eng_apont_c")
         data_apont = datetime.date.today()
@@ -217,7 +217,16 @@ if modo_campo:
             
             convocacoes_render = [c for c in convocacoes_hoje if c['dados_obra']['unidade'] == unidade_filtro and c['dados_obra']['nome'] == obra_filtro]
             
-            st.info("💡 Suas marcações salvam instantaneamente. Pode parar e continuar quando quiser.")
+            # ATALHO PARA OBRAS GRANDES: Marcar todos como presentes de uma vez
+            col_b1, col_b2 = st.columns(2)
+            with col_b1:
+                if st.button("✅ Marcar Todos como Presentes"):
+                    for c in convocacoes_render:
+                        supabase.table("convocacoes").update({"status": "Presente"}).eq("id", c['id']).execute()
+                    st.success("Equipe atualizada para Presente!")
+                    st.rerun()
+
+            st.info(f"💡 Exibindo {len(convocacoes_render)} colaboradores nesta obra. Por padrão todos iniciam como 'Presente' — altere apenas quem faltou ou teve atestado.")
             opcoes_status = ["Presente", "Falta", "Atestado", "Extra"]
             
             for conv in convocacoes_render:
@@ -267,7 +276,7 @@ if modo_campo:
             # 1. SELEÇÃO EM CIMA
             equipe_selecionada = st.multiselect("Selecione os colaboradores para esta frente:", list(opcoes_colaboradores.keys()), key="eq_c_sel")
 
-            # 2. PANORAMA LOGO ABAIXO (ACOMPANHAMENTO EM TEMPO REAL)
+            # 2. PANORAMA LOGO ABAIXO
             with st.container(border=True):
                 st.markdown(f"#### 👁️ Panorama: Suas Convocações ({data_conv.strftime('%d/%m/%Y')})")
                 try:
@@ -301,7 +310,7 @@ if modo_campo:
                         st.success("✅ Convocado com sucesso!")
                         st.rerun()
                     except:
-                        st.error("Erro: Um ou mais colaboradores já possuem convocação neste dia.")
+                        st.error("Erro: Colaborador já possui convocação neste dia.")
         else:
             st.info("Aguardando cadastro de obras/colaboradores pela administração.")
 
@@ -416,6 +425,12 @@ else:
             convocacoes_render = [c for c in convocacoes_hoje if c['dados_obra']['unidade'] == unidade_filtro and c['dados_obra']['nome'] == obra_filtro]
             opcoes_status = ["Presente", "Falta", "Atestado", "Extra"]
             
+            if st.button("✅ Marcar Todos como Presentes (ADM)", key="btn_todos_adm"):
+                for c in convocacoes_render:
+                    supabase.table("convocacoes").update({"status": "Presente"}).eq("id", c['id']).execute()
+                st.success("Equipe atualizada para Presente!")
+                st.rerun()
+
             with st.form("form_apontamentos_extras"):
                 dados_para_atualizar = {}
                 for conv in convocacoes_render:
