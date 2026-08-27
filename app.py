@@ -8,52 +8,53 @@ import unicodedata
 import re
 import os
 
-# --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR (WIDE) ---
+# --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR (WIDE - CLARO) ---
 st.set_page_config(page_title="APROAR - Controle de Presenças", page_icon="👷", layout="wide")
 
-# CSS Moderno, limpo e corporativo
+# CSS Moderno com Fundo Branco e Azul APROAR
 st.markdown("""
     <style>
     .stApp {
-        background-color: #080C1F;
-        color: #F8FAFC;
+        background-color: #FFFFFF;
+        color: #0F172A;
     }
     h1, h2, h3, h4, p, label, .stMarkdown, span {
-        color: #F8FAFC !important;
+        color: #0F172A !important;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
-    /* Sidebar Moderna */
+    /* Sidebar Clara e Moderna */
     section[data-testid="stSidebar"] {
-        background-color: #050814 !important;
-        border-right: 1px solid #1E293B;
+        background-color: #F8FAFC !important;
+        border-right: 1px solid #E2E8F0;
         padding-top: 15px;
     }
-    /* Inputs e Selects Sleek */
+    /* Inputs e Selects Limpos */
     div[data-baseweb="select"] > div, 
     div[data-baseweb="base-input"] > div, 
     div[data-baseweb="input"] > div,
     input, textarea, div[role="combobox"] {
-        background-color: #111836 !important;
-        color: #FFFFFF !important;
-        border-color: #1E293B !important;
+        background-color: #FFFFFF !important;
+        color: #0F172A !important;
+        border-color: #CBD5E1 !important;
         border-radius: 8px !important;
     }
     ul[data-baseweb="menu"], div[data-baseweb="popover"] {
-        background-color: #111836 !important;
-        color: #FFFFFF !important;
+        background-color: #FFFFFF !important;
+        color: #0F172A !important;
     }
     li[role="option"] {
-        background-color: #111836 !important;
-        color: #FFFFFF !important;
+        background-color: #FFFFFF !important;
+        color: #0F172A !important;
     }
     li[role="option"]:hover {
-        background-color: #2563EB !important;
+        background-color: #DBEAFE !important;
+        color: #1D4ED8 !important;
     }
     div[data-baseweb="tag"] {
         background-color: #2563EB !important;
         color: #FFFFFF !important;
     }
-    /* Botões Principais */
+    /* Botões Principais no Azul APROAR */
     .stButton > button {
         background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%) !important;
         color: #FFFFFF !important;
@@ -61,27 +62,27 @@ st.markdown("""
         border-radius: 8px !important;
         font-weight: 600;
         padding: 0.5rem 1rem;
-        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.15);
         transition: all 0.3s ease;
         width: 100%;
     }
     .stButton > button:hover {
         transform: translateY(-1px);
-        box-shadow: 0 6px 16px rgba(37, 99, 235, 0.4);
+        box-shadow: 0 6px 16px rgba(37, 99, 235, 0.3);
     }
-    /* Containers com Efeito de Elevação */
+    /* Containers com Efeito de Elevação Suave */
     div[data-testid="stVerticalBlock"] > div[style*="border"] {
-        background-color: #0F172A !important;
-        border: 1px solid #1E293B !important;
+        background-color: #F8FAFC !important;
+        border: 1px solid #E2E8F0 !important;
         border-radius: 12px !important;
         padding: 16px;
     }
     .streamlit-expanderHeader {
-        background-color: #111836 !important;
+        background-color: #F1F5F9 !important;
         border-radius: 8px;
     }
     hr {
-        border-color: #1E293B !important;
+        border-color: #E2E8F0 !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -206,7 +207,7 @@ def render_aba_disponibilidade(key_suffix=""):
                         if conv_info:
                             ob_inf = dict_obras.get(conv_info['obra_id'], {})
                             obra_nome = f"{ob_inf.get('unidade','')} - {ob_inf.get('nome','')}"
-                        st.markdown(f"• {oc['nome']} <br><small style='color:#94A3B8;'>({obra_nome})</small>", unsafe_allow_html=True)
+                        st.markdown(f"• {oc['nome']} <br><small style='color:#64748B;'>({obra_nome})</small>", unsafe_allow_html=True)
                 else:
                     st.caption("Nenhum.")
                     
@@ -223,7 +224,6 @@ parametros_url = st.query_params
 modo_campo = parametros_url.get("modo") == "campo"
 
 if modo_campo:
-    # VISÃO ESSENCIAL DO ENGENHEIRO NO CELULAR
     st.markdown("### 📲 Acesso Rápido - Campo")
     tab_apontamento_campo, tab_convocacao_campo, tab_disp_campo = st.tabs([
         "✅ Apontamento", "📋 Convocação", "👥 Disponibilidade"
@@ -347,19 +347,18 @@ if modo_campo:
 
 else:
     # ==========================================
-    # TORRE DE CONTROLE ADMINISTRATIVA (MODERNA)
+    # PAINEL ADMINISTRATIVO (FUNDO BRANCO)
     # ==========================================
     
-    # Gerenciamento de estado para os botões do menu lateral
     if "menu_ativo" not in st.session_state:
         st.session_state.menu_ativo = "🎛️ Dashboard"
 
-    # --- MENU LATERAL (SIDEBAR COM BOTÕES MODERNOS) ---
+    # --- MENU LATERAL (SIDEBAR) ---
     with st.sidebar:
         if os.path.exists("logo.png"):
             st.image("logo.png", use_container_width=True)
         else:
-            st.markdown("<h2 style='text-align: center; color: white; letter-spacing: 2px;'>APROAR</h2>", unsafe_allow_html=True)
+            st.markdown("<h2 style='text-align: center; color: #0F172A; letter-spacing: 2px;'>APROAR</h2>", unsafe_allow_html=True)
         
         st.markdown("<div style='margin-bottom: 20px;'></div>", unsafe_allow_html=True)
         
@@ -375,7 +374,7 @@ else:
 
     menu_escolhido = st.session_state.menu_ativo
 
-    # --- CONTEÚDO PRINCIPAL (ÁREA WIDE) ---
+    # --- CONTEÚDO PRINCIPAL ---
 
     # 1. DASHBOARD
     if menu_escolhido == "🎛️ Dashboard":
@@ -438,7 +437,6 @@ else:
                 "custo": diaria_calc + extra
             })
 
-        # Métricas do dia (Cartões Estilizados)
         total_conv = len(lista_processada)
         total_pres = len([x for x in lista_processada if "Presente" in x['status'] or x['status'] == 'Extra'])
         total_atest = len([x for x in lista_processada if x['status'] == 'Atestado'])
@@ -477,7 +475,7 @@ else:
                         c_id = row['id']
                         c1, c2, c3 = st.columns([3, 2, 2])
                         with c1:
-                            st.markdown(f"{row['colab_nome']} &nbsp; `{row['colab_funcao']}` &nbsp; <small style='color:#94A3B8;'>({row['data_item']})</small>", unsafe_allow_html=True)
+                            st.markdown(f"{row['colab_nome']} &nbsp; `{row['colab_funcao']}` &nbsp; <small style='color:#64748B;'>({row['data_item']})</small>", unsafe_allow_html=True)
                             obs_val = st.text_input("Obs", value=row['observacao'], placeholder="Obs...", key=f"obs_{c_id}", label_visibility="collapsed")
                             if obs_val != row['observacao']:
                                 supabase.table("convocacoes").update({"observacao": obs_val}).eq("id", c_id).execute()
