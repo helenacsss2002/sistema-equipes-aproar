@@ -2,6 +2,7 @@ import streamlit as st
 from supabase import create_client, Client
 import datetime
 import pandas as pd
+json = pd.io.json # Compatibilidade
 import json
 from fpdf import FPDF
 import unicodedata
@@ -79,6 +80,15 @@ st.markdown("""
     .stButton > button:hover {
         transform: translateY(-1px);
         box-shadow: 0 6px 16px rgba(37, 99, 235, 0.4);
+    }
+    /* Estilo para Botões Compactos (Trello e Limpeza) */
+    div.btn-compact > div > button, div.btn-compact button {
+        width: auto !important;
+        padding: 0.3rem 0.75rem !important;
+        font-size: 0.85rem !important;
+        min-height: 0px !important;
+        display: inline-block !important;
+        border-radius: 6px !important;
     }
     /* Containers com Efeito de Elevação Suave */
     div[data-testid="stVerticalBlock"] > div[style*="border"] {
@@ -212,7 +222,7 @@ def executar_sincronizacao_trello():
                 novas_inseridas += 1
                 nomes_cadastrados.add(normalizar(nome_card))
                 
-        return True, f"Sincronização realizada com sucesso! {novas_inseridas} nova(s) obra(s) da lista 'EM EXECUÇÃO' foram adicionadas."
+        return True, f"Sincronização realizada com sucesso! {novas_inseridas} nova(s) obra(s) adicionada(s)."
     except Exception as e:
         return False, f"Erro na conexão com o Trello: {e}"
 
@@ -241,7 +251,7 @@ dict_obras = {o['id']: o for o in obras} if obras else {}
 
 ENGENHEIROS = ["EDUARDO", "GABRIEL", "GUSTAVO", "JOEL", "NETO", "PAULO", "SOARES", "VICTOR"]
 
-# --- FUNÇÃO AUXILIAR PARA RENDERIZAR A ABA DE DISPONIBILIDADE ---
+# --- RENDERIZAR ABA DISPONIBILIDADE ---
 def render_aba_disponibilidade(key_suffix=""):
     st.markdown("### 👥 DISPONIBILIDADE DE EQUIPE POR FUNÇÃO")
     st.write("Consulte quem já está convocado e quem está disponível para a data selecionada.")
@@ -292,7 +302,7 @@ def render_aba_disponibilidade(key_suffix=""):
                 else:
                     st.caption("Nenhum disponível.")
 
-# --- VERIFICAÇÃO DE MODO (CAMPO/ENGENHEIRO VIA ?eng OU ?modo=campo) ---
+# --- VERIFICAÇÃO DE MODO (CAMPO/ENGENHEIRO) ---
 parametros_url = st.query_params
 modo_campo = "eng" in parametros_url or parametros_url.get("modo") in ["campo", "eng"]
 
@@ -410,7 +420,7 @@ if modo_campo:
                             "observacao": f"Turno: {turno_conv}"
                         }).execute()
                         sucessos += 1
-                    st.success(f"✅ {sucessos} colaborador(es) convocado(s) para o turno {turno_conv}!")
+                    st.success(f"✅ {sucessos} colaborador(es) convocado(s)!")
                     st.rerun()
         else:
             st.info("Cadastre obras e colaboradores na administração.")
@@ -419,14 +429,10 @@ if modo_campo:
         render_aba_disponibilidade("campo")
 
 else:
-    # ==========================================
-    # PAINEL ADMINISTRATIVO (TEMA ESCURO)
-    # ==========================================
-    
+    # --- PAINEL ADMINISTRATIVO ---
     if "menu_ativo" not in st.session_state:
         st.session_state.menu_ativo = "🎛️ DASHBOARD"
 
-    # --- MENU LATERAL EM MAIÚSCULAS ---
     with st.sidebar:
         if os.path.exists("logo.png"):
             st.image("logo.png", use_container_width=True)
@@ -454,8 +460,6 @@ else:
         st.caption("APROAR Engenharia © 2026")
 
     menu_escolhido = st.session_state.menu_ativo
-
-    # --- CONTEÚDO PRINCIPAL ---
 
     # 1. DASHBOARD
     if menu_escolhido == "🎛️ DASHBOARD":
@@ -643,7 +647,7 @@ else:
                             "observacao": f"Turno: {turno_conv_adm}"
                         }).execute()
                         sucessos += 1
-                    st.success(f"✅ {sucessos} colaborador(es) convocado(s) para o turno {turno_conv_adm}!")
+                    st.success(f"✅ {sucessos} colaborador(es) convocado(s)!")
                     st.rerun()
         else:
             st.info("Cadastre obras e colaboradores na aba Configurações.")
@@ -775,140 +779,227 @@ else:
                                 pdf.set_font("Arial", '', 8)
                                 for row in apontamentos:
                                     colab = dict_colaboradores.get(row['colaborador_id'], {})
-                                    nome = colab.get('nome', 'N/A')
-                                    funcao = colab.get('funcao', 'N/A')
-                                    status = row.get('status', 'Presente (Integral)')
-                                    extra = float(row.get('valor_extra', 0) or 0)
-                                    obs = row.get('observacao', '')
-                                    diaria_base = calcular_diaria_proporcional(status, colab.get('valor_diaria'))
-                                    
-                                    pdf.cell(25, 6, to_latin(row.get('data', '')), border=1, align='C')
-                                    pdf.cell(65, 6, to_latin(nome[:28]), border=1)
-                                    pdf.cell(50, 6, to_latin(funcao[:20]), border=1)
-                                    pdf.cell(32, 6, to_latin(status[:14]), border=1, align='C')
-                                    pdf.cell(24, 6, to_latin(f"R$ {diaria_base:.2f}"), border=1, align='C')
-                                    pdf.cell(24, 6, to_latin(f"R$ {extra:.2f}"), border=1, align='C')
-                                    pdf.cell(51, 6, to_latin(obs[:30]), border=1, ln=True)
-                                pdf.ln(3)
+                                    nome_c = colab.get('nome', 'N/A')
+                                    func_c = colab.get('funcao', 'N/A')
+                                    diaria_c = colab.get('valor_diaria', 240.0)
+                                    st_c = row.get('status', 'Presente (Integral)')
+                                    d_calc = calcular_diaria_proporcional(st_c, diaria_c)
+                                    ext_c = float(row.get('valor_extra') or 0.0)
+                                    obs_c = row.get('observacao', '')
+                                    dt_c = row.get('data', '')
 
-                        pdf_output = pdf.output(dest='S').encode('latin1')
+                                    pdf.cell(25, 6, to_latin(dt_c), border=1, align='C')
+                                    pdf.cell(65, 6, to_latin(nome_c[:35]), border=1)
+                                    pdf.cell(50, 6, to_latin(func_c[:25]), border=1)
+                                    pdf.cell(32, 6, to_latin(st_c[:18]), border=1, align='C')
+                                    pdf.cell(24, 6, to_latin(f"R$ {d_calc:.2f}"), border=1, align='R')
+                                    pdf.cell(24, 6, to_latin(f"R$ {ext_c:.2f}"), border=1, align='R')
+                                    pdf.cell(51, 6, to_latin(obs_c[:30]), border=1, ln=True)
+                                pdf.ln(4)
+
+                        pdf_output = bytes(pdf.output())
                         st.download_button(
                             label="📥 Baixar PDF Gerado",
                             data=pdf_output,
-                            file_name=f"relatorio_custos_{data_inicio_rel.strftime('%d-%m-%Y')}_a_{data_fim_rel.strftime('%d-%m-%Y')}.pdf",
-                            mime="application/pdf"
+                            file_name=f"relatorio_custos_{data_inicio_rel}_{data_fim_rel}.pdf",
+                            mime="application/pdf",
+                            use_container_width=True
                         )
                 except Exception as e:
                     st.error(f"Erro ao gerar PDF: {e}")
 
         with col_btn2:
-            if st.button("📊 Gerar Excel (Abas por Dia + Cores por Engenheiro)", use_container_width=True):
+            if st.button("📊 Gerar Excel", type="primary", use_container_width=True):
                 try:
                     if data_inicio_rel > data_fim_rel:
                         st.error("Data inicial maior que a final.")
                     elif not dados_relatorio:
                         st.warning("Sem dados no período.")
                     else:
-                        lista_excel = []
-                        for row in dados_relatorio:
-                            ob = dict_obras.get(row['obra_id'], {"nome": "N/A", "unidade": "N/A"})
-                            colab = dict_colaboradores.get(row['colaborador_id'], {})
-                            status = row.get('status', 'Presente (Integral)')
-                            diaria_calc = float(calcular_diaria_proporcional(status, colab.get('valor_diaria')))
-                            extra = float(row.get('valor_extra') or 0.0)
-                            
-                            lista_excel.append({
-                                "Data": str(row.get('data')),
-                                "Engenheiro": str(row.get('engenheiro', 'N/A')),
-                                "Unidade": str(ob['unidade']),
-                                "Obra": str(ob['nome']),
-                                "Colaborador": str(colab.get('nome', 'N/A')),
-                                "Funcao": str(colab.get('funcao', 'N/A')),
-                                "Status": str(status),
-                                "Diaria": diaria_calc,
-                                "Extra": extra,
-                                "Observacao": str(row.get('observacao', ''))
-                            })
-                        
-                        df_excel = pd.DataFrame(lista_excel)
-                        
-                        cores_engenheiros = {
-                            "VICTOR": "E0F2FE",
-                            "EDUARDO": "DCFCE7",
-                            "GUSTAVO": "FEF9C3",
-                            "JOEL": "F3E8FF",
-                            "NETO": "FFEDD5",
-                            "SOARES": "FFE4E6",
-                            "GABRIEL": "CCFBF1",
-                            "PAULO": "F1F5F9"
-                        }
-                        
+                        output = io.BytesIO()
                         wb = openpyxl.Workbook()
                         wb.remove(wb.active)
-                        
-                        font_titulo = Font(name="Arial", size=10, bold=True, color="FFFFFF")
-                        fill_cabecalho = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
-                        borda_fina = Border(
+
+                        fill_header = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
+                        font_header = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+                        font_body = Font(name="Calibri", size=10)
+                        thin_border = Border(
                             left=Side(style='thin', color='CBD5E1'),
                             right=Side(style='thin', color='CBD5E1'),
                             top=Side(style='thin', color='CBD5E1'),
                             bottom=Side(style='thin', color='CBD5E1')
                         )
-                        
-                        datas_unicas = sorted(df_excel['Data'].unique()) if not df_excel.empty else []
-                        
-                        for data_str in datas_unicas:
-                            df_dia = df_excel[df_excel['Data'] == data_str]
-                            nome_aba = data_str.replace('/', '-')[:31]
-                            ws = wb.create_sheet(title=nome_aba)
-                            
-                            headers = ["Data", "Engenheiro", "Unidade", "Obra", "Colaborador", "Função", "Status", "Diária (R$)", "Extra (R$)", "Observação"]
-                            ws.append(headers)
-                            
-                            for col_num in range(1, len(headers) + 1):
-                                cell = ws.cell(row=1, column=col_num)
-                                cell.font = font_titulo
-                                cell.fill = fill_cabecalho
-                                cell.alignment = Alignment(horizontal="center", vertical="center")
-                                cell.border = borda_fina
-                            
-                            for _, r in df_dia.iterrows():
-                                row_data = [
-                                    r["Data"], r["Engenheiro"], r["Unidade"], r["Obra"],
-                                    r["Colaborador"], r["Funcao"], r["Status"],
-                                    r["Diaria"], r["Extra"], r["Observacao"]
-                                ]
-                                ws.append(row_data)
-                                cur_row = ws.max_row
-                                
-                                eng_nome = str(r["Engenheiro"]).upper().strip()
-                                cor_hex = cores_engenheiros.get(eng_nome, "FFFFFF")
-                                fill_eng = PatternFill(start_color=cor_hex, end_color=cor_hex, fill_type="solid")
-                                
-                                for col_num in range(1, len(row_data) + 1):
-                                    cell = ws.cell(row=cur_row, column=col_num)
-                                    cell.border = borda_fina
-                                    cell.fill = fill_eng
-                                    if col_num in [8, 9]:
-                                        cell.number_format = '"R$ "#,##0.00'
-                                        cell.alignment = Alignment(horizontal="right", vertical="center")
-                                    else:
-                                        cell.alignment = Alignment(horizontal="left", vertical="center")
-                            
-                            for col in ws.columns:
-                                max_len = max(len(str(cell.value or '')) for cell in col)
-                                col_letter = openpyxl.utils.get_column_letter(col[0].column)
-                                ws.column_dimensions[col_letter].width = max(max_len + 3, 12)
-                        
-                        excel_buffer = io.BytesIO()
-                        wb.save(excel_buffer)
-                        excel_buffer.seek(0)
-                        
+
+                        ws = wb.create_sheet(title="Relatorio_Custos")
+                        headers = ["Data", "Engenheiro", "Unidade", "Obra", "Colaborador", "Função", "Status", "Diária (R$)", "Extra (R$)", "Custo Total (R$)", "Observação"]
+                        ws.append(headers)
+
+                        for col_num in range(1, len(headers) + 1):
+                            cell = ws.cell(row=1, column=col_num)
+                            cell.fill = fill_header
+                            cell.font = font_header
+                            cell.alignment = Alignment(horizontal="center", vertical="center")
+
+                        for row_idx, r in enumerate(dados_relatorio, start=2):
+                            ob = dict_obras.get(r['obra_id'], {"unidade": "GERAL", "nome": "Desconhecida"})
+                            colab = dict_colaboradores.get(r['colaborador_id'], {"nome": "Desconhecido", "funcao": "-", "valor_diaria": 240.0})
+                            status_item = r.get('status', 'Presente (Integral)')
+                            diaria_calc = calcular_diaria_proporcional(status_item, colab.get('valor_diaria'))
+                            extra_val = float(r.get('valor_extra') or 0.0)
+                            custo_tot = diaria_calc + extra_val
+
+                            line = [
+                                r.get('data', ''),
+                                r.get('engenheiro', ''),
+                                ob['unidade'],
+                                ob['nome'],
+                                colab['nome'],
+                                colab['funcao'],
+                                status_item,
+                                diaria_calc,
+                                extra_val,
+                                custo_tot,
+                                r.get('observacao', '')
+                            ]
+                            ws.append(line)
+                            for col_num in range(1, len(line) + 1):
+                                cell = ws.cell(row=row_idx, column=col_num)
+                                cell.font = font_body
+                                cell.border = thin_border
+                                if col_num in [8, 9, 10]:
+                                    cell.number_format = 'R$ #,##0.00'
+
+                        wb.save(output)
                         st.download_button(
-                            label="📥 Baixar Excel Gerado (Abas por Dia)",
-                            data=excel_buffer,
-                            file_name=f"relatorio_presencas_{data_inicio_rel.strftime('%d-%m-%Y')}_a_{data_fim_rel.strftime('%d-%m-%Y')}.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            label="📥 Baixar Excel Gerado",
+                            data=output.getvalue(),
+                            file_name=f"relatorio_custos_{data_inicio_rel}_{data_fim_rel}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True
                         )
                 except Exception as e:
                     st.error(f"Erro ao gerar Excel: {e}")
+
+    # 5. INDICADORES
+    elif menu_escolhido == "📈 INDICADORES":
+        st.markdown("## 📈 INDICADORES DE DESEMPENHO E CUSTOS")
+        col_ind1, col_ind2 = st.columns(2)
+        with col_ind1:
+            dt_ini_ind = st.date_input("Início:", value=datetime.date.today() - datetime.timedelta(days=30), format="DD/MM/YYYY", key="ind_ini")
+        with col_ind2:
+            dt_fim_ind = st.date_input("Fim:", value=datetime.date.today(), format="DD/MM/YYYY", key="ind_fim")
+
+        try:
+            convs_ind = supabase.table("convocacoes").select("*").gte("data", dt_ini_ind.isoformat()).lte("data", dt_fim_ind.isoformat()).execute().data
+        except:
+            convs_ind = []
+
+        if convs_ind:
+            df_ind = pd.DataFrame(convs_ind)
+            df_ind['diaria'] = df_ind.apply(lambda r: calcular_diaria_proporcional(r.get('status'), dict_colaboradores.get(r['colaborador_id'], {}).get('valor_diaria')), axis=1)
+            df_ind['extra'] = df_ind['valor_extra'].fillna(0.0).astype(float)
+            df_ind['custo_total'] = df_ind['diaria'] + df_ind['extra']
+
+            c_ind1, c_ind2 = st.columns(2)
+            with c_ind1:
+                st.markdown("### 💰 Custo por Engenheiro")
+                cost_by_eng = df_ind.groupby('engenheiro')['custo_total'].sum().reset_index()
+                st.dataframe(cost_by_eng, use_container_width=True)
+
+            with c_ind2:
+                st.markdown("### 👥 Convocações por Status")
+                status_counts = df_ind['status'].value_counts().reset_index()
+                st.dataframe(status_counts, use_container_width=True)
+        else:
+            st.info("Nenhum dado encontrado para o período selecionado.")
+
+    # 6. DISPONIBILIDADE
+    elif menu_escolhido == "👥 DISPONIBILIDADE":
+        render_aba_disponibilidade("adm")
+
+    # 7. CONFIGURAÇÕES
+    elif menu_escolhido == "⚙️ CONFIGURAÇÕES":
+        st.markdown("## ⚙️ CONFIGURAÇÕES DO SISTEMA")
+        tab_obras, tab_colab, tab_manutencao = st.tabs(["🏗️ OBRAS", "👥 COLABORADORES", "🛠️ MANUTENÇÃO E DADOS"])
+
+        with tab_obras:
+            st.markdown("### 🏗️ Gerenciar Obras")
+            
+            # BOTÃO DE SINCRONIZAÇÃO TRELLO (REDUZIDO E COMPACTO)
+            st.markdown("<div class='btn-compact'>", unsafe_allow_html=True)
+            col_sync, _ = st.columns([1.8, 4.2])
+            with col_sync:
+                if st.button("🔄 Sincronizar Obras com Trello", key="btn_sync_trello"):
+                    sucesso, msg = executar_sincronizacao_trello()
+                    if sucesso:
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
+            st.markdown("</div>", unsafe_allow_html=True)
+
+            st.markdown("---")
+            with st.form("form_nova_obra", clear_on_submit=True):
+                st.markdown("**Cadastrar Nova Obra Manualmente**")
+                nova_unidade = st.text_input("Unidade (ex: MARACANAÚ, FIEC, GERAL):")
+                novo_nome_obra = st.text_input("Nome da Obra:")
+                if st.form_submit_button("Salvar Obra"):
+                    if nova_unidade and novo_nome_obra:
+                        supabase.table("obras").insert({
+                            "unidade": nova_unidade.strip().upper(),
+                            "nome": novo_nome_obra.strip()
+                        }).execute()
+                        st.success("Obra cadastrada!")
+                        st.rerun()
+                    else:
+                        st.warning("Preencha todos os campos.")
+
+            if obras:
+                st.markdown("#### Obras Cadastradas")
+                df_obras = pd.DataFrame(obras)
+                st.dataframe(df_obras[['unidade', 'nome']], use_container_width=True)
+
+        with tab_colab:
+            st.markdown("### 👥 Gerenciar Colaboradores")
+            with st.form("form_novo_colab", clear_on_submit=True):
+                col_n, col_f, col_v = st.columns(3)
+                with col_n:
+                    nome_c = st.text_input("Nome Completo:")
+                with col_f:
+                    funcao_c = st.text_input("Função / Cargo:")
+                with col_v:
+                    val_diaria_c = st.number_input("Valor Diária (R$):", value=240.0, step=10.0)
+                
+                if st.form_submit_button("Cadastrar Colaborador"):
+                    if nome_c and funcao_c:
+                        supabase.table("colaboradores").insert({
+                            "nome": nome_c.strip().upper(),
+                            "funcao": limpar_funcao(funcao_c),
+                            "valor_diaria": val_diaria_c
+                        }).execute()
+                        st.success("Colaborador cadastrado!")
+                        st.rerun()
+                    else:
+                        st.warning("Preencha os campos obrigatórios.")
+
+            if colaboradores:
+                st.markdown("#### Lista de Colaboradores")
+                df_colabs = pd.DataFrame(colaboradores)
+                st.dataframe(df_colabs[['nome', 'funcao', 'valor_diaria']], use_container_width=True)
+
+        with tab_manutencao:
+            st.markdown("### 🛠️ Limpeza e Manutenção do Banco")
+            st.caption("Ações de limpeza de registros de teste e dados temporários.")
+            
+            # BOTÃO DE LIMPEZA (REDUZIDO E COMPACTO)
+            st.markdown("<div class='btn-compact'>", unsafe_allow_html=True)
+            col_limp, _ = st.columns([1.8, 4.2])
+            with col_limp:
+                if st.button("🧹 Limpar Convocações de Teste", key="btn_limpar_dados"):
+                    try:
+                        supabase.table("convocacoes").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
+                        st.success("Convocações de teste limpas com sucesso!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Erro ao limpar dados: {e}")
+            st.markdown("</div>", unsafe_allow_html=True)
