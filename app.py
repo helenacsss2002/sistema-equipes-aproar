@@ -860,18 +860,18 @@ else:
                                     
                                     fim_dados_obra = current_row - 1
                                     
-                                    # Linha de Subtotal da Obra com Fórmula SUM correta
+                                    # Linha de Subtotal da Obra com Fórmula SOMA correta para Excel em Português
                                     ws.cell(row=current_row, column=5, value=f"TOTAL OBRA {obra_nome}:").font = Font(name="Arial", size=10, bold=True)
                                     ws.cell(row=current_row, column=5).alignment = Alignment(horizontal="right")
                                     
-                                    celula_subtotal = ws.cell(row=current_row, column=7, value=f"=SUM(G{inicio_dados_obra}:G{fim_dados_obra})")
+                                    celula_subtotal = ws.cell(row=current_row, column=7, value=f"=SOMA(G{inicio_dados_obra}:G{fim_dados_obra})")
                                     celula_subtotal.font = Font(name="Arial", size=10, bold=True)
                                     celula_subtotal.number_format = 'R$ #,##0.00'
                                     celula_subtotal.border = borda_fina
                                     
                                     current_row += 2 # Espaço entre obras
 
-                            # Ajuste de largura das colunas (ignorando títulos longos e limitando o tamanho máximo para evitar distâncias excessivas)
+                            # Ajuste de largura das colunas
                             for col in ws.columns:
                                 max_len = 0
                                 col_letter = openpyxl.utils.get_column_letter(col[0].column)
