@@ -3,6 +3,7 @@ from supabase import create_client, Client
 import datetime
 import pandas as pd
 import io
+import json
 from fpdf import FPDF
 
 # --- CONFIGURAÇÕES DA PÁGINA ---
@@ -38,6 +39,7 @@ obras = buscar_obras()
 colaboradores = buscar_colaboradores()
 
 dict_colaboradores = {c['id']: c for c in colaboradores} if colaboradores else {}
+dict_obras = {o['id']: o for o in obras} if obras else {}
 
 ENGENHEIROS = ["EDUARDO", "GABRIEL", "GUSTAVO", "JOEL", "NETO", "PAULO", "SOARES", "VICTOR"]
 
@@ -53,14 +55,23 @@ tab_convocacao, tab_apontamento, tab_relatorios, tab_config = st.tabs(["📋 Con
 hoje = datetime.date.today().isoformat()
 
 # ==========================================
-# ABA 1: CONVOCAÇÃO
+# ABA 1: CONVOCAÇÃO (COM FILTRO CASCATA)
 # ==========================================
 with tab_convocacao:
     if obras and colaboradores:
         st.markdown("### Informações da Demanda")
         engenheiro_conv = st.selectbox("Engenheiro responsável:", ENGENHEIROS, key="eng_conv")
-        opcoes_obras = {f"{o['unidade']} - {o['nome']}": o['id'] for o in obras}
-        obra_selecionada = st.selectbox("Selecione a Unidade e Obra/Serviço:", list(opcoes_obras.keys()))
+        
+        # Filtro Cascata: Unidade -> Obra
+        unidades_unicas = sorted(list(set([o['unidade'] for o in obras])))
+        col_u, col_o = st.columns(2)
+        
+        with col_u:
+            unidade_selecionada = st.selectbox("Unidade:", unidades_unicas)
+        
+        obras_da_unidade = {o['nome']: o['id'] for o in obras if o['unidade'] == unidade_selecionada}
+        with col_o:
+            obra_selecionada = st.selectbox("Obra/Serviço:", list(obras_da_unidade.keys()))
 
         st.markdown("### Montar Equipe")
         funcoes_disponiveis = sorted(list(set([str(c['funcao']) for c in colaboradores])))
@@ -75,7 +86,7 @@ with tab_convocacao:
             if not equipe_selecionada:
                 st.warning("⚠️ Selecione pelo menos um colaborador.")
             else:
-                obra_id = opcoes_obras[obra_selecionada]
+                obra_id = obras_da_unidade[obra_selecionada]
                 dados_insercao = []
                 for nome in equipe_selecionada:
                     dados_insercao.append({
@@ -93,10 +104,10 @@ with tab_convocacao:
                 except Exception as e:
                     st.error("❌ Erro: Possível duplicidade. Colaborador já convocado hoje.")
     else:
-        st.info("Cadastre obras e colaboradores na aba Configurações.")
+        st.info("Cadastre obras (JSON) e colaboradores (Excel) na aba Configurações.")
 
 # ==========================================
-# ABA 2: APONTAMENTOS (COM ACORDOS FINANCEIROS)
+# ABA 2: APONTAMENTOS (COM FILTRO CASCATA)
 # ==========================================
 with tab_apontamento:
     st.markdown("### Apontamento Diário")
@@ -108,11 +119,30 @@ with tab_apontamento:
         convocacoes_hoje = []
 
     if convocacoes_hoje:
+        # Enriquecer convocações com os dados da obra para permitir o filtro
+        for conv in convocacoes_hoje:
+            conv['dados_obra'] = dict_obras.get(conv['obra_id'], {"unidade": "Desconhecida", "nome": "Desconhecida"})
+            
+        unidades_convocadas = sorted(list(set([c['dados_obra']['unidade'] for c in convocacoes_hoje])))
+        
+        st.markdown("##### Filtrar a equipe por:")
+        col_ua, col_oa = st.columns(2)
+        with col_ua:
+            unidade_filtro = st.selectbox("Unidade Convocada:", unidades_convocadas, key="filtro_u_apont")
+        
+        obras_convocadas = sorted(list(set([c['dados_obra']['nome'] for c in convocacoes_hoje if c['dados_obra']['unidade'] == unidade_filtro])))
+        with col_oa:
+            obra_filtro = st.selectbox("Obra Convocada:", obras_convocadas, key="filtro_o_apont")
+        
+        # Filtra a lista final que será renderizada na tela
+        convocacoes_render = [c for c in convocacoes_hoje if c['dados_obra']['unidade'] == unidade_filtro and c['dados_obra']['nome'] == obra_filtro]
+        
+        st.info("Marque as exceções do dia e insira bonificações se necessário.")
         with st.form("form_apontamentos"):
             alteracoes = {}
             opcoes_status = ["Presente", "Falta", "Atestado", "Extra"]
             
-            for conv in convocacoes_hoje:
+            for conv in convocacoes_render:
                 c_id = conv['id']
                 dados_colab = dict_colaboradores.get(conv['colaborador_id'], {"nome": "Desconhecido", "funcao": "-"})
                 nome = dados_colab['nome']
@@ -121,13 +151,9 @@ with tab_apontamento:
                 status_atual = conv.get("status", "Presente")
                 idx = opcoes_status.index(status_atual) if status_atual in opcoes_status else 0
                 
-                # Exibe Nome e Função
                 st.markdown(f"**{nome}** &nbsp; {cor} `{funcao}`")
-                
-                # Botões de Status
                 status_sel = st.radio("Status", opcoes_status, index=idx, key=f"status_{c_id}", horizontal=True, label_visibility="collapsed")
                 
-                # Sanfona Oculta para Extras e Observações (Mantém a tela limpa no celular)
                 with st.expander("💸 Inserir Extra ou Observação"):
                     val_atual = float(conv.get("valor_extra") or 0.0)
                     obs_atual = conv.get("observacao") or ""
@@ -138,7 +164,7 @@ with tab_apontamento:
                 alteracoes[c_id] = {"status": status_sel, "valor_extra": val_extra, "observacao": obs}
                 st.divider()
             
-            if st.form_submit_button("Salvar Apontamentos", type="primary", use_container_width=True):
+            if st.form_submit_button("Salvar Apontamentos desta Obra", type="primary", use_container_width=True):
                 try:
                     for c_id, dados in alteracoes.items():
                         supabase.table("convocacoes").update(dados).eq("id", c_id).execute()
@@ -158,7 +184,6 @@ with tab_relatorios:
     if st.button("Gerar PDF de Custos/Apontamento"):
         try:
             dados_relatorio = supabase.table("convocacoes").select("*").eq("engenheiro", eng_relatorio).eq("data", hoje).execute().data
-            
             if not dados_relatorio:
                 st.warning("Sem apontamentos hoje.")
             else:
@@ -172,13 +197,15 @@ with tab_relatorios:
                 
                 for row in dados_relatorio:
                     colab = dict_colaboradores.get(row['colaborador_id'], {})
+                    dados_ob = dict_obras.get(row['obra_id'], {"nome": "N/A", "unidade": "N/A"})
+                    
                     nome = colab.get('nome', 'N/A')
                     status = row.get('status', 'N/A')
                     extra = row.get('valor_extra', 0)
                     obs = row.get('observacao', '')
                     
                     pdf.set_font("Arial", 'B', 10)
-                    pdf.cell(0, 8, txt=f"Colaborador: {nome}", ln=True)
+                    pdf.cell(0, 8, txt=f"Colaborador: {nome} | Obra: {dados_ob['unidade']} - {dados_ob['nome']}", ln=True)
                     pdf.set_font("Arial", '', 10)
                     pdf.cell(0, 6, txt=f"Status: {status} | Bonificacao/Extra: R$ {extra:.2f}", ln=True)
                     if obs:
@@ -189,18 +216,75 @@ with tab_relatorios:
                 pdf_bytes = pdf.output(dest='S').encode('latin1')
                 st.download_button(label="📥 Baixar Relatório", data=pdf_bytes, file_name=f"Relatorio_{eng_relatorio}.pdf", mime="application/pdf")
         except Exception as e:
-            st.error("Erro ao gerar PDF.")
+            st.error(f"Erro ao gerar PDF: {e}")
 
 # ==========================================
-# ABA 4: IMPORTAR COLABORADORES (ATUALIZADA C/ FINANCEIRO)
+# ABA 4: CONFIGURAÇÕES E IMPORTAÇÕES
 # ==========================================
 with tab_config:
-    st.markdown("### 📥 Sincronizar Base de Colaboradores")
-    st.info("O sistema agora lê 'VALOR DIÁRIA' e 'PASSAGEM' da planilha.")
-    arquivo_excel = st.file_uploader("Selecione a planilha", type=["xlsx"])
+    # --- IMPORTAÇÃO DO JSON DO TRELLO ---
+    st.markdown("### 📋 Sincronizar Obras (Trello JSON)")
+    st.info("O sistema buscará apenas os cards da lista 'EM EXECUÇÃO' e separará a Unidade do Nome da Obra automaticamente.")
+    arquivo_json = st.file_uploader("Selecione o arquivo JSON do Trello", type=["json"], key="json_trello")
+    
+    if arquivo_json is not None:
+        if st.button("🔄 Importar Obras em Execução", type="primary"):
+            with st.spinner("Analisando Trello..."):
+                try:
+                    trello_data = json.load(arquivo_json)
+                    list_execucao_id = None
+                    
+                    # Localiza o ID da lista "EM EXECUÇÃO"
+                    for lst in trello_data.get('lists', []):
+                        if lst.get('name', '').upper() == 'EM EXECUÇÃO' and not lst.get('closed', False):
+                            list_execucao_id = lst.get('id')
+                            break
+                    
+                    if not list_execucao_id:
+                        st.error("❌ Lista 'EM EXECUÇÃO' não encontrada no arquivo.")
+                    else:
+                        cards = [c for c in trello_data.get('cards', []) if c.get('idList') == list_execucao_id and not c.get('closed', False)]
+                        novas_obras = []
+                        
+                        for c in cards:
+                            nome_card = c.get('name', '')
+                            # Corta a string pela barra vertical "|"
+                            partes = [p.strip() for p in nome_card.split('|')]
+                            
+                            if len(partes) >= 2:
+                                nome_obra = partes[0]
+                                unidade_obra = partes[1]
+                            else:
+                                nome_obra = nome_card
+                                unidade_obra = "GERAL"
+                            
+                            novas_obras.append({"unidade": unidade_obra, "nome": nome_obra})
+                        
+                        if novas_obras:
+                            # Compara com o banco para não duplicar obras que já entraram antes
+                            existentes = supabase.table("obras").select("unidade, nome").execute().data
+                            set_existentes = {f"{o['unidade']} - {o['nome']}" for o in existentes}
+                            
+                            inserir = [o for o in novas_obras if f"{o['unidade']} - {o['nome']}" not in set_existentes]
+                            
+                            if inserir:
+                                supabase.table("obras").insert(inserir).execute()
+                                st.success(f"🎉 {len(inserir)} novas obras cadastradas com sucesso!")
+                            else:
+                                st.info("👍 Nenhuma obra nova detectada. O banco já estava atualizado.")
+                        else:
+                            st.warning("⚠️ A lista 'EM EXECUÇÃO' está vazia no Trello.")
+                except Exception as e:
+                    st.error(f"Erro ao processar JSON: {e}")
+    
+    st.divider()
+    
+    # --- IMPORTAÇÃO DO EXCEL DOS COLABORADORES ---
+    st.markdown("### 📥 Sincronizar Base de Colaboradores (Excel)")
+    arquivo_excel = st.file_uploader("Selecione a planilha Excel", type=["xlsx"], key="excel_colab")
     
     if arquivo_excel is not None:
-        if st.button("🔄 Importar e Atualizar", type="primary"):
+        if st.button("🔄 Importar e Atualizar Colaboradores", type="secondary"):
             with st.spinner("Lendo custos e atualizando banco..."):
                 try:
                     df = pd.read_excel(arquivo_excel, sheet_name="Base de dados")
@@ -211,7 +295,6 @@ with tab_config:
                         nome_excel = str(row.get('NOME', '')).strip()
                         funcao_excel = str(row.get('FUNÇÃO', '')).strip()
                         
-                        # Extrai valores financeiros tratando erros caso a célula esteja vazia (NaN)
                         try: diaria = float(row.get('VALOR DIÁRIA (R$)', 0))
                         except: diaria = 0.0
                         
