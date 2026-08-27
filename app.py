@@ -8,6 +8,8 @@ import unicodedata
 import re
 import os
 import io
+import openpyxl
+from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 
 # --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR (WIDE - ESCURO / COMPACTO) ---
 st.set_page_config(page_title="APROAR - Controle de Presenças", page_icon="👷", layout="wide")
@@ -634,7 +636,7 @@ else:
         else:
             st.warning("Nenhuma equipe convocada para este engenheiro nesta data.")
 
-    # 4. RELATÓRIOS (PDF E EXCEL ORGANIZADO)
+    # 4. RELATÓRIOS (PDF E EXCEL PROFISSIONAL)
     elif menu_escolhido == "📊 RELATÓRIOS":
         st.markdown("## 📊 RELATÓRIO DE CUSTOS E FECHAMENTO")
         col_rel_eng, _ = st.columns(2)
@@ -767,7 +769,69 @@ else:
                         buffer = io.BytesIO()
                         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
                             df_excel.to_excel(writer, index=False, sheet_name='Relatório de Custos')
-                        excel_bytes = buffer.getvalue()
+                        
+                        # --- ESTILIZAÇÃO PROFISSIONAL COM OPENPYXL (PADRÃO APROAR) ---
+                        buffer.seek(0)
+                        wb = openpyxl.load_workbook(buffer)
+                        ws = wb.active
+                        
+                        header_fill = PatternFill(start_color="2563EB", end_color="2563EB", fill_type="solid")
+                        header_font = Font(name="Calibri", size=11, bold=True, color="FFFFFF")
+                        data_font = Font(name="Calibri", size=10, color="000000")
+                        alt_fill = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
+                        white_fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+                        
+                        thin_border = Border(
+                            left=Side(style='thin', color='CBD5E1'),
+                            right=Side(style='thin', color='CBD5E1'),
+                            top=Side(style='thin', color='CBD5E1'),
+                            bottom=Side(style='thin', color='CBD5E1')
+                        )
+                        
+                        # Formatar Cabeçalhos
+                        for col_num in range(1, len(df_excel.columns) + 1):
+                            cell = ws.cell(row=1, column=col_num)
+                            cell.fill = header_fill
+                            cell.font = header_font
+                            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                            cell.border = thin_border
+                        ws.row_dimensions[1].height = 28
+
+                        # Formatar Linhas de Dados, Alinhamentos e Moedas
+                        currency_format = 'R$ #,##0.00'
+                        for row_num in range(2, len(df_excel) + 2):
+                            is_alt = (row_num % 2 == 0)
+                            row_fill = alt_fill if is_alt else white_fill
+                            ws.row_dimensions[row_num].height = 20
+                            
+                            for col_num in range(1, len(df_excel.columns) + 1):
+                                cell = ws.cell(row=row_num, column=col_num)
+                                cell.font = data_font
+                                cell.fill = row_fill
+                                cell.border = thin_border
+                                
+                                col_name = df_excel.columns[col_num - 1]
+                                if col_name in ["Diária (R$)", "Extra (R$)", "Custo Total (R$)"]:
+                                    cell.number_format = currency_format
+                                    cell.alignment = Alignment(horizontal="right", vertical="center")
+                                elif col_name in ["Data", "Status"]:
+                                    cell.alignment = Alignment(horizontal="center", vertical="center")
+                                else:
+                                    cell.alignment = Alignment(horizontal="left", vertical="center")
+
+                        # Auto-ajustar largura das colunas
+                        for col in ws.columns:
+                            max_len = 0
+                            col_letter = col[0].column_letter
+                            for cell in col:
+                                val_str = str(cell.value or '')
+                                if len(val_str) > max_len:
+                                    max_len = len(val_str)
+                            ws.column_dimensions[col_letter].width = max(max_len + 4, 14)
+
+                        final_buffer = io.BytesIO()
+                        wb.save(final_buffer)
+                        excel_bytes = final_buffer.getvalue()
 
                         st.download_button(
                             label="📥 Baixar Planilha Excel (.xlsx)",
