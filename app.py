@@ -134,6 +134,53 @@ dict_obras = {o['id']: o for o in obras} if obras else {}
 
 ENGENHEIROS = ["EDUARDO", "GABRIEL", "GUSTAVO", "JOEL", "NETO", "PAULO", "SOARES", "VICTOR"]
 
+# --- FUNÇÃO AUXILIAR PARA RENDERIZAR A ABA DE DISPONIBILIDADE ---
+def render_aba_disponibilidade(key_suffix=""):
+    st.markdown("### 👥 Disponibilidade de Equipe por Função")
+    st.write("Consulte quem já está convocado e quem está disponível (sobrando) para o dia selecionado.")
+    
+    data_disp = st.date_input("Verificar disponibilidade para a data:", value=datetime.date.today() + datetime.timedelta(days=1), format="DD/MM/YYYY", key=f"data_disp_{key_suffix}")
+    
+    try:
+        convs_disp = supabase.table("convocacoes").select("*").eq("data", data_disp.isoformat()).execute().data
+    except:
+        convs_disp = []
+        
+    ids_ocupados = {c['colaborador_id'] for c in convs_disp}
+    funcoes = sorted(list(set([c['funcao'] for c in colaboradores])))
+    
+    if not funcoes:
+        st.info("Nenhum colaborador cadastrado.")
+        return
+
+    for func in funcoes:
+        with st.expander(f"🔹 {func}"):
+            colabs_func = [c for c in colaboradores if c['funcao'] == func]
+            ocupados_func = [c for c in colabs_func if c['id'] in ids_ocupados]
+            disponiveis_func = [c for c in colabs_func if c['id'] not in ids_ocupados]
+            
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown(f"**🔴 Convocados ({len(ocupados_func)})**")
+                if ocupados_func:
+                    for oc in ocupados_func:
+                        conv_info = next((item for item in convs_disp if item['colaborador_id'] == oc['id']), None)
+                        obra_nome = "Obra"
+                        if conv_info:
+                            ob_inf = dict_obras.get(conv_info['obra_id'], {})
+                            obra_nome = f"{ob_inf.get('unidade','')} - {ob_inf.get('nome','')}"
+                        st.markdown(f"• {oc['nome']} <br><small style='color:#94A3B8;'>({obra_nome})</small>", unsafe_allow_html=True)
+                else:
+                    st.caption("Nenhum convocado nesta função.")
+                    
+            with c2:
+                st.markdown(f"**🟢 Disponíveis / Sobrando ({len(disponiveis_func)})**")
+                if disponiveis_func:
+                    for disp in disponiveis_func:
+                        st.markdown(f"• {disp['nome']}")
+                else:
+                    st.caption("Nenhum disponível nesta função.")
+
 # --- VERIFICAÇÃO DE MODO (CAMPO vs ADM) ---
 parametros_url = st.query_params
 modo_campo = parametros_url.get("modo") == "campo"
@@ -141,7 +188,9 @@ modo_campo = parametros_url.get("modo") == "campo"
 if modo_campo:
     # VISÃO ESSENCIAL DO ENGENHEIRO NO CELULAR
     st.title("👷 APROAR - Campo")
-    tab_apontamento_campo, tab_convocacao_campo = st.tabs(["✅ Apontamento de Hoje", "📋 Convocação para Amanhã"])
+    tab_apontamento_campo, tab_convocacao_campo, tab_disp_campo = st.tabs([
+        "✅ Apontamento Hoje", "📋 Convocação Amanhã", "👥 Disponibilidade"
+    ])
     
     # --- ABA APONTAMENTO CAMPO ---
     with tab_apontamento_campo:
@@ -199,7 +248,7 @@ if modo_campo:
         if obras and colaboradores:
             engenheiro_conv = st.selectbox("Seu Nome:", ENGENHEIROS, key="eng_c_conv")
             amanha = datetime.date.today() + datetime.timedelta(days=1)
-            st.write(f"📅 Convocando para: {amanha.strftime('%d/%m/%Y')}")
+            data_conv = st.date_input("Data da Obra/Serviço:", value=amanha, format="DD/MM/YYYY", key="d_c_campo")
             
             unidades_unicas = sorted(list(set([o['unidade'] for o in obras])))
             unidade_selecionada = st.selectbox("Unidade:", unidades_unicas, key="u_c_sel")
@@ -210,9 +259,26 @@ if modo_campo:
             funcoes_disponiveis = sorted(list(set([c['funcao'] for c in colaboradores])))
             frente_selecionada = st.selectbox("Função:", funcoes_disponiveis, key="f_c_sel")
 
+            # Panorama em tempo real: Mostra quem já foi convocado para esta data
+            st.markdown(f"--- \n#### 👁️ Panorama: Já convocados para {data_conv.strftime('%d/%m/%Y')}")
+            try:
+                convs_data = supabase.table("convocacoes").select("*").eq("data", data_conv.isoformat()).execute().data
+            except:
+                convs_data = []
+            if convs_data:
+                ids_ja_alocados = {c['colaborador_id'] for c in convs_data}
+                alocados_nesta_funcao = [c for c in colaboradores if c['funcao'] == frente_selecionada and c['id'] in ids_ja_alocados]
+                if alocados_nesta_funcao:
+                    st.markdown(f"*Nesta função ({frente_selecionada}) já estão escalados:* " + ", ".join([c['nome'] for c in alocados_nesta_funcao]))
+                else:
+                    st.caption(f"Nenhum colaborador alocado nesta função para o dia {data_conv.strftime('%d/%m/%Y')}.")
+            else:
+                st.caption("Nenhuma convocação registrada para esta data ainda.")
+            st.markdown("---")
+
             colaboradores_filtrados = [c for c in colaboradores if c['funcao'] == frente_selecionada]
             opcoes_colaboradores = {c['nome']: c['id'] for c in colaboradores_filtrados}
-            equipe_selecionada = st.multiselect("Colaboradores:", list(opcoes_colaboradores.keys()), key="eq_c_sel")
+            equipe_selecionada = st.multiselect("Selecione para convocar:", list(opcoes_colaboradores.keys()), key="eq_c_sel")
 
             if st.button("Convocação Rápida", type="primary", use_container_width=True):
                 if not equipe_selecionada:
@@ -221,22 +287,27 @@ if modo_campo:
                     obra_id = obras_da_unidade[obra_selecionada]
                     dados_insercao = [{
                         "obra_id": obra_id, "colaborador_id": opcoes_colaboradores[nome],
-                        "data": amanha.isoformat(), "engenheiro": engenheiro_conv,
+                        "data": data_conv.isoformat(), "engenheiro": engenheiro_conv,
                         "status": "Presente", "valor_extra": 0, "observacao": ""
                     } for nome in equipe_selecionada]
                     try:
                         supabase.table("convocacoes").insert(dados_insercao).execute()
                         st.success("✅ Convocado com sucesso!")
+                        st.rerun()
                     except:
                         st.error("Erro: Colaborador já possui convocação neste dia.")
         else:
             st.info("Aguardando cadastro de obras/colaboradores pela administração.")
 
+    # --- ABA DISPONIBILIDADE CAMPO ---
+    with tab_disp_campo:
+        render_aba_disponibilidade("campo")
+
 else:
     # VISÃO COMPLETA DO ADMINISTRATIVO (PAINEL GERAL)
     st.title("👷 APROAR - Painel Administrativo")
-    tab_convocacao, tab_apontamento, tab_relatorios, tab_indicadores, tab_config = st.tabs([
-        "📋 Convocação", "✅ Apontamento", "📊 Relatório", "📈 Indicadores", "⚙️ Config"
+    tab_convocacao, tab_apontamento, tab_relatorios, tab_indicadores, tab_disp_adm, tab_config = st.tabs([
+        "📋 Convocação", "✅ Apontamento", "📊 Relatório", "📈 Indicadores", "👥 Disponibilidade", "⚙️ Config"
     ])
 
     # ==========================================
@@ -263,6 +334,24 @@ else:
             st.markdown("### Montar Equipe")
             funcoes_disponiveis = sorted(list(set([c['funcao'] for c in colaboradores])))
             frente_selecionada = st.selectbox("Frente de Trabalho:", funcoes_disponiveis)
+
+            # Panorama em tempo real para o ADM
+            st.markdown(f"--- \n#### 👁️ Panorama: Já convocados para {data_conv.strftime('%d/%m/%Y')}")
+            try:
+                convs_data = supabase.table("convocacoes").select("*").eq("data", data_conv.isoformat()).execute().data
+            except:
+                convs_data = []
+            if convs_data:
+                ids_ja_alocados = {c['colaborador_id'] for c in convs_data}
+                alocados_nesta_funcao = [c for c in colaboradores if c['funcao'] == frente_selecionada and c['id'] in ids_ja_alocados]
+                if alocados_nesta_funcao:
+                    st.markdown(f"*Nesta função ({frente_selecionada}) já estão escalados:* " + ", ".join([c['nome'] for c in alocados_nesta_funcao]))
+                else:
+                    st.caption(f"Nenhum colaborador alocado nesta função para o dia {data_conv.strftime('%d/%m/%Y')}.")
+            else:
+                st.caption("Nenhuma convocação registrada para esta data ainda.")
+            st.markdown("---")
+
             colaboradores_filtrados = [c for c in colaboradores if c['funcao'] == frente_selecionada]
             opcoes_colaboradores = {c['nome']: c['id'] for c in colaboradores_filtrados}
             equipe_selecionada = st.multiselect("Selecione os colaboradores para esta frente:", list(opcoes_colaboradores.keys()))
@@ -280,6 +369,7 @@ else:
                     try:
                         supabase.table("convocacoes").insert(dados_insercao).execute()
                         st.success(f"✅ Equipe convocada com sucesso para {data_conv.strftime('%d/%m/%Y')}!")
+                        st.rerun()
                     except:
                         st.error("❌ Erro: Colaborador já convocado para outra obra neste dia.")
         else:
@@ -483,7 +573,13 @@ else:
             st.error(f"Erro: {e}")
 
     # ==========================================
-    # ABA 5: CONFIGURAÇÕES (ADM)
+    # ABA 5: DISPONIBILIDADE (ADM)
+    # ==========================================
+    with tab_disp_adm:
+        render_aba_disponibilidade("adm")
+
+    # ==========================================
+    # ABA 6: CONFIGURAÇÕES (ADM)
     # ==========================================
     with tab_config:
         st.markdown("### 📋 Sincronizar Obras (Trello JSON)")
@@ -492,7 +588,7 @@ else:
             trello_data = json.load(arquivo_json)
             list_id = next((lst['id'] for lst in trello_data.get('lists', []) if lst.get('name', '').upper() == 'EM EXECUÇÃO'), None)
             if list_id:
-                cards = [c for c in trello_data.get('cards', []) if c.get('idList') == list_id]
+                cards = [c for c in trello_data.get('cards', []) if c.get('idList'] == list_id]
                 novas_obras = [{"unidade": identificar_unidade(c.get('name', '')), "nome": c.get('name', '').split('|')[0].strip()} for c in cards]
                 existentes = {f"{o['unidade']} - {o['nome']}" for o in supabase.table("obras").select("unidade, nome").execute().data}
                 inserir = [o for o in novas_obras if f"{o['unidade']} - {o['nome']}" not in existentes]
