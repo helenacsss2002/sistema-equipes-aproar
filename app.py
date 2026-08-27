@@ -753,20 +753,20 @@ else:
                             ob = dict_obras.get(row['obra_id'], {"nome": "N/A", "unidade": "N/A"})
                             colab = dict_colaboradores.get(row['colaborador_id'], {})
                             status = row.get('status', 'Presente (Integral)')
-                            diaria_calc = calcular_diaria_proporcional(status, colab.get('valor_diaria'))
+                            diaria_calc = float(calcular_diaria_proporcional(status, colab.get('valor_diaria')))
                             extra = float(row.get('valor_extra') or 0.0)
                             
                             lista_excel.append({
-                                "Data": row.get('data'),
-                                "Engenheiro": row.get('engenheiro', 'N/A'),
-                                "Unidade": ob['unidade'],
-                                "Obra": ob['nome'],
-                                "Colaborador": colab.get('nome', 'N/A'),
-                                "Função": colab.get('funcao', 'N/A'),
-                                "Status": status,
-                                "Diária (R$)": diaria_calc,
-                                "Extra (R$)": extra,
-                                "Observação": row.get('observacao', '')
+                                "Data": str(row.get('data')),
+                                "Engenheiro": str(row.get('engenheiro', 'N/A')),
+                                "Unidade": str(ob['unidade']),
+                                "Obra": str(ob['nome']),
+                                "Colaborador": str(colab.get('nome', 'N/A')),
+                                "Funcao": str(colab.get('funcao', 'N/A')),
+                                "Status": str(status),
+                                "Diaria": diaria_calc,
+                                "Extra": extra,
+                                "Observacao": str(row.get('observacao', ''))
                             })
                         
                         df_excel = pd.DataFrame(lista_excel)
@@ -841,8 +841,8 @@ else:
                                         celula_custo_formula = f"=E{current_row}+F{current_row}"
                                         
                                         linha_dados = [
-                                            r["Colaborador"], r["Função"], r["Engenheiro"], r["Status"],
-                                            r["Diária (R$)"], r["Extra (R$)"], celula_custo_formula, r["Observação"]
+                                            r["Colaborador"], r["Funcao"], r["Engenheiro"], r["Status"],
+                                            r["Diaria"], r["Extra"], celula_custo_formula, r["Observacao"]
                                         ]
                                         
                                         for c_idx, val in enumerate(linha_dados, 1):
@@ -876,7 +876,6 @@ else:
                                 max_len = 0
                                 col_letter = openpyxl.utils.get_column_letter(col[0].column)
                                 for cell in col:
-                                    # Ignora linhas de título principal e de unidade/obra para não inflar a largura
                                     if cell.row in [1, 2, 3] or (cell.value and str(cell.value).startswith("UNIDADE:")):
                                         continue
                                     if cell.value:
