@@ -9,9 +9,9 @@ import re
 import os
 
 # --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR (WIDE) ---
-st.set_page_config(page_title="APROAR - Torre de Controle", page_icon="👷", layout="wide")
+st.set_page_config(page_title="APROAR - Controle de Presenças", page_icon="👷", layout="wide")
 
-# CSS Moderno, limpo e corporativo (Remoção das bolinhas do menu lateral e melhorias visuais)
+# CSS Moderno, limpo e corporativo
 st.markdown("""
     <style>
     .stApp {
@@ -22,35 +22,12 @@ st.markdown("""
         color: #F8FAFC !important;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
-    
-    /* --- SIDEBAR MODERNA & ELEGANTE --- */
+    /* Sidebar Moderna */
     section[data-testid="stSidebar"] {
         background-color: #050814 !important;
         border-right: 1px solid #1E293B;
-        padding-top: 10px;
+        padding-top: 15px;
     }
-    
-    /* Remove as bolinhas (radio indicators) do menu lateral e transforma em botões limpos */
-    section[data-testid="stSidebar"] div[role="radiogroup"] label div:first-child {
-        display: none !important;
-    }
-    section[data-testid="stSidebar"] div[role="radiogroup"] label {
-        background-color: transparent;
-        border-radius: 8px;
-        padding: 10px 14px;
-        margin: 6px 0;
-        width: 100%;
-        display: flex;
-        align-items: center;
-        cursor: pointer;
-        transition: all 0.2s ease;
-        border: 1px solid transparent;
-    }
-    section[data-testid="stSidebar"] div[role="radiogroup"] label:hover {
-        background-color: #111836 !important;
-        border-color: #2563EB !important;
-    }
-    
     /* Inputs e Selects Sleek */
     div[data-baseweb="select"] > div, 
     div[data-baseweb="base-input"] > div, 
@@ -76,8 +53,7 @@ st.markdown("""
         background-color: #2563EB !important;
         color: #FFFFFF !important;
     }
-    
-    /* Botões Modernos */
+    /* Botões Principais */
     .stButton > button {
         background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%) !important;
         color: #FFFFFF !important;
@@ -87,12 +63,12 @@ st.markdown("""
         padding: 0.5rem 1rem;
         box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
         transition: all 0.3s ease;
+        width: 100%;
     }
     .stButton > button:hover {
         transform: translateY(-1px);
         box-shadow: 0 6px 16px rgba(37, 99, 235, 0.4);
     }
-    
     /* Containers com Efeito de Elevação */
     div[data-testid="stVerticalBlock"] > div[style*="border"] {
         background-color: #0F172A !important;
@@ -374,22 +350,30 @@ else:
     # TORRE DE CONTROLE ADMINISTRATIVA (MODERNA)
     # ==========================================
     
-    # --- MENU LATERAL (SIDEBAR) ---
+    # Gerenciamento de estado para os botões do menu lateral
+    if "menu_ativo" not in st.session_state:
+        st.session_state.menu_ativo = "🎛️ Dashboard"
+
+    # --- MENU LATERAL (SIDEBAR COM BOTÕES MODERNOS) ---
     with st.sidebar:
         if os.path.exists("logo.png"):
             st.image("logo.png", use_container_width=True)
         else:
             st.markdown("<h2 style='text-align: center; color: white; letter-spacing: 2px;'>APROAR</h2>", unsafe_allow_html=True)
         
-        st.markdown("<p style='text-align: center; color: #60A5FA; font-size: 0.8rem; font-weight: bold; margin-bottom: 20px;'>TORRE DE CONTROLE</p>", unsafe_allow_html=True)
+        st.markdown("<div style='margin-bottom: 20px;'></div>", unsafe_allow_html=True)
         
-        menu_escolhido = st.radio(
-            "Navegação",
-            ["🎛️ Dashboard", "📋 Convocação", "✅ Apontamento", "📊 Relatórios", "📈 Indicadores", "👥 Disponibilidade", "⚙️ Configurações"],
-            label_visibility="collapsed"
-        )
+        itens_menu = ["🎛️ Dashboard", "📋 Convocação", "✅ Apontamento", "📊 Relatórios", "📈 Indicadores", "👥 Disponibilidade", "⚙️ Configurações"]
+        
+        for item in itens_menu:
+            if st.button(item, key=f"btn_nav_{item}", use_container_width=True):
+                st.session_state.menu_ativo = item
+                st.rerun()
+
         st.markdown("---")
         st.caption("APROAR Engenharia © 2026")
+
+    menu_escolhido = st.session_state.menu_ativo
 
     # --- CONTEÚDO PRINCIPAL (ÁREA WIDE) ---
 
