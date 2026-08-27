@@ -10,7 +10,7 @@ import re
 # --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR ---
 st.set_page_config(page_title="App Obras - APROAR", page_icon="👷", layout="centered")
 
-# Injeção de CSS para corrigir cores, contrastes e elementos visuais no modo escuro
+# CSS Ajustado para forçar o fundo escuro nos inputs, seletores e multiselects
 st.markdown("""
     <style>
     /* Fundo geral e fontes */
@@ -22,15 +22,31 @@ st.markdown("""
         color: #F8FAFC !important;
     }
     
-    /* Correção de Inputs, Selectboxes e Multiselects */
-    div[data-baseweb="select"] > div, div[data-baseweb="base-input"] > div, input, textarea {
+    /* Fundo das caixas de input, selectbox e data */
+    div[data-baseweb="select"] > div, 
+    div[data-baseweb="base-input"] > div, 
+    div[data-baseweb="input"] > div,
+    input, textarea, div[role="combobox"] {
         background-color: #161B3D !important;
         color: #FFFFFF !important;
         border-color: #2D3568 !important;
     }
     
-    /* Tags / Pílulas do Multiselect */
-    span[data-baseweb="tag"] {
+    /* Dropdowns e listas suspensas */
+    ul[data-baseweb="menu"], div[data-baseweb="popover"] {
+        background-color: #161B3D !important;
+        color: #FFFFFF !important;
+    }
+    li[role="option"] {
+        background-color: #161B3D !important;
+        color: #FFFFFF !important;
+    }
+    li[role="option"]:hover {
+        background-color: #2563EB !important;
+    }
+    
+    /* Caixa interna do Multiselect (onde ficam os itens selecionados) */
+    div[data-baseweb="tag"] {
         background-color: #2563EB !important;
         color: #FFFFFF !important;
     }
@@ -133,7 +149,6 @@ ENGENHEIROS = ["EDUARDO", "GABRIEL", "GUSTAVO", "JOEL", "NETO", "PAULO", "SOARES
 
 st.title("👷 APROAR - Gestão de Equipes")
 
-# Navegação por Abas (incluindo a nova aba de Indicadores)
 tab_convocacao, tab_apontamento, tab_relatorios, tab_indicadores, tab_config = st.tabs([
     "📋 Convocação", "✅ Apontamento", "📊 Relatório", "📈 Indicadores", "⚙️ Config"
 ])
@@ -195,7 +210,7 @@ with tab_convocacao:
         st.info("Cadastre obras (JSON) e colaboradores (Excel) na aba Configurações.")
 
 # ==========================================
-# ABA 2: APONTAMENTOS (SALVAMENTO EM TEMPO REAL)
+# ABA 2: APONTAMENTOS
 # ==========================================
 with tab_apontamento:
     st.markdown("### Apontamento Diário (Salvo em Tempo Real)")
@@ -261,12 +276,12 @@ with tab_apontamento:
         st.warning(f"Nenhuma equipe convocada por {engenheiro_apont} para o dia {data_apont.strftime('%d/%m/%Y')}.")
 
 # ==========================================
-# ABA 3: RELATÓRIOS (DIÁRIO, SEMANAL, MENSAL)
+# ABA 3: RELATÓRIOS
 # ==========================================
 with tab_relatorios:
     st.markdown("### 📊 Relatório de Custos e Apontamentos")
     col_rel_eng, col_rel_tipo = st.columns(2)
-    with col_eng:
+    with col_rel_eng:
         opcoes_relatorio = ["TODOS OS ENGENHEIROS"] + ENGENHEIROS
         eng_relatorio = st.selectbox("Engenheiro:", opcoes_relatorio, key="eng_rel")
     with col_rel_tipo:
@@ -393,21 +408,18 @@ with tab_relatorios:
             st.error(f"Erro ao gerar relatório: {e}")
 
 # ==========================================
-# ABA 4: INDICADORES E RANKINGS (NOVA ABA ADM)
+# ABA 4: INDICADORES E RANKINGS
 # ==========================================
 with tab_indicadores:
     st.markdown("### 📈 Painel Administrativo de Indicadores")
     st.write("Acompanhe o ranking dos colaboradores com maior incidência de faltas, atestados e presenças.")
     
     try:
-        # Busca todas as convocações e colaboradores para análise
         all_conv = supabase.table("convocacoes").select("*").execute().data
         if not all_conv:
             st.info("Ainda não há dados de apontamentos suficientes para gerar os rankings.")
         else:
             df_conv = pd.DataFrame(all_conv)
-            
-            # Mapeia o nome do colaborador
             df_conv['nome_colab'] = df_conv['colaborador_id'].map(lambda cid: dict_colaboradores.get(cid, {}).get('nome', 'Desconhecido'))
             df_conv['funcao_colab'] = df_conv['colaborador_id'].map(lambda cid: dict_colaboradores.get(cid, {}).get('funcao', 'Desconhecido'))
 
