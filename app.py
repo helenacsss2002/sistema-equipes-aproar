@@ -1,3 +1,4 @@
+import json
 import re
 import unicodedata
 from datetime import date
@@ -11,7 +12,7 @@ import streamlit as st
 # CONFIGURAÇÃO
 # ============================================================
 
-BUILD = "PROTOTIPO-TRELLO-PUBLICO-2026-08-27"
+BUILD = "PROTOTIPO-TRELLO-JSON-MANUAL-2026-08-27"
 
 TRELLO_SHORTLINK = "TX8hGvmI"
 
@@ -22,7 +23,7 @@ st.set_page_config(
 )
 
 
-TRELLO_JSON_URLS = [
+TRELLO_PUBLIC_URLS = [
     f"https://trello.com/b/{TRELLO_SHORTLINK}.json",
     f"https://trello.com/b/{TRELLO_SHORTLINK}/orcamentos.json",
 ]
@@ -125,7 +126,7 @@ st.markdown(
             margin-top: 8px;
         }
 
-        .trello-ok {
+        .fonte-ok {
             padding: 9px 12px;
             border-radius: 9px;
             background: rgba(34,197,94,.07);
@@ -402,12 +403,12 @@ def extrair_titulo(
 
 
 # ============================================================
-# TRELLO PÚBLICO
+# PROCESSAMENTO DO JSON DO TRELLO
 # ============================================================
 
 def parsear_card(
     card,
-    lista,
+    nome_lista,
 ):
 
     nome = str(
@@ -495,10 +496,191 @@ def parsear_card(
             ),
 
         "lista":
-            lista,
+            nome_lista,
 
     }
 
+
+def processar_json_trello(
+    dados,
+):
+
+    if not isinstance(
+        dados,
+        dict,
+    ):
+
+        raise ValueError(
+            "O arquivo enviado não parece ser "
+            "um JSON de quadro do Trello."
+        )
+
+
+    listas_json = dados.get(
+        "lists",
+        [],
+    )
+
+
+    cards_json = dados.get(
+        "cards",
+        [],
+    )
+
+
+    if (
+        not isinstance(
+            listas_json,
+            list,
+        )
+        or
+        not isinstance(
+            cards_json,
+            list,
+        )
+    ):
+
+        raise ValueError(
+            "O JSON não possui as estruturas "
+            "'lists' e 'cards' esperadas."
+        )
+
+
+    nomes_validos = {
+        normalizar(
+            nome
+        )
+        for nome in (
+            LISTAS_OBRAS_ATIVAS
+        )
+    }
+
+
+    listas_validas = {
+
+        str(
+            lista.get(
+                "id"
+            )
+        ):
+        str(
+            lista.get(
+                "name",
+                "",
+            )
+        ).strip()
+
+        for lista in listas_json
+
+        if (
+            not lista.get(
+                "closed"
+            )
+            and
+            normalizar(
+                lista.get(
+                    "name",
+                    "",
+                )
+            )
+            in nomes_validos
+        )
+    }
+
+
+    if not listas_validas:
+
+        raise ValueError(
+            "O JSON foi lido, mas não encontrei "
+            "as listas 'EM EXECUÇÃO' ou "
+            "'APROVADO - AGUARDANDO EXECUÇÃO'."
+        )
+
+
+    obras = []
+
+
+    for card in cards_json:
+
+        if card.get(
+            "closed"
+        ):
+
+            continue
+
+
+        id_lista = str(
+            card.get(
+                "idList",
+                "",
+            )
+        )
+
+
+        if id_lista not in listas_validas:
+
+            continue
+
+
+        item = parsear_card(
+            card,
+            listas_validas[
+                id_lista
+            ],
+        )
+
+
+        if item:
+
+            obras.append(
+                item
+            )
+
+
+    df = pd.DataFrame(
+        obras,
+        columns=[
+            "trello_card_id",
+            "short_link",
+            "nome_trello",
+            "obra",
+            "titulo",
+            "unidade",
+            "pipe",
+            "lista",
+        ],
+    )
+
+
+    if not df.empty:
+
+        df = (
+            df
+            .drop_duplicates(
+                subset=[
+                    "trello_card_id"
+                ]
+            )
+            .sort_values(
+                [
+                    "unidade",
+                    "obra",
+                    "titulo",
+                ],
+                kind="stable",
+            )
+            .reset_index(
+                drop=True
+            )
+        )
+
+
+    return df
+
+
+# ============================================================
+# TENTATIVA DE LEITURA PÚBLICA
+# ============================================================
 
 @st.cache_data(
     ttl=60,
@@ -509,7 +691,7 @@ def carregar_trello_publico():
     ultimo_erro = ""
 
 
-    for url in TRELLO_JSON_URLS:
+    for url in TRELLO_PUBLIC_URLS:
 
         try:
 
@@ -530,156 +712,12 @@ def carregar_trello_publico():
             resposta.raise_for_status()
 
 
-            if not (
-                resposta.text
-                .lstrip()
-                .startswith("{")
-            ):
-
-                raise RuntimeError(
-                    "O Trello respondeu sem JSON. "
-                    "Isso normalmente significa que "
-                    "o quadro não está público."
-                )
-
-
             dados = resposta.json()
 
 
-            listas_validas = {
-                normalizar(
-                    nome
-                )
-                for nome in (
-                    LISTAS_OBRAS_ATIVAS
-                )
-            }
-
-
-            listas = {
-
-                str(
-                    item.get(
-                        "id"
-                    )
-                ):
-                str(
-                    item.get(
-                        "name",
-                        "",
-                    )
-                ).strip()
-
-                for item in dados.get(
-                    "lists",
-                    [],
-                )
-
-                if (
-                    not item.get(
-                        "closed"
-                    )
-                    and
-                    normalizar(
-                        item.get(
-                            "name",
-                            "",
-                        )
-                    )
-                    in listas_validas
-                )
-            }
-
-
-            if not listas:
-
-                raise RuntimeError(
-                    "O quadro abriu, mas as listas "
-                    "EM EXECUÇÃO e "
-                    "APROVADO - AGUARDANDO EXECUÇÃO "
-                    "não foram encontradas."
-                )
-
-
-            obras = []
-
-
-            for card in dados.get(
-                "cards",
-                [],
-            ):
-
-                if card.get(
-                    "closed"
-                ):
-
-                    continue
-
-
-                id_lista = str(
-                    card.get(
-                        "idList",
-                        "",
-                    )
-                )
-
-
-                if id_lista not in listas:
-
-                    continue
-
-
-                item = parsear_card(
-                    card,
-                    listas[
-                        id_lista
-                    ],
-                )
-
-
-                if item:
-
-                    obras.append(
-                        item
-                    )
-
-
-            df = pd.DataFrame(
-                obras,
-                columns=[
-                    "trello_card_id",
-                    "short_link",
-                    "nome_trello",
-                    "obra",
-                    "titulo",
-                    "unidade",
-                    "pipe",
-                    "lista",
-                ],
+            df = processar_json_trello(
+                dados
             )
-
-
-            if not df.empty:
-
-                df = (
-                    df
-                    .drop_duplicates(
-                        subset=[
-                            "trello_card_id"
-                        ]
-                    )
-                    .sort_values(
-                        [
-                            "unidade",
-                            "obra",
-                            "titulo",
-                        ],
-                        kind="stable",
-                    )
-                    .reset_index(
-                        drop=True
-                    )
-                )
 
 
             return (
@@ -697,12 +735,12 @@ def carregar_trello_publico():
 
     raise RuntimeError(
         "Não foi possível ler o quadro "
-        "sem token. "
+        "publicamente. "
         f"Último erro: {ultimo_erro}"
     )
 
 
-def sincronizar_trello(
+def tentar_trello_publico(
     forcar=False,
 ):
 
@@ -720,6 +758,11 @@ def sincronizar_trello(
 
         st.session_state.obras_trello = (
             df
+        )
+
+
+        st.session_state.trello_fonte = (
+            "LEITURA PÚBLICA"
         )
 
 
@@ -903,6 +946,11 @@ def iniciar_dados():
         )
 
 
+    if "trello_fonte" not in st.session_state:
+
+        st.session_state.trello_fonte = ""
+
+
     if "medicoes" not in st.session_state:
 
         st.session_state.medicoes = (
@@ -959,9 +1007,6 @@ def iniciar_dados():
 
 
 def compatibilizar_sessao_antiga():
-
-    # Corrige automaticamente o KeyError "unidade"
-    # causado pelos apontamentos das versões anteriores.
 
     for item in st.session_state.get(
         "apontamentos",
@@ -1077,7 +1122,7 @@ st.caption(
 st.markdown(
     '<div class="proto">'
     '🧪 <b>MODO PROTÓTIPO — SEM SUPABASE</b><br>'
-    'Trello em teste por leitura pública, sem token.<br>'
+    'O Trello pode ser carregado por JSON exportado manualmente.<br>'
     f'Build: <code>{BUILD}</code>'
     '</div>',
     unsafe_allow_html=True,
@@ -1162,7 +1207,7 @@ with st.sidebar:
 
             "trello_url",
 
-            "trello_sync_inicial",
+            "trello_fonte",
 
         ]
 
@@ -1250,7 +1295,7 @@ if menu == "Visão Geral":
 
 
     c4.metric(
-        "Obras ativas do Trello",
+        "Obras carregadas",
         len(
             st.session_state
             .obras_trello
@@ -1264,10 +1309,22 @@ if menu == "Visão Geral":
 
 
     st.write(
-        "Trello → Unidade + Obra → "
+        "JSON/Trello → Unidade + Obra → "
         "Convocação → Apontamento → "
         "Medições / Resultados"
     )
+
+
+    if not (
+        st.session_state
+        .obras_trello
+        .empty
+    ):
+
+        st.caption(
+            f"Fonte atual das obras: "
+            f"{st.session_state.trello_fonte or 'não informada'}"
+        )
 
 
     if st.session_state.apontamentos:
@@ -1279,21 +1336,32 @@ if menu == "Visão Geral":
 
 
         for coluna in [
+
             "data",
+
             "unidade",
+
             "obra",
+
             "nome",
+
             "frente",
+
             "status",
+
         ]:
 
             if coluna not in df.columns:
 
-                df[coluna] = ""
+                df[
+                    coluna
+                ] = ""
 
 
         pendentes = df[
-            df["status"]
+            df[
+                "status"
+            ]
             ==
             "Pendente"
         ]
@@ -1389,20 +1457,17 @@ elif menu == "Colaboradores":
                 )
 
 
-                if df.empty:
-
-                    novo_id = 1
-
-                else:
-
-                    novo_id = (
-                        int(
-                            df["id"]
-                            .max()
-                        )
-                        +
-                        1
+                novo_id = (
+                    1
+                    if df.empty
+                    else int(
+                        df[
+                            "id"
+                        ].max()
                     )
+                    +
+                    1
+                )
 
 
                 novo = pd.DataFrame(
@@ -1476,7 +1541,9 @@ elif menu == "Colaboradores":
     if filtro != "Todas":
 
         base = base[
-            base["frente"]
+            base[
+                "frente"
+            ]
             ==
             filtro
         ]
@@ -1484,6 +1551,7 @@ elif menu == "Colaboradores":
 
     base = base.rename(
         columns={
+
             "nome":
                 "Nome",
 
@@ -1495,6 +1563,7 @@ elif menu == "Colaboradores":
 
             "ativo":
                 "Ativo",
+
         }
     )
 
@@ -1525,8 +1594,8 @@ elif menu == "Convocação":
 
 
     st.caption(
-        "Selecione a unidade, relacione a obra "
-        "do Trello e monte a equipe."
+        "Carregue o JSON do Trello, selecione a unidade, "
+        "relacione a obra e monte a equipe."
     )
 
 
@@ -1543,92 +1612,195 @@ elif menu == "Convocação":
 
 
     # ========================================================
-    # SINCRONIZAÇÃO TRELLO
+    # FONTE DAS OBRAS
     # ========================================================
 
-    if (
-        "trello_sync_inicial"
-        not in st.session_state
+    with st.container(
+        border=True
     ):
 
-        st.session_state.trello_sync_inicial = (
-            True
+        st.markdown(
+            "#### Obras do Trello"
         )
 
 
-        with st.spinner(
-            "Lendo obras do Trello..."
-        ):
-
-            sincronizar_trello()
-
-
-    c_status, c_refresh = st.columns(
-        [
-            5,
-            1,
-        ]
-    )
+        st.caption(
+            "Envie o JSON exportado do quadro. "
+            "O sistema considera somente "
+            "EM EXECUÇÃO e "
+            "APROVADO - AGUARDANDO EXECUÇÃO."
+        )
 
 
-    with c_status:
-
-        if st.session_state.get(
-            "trello_ok"
-        ):
-
-            st.markdown(
-                '<div class="trello-ok">'
-                f'✅ Trello lido: '
-                f'<b>{len(st.session_state.obras_trello)}</b> '
-                'obra(s) em execução ou aguardando execução.'
-                '</div>',
-                unsafe_allow_html=True,
-            )
+        arquivo_json = st.file_uploader(
+            "Enviar JSON exportado do Trello",
+            type=[
+                "json"
+            ],
+            key="trello_json_upload",
+            help=(
+                "Exporte o quadro em JSON no Trello "
+                "e envie o arquivo aqui."
+            ),
+        )
 
 
-        else:
+        if arquivo_json is not None:
 
-            st.error(
-                "Não foi possível ler o quadro público do Trello."
-            )
+            try:
 
-
-            if st.session_state.get(
-                "trello_erro"
-            ):
-
-                with st.expander(
-                    "Ver motivo"
-                ):
-
-                    st.write(
-                        st.session_state
-                        .trello_erro
-                    )
-
-
-    with c_refresh:
-
-        if st.button(
-            "🔄 Atualizar",
-            use_container_width=True,
-        ):
-
-            with st.spinner(
-                "Atualizando..."
-            ):
-
-                sincronizar_trello(
-                    forcar=True
+                dados = json.load(
+                    arquivo_json
                 )
 
 
-            st.rerun()
+                df_obras = (
+                    processar_json_trello(
+                        dados
+                    )
+                )
+
+
+                st.session_state.obras_trello = (
+                    df_obras
+                )
+
+
+                st.session_state.trello_fonte = (
+                    "JSON ENVIADO MANUALMENTE"
+                )
+
+
+                st.session_state.trello_ok = (
+                    True
+                )
+
+
+                st.session_state.trello_erro = (
+                    ""
+                )
+
+
+                st.success(
+                    f"✅ JSON carregado: "
+                    f"{len(df_obras)} "
+                    "obra(s) válida(s)."
+                )
+
+
+                if not df_obras.empty:
+
+                    sem_unidade = int(
+                        (
+                            df_obras[
+                                "unidade"
+                            ]
+                            ==
+                            ""
+                        ).sum()
+                    )
+
+
+                    if sem_unidade:
+
+                        st.warning(
+                            f"{sem_unidade} card(s) "
+                            "foram lidos, mas a unidade "
+                            "não foi identificada "
+                            "automaticamente."
+                        )
+
+
+            except Exception as erro:
+
+                st.error(
+                    "Não consegui interpretar esse JSON."
+                )
+
+
+                st.caption(
+                    str(
+                        erro
+                    )
+                )
+
+
+        c1, c2 = st.columns(
+            [
+                2,
+                1,
+            ]
+        )
+
+
+        with c1:
+
+            if not (
+                st.session_state
+                .obras_trello
+                .empty
+            ):
+
+                st.markdown(
+                    '<div class="fonte-ok">'
+                    f'✅ Obras disponíveis: '
+                    f'<b>{len(st.session_state.obras_trello)}</b> '
+                    f'• Fonte: '
+                    f'{st.session_state.trello_fonte}'
+                    '</div>',
+                    unsafe_allow_html=True,
+                )
+
+
+            else:
+
+                st.info(
+                    "Ainda não há obras carregadas."
+                )
+
+
+        with c2:
+
+            if st.button(
+                "Tentar leitura pública",
+                use_container_width=True,
+            ):
+
+                with st.spinner(
+                    "Tentando acessar o quadro..."
+                ):
+
+                    tentar_trello_publico(
+                        forcar=True
+                    )
+
+
+                st.rerun()
+
+
+        if (
+            not st.session_state.get(
+                "trello_ok",
+                True,
+            )
+            and
+            st.session_state.get(
+                "trello_erro"
+            )
+        ):
+
+            with st.expander(
+                "Erro da tentativa pública"
+            ):
+
+                st.write(
+                    st.session_state
+                    .trello_erro
+                )
 
 
     # ========================================================
-    # DATA + UNIDADE + ENGENHEIRO + OBRA
+    # DADOS DA CONVOCAÇÃO
     # ========================================================
 
     with st.container(
@@ -1705,6 +1877,10 @@ elif menu == "Convocação":
             "Nº da obra",
             placeholder="Ex.: 140",
             key="conv_numero_obra",
+            help=(
+                "Digite o número da obra. "
+                "O sistema procura no JSON carregado."
+            ),
         ).strip()
 
 
@@ -1735,14 +1911,20 @@ elif menu == "Convocação":
             ].copy()
 
 
-            if len(exatos) == 1:
+            if len(
+                exatos
+            ) == 1:
 
                 obra_selecionada = (
-                    exatos.iloc[0]
+                    exatos.iloc[
+                        0
+                    ]
                 )
 
 
-            elif len(exatos) > 1:
+            elif len(
+                exatos
+            ) > 1:
 
                 opcoes = {
 
@@ -1759,12 +1941,15 @@ elif menu == "Convocação":
                 }
 
 
-                escolha = c_resultado.selectbox(
-                    "Correspondências",
-                    list(
-                        opcoes.keys()
-                    ),
-                    key="obra_exata_opcoes",
+                escolha = (
+                    c_resultado
+                    .selectbox(
+                        "Correspondências",
+                        list(
+                            opcoes.keys()
+                        ),
+                        key="obra_exata_opcoes",
+                    )
                 )
 
 
@@ -1798,12 +1983,15 @@ elif menu == "Convocação":
                 }
 
 
-                escolha = c_resultado.selectbox(
-                    "Obras encontradas",
-                    list(
-                        opcoes.keys()
-                    ),
-                    key="obra_parcial_opcoes",
+                escolha = (
+                    c_resultado
+                    .selectbox(
+                        "Obras encontradas",
+                        list(
+                            opcoes.keys()
+                        ),
+                        key="obra_parcial_opcoes",
+                    )
                 )
 
 
@@ -1821,9 +2009,7 @@ elif menu == "Convocação":
                 )
 
 
-            elif st.session_state.get(
-                "trello_ok"
-            ):
+            elif not obras_trello.empty:
 
                 c_resultado.warning(
                     f"Nenhuma obra "
@@ -1833,13 +2019,11 @@ elif menu == "Convocação":
                 )
 
 
-        elif st.session_state.get(
-            "trello_ok"
-        ):
+        elif not obras_trello.empty:
 
             c_resultado.caption(
                 f"{len(obras_unidade)} "
-                f"obra(s) disponíveis "
+                f"obra(s) disponível(is) "
                 f"em {unidade}."
             )
 
@@ -1853,15 +2037,12 @@ elif menu == "Convocação":
             ).strip()
 
 
-            if pipe:
-
-                pipe_txt = (
-                    f" • PIPE {pipe}"
-                )
-
-            else:
-
-                pipe_txt = ""
+            pipe_txt = (
+                f" • PIPE {pipe}"
+                if pipe
+                else
+                ""
+            )
 
 
             st.markdown(
@@ -2214,7 +2395,10 @@ elif menu == "Convocação":
     # EQUIPE MONTADA
     # ========================================================
 
-    if st.session_state.equipe_rascunho:
+    if (
+        st.session_state
+        .equipe_rascunho
+    ):
 
         st.markdown(
             "### Equipe montada"
@@ -2225,6 +2409,7 @@ elif menu == "Convocação":
             [
 
                 {
+
                     "Nome":
                         item[
                             "nome"
@@ -2253,6 +2438,7 @@ elif menu == "Convocação":
 
                     "Remover":
                         False,
+
                 }
 
                 for item in (
@@ -2411,6 +2597,7 @@ elif menu == "Convocação":
 
             st.session_state.equipe_rascunho = []
 
+
             st.session_state.conv_select_version += 1
 
             st.session_state.conv_editor_version += 1
@@ -2440,7 +2627,8 @@ elif menu == "Convocação":
             if obra_selecionada is None:
 
                 st.error(
-                    "Digite e relacione uma obra válida do Trello."
+                    "Digite e relacione uma obra válida "
+                    "do JSON do Trello."
                 )
 
                 st.stop()
@@ -2459,7 +2647,7 @@ elif menu == "Convocação":
 
 
             # =================================================
-            # OBSERVAÇÃO OBRIGATÓRIA SE ALTERAR FUNÇÃO/FRENTE
+            # OBSERVAÇÃO OBRIGATÓRIA
             # =================================================
 
             sem_observacao = []
@@ -2552,7 +2740,7 @@ elif menu == "Convocação":
 
 
             # =================================================
-            # BLOQUEAR CONVOCAÇÃO DUPLICADA
+            # BLOQUEIO DE DUPLICAÇÃO
             # =================================================
 
             nomes_chave = sorted(
@@ -2843,7 +3031,6 @@ elif menu == "Convocação":
 
             st.session_state.conv_select_version += 1
 
-
             st.session_state.conv_editor_version += 1
 
 
@@ -2894,10 +3081,6 @@ elif menu == "Apontamentos":
             .apontamentos
         )
 
-
-        # ====================================================
-        # GARANTIR COLUNAS MESMO COM SESSÃO ANTIGA
-        # ====================================================
 
         colunas = {
 
@@ -3004,10 +3187,10 @@ elif menu == "Apontamentos":
         if not unidades_disponiveis:
 
             st.warning(
-                "Os apontamentos que estavam na memória "
-                "foram criados por uma versão antiga. "
+                "Os apontamentos em memória foram "
+                "criados por uma versão antiga. "
                 "Clique em 'Restaurar demonstração' "
-                "uma vez para limpar esses testes."
+                "para limpar os testes."
             )
 
             st.stop()
@@ -3082,7 +3265,8 @@ elif menu == "Apontamentos":
             titulo = str(
                 base[
                     "titulo_obra"
-                ].iloc[0]
+                ]
+                .iloc[0]
             ).strip()
 
 
@@ -3289,6 +3473,7 @@ elif menu == "Apontamentos":
                         ]
                     )
 
+
                 else:
 
                     item[
@@ -3309,6 +3494,7 @@ elif menu == "Apontamentos":
                             "Observação"
                         ]
                     )
+
 
                 else:
 
