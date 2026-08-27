@@ -9,7 +9,7 @@ import re
 import os
 
 # --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR ---
-st.set_page_config(page_title="APROAR - Controle de Presenças", page_icon="👷", layout="centered")
+st.set_page_config(page_title="APROAR - Controle de Presenças", page_icon="👷", layout="wide")
 
 # CSS para o tema escuro APROAR, cards modernos e inputs
 st.markdown("""
@@ -301,7 +301,7 @@ if modo_campo:
                 if nomes_ja_alocados:
                     st.markdown(f"📌 **Já escalados por você hoje:** " + ", ".join(nomes_ja_alocados))
                 else:
-                    st.caption("Você ainda não registrou nenhuma convocação para esta data.")
+                    st.caption("Nenhum convocado para esta data.")
 
                 if equipe_selecionada:
                     st.markdown(f"✨ **Selecionados agora:** " + ", ".join(equipe_selecionada))
@@ -330,11 +330,145 @@ if modo_campo:
         render_aba_disponibilidade("campo")
 
 else:
-    # VISÃO COMPLETA DO ADMINISTRATIVO (PAINEL GERAL)
-    st.subheader("⚙️ Painel Administrativo")
-    tab_convocacao, tab_apontamento, tab_relatorios, tab_indicadores, tab_disp_adm, tab_config = st.tabs([
-        "📋 Convocação", "✅ Apontamento", "📊 Relatório", "📈 Indicadores", "👥 Disponibilidade", "⚙️ Config"
+    # ==========================================
+    # VISÃO COMPLETA DO ADMINISTRATIVO (ESTILO DASHBOARD)
+    # ==========================================
+    st.subheader("⚙️ Painel Administrativo - Controle de Presença")
+    
+    tab_dashboard, tab_convocacao, tab_relatorios, tab_indicadores, tab_disp_adm, tab_config = st.tabs([
+        "🎛️ Dashboard & Apontamentos", "📋 Convocação", "📊 Relatório", "📈 Indicadores", "👥 Disponibilidade", "⚙️ Config"
     ])
+
+    # ==========================================
+    # ABA DASHBOARD & APONTAMENTOS (ESTILO SCREENSHOT)
+    # ==========================================
+    with tab_dashboard:
+        st.markdown("### 🎛️ Painel de Controle e Auditoria de Presenças")
+        
+        # Filtros do Topo (Data, Unidade, Busca, Status)
+        col_f1, col_f2, col_f3, col_f4 = st.columns(4)
+        with col_f1:
+            data_filtro_dash = st.date_input("Data de Auditoria:", value=datetime.date.today(), format="DD/MM/YYYY", key="d_dash")
+        with col_f2:
+            unidades_cadastradas = sorted(list(set([o['unidade'] for o in obras]))) if obras else []
+            unidades_filtro_opts = ["TODAS"] + unidades_cadastradas
+            unidade_dash = st.selectbox("Filtrar por Unidade:", unidades_filtro_opts, key="u_dash")
+        with col_f3:
+            busca_colab = st.text_input("Buscar colaborador:", placeholder="Nome...", key="busca_colab_dash")
+        with col_f4:
+            status_filtro_dash = st.selectbox("Status:", ["Todos", "Presente", "Falta", "Atestado", "Extra"], key="st_dash")
+
+        # Busca dados do dia selecionado
+        try:
+            query_dash = supabase.table("convocacoes").select("*").eq("data", data_filtro_dash.isoformat())
+            if unidade_dash != "TODAS":
+                # Filtra os IDs de obras que pertencem à unidade selecionada
+                obras_ids_unidade = [o['id'] for o in obras if o['unidade'] == unidade_dash]
+                if obras_ids_unidade:
+                    query_dash = query_dash.in_("obra_id", obras_ids_unidade)
+                else:
+                    query_dash = query_dash.eq("obra_id", "00000000-0000-0000-0000-000000000000") # vazio
+            convs_dash = query_dash.execute().data
+        except:
+            convs_dash = []
+
+        # Enriquece dados com obra e colaborador
+        lista_processada = []
+        for c in convs_dash:
+            ob = dict_obras.get(c['obra_id'], {"unidade": "GERAL", "nome": "Desconhecida"})
+            colab = dict_colaboradores.get(c['colaborador_id'], {"nome": "Desconhecido", "funcao": "-", "valor_diaria": 240.0})
+            
+            # Filtro por nome
+            if busca_colab and busca_colab.upper() not in colab['nome'].upper():
+                continue
+            # Filtro por status
+            if status_filtro_dash != "Todos" and c.get('status') != status_filtro_dash:
+                continue
+
+            diaria = float(colab.get('valor_diaria') or 240.0) if c.get('status') in ["Presente", "Extra"] else 0.0
+            extra = float(c.get('valor_extra') or 0.0)
+            custo_total_item = diaria + extra
+
+            lista_processada.append({
+                "id": c['id'],
+                "engenheiro": c.get('engenheiro', 'N/A'),
+                "unidade": ob['unidade'],
+                "obra_nome": ob['nome'],
+                "colab_nome": colab['nome'],
+                "colab_funcao": colab['funcao'],
+                "status": c.get('status', 'Presente'),
+                "valor_extra": extra,
+                "observacao": c.get('observacao', ''),
+                "custo": custo_total_item
+            })
+
+        # --- CARTÕES DE MÉTRICAS (METRICS ROW) ---
+        total_conv = len(lista_processada)
+        total_pres = len([x for x in lista_processada if x['status'] == 'Presente'])
+        total_atest = len([x for x in lista_processada if x['status'] == 'Atestado'])
+        total_falt = len([x for x in lista_processada if x['status'] == 'Falta'])
+        total_extra_st = len([x for x in lista_processada if x['status'] == 'Extra'])
+        custo_geral_dia = sum([x['custo'] for x in lista_processada])
+
+        m1, m2, m3, m4, m5, m6 = st.columns(6)
+        m1.metric("TOTAL", total_conv)
+        m2.metric("PRESENTES", total_pres)
+        m3.metric("ATESTADO", total_atest)
+        m4.metric("FALTAS", total_falt)
+        m5.metric("EXTRAS", total_extra_st)
+        m6.metric("CUSTO TOTAL", f"R$ {custo_geral_dia:.2f}")
+
+        st.markdown("---")
+
+        if not lista_processada:
+            st.info("Nenhum registro encontrado para os filtros selecionados nesta data.")
+        else:
+            # Botão rápido para marcar todos como presentes na visão ADM
+            if st.button("✅ Marcar Todos da Lista como Presentes"):
+                for item in lista_processada:
+                    supabase.table("convocacoes").update({"status": "Presente"}).eq("id", item['id']).execute()
+                st.success("Registros atualizados para Presente!")
+                st.rerun()
+
+            # Renderiza agrupado por Obra / Unidade estilo o print
+            df_view = pd.DataFrame(lista_processada)
+            obras_unicas_view = df_view['obra_nome'].unique()
+
+            for obra_n in obras_unicas_view:
+                subset = df_view[df_view['obra_nome'] == obra_n]
+                unidade_nome = subset.iloc[0]['unidade']
+                eng_resp = subset.iloc[0]['engenheiro']
+                
+                with st.container(border=True):
+                    st.markdown(f"#### 🏢 **{unidade_nome}** — *{obra_n}* &nbsp;&nbsp;|&nbsp;&nbsp; 👷 Eng: `{eng_resp}`")
+                    
+                    for idx, row in subset.iterrows():
+                        c_id = row['id']
+                        col_info, col_status, col_val = st.columns([3, 2, 2])
+                        
+                        with col_info:
+                            cor_f = get_cor_funcao(row['colab_funcao'])
+                            st.markdown(f"**{row['colab_nome']}** &nbsp; {cor_f} `{row['colab_funcao']}`")
+                            obs_val = st.text_input("Obs", value=row['observacao'], placeholder="Justificativa...", key=f"obs_adm_{c_id}", label_visibility="collapsed")
+                            if obs_val != row['observacao']:
+                                supabase.table("convocacoes").update({"observacao": obs_val}).eq("id", c_id).execute()
+
+                        with col_status:
+                            opcoes_st = ["Presente", "Atestado", "Falta", "Extra"]
+                            st_atual = row['status']
+                            idx_st = opcoes_st.index(st_atual) if st_atual in opcoes_st else 0
+                            novo_st = st.radio("Status", opcoes_st, index=idx_st, key=f"st_adm_{c_id}", horizontal=True, label_visibility="collapsed")
+                            if novo_st != st_atual:
+                                supabase.table("convocacoes").update({"status": novo_st}).eq("id", c_id).execute()
+                                st.rerun()
+
+                        with col_val:
+                            extra_val = st.number_input("Extra R$", value=float(row['valor_extra']), step=10.0, key=f"ext_adm_{c_id}", label_visibility="collapsed")
+                            if extra_val != float(row['valor_extra']):
+                                supabase.table("convocacoes").update({"valor_extra": extra_val}).eq("id", c_id).execute()
+                            st.caption(f"Custo: R$ {row['custo']:.2f}")
+
+                        st.divider()
 
     # ==========================================
     # ABA 1: CONVOCAÇÃO (ADM)
@@ -404,79 +538,7 @@ else:
             st.info("Cadastre obras (JSON) e colaboradores (Excel) na aba Configurações.")
 
     # ==========================================
-    # ABA 2: APONTAMENTOS (ADM)
-    # ==========================================
-    with tab_apontamento:
-        st.markdown("### Apontamento Diário (Administrativo)")
-        col_eng_ap, col_data_ap = st.columns(2)
-        with col_eng_ap:
-            engenheiro_apont = st.selectbox("Engenheiro:", ENGENHEIROS, key="eng_apont")
-        with col_data_ap:
-            data_apont = st.date_input("Data do Apontamento:", value=datetime.date.today(), format="DD/MM/YYYY")
-        
-        try:
-            convocacoes_hoje = supabase.table("convocacoes").select("*").eq("engenheiro", engenheiro_apont).eq("data", data_apont.isoformat()).execute().data
-        except:
-            convocacoes_hoje = []
-
-        if convocacoes_hoje:
-            for conv in convocacoes_hoje:
-                conv['dados_obra'] = dict_obras.get(conv['obra_id'], {"unidade": "Desconhecida", "nome": "Desconhecida"})
-                
-            unidades_convocadas = sorted(list(set([c['dados_obra']['unidade'] for c in convocacoes_hoje])))
-            col_ua, col_oa = st.columns(2)
-            with col_ua:
-                unidade_filtro = st.selectbox("Unidade Convocada:", unidades_convocadas, key="filtro_u_apont")
-            obras_convocadas = sorted(list(set([c['dados_obra']['nome'] for c in convocacoes_hoje if c['dados_obra']['unidade'] == unidade_filtro])))
-            with col_oa:
-                obra_filtro = st.selectbox("Obra Convocada:", obras_convocadas, key="filtro_o_apont")
-            
-            convocacoes_render = [c for c in convocacoes_hoje if c['dados_obra']['unidade'] == unidade_filtro and c['dados_obra']['nome'] == obra_filtro]
-            opcoes_status = ["Presente", "Falta", "Atestado", "Extra"]
-            
-            if st.button("✅ Marcar Todos como Presentes (ADM)", key="btn_todos_adm"):
-                for c in convocacoes_render:
-                    supabase.table("convocacoes").update({"status": "Presente"}).eq("id", c['id']).execute()
-                st.success("Equipe atualizada para Presente!")
-                st.rerun()
-
-            with st.form("form_apontamentos_extras"):
-                dados_para_atualizar = {}
-                for conv in convocacoes_render:
-                    with st.container(border=True):
-                        c_id = conv['id']
-                        dados_colab = dict_colaboradores.get(conv['colaborador_id'], {"nome": "Desconhecido", "funcao": "-"})
-                        nome = dados_colab['nome']
-                        funcao = dados_colab['funcao']
-                        cor = get_cor_funcao(funcao)
-                        status_atual = conv.get("status", "Presente")
-                        idx = opcoes_status.index(status_atual) if status_atual in opcoes_status else 0
-                        
-                        st.markdown(f"**{nome}** &nbsp; {cor} `{funcao}`")
-                        status_sel = st.radio("Status", opcoes_status, index=idx, key=f"status_{c_id}", horizontal=True, label_visibility="collapsed")
-                        if status_sel != status_atual:
-                            supabase.table("convocacoes").update({"status": status_sel}).eq("id", c_id).execute()
-                        
-                        with st.expander("💸 Inserir Extra ou Observação"):
-                            val_atual = float(conv.get("valor_extra") or 0.0)
-                            obs_atual = conv.get("observacao") or ""
-                            val_extra = st.number_input("Bonificação / Extra (R$)", value=val_atual, step=10.0, key=f"val_{c_id}")
-                            obs = st.text_input("Justificativa / Acordo", value=obs_atual, key=f"obs_{c_id}")
-                        
-                        dados_para_atualizar[c_id] = {"valor_extra": val_extra, "observacao": obs}
-                
-                if st.form_submit_button("💾 Salvar Extras e Observações", type="primary", use_container_width=True):
-                    try:
-                        for c_id, d in dados_para_atualizar.items():
-                            supabase.table("convocacoes").update(d).eq("id", c_id).execute()
-                        st.success("✅ Salvo com sucesso!")
-                    except Exception as e:
-                        st.error(f"Erro: {e}")
-        else:
-            st.warning(f"Nenhuma equipe convocada para {data_apont.strftime('%d/%m/%Y')}.")
-
-    # ==========================================
-    # ABA 3: RELATÓRIOS (ADM)
+    # ABA 2: RELATÓRIOS (ADM)
     # ==========================================
     with tab_relatorios:
         st.markdown("### 📊 Relatório de Custos por Período")
@@ -572,7 +634,7 @@ else:
                 st.error(f"Erro: {e}")
 
     # ==========================================
-    # ABA 4: INDICADORES (ADM)
+    # ABA 3: INDICADORES (ADM)
     # ==========================================
     with tab_indicadores:
         st.markdown("### 📈 Painel Administrativo de Indicadores")
@@ -607,13 +669,13 @@ else:
             st.error(f"Erro: {e}")
 
     # ==========================================
-    # ABA 5: DISPONIBILIDADE (ADM)
+    # ABA 4: DISPONIBILIDADE (ADM)
     # ==========================================
     with tab_disp_adm:
         render_aba_disponibilidade("adm")
 
     # ==========================================
-    # ABA 6: CONFIGURAÇÕES (ADM)
+    # ABA 5: CONFIGURAÇÕES (ADM)
     # ==========================================
     with tab_config:
         st.markdown("### 📋 Sincronizar Obras (Trello JSON)")
