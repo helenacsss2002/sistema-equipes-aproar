@@ -5,6 +5,8 @@ import pandas as pd
 import io
 import json
 from fpdf import FPDF
+import unicodedata
+import re
 
 # --- CONFIGURAÇÕES DA PÁGINA ---
 st.set_page_config(page_title="App Obras", page_icon="👷", layout="centered")
@@ -22,18 +24,55 @@ except Exception as e:
     st.error(f"Erro de credenciais: {e}")
     st.stop()
 
+# --- FUNÇÕES DE LIMPEZA E PADRONIZAÇÃO ---
+def limpar_unidade(texto):
+    if not texto: return "GERAL"
+    # Remove acentos, espaços extras e coloca em maiúsculo
+    texto_limpo = unicodedata.normalize('NFKD', str(texto)).encode('ASCII', 'ignore').decode('utf-8').upper().strip()
+    
+    # Mapeamento para forçar as 9 Macro Unidades do projeto
+    macro_unidades = {
+        "HORIZONTE": "HORIZONTE",
+        "FIEC": "FIEC",
+        "CASA DA INDUSTRIA": "FIEC", # Casa da Indústria é FIEC
+        "DR": "FIEC", # Adicionando DR como FIEC baseado no padrão
+        "BARRA": "BARRA",
+        "COLISEU": "COLISEU",
+        "MARACANAU": "MARACANAÚ",
+        "ESCRITORIO": "ESCRITÓRIO",
+        "CENTRO": "CENTRO",
+        "MUSEU": "MUSEU",
+        "UNIFOR": "UNIFOR"
+    }
+    
+    # Procura se alguma macro unidade existe no texto
+    for chave, valor in macro_unidades.items():
+         if chave in texto_limpo:
+             return valor
+    return texto_limpo # Se não achar nenhuma, retorna o texto limpo
+
+def limpar_funcao(texto):
+    if not texto or str(texto).upper() == 'NAN': return "INDEFINIDA"
+    texto_limpo = str(texto).upper().strip()
+    # Remove o prefixo numérico (ex: "040 - ")
+    texto_limpo = re.sub(r'^\d+\s*-\s*', '', texto_limpo)
+    # Remove acentos
+    texto_limpo = unicodedata.normalize('NFKD', texto_limpo).encode('ASCII', 'ignore').decode('utf-8')
+    return texto_limpo
+
+def get_cor_funcao(funcao):
+    cores = ["🟥", "🟧", "🟨", "🟩", "🟦", "🟪", "🟫", "⬛"]
+    hash_num = sum(ord(c) for c in str(funcao))
+    return cores[hash_num % len(cores)]
+
 # --- BUSCA DE DADOS ---
 def buscar_obras():
-    try:
-        return supabase.table("obras").select("*").execute().data
-    except Exception as e:
-        return []
+    try: return supabase.table("obras").select("*").execute().data
+    except Exception: return []
 
 def buscar_colaboradores():
-    try:
-        return supabase.table("colaboradores").select("*").eq("ativo", True).execute().data
-    except Exception as e:
-        return []
+    try: return supabase.table("colaboradores").select("*").eq("ativo", True).execute().data
+    except Exception: return []
 
 obras = buscar_obras()
 colaboradores = buscar_colaboradores()
@@ -43,11 +82,6 @@ dict_obras = {o['id']: o for o in obras} if obras else {}
 
 ENGENHEIROS = ["EDUARDO", "GABRIEL", "GUSTAVO", "JOEL", "NETO", "PAULO", "SOARES", "VICTOR"]
 
-def get_cor_funcao(funcao):
-    cores = ["🟥", "🟧", "🟨", "🟩", "🟦", "🟪", "🟫", "⬛"]
-    hash_num = sum(ord(c) for c in str(funcao))
-    return cores[hash_num % len(cores)]
-
 st.title("👷 Gestão de Equipes")
 
 tab_convocacao, tab_apontamento, tab_relatorios, tab_config = st.tabs(["📋 Convocação", "✅ Apontamento", "📊 Relatório", "⚙️ Config"])
@@ -55,14 +89,14 @@ tab_convocacao, tab_apontamento, tab_relatorios, tab_config = st.tabs(["📋 Con
 hoje = datetime.date.today().isoformat()
 
 # ==========================================
-# ABA 1: CONVOCAÇÃO (COM FILTRO CASCATA)
+# ABA 1: CONVOCAÇÃO
 # ==========================================
 with tab_convocacao:
     if obras and colaboradores:
         st.markdown("### Informações da Demanda")
         engenheiro_conv = st.selectbox("Engenheiro responsável:", ENGENHEIROS, key="eng_conv")
         
-        # Filtro Cascata: Unidade -> Obra
+        # Filtro Cascata Unidade -> Obra
         unidades_unicas = sorted(list(set([o['unidade'] for o in obras])))
         col_u, col_o = st.columns(2)
         
@@ -74,7 +108,8 @@ with tab_convocacao:
             obra_selecionada = st.selectbox("Obra/Serviço:", list(obras_da_unidade.keys()))
 
         st.markdown("### Montar Equipe")
-        funcoes_disponiveis = sorted(list(set([str(c['funcao']) for c in colaboradores])))
+        # Funções limpas e sem duplicidade
+        funcoes_disponiveis = sorted(list(set([c['funcao'] for c in colaboradores])))
         frente_selecionada = st.selectbox("Frente de Trabalho:", funcoes_disponiveis)
 
         colaboradores_filtrados = [c for c in colaboradores if c['funcao'] == frente_selecionada]
@@ -107,7 +142,7 @@ with tab_convocacao:
         st.info("Cadastre obras (JSON) e colaboradores (Excel) na aba Configurações.")
 
 # ==========================================
-# ABA 2: APONTAMENTOS (COM FILTRO CASCATA)
+# ABA 2: APONTAMENTOS
 # ==========================================
 with tab_apontamento:
     st.markdown("### Apontamento Diário")
@@ -119,7 +154,6 @@ with tab_apontamento:
         convocacoes_hoje = []
 
     if convocacoes_hoje:
-        # Enriquecer convocações com os dados da obra para permitir o filtro
         for conv in convocacoes_hoje:
             conv['dados_obra'] = dict_obras.get(conv['obra_id'], {"unidade": "Desconhecida", "nome": "Desconhecida"})
             
@@ -134,7 +168,6 @@ with tab_apontamento:
         with col_oa:
             obra_filtro = st.selectbox("Obra Convocada:", obras_convocadas, key="filtro_o_apont")
         
-        # Filtra a lista final que será renderizada na tela
         convocacoes_render = [c for c in convocacoes_hoje if c['dados_obra']['unidade'] == unidade_filtro and c['dados_obra']['nome'] == obra_filtro]
         
         st.info("Marque as exceções do dia e insira bonificações se necessário.")
@@ -175,7 +208,7 @@ with tab_apontamento:
         st.warning("Nenhuma equipe convocada por você para a data de hoje.")
 
 # ==========================================
-# ABA 3: RELATÓRIOS EM PDF
+# ABA 3: RELATÓRIOS
 # ==========================================
 with tab_relatorios:
     st.markdown("### 📊 Relatório do Dia")
@@ -205,11 +238,17 @@ with tab_relatorios:
                     obs = row.get('observacao', '')
                     
                     pdf.set_font("Arial", 'B', 10)
-                    pdf.cell(0, 8, txt=f"Colaborador: {nome} | Obra: {dados_ob['unidade']} - {dados_ob['nome']}", ln=True)
+                    # Remover caracteres especiais para o PDF não quebrar
+                    nome_pdf = unicodedata.normalize('NFKD', nome).encode('ASCII', 'ignore').decode('utf-8')
+                    unidade_pdf = unicodedata.normalize('NFKD', dados_ob['unidade']).encode('ASCII', 'ignore').decode('utf-8')
+                    obra_pdf = unicodedata.normalize('NFKD', dados_ob['nome']).encode('ASCII', 'ignore').decode('utf-8')
+                    
+                    pdf.cell(0, 8, txt=f"Colaborador: {nome_pdf} | Obra: {unidade_pdf} - {obra_pdf}", ln=True)
                     pdf.set_font("Arial", '', 10)
                     pdf.cell(0, 6, txt=f"Status: {status} | Bonificacao/Extra: R$ {extra:.2f}", ln=True)
                     if obs:
-                        pdf.cell(0, 6, txt=f"Obs: {obs}", ln=True)
+                        obs_pdf = unicodedata.normalize('NFKD', obs).encode('ASCII', 'ignore').decode('utf-8')
+                        pdf.cell(0, 6, txt=f"Obs: {obs_pdf}", ln=True)
                     pdf.line(10, pdf.get_y(), 200, pdf.get_y())
                     pdf.ln(3)
                 
@@ -219,49 +258,46 @@ with tab_relatorios:
             st.error(f"Erro ao gerar PDF: {e}")
 
 # ==========================================
-# ABA 4: CONFIGURAÇÕES E IMPORTAÇÕES
+# ABA 4: CONFIGURAÇÕES (COM PADRONIZAÇÃO E LIMPEZA)
 # ==========================================
 with tab_config:
-    # --- IMPORTAÇÃO DO JSON DO TRELLO ---
     st.markdown("### 📋 Sincronizar Obras (Trello JSON)")
-    st.info("O sistema buscará apenas os cards da lista 'EM EXECUÇÃO' e separará a Unidade do Nome da Obra automaticamente.")
+    st.info("O sistema unifica os nomes das unidades e limpa discrepâncias (ex: SESI Centro vira CENTRO).")
     arquivo_json = st.file_uploader("Selecione o arquivo JSON do Trello", type=["json"], key="json_trello")
     
     if arquivo_json is not None:
         if st.button("🔄 Importar Obras em Execução", type="primary"):
-            with st.spinner("Analisando Trello..."):
+            with st.spinner("Limpando e Analisando Trello..."):
                 try:
                     trello_data = json.load(arquivo_json)
                     list_execucao_id = None
                     
-                    # Localiza o ID da lista "EM EXECUÇÃO"
                     for lst in trello_data.get('lists', []):
                         if lst.get('name', '').upper() == 'EM EXECUÇÃO' and not lst.get('closed', False):
                             list_execucao_id = lst.get('id')
                             break
                     
                     if not list_execucao_id:
-                        st.error("❌ Lista 'EM EXECUÇÃO' não encontrada no arquivo.")
+                        st.error("❌ Lista 'EM EXECUÇÃO' não encontrada.")
                     else:
                         cards = [c for c in trello_data.get('cards', []) if c.get('idList') == list_execucao_id and not c.get('closed', False)]
                         novas_obras = []
                         
                         for c in cards:
                             nome_card = c.get('name', '')
-                            # Corta a string pela barra vertical "|"
                             partes = [p.strip() for p in nome_card.split('|')]
                             
                             if len(partes) >= 2:
                                 nome_obra = partes[0]
-                                unidade_obra = partes[1]
+                                unidade_crua = partes[1]
                             else:
                                 nome_obra = nome_card
-                                unidade_obra = "GERAL"
+                                unidade_crua = "GERAL"
                             
-                            novas_obras.append({"unidade": unidade_obra, "nome": nome_obra})
+                            unidade_limpa = limpar_unidade(unidade_crua)
+                            novas_obras.append({"unidade": unidade_limpa, "nome": nome_obra})
                         
                         if novas_obras:
-                            # Compara com o banco para não duplicar obras que já entraram antes
                             existentes = supabase.table("obras").select("unidade, nome").execute().data
                             set_existentes = {f"{o['unidade']} - {o['nome']}" for o in existentes}
                             
@@ -269,23 +305,23 @@ with tab_config:
                             
                             if inserir:
                                 supabase.table("obras").insert(inserir).execute()
-                                st.success(f"🎉 {len(inserir)} novas obras cadastradas com sucesso!")
+                                st.success(f"🎉 {len(inserir)} novas obras padronizadas e salvas!")
                             else:
-                                st.info("👍 Nenhuma obra nova detectada. O banco já estava atualizado.")
+                                st.info("👍 Obras atualizadas. Sem novos registros.")
                         else:
-                            st.warning("⚠️ A lista 'EM EXECUÇÃO' está vazia no Trello.")
+                            st.warning("⚠️ Lista 'EM EXECUÇÃO' vazia.")
                 except Exception as e:
                     st.error(f"Erro ao processar JSON: {e}")
     
     st.divider()
     
-    # --- IMPORTAÇÃO DO EXCEL DOS COLABORADORES ---
     st.markdown("### 📥 Sincronizar Base de Colaboradores (Excel)")
+    st.info("O sistema remove numerações e acentos das funções (ex: 076 - PEDREIRO vira PEDREIRO).")
     arquivo_excel = st.file_uploader("Selecione a planilha Excel", type=["xlsx"], key="excel_colab")
     
     if arquivo_excel is not None:
-        if st.button("🔄 Importar e Atualizar Colaboradores", type="secondary"):
-            with st.spinner("Lendo custos e atualizando banco..."):
+        if st.button("🔄 Limpar e Importar Colaboradores", type="secondary"):
+            with st.spinner("Lendo custos e padronizando funções..."):
                 try:
                     df = pd.read_excel(arquivo_excel, sheet_name="Base de dados")
                     nomes_existentes = [c['nome'] for c in colaboradores] if colaboradores else []
@@ -293,7 +329,8 @@ with tab_config:
                     
                     for index, row in df.iterrows():
                         nome_excel = str(row.get('NOME', '')).strip()
-                        funcao_excel = str(row.get('FUNÇÃO', '')).strip()
+                        funcao_crua = str(row.get('FUNÇÃO', '')).strip()
+                        funcao_limpa = limpar_funcao(funcao_crua)
                         
                         try: diaria = float(row.get('VALOR DIÁRIA (R$)', 0))
                         except: diaria = 0.0
@@ -304,7 +341,7 @@ with tab_config:
                         if nome_excel and nome_excel.upper() != 'NAN' and nome_excel not in nomes_existentes:
                             novos_colaboradores.append({
                                 "nome": nome_excel, 
-                                "funcao": funcao_excel, 
+                                "funcao": funcao_limpa, 
                                 "valor_diaria": diaria,
                                 "valor_passagem": passagem,
                                 "ativo": True
@@ -313,7 +350,7 @@ with tab_config:
                     
                     if novos_colaboradores:
                         supabase.table("colaboradores").insert(novos_colaboradores).execute()
-                        st.success(f"🎉 {len(novos_colaboradores)} novos colaboradores com custos importados.")
+                        st.success(f"🎉 {len(novos_colaboradores)} colaboradores importados sem duplicidade de funções.")
                     else:
                         st.info("Nenhum colaborador novo foi encontrado.")
                 except Exception as e:
