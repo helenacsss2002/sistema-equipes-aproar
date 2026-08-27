@@ -8,7 +8,7 @@ import unicodedata
 import re
 import os
 
-# --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR ---
+# --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR (MINIMALISTA) ---
 st.set_page_config(page_title="APROAR - Controle de Presenças", page_icon="👷", layout="centered")
 
 # CSS Minimalista, elegante e focado em respiro visual
@@ -316,7 +316,6 @@ if modo_campo:
                     erros = []
                     for nome in equipe_selecionada:
                         c_id = opcoes_colaboradores[nome]
-                        # Verifica individualmente se já existe convocação para este colaborador nesta data
                         checagem = supabase.table("convocacoes").select("id").eq("colaborador_id", c_id).eq("data", data_conv.isoformat()).execute().data
                         if checagem:
                             erros.append(nome)
@@ -350,8 +349,8 @@ else:
     # ==========================================
     st.markdown("### ⚙️ Painel Administrativo")
     
-    tab_dashboard, tab_convocacao, tab_relatorios, tab_indicadores, tab_disp_adm, tab_config = st.tabs([
-        "🎛️ Dashboard", "📋 Convocação", "📊 Relatório", "📈 Indicadores", "👥 Disponibilidade", "⚙️ Config"
+    tab_dashboard, tab_convocacao, tab_apontamento, tab_relatorios, tab_indicadores, tab_disp_adm, tab_config = st.tabs([
+        "🎛️ Dashboard", "📋 Convocação", "✅ Apontamento", "📊 Relatório", "📈 Indicadores", "👥 Disponibilidade", "⚙️ Config"
     ])
 
     with tab_dashboard:
@@ -369,7 +368,6 @@ else:
             status_filtro_dash = st.selectbox("Status:", ["Todos", "Presente", "Falta", "Atestado", "Extra"], key="st_dash")
 
         try:
-            # Se buscou por nome específico, busca globalmente nas convocações para achar o colaborador
             if busca_colab:
                 query_dash = supabase.table("convocacoes").select("*")
             else:
@@ -390,7 +388,6 @@ else:
             ob = dict_obras.get(c['obra_id'], {"unidade": "GERAL", "nome": "Desconhecida"})
             colab = dict_colaboradores.get(c['colaborador_id'], {"nome": "Desconhecido", "funcao": "-", "valor_diaria": 240.0})
             
-            # Filtro inteligente por nome (ignora acentos e maiúsculas)
             if busca_colab:
                 if normalizar(busca_colab) not in normalizar(colab['nome']):
                     continue
@@ -543,6 +540,66 @@ else:
                         st.rerun()
         else:
             st.info("Cadastre obras e colaboradores na administração.")
+
+    with tab_apontamento:
+        st.markdown("#### Apontamento Diário")
+        col_eng_ap, col_data_ap = st.columns(2)
+        with col_eng_ap:
+            engenheiro_apont = st.selectbox("Engenheiro:", ENGENHEIROS, key="eng_apont_adm")
+        with col_data_ap:
+            data_apont = st.date_input("Data:", value=datetime.date.today(), format="DD/MM/YYYY", key="dt_apont_adm")
+        
+        try:
+            convocacoes_hoje = supabase.table("convocacoes").select("*").eq("engenheiro", engenheiro_apont).eq("data", data_apont.isoformat()).execute().data
+        except:
+            convocacoes_hoje = []
+
+        if convocacoes_hoje:
+            for conv in convocacoes_hoje:
+                conv['dados_obra'] = dict_obras.get(conv['obra_id'], {"unidade": "Desconhecida", "nome": "Desconhecida"})
+                
+            unidades_convocadas = sorted(list(set([c['dados_obra']['unidade'] for c in convocacoes_hoje])))
+            col_ua, col_oa = st.columns(2)
+            with col_ua:
+                unidade_filtro = st.selectbox("Unidade:", unidades_convocadas, key="filtro_u_apont_adm")
+            obras_convocadas = sorted(list(set([c['dados_obra']['nome'] for c in convocacoes_hoje if c['dados_obra']['unidade'] == unidade_filtro])))
+            with col_oa:
+                obra_filtro = st.selectbox("Obra:", obras_convocadas, key="filtro_o_apont_adm")
+            
+            convocacoes_render = [c for c in convocacoes_hoje if c['dados_obra']['unidade'] == unidade_filtro and c['dados_obra']['nome'] == obra_filtro]
+            
+            if st.button("✅ Marcar Todos como Presentes", key="btn_all_present_adm"):
+                for c in convocacoes_render:
+                    supabase.table("convocacoes").update({"status": "Presente"}).eq("id", c['id']).execute()
+                st.success("Atualizado!")
+                st.rerun()
+
+            opcoes_status = ["Presente", "Falta", "Atestado", "Extra"]
+            for conv in convocacoes_render:
+                with st.container(border=True):
+                    c_id = conv['id']
+                    dados_colab = dict_colaboradores.get(conv['colaborador_id'], {"nome": "Desconhecido", "funcao": "-"})
+                    nome = dados_colab['nome']
+                    funcao = dados_colab['funcao']
+                    cor = get_cor_funcao(funcao)
+                    status_atual = conv.get("status", "Presente")
+                    idx = opcoes_status.index(status_atual) if status_atual in opcoes_status else 0
+                    
+                    st.markdown(f"**{nome}** &nbsp; {cor} `{funcao}`")
+                    status_sel = st.radio("Status", opcoes_status, index=idx, key=f"status_adm_{c_id}", horizontal=True, label_visibility="collapsed")
+                    if status_sel != status_atual:
+                        supabase.table("convocacoes").update({"status": status_sel}).eq("id", c_id).execute()
+                    
+                    with st.expander("💸 Extra / Obs"):
+                        val_atual = float(conv.get("valor_extra") or 0.0)
+                        obs_atual = conv.get("observacao") or ""
+                        val_extra = st.number_input("Extra (R$)", value=val_atual, step=10.0, key=f"val_adm_{c_id}")
+                        obs = st.text_input("Obs", value=obs_atual, key=f"obs_adm_field_{c_id}")
+                        if st.button("Salvar Detalhes", key=f"btn_save_adm_{c_id}"):
+                            supabase.table("convocacoes").update({"valor_extra": val_extra, "observacao": obs}).eq("id", c_id).execute()
+                            st.success("Salvo!")
+        else:
+            st.warning("Nenhuma equipe convocada para este engenheiro nesta data.")
 
     with tab_relatorios:
         st.markdown("#### Relatório de Custos")
