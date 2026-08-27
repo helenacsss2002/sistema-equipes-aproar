@@ -643,3 +643,19 @@ else:
                 supabase.table("colaboradores").insert(novos).execute()
                 st.success(f"🎉 {len(novos)} colaboradores importados!")
                 st.rerun()
+
+        st.divider()
+        st.markdown("### 🗑️ Limpeza de Testes / Demandas")
+        st.write("Apague todas as convocações cadastradas para reiniciar os testes ou corrigir agendamentos.")
+        if st.button("🗑️ Apagar Todas as Convocações", type="secondary"):
+            try:
+                res = supabase.table("convocacoes").select("id").execute()
+                if res.data:
+                    for item in res.data:
+                        supabase.table("convocacoes").delete().eq("id", item['id']).execute()
+                    st.success("🎉 Todas as convocações foram apagadas com sucesso!")
+                    st.rerun()
+                else:
+                    st.info("Nenhuma convocação encontrada para apagar.")
+            except Exception as e:
+                st.error(f"Erro ao limpar convocações: {e}")
