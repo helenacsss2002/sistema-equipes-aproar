@@ -2,14 +2,30 @@ import streamlit as st
 from supabase import create_client, Client
 import datetime
 import pandas as pd
-import io
 import json
 from fpdf import FPDF
 import unicodedata
 import re
 
-# --- CONFIGURAÇÕES DA PÁGINA ---
-st.set_page_config(page_title="App Obras", page_icon="👷", layout="centered")
+# --- CONFIGURAÇÕES DA PÁGINA & IDENTIDADE VISUAL APROAR ---
+st.set_page_config(page_title="App Obras - APROAR", page_icon="👷", layout="centered")
+
+# Injeção de CSS para o tema escuro institucional (Azul Marinho Aproar)
+st.markdown("""
+    <style>
+    .stApp {
+        background-color: #0C102B;
+        color: #FFFFFF;
+    }
+    h1, h2, h3, h4, p, label, .stMarkdown {
+        color: #FFFFFF !important;
+    }
+    .stTabs [data-baseweb="tab-list"] button [data-testid="stMarkdownContainer"] p {
+        color: #0C102B !important;
+        font-weight: bold;
+    }
+    </style>
+""", unsafe_allow_html=True)
 
 # --- CONEXÃO COM SUPABASE ---
 @st.cache_resource
@@ -79,7 +95,7 @@ dict_obras = {o['id']: o for o in obras} if obras else {}
 
 ENGENHEIROS = ["EDUARDO", "GABRIEL", "GUSTAVO", "JOEL", "NETO", "PAULO", "SOARES", "VICTOR"]
 
-st.title("👷 Gestão de Equipes")
+st.title("👷 APROAR - Gestão de Equipes")
 
 tab_convocacao, tab_apontamento, tab_relatorios, tab_config = st.tabs(["📋 Convocação", "✅ Apontamento", "📊 Relatório", "⚙️ Config"])
 
@@ -94,7 +110,7 @@ with tab_convocacao:
             engenheiro_conv = st.selectbox("Engenheiro responsável:", ENGENHEIROS, key="eng_conv")
         with col_data:
             amanha = datetime.date.today() + datetime.timedelta(days=1)
-            data_conv = st.date_input("Data da Obra/Serviço:", value=amanha, format="DD/MM/YYYY")
+            data_conv = st.date_input("Data da Obra/Serviço (Amanhã):", value=amanha, format="DD/MM/YYYY")
 
         unidades_unicas = sorted(list(set([o['unidade'] for o in obras])))
         col_u, col_o = st.columns(2)
@@ -140,10 +156,10 @@ with tab_convocacao:
         st.info("Cadastre obras (JSON) e colaboradores (Excel) na aba Configurações.")
 
 # ==========================================
-# ABA 2: APONTAMENTOS
+# ABA 2: APONTAMENTOS (SALVAMENTO EM TEMPO REAL / SEM BLOQUEIO)
 # ==========================================
 with tab_apontamento:
-    st.markdown("### Apontamento Diário")
+    st.markdown("### Apontamento Diário (Salvo em Tempo Real)")
     col_eng_ap, col_data_ap = st.columns(2)
     with col_eng_ap:
         engenheiro_apont = st.selectbox("Engenheiro:", ENGENHEIROS, key="eng_apont")
@@ -172,64 +188,90 @@ with tab_apontamento:
         
         convocacoes_render = [c for c in convocacoes_hoje if c['dados_obra']['unidade'] == unidade_filtro and c['dados_obra']['nome'] == obra_filtro]
         
-        st.info("Marque as exceções e insira bonificações se necessário.")
-        with st.form("form_apontamentos"):
-            alteracoes = {}
-            opcoes_status = ["Presente", "Falta", "Atestado", "Extra"]
+        st.info("💡 Suas alterações são salvas automaticamente conforme você clica. Você pode parar e continuar de onde parou a qualquer momento.")
+        
+        opcoes_status = ["Presente", "Falta", "Atestado", "Extra"]
+        
+        for conv in convocacoes_render:
+            c_id = conv['id']
+            dados_colab = dict_colaboradores.get(conv['colaborador_id'], {"nome": "Desconhecido", "funcao": "-"})
+            nome = dados_colab['nome']
+            funcao = dados_colab['funcao']
+            cor = get_cor_funcao(funcao)
+            status_atual = conv.get("status", "Presente")
+            idx = opcoes_status.index(status_atual) if status_atual in opcoes_status else 0
             
-            for conv in convocacoes_render:
-                c_id = conv['id']
-                dados_colab = dict_colaboradores.get(conv['colaborador_id'], {"nome": "Desconhecido", "funcao": "-"})
-                nome = dados_colab['nome']
-                funcao = dados_colab['funcao']
-                cor = get_cor_funcao(funcao)
-                status_atual = conv.get("status", "Presente")
-                idx = opcoes_status.index(status_atual) if status_atual in opcoes_status else 0
-                
-                st.markdown(f"**{nome}** &nbsp; {cor} `{funcao}`")
-                status_sel = st.radio("Status", opcoes_status, index=idx, key=f"status_{c_id}", horizontal=True, label_visibility="collapsed")
-                
-                with st.expander("💸 Inserir Extra ou Observação"):
-                    val_atual = float(conv.get("valor_extra") or 0.0)
-                    obs_atual = conv.get("observacao") or ""
-                    
-                    val_extra = st.number_input("Bonificação / Extra (R$)", value=val_atual, step=10.0, key=f"val_{c_id}")
-                    obs = st.text_input("Justificativa / Acordo", value=obs_atual, key=f"obs_{c_id}")
-                
-                alteracoes[c_id] = {"status": status_sel, "valor_extra": val_extra, "observacao": obs}
-                st.divider()
+            st.markdown(f"**{nome}** &nbsp; {cor} `{funcao}`")
             
-            if st.form_submit_button("Salvar Apontamentos desta Obra", type="primary", use_container_width=True):
-                try:
-                    for c_id, dados in alteracoes.items():
-                        supabase.table("convocacoes").update(dados).eq("id", c_id).execute()
-                    st.success("✅ Apontamentos e Acordos salvos com sucesso!")
-                except Exception as e:
-                    st.error(f"Erro ao salvar: {e}")
+            # Atualização imediata no banco ao alterar o rádio
+            status_sel = st.radio("Status", opcoes_status, index=idx, key=f"status_{c_id}", horizontal=True, label_visibility="collapsed")
+            if status_sel != status_atual:
+                supabase.table("convocacoes").update({"status": status_sel}).eq("id", c_id).execute()
+            
+            with st.expander("💸 Inserir Extra ou Observação"):
+                val_atual = float(conv.get("valor_extra") or 0.0)
+                obs_atual = conv.get("observacao") or ""
+                
+                val_extra = st.number_input("Bonificação / Extra (R$)", value=val_atual, step=10.0, key=f"val_{c_id}")
+                obs = st.text_input("Justificativa / Acordo", value=obs_atual, key=f"obs_{c_id}")
+                
+                if val_extra != val_atual or obs != obs_atual:
+                    supabase.table("convocacoes").update({"valor_extra": val_extra, "observacao": obs}).eq("id", c_id).execute()
+            
+            st.divider()
     else:
         st.warning(f"Nenhuma equipe convocada por {engenheiro_apont} para o dia {data_apont.strftime('%d/%m/%Y')}.")
 
 # ==========================================
-# ABA 3: RELATÓRIOS (COM CÁLCULO DE CUSTOS E DIÁRIAS)
+# ABA 3: RELATÓRIOS (DIÁRIO, SEMANAL, MENSAL)
 # ==========================================
 with tab_relatorios:
-    st.markdown("### 📊 Relatório Diário Profissional (Custos)")
-    col_rel_eng, col_rel_data = st.columns(2)
-    with col_rel_eng:
+    st.markdown("### 📊 Relatório de Custos e Apontamentos")
+    col_rel_eng, col_rel_tipo = st.columns(2)
+    with col_eng:
         opcoes_relatorio = ["TODOS OS ENGENHEIROS"] + ENGENHEIROS
-        eng_relatorio = st.selectbox("Gerar relatório para:", opcoes_relatorio, key="eng_rel")
-    with col_rel_data:
-        data_rel = st.date_input("Data do Relatório:", value=datetime.date.today(), format="DD/MM/YYYY")
+        eng_relatorio = st.selectbox("Engenheiro:", opcoes_relatorio, key="eng_rel")
+    with col_rel_tipo:
+        tipo_rel = st.selectbox("Frequência do Relatório:", ["Diário", "Semanal", "Mensal"], key="tipo_rel")
     
-    if st.button("Gerar PDF de Custos e Apontamentos"):
+    col_d1, col_d2 = st.columns(2)
+    with col_d1:
+        data_base_rel = st.date_input("Data de Referência:", value=datetime.date.today(), format="DD/MM/YYYY", key="data_ref_rel")
+    
+    if st.button("Gerar PDF de Relatório Consolidado", type="primary"):
         try:
-            if eng_relatorio == "TODOS OS ENGENHEIROS":
-                dados_relatorio = supabase.table("convocacoes").select("*").eq("data", data_rel.isoformat()).execute().data
-            else:
-                dados_relatorio = supabase.table("convocacoes").select("*").eq("engenheiro", eng_relatorio).eq("data", data_rel.isoformat()).execute().data
+            # Lógica de cálculo de intervalo de datas (Diário, Semanal, Mensal)
+            if tipo_rel == "Diário":
+                data_inicio = data_base_rel.isoformat()
+                data_fim = data_base_rel.isoformat()
+                titulo_periodo = f"Diário - Data: {data_base_rel.strftime('%d/%m/%Y')}"
+            elif tipo_rel == "Semanal":
+                # Início da semana (Segunda) até Domingo
+                inicio_sem = data_base_rel - datetime.timedelta(days=data_base_rel.weekday())
+                fim_sem = inicio_sem + datetime.timedelta(days=6)
+                data_inicio = inicio_sem.isoformat()
+                data_fim = fim_sem.isoformat()
+                titulo_periodo = f"Semanal - De {inicio_sem.strftime('%d/%m/%Y')} até {fim_sem.strftime('%d/%m/%Y')}"
+            else: # Mensal
+                inicio_mes = data_base_rel.replace(day=1)
+                # último dia do mês
+                if data_base_rel.month == 12:
+                    fim_mes = data_base_rel.replace(year=data_base_rel.year+1, month=1, day=1) - datetime.timedelta(days=1)
+                else:
+                    fim_mes = data_base_rel.replace(month=data_base_rel.month+1, day=1) - datetime.timedelta(days=1)
+                data_inicio = inicio_mes.isoformat()
+                data_fim = fim_mes.isoformat()
+                titulo_periodo = f"Mensal - Mês: {data_base_rel.strftime('%m/%Y')}"
+
+            # Busca no Supabase por intervalo de datas
+            query = supabase.table("convocacoes").select("*").gte("data", data_inicio).lte("data", data_fim)
+            if eng_relatorio != "TODOS OS ENGENHEIROS":
+                query = query.eq("engenheiro", eng_relatorio)
+            
+            dados_relatorio = query.execute().data
             
             if not dados_relatorio:
-                st.warning(f"Sem apontamentos registrados para {data_rel.strftime('%d/%m/%Y')}.")
+                st.warning(f"Sem apontamentos registrados para o período selecionado.")
             else:
                 agrupado_eng = {}
                 for row in dados_relatorio:
@@ -243,10 +285,10 @@ with tab_relatorios:
                 
                 for eng, obras_eng in agrupado_eng.items():
                     pdf.add_page()
-                    pdf.set_font("Arial", 'B', 16)
-                    pdf.cell(0, 10, txt=to_latin("RELATÓRIO DIÁRIO DE CUSTOS E APONTAMENTOS"), ln=True, align='C')
-                    pdf.set_font("Arial", size=11)
-                    pdf.cell(0, 10, txt=to_latin(f"Data Referência: {data_rel.strftime('%d/%m/%Y')} | Engenheiro: {eng}"), ln=True, align='C')
+                    pdf.set_font("Arial", 'B', 15)
+                    pdf.cell(0, 10, txt=to_latin("APROAR ENGENHARIA - RELATÓRIO DE CUSTOS"), ln=True, align='C')
+                    pdf.set_font("Arial", size=10)
+                    pdf.cell(0, 8, txt=to_latin(f"Período: {titulo_periodo} | Engenheiro: {eng}"), ln=True, align='C')
                     pdf.ln(5)
                     
                     custo_total_engenheiro = 0.0
@@ -254,20 +296,21 @@ with tab_relatorios:
                     for o_id, apontamentos in obras_eng.items():
                         dados_ob = dict_obras.get(o_id, {"nome": "N/A", "unidade": "N/A"})
                         
-                        pdf.set_font("Arial", 'B', 12)
+                        pdf.set_font("Arial", 'B', 11)
                         pdf.set_fill_color(220, 220, 220)
                         titulo_obra = f"Unidade: {dados_ob['unidade']} | Obra/Serviço: {dados_ob['nome']}"
-                        pdf.cell(0, 10, txt=to_latin(titulo_obra), ln=True, fill=True)
+                        pdf.cell(0, 8, txt=to_latin(titulo_obra), ln=True, fill=True)
                         
-                        pdf.set_font("Arial", 'B', 10)
-                        pdf.cell(80, 8, to_latin("Colaborador"), border=1)
-                        pdf.cell(50, 8, to_latin("Função"), border=1)
-                        pdf.cell(25, 8, to_latin("Status"), border=1, align='C')
-                        pdf.cell(30, 8, to_latin("Diária (R$)"), border=1, align='C')
-                        pdf.cell(30, 8, to_latin("Extra (R$)"), border=1, align='C')
-                        pdf.cell(69, 8, to_latin("Observação"), border=1, ln=True)
+                        pdf.set_font("Arial", 'B', 9)
+                        pdf.cell(25, 7, to_latin("Data"), border=1, align='C')
+                        pdf.cell(65, 7, to_latin("Colaborador"), border=1)
+                        pdf.cell(50, 7, to_latin("Função"), border=1)
+                        pdf.cell(22, 7, to_latin("Status"), border=1, align='C')
+                        pdf.cell(28, 7, to_latin("Diária (R$)"), border=1, align='C')
+                        pdf.cell(28, 7, to_latin("Extra (R$)"), border=1, align='C')
+                        pdf.cell(61, 7, to_latin("Observação"), border=1, ln=True)
                         
-                        pdf.set_font("Arial", '', 10)
+                        pdf.set_font("Arial", '', 9)
                         custo_total_obra = 0.0
                         
                         for row in apontamentos:
@@ -277,8 +320,8 @@ with tab_relatorios:
                             status = row.get('status', 'Presente')
                             extra = float(row.get('valor_extra', 0) or 0)
                             obs = row.get('observacao', '')
+                            data_item = row.get('data', '')
                             
-                            # Se estiver Presente ou Extra, contabiliza a diária padrão (R$ 240 ou o valor do cadastro)
                             diaria_base = 0.0
                             if status in ["Presente", "Extra"]:
                                 diaria_base = float(colab.get('valor_diaria') or 240.0)
@@ -286,35 +329,34 @@ with tab_relatorios:
                             subtotal_colab = diaria_base + extra
                             custo_total_obra += subtotal_colab
                             
-                            nome_str = (nome[:32] + '..') if len(nome) > 32 else nome
+                            nome_str = (nome[:28] + '..') if len(nome) > 28 else nome
                             func_str = (funcao[:20] + '..') if len(funcao) > 20 else funcao
-                            obs_str = (obs[:35] + '..') if len(obs) > 35 else obs
+                            obs_str = (obs[:30] + '..') if len(obs) > 30 else obs
                             
-                            pdf.cell(80, 8, to_latin(nome_str), border=1)
-                            pdf.cell(50, 8, to_latin(func_str), border=1)
-                            pdf.cell(25, 8, to_latin(status), border=1, align='C')
-                            pdf.cell(30, 8, to_latin(f"R$ {diaria_base:.2f}"), border=1, align='C')
-                            pdf.cell(30, 8, to_latin(f"R$ {extra:.2f}"), border=1, align='C')
-                            pdf.cell(69, 8, to_latin(obs_str), border=1, ln=True)
+                            pdf.cell(25, 7, to_latin(data_item), border=1, align='C')
+                            pdf.cell(65, 7, to_latin(nome_str), border=1)
+                            pdf.cell(50, 7, to_latin(func_str), border=1)
+                            pdf.cell(22, 7, to_latin(status), border=1, align='C')
+                            pdf.cell(28, 7, to_latin(f"R$ {diaria_base:.2f}"), border=1, align='C')
+                            pdf.cell(28, 7, to_latin(f"R$ {extra:.2f}"), border=1, align='C')
+                            pdf.cell(61, 7, to_latin(obs_str), border=1, ln=True)
                         
-                        # Exibe o Custo Total da Obra logo abaixo da tabela
-                        pdf.set_font("Arial", 'B', 10)
+                        pdf.set_font("Arial", 'B', 9)
                         pdf.set_fill_color(245, 245, 245)
-                        pdf.cell(214, 8, to_latin(f"CUSTO TOTAL DA OBRA/SERVIÇO:"), border=1, align='R', fill=True)
-                        pdf.cell(70, 8, to_latin(f"R$ {custo_total_obra:.2f}"), border=1, align='C', fill=True, ln=True)
-                        pdf.ln(6)
+                        pdf.cell(218, 7, to_latin("CUSTO TOTAL DA OBRA/SERVIÇO:"), border=1, align='R', fill=True)
+                        pdf.cell(61, 7, to_latin(f"R$ {custo_total_obra:.2f}"), border=1, align='C', fill=True, ln=True)
+                        pdf.ln(5)
                         
                         custo_total_engenheiro += custo_total_obra
                     
-                    # Rodapé com o Custo Total Geral do Engenheiro na página
-                    pdf.set_font("Arial", 'B', 11)
-                    pdf.cell(0, 8, to_latin(f"CUSTO TOTAL GERAL DE MÃO DE OBRA (ENGENHEIRO {eng}): R$ {custo_total_engenheiro:.2f}"), ln=True, align='R')
+                    pdf.set_font("Arial", 'B', 10)
+                    pdf.cell(0, 8, to_latin(f"CUSTO TOTAL GERAL (ENGENHEIRO {eng}): R$ {custo_total_engenheiro:.2f}"), ln=True, align='R')
                 
                 pdf_bytes = pdf.output(dest='S').encode('latin1')
-                nome_arquivo = f"Relatorio_Custos_{eng_relatorio}_{data_rel.strftime('%d-%m-%Y')}.pdf"
-                st.download_button(label="📥 Baixar Relatório de Custos PDF", data=pdf_bytes, file_name=nome_arquivo, mime="application/pdf")
+                nome_arquivo = f"Relatorio_Aproar_{tipo_rel}_{eng_relatorio}.pdf"
+                st.download_button(label="📥 Baixar Relatório PDF Consolidado", data=pdf_bytes, file_name=nome_arquivo, mime="application/pdf")
         except Exception as e:
-            st.error(f"Erro ao gerar PDF: {e}")
+            st.error(f"Erro ao gerar relatório: {e}")
 
 # ==========================================
 # ABA 4: CONFIGURAÇÕES E IMPORTAÇÕES
@@ -325,7 +367,7 @@ with tab_config:
     
     if arquivo_json is not None:
         if st.button("🔄 Importar Obras em Execução", type="primary"):
-            with st.spinner("Limpando e Analisando Trello..."):
+            with st.spinner("Analisando Trello..."):
                 try:
                     trello_data = json.load(arquivo_json)
                     list_execucao_id = None
@@ -351,7 +393,7 @@ with tab_config:
                             inserir = [o for o in novas_obras if f"{o['unidade']} - {o['nome']}" not in set_existentes]
                             if inserir:
                                 supabase.table("obras").insert(inserir).execute()
-                                st.success(f"🎉 {len(inserir)} novas obras padronizadas e salvas!")
+                                st.success(f"🎉 {len(inserir)} novas obras salvas!")
                                 st.rerun()
                             else:
                                 st.info("👍 Obras atualizadas. Sem novos registros.")
@@ -367,7 +409,7 @@ with tab_config:
     
     if arquivo_excel is not None:
         if st.button("🔄 Limpar e Importar Colaboradores", type="secondary"):
-            with st.spinner("Lendo arquivo e padronizando funções..."):
+            with st.spinner("Lendo arquivo..."):
                 try:
                     xls = pd.ExcelFile(arquivo_excel)
                     nome_aba = "Base de dados" if "Base de dados" in xls.sheet_names else xls.sheet_names[0]
@@ -383,8 +425,7 @@ with tab_config:
                         
                         try: diaria = float(row.get('VALOR DIÁRIA (R$)', 0))
                         except: diaria = 0.0
-                        # Se não vier preenchido na planilha, define o padrão de R$ 240,00
-                        if diaria <= 0: diaria = 240.0
+                        if diaria <= 0: diaria = 240.0 # Padrão de R$ 240,00 por profissional
                         
                         try: passagem = float(row.get('PASSAGEM', 0))
                         except: passagem = 0.0
@@ -401,7 +442,7 @@ with tab_config:
                     
                     if novos_colaboradores:
                         supabase.table("colaboradores").insert(novos_colaboradores).execute()
-                        st.success(f"🎉 {len(novos_colaboradores)} colaboradores importados com sucesso.")
+                        st.success(f"🎉 {len(novos_colaboradores)} colaboradores importados.")
                         st.rerun()
                     else:
                         st.info("Nenhum colaborador novo foi encontrado.")
