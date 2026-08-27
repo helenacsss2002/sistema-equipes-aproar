@@ -2,7 +2,6 @@ import streamlit as st
 from supabase import create_client, Client
 import datetime
 import pandas as pd
-json = pd.io.json  # Compatibilidade
 import json
 from fpdf import FPDF
 import unicodedata
