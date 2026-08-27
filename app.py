@@ -7,22 +7,58 @@ from fpdf import FPDF
 import unicodedata
 import re
 
-# --- CONFIGURAÇÕES DA PÁGINA & IDENTIDADE VISUAL APROAR ---
+# --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR ---
 st.set_page_config(page_title="App Obras - APROAR", page_icon="👷", layout="centered")
 
-# Injeção de CSS para o tema escuro institucional (Azul Marinho Aproar)
+# Injeção de CSS para corrigir cores, contrastes e elementos visuais no modo escuro
 st.markdown("""
     <style>
+    /* Fundo geral e fontes */
     .stApp {
         background-color: #0C102B;
-        color: #FFFFFF;
+        color: #F8FAFC;
     }
-    h1, h2, h3, h4, p, label, .stMarkdown {
+    h1, h2, h3, h4, p, label, .stMarkdown, span {
+        color: #F8FAFC !important;
+    }
+    
+    /* Correção de Inputs, Selectboxes e Multiselects */
+    div[data-baseweb="select"] > div, div[data-baseweb="base-input"] > div, input, textarea {
+        background-color: #161B3D !important;
+        color: #FFFFFF !important;
+        border-color: #2D3568 !important;
+    }
+    
+    /* Tags / Pílulas do Multiselect */
+    span[data-baseweb="tag"] {
+        background-color: #2563EB !important;
         color: #FFFFFF !important;
     }
+    
+    /* Botões Principais */
+    .stButton > button {
+        background-color: #2563EB !important;
+        color: #FFFFFF !important;
+        border: none !important;
+        font-weight: bold;
+    }
+    .stButton > button:hover {
+        background-color: #1D4ED8 !important;
+    }
+    
+    /* Abas */
     .stTabs [data-baseweb="tab-list"] button [data-testid="stMarkdownContainer"] p {
         color: #0C102B !important;
         font-weight: bold;
+    }
+    
+    /* Expander e Divisores */
+    .streamlit-expanderHeader {
+        background-color: #161B3D !important;
+        border-radius: 6px;
+    }
+    hr {
+        border-color: #2D3568 !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -97,7 +133,10 @@ ENGENHEIROS = ["EDUARDO", "GABRIEL", "GUSTAVO", "JOEL", "NETO", "PAULO", "SOARES
 
 st.title("👷 APROAR - Gestão de Equipes")
 
-tab_convocacao, tab_apontamento, tab_relatorios, tab_config = st.tabs(["📋 Convocação", "✅ Apontamento", "📊 Relatório", "⚙️ Config"])
+# Navegação por Abas (incluindo a nova aba de Indicadores)
+tab_convocacao, tab_apontamento, tab_relatorios, tab_indicadores, tab_config = st.tabs([
+    "📋 Convocação", "✅ Apontamento", "📊 Relatório", "📈 Indicadores", "⚙️ Config"
+])
 
 # ==========================================
 # ABA 1: CONVOCAÇÃO
@@ -156,7 +195,7 @@ with tab_convocacao:
         st.info("Cadastre obras (JSON) e colaboradores (Excel) na aba Configurações.")
 
 # ==========================================
-# ABA 2: APONTAMENTOS (SALVAMENTO EM TEMPO REAL / SEM BLOQUEIO)
+# ABA 2: APONTAMENTOS (SALVAMENTO EM TEMPO REAL)
 # ==========================================
 with tab_apontamento:
     st.markdown("### Apontamento Diário (Salvo em Tempo Real)")
@@ -203,7 +242,6 @@ with tab_apontamento:
             
             st.markdown(f"**{nome}** &nbsp; {cor} `{funcao}`")
             
-            # Atualização imediata no banco ao alterar o rádio
             status_sel = st.radio("Status", opcoes_status, index=idx, key=f"status_{c_id}", horizontal=True, label_visibility="collapsed")
             if status_sel != status_atual:
                 supabase.table("convocacoes").update({"status": status_sel}).eq("id", c_id).execute()
@@ -240,21 +278,18 @@ with tab_relatorios:
     
     if st.button("Gerar PDF de Relatório Consolidado", type="primary"):
         try:
-            # Lógica de cálculo de intervalo de datas (Diário, Semanal, Mensal)
             if tipo_rel == "Diário":
                 data_inicio = data_base_rel.isoformat()
                 data_fim = data_base_rel.isoformat()
                 titulo_periodo = f"Diário - Data: {data_base_rel.strftime('%d/%m/%Y')}"
             elif tipo_rel == "Semanal":
-                # Início da semana (Segunda) até Domingo
                 inicio_sem = data_base_rel - datetime.timedelta(days=data_base_rel.weekday())
                 fim_sem = inicio_sem + datetime.timedelta(days=6)
                 data_inicio = inicio_sem.isoformat()
                 data_fim = fim_sem.isoformat()
                 titulo_periodo = f"Semanal - De {inicio_sem.strftime('%d/%m/%Y')} até {fim_sem.strftime('%d/%m/%Y')}"
-            else: # Mensal
+            else:
                 inicio_mes = data_base_rel.replace(day=1)
-                # último dia do mês
                 if data_base_rel.month == 12:
                     fim_mes = data_base_rel.replace(year=data_base_rel.year+1, month=1, day=1) - datetime.timedelta(days=1)
                 else:
@@ -263,7 +298,6 @@ with tab_relatorios:
                 data_fim = fim_mes.isoformat()
                 titulo_periodo = f"Mensal - Mês: {data_base_rel.strftime('%m/%Y')}"
 
-            # Busca no Supabase por intervalo de datas
             query = supabase.table("convocacoes").select("*").gte("data", data_inicio).lte("data", data_fim)
             if eng_relatorio != "TODOS OS ENGENHEIROS":
                 query = query.eq("engenheiro", eng_relatorio)
@@ -359,7 +393,60 @@ with tab_relatorios:
             st.error(f"Erro ao gerar relatório: {e}")
 
 # ==========================================
-# ABA 4: CONFIGURAÇÕES E IMPORTAÇÕES
+# ABA 4: INDICADORES E RANKINGS (NOVA ABA ADM)
+# ==========================================
+with tab_indicadores:
+    st.markdown("### 📈 Painel Administrativo de Indicadores")
+    st.write("Acompanhe o ranking dos colaboradores com maior incidência de faltas, atestados e presenças.")
+    
+    try:
+        # Busca todas as convocações e colaboradores para análise
+        all_conv = supabase.table("convocacoes").select("*").execute().data
+        if not all_conv:
+            st.info("Ainda não há dados de apontamentos suficientes para gerar os rankings.")
+        else:
+            df_conv = pd.DataFrame(all_conv)
+            
+            # Mapeia o nome do colaborador
+            df_conv['nome_colab'] = df_conv['colaborador_id'].map(lambda cid: dict_colaboradores.get(cid, {}).get('nome', 'Desconhecido'))
+            df_conv['funcao_colab'] = df_conv['colaborador_id'].map(lambda cid: dict_colaboradores.get(cid, {}).get('funcao', 'Desconhecido'))
+
+            col_ind1, col_ind2, col_ind3 = st.columns(3)
+
+            with col_ind1:
+                st.markdown("#### ❌ Top 10 - Faltas")
+                df_faltas = df_conv[df_conv['status'] == 'Falta']
+                if not df_faltas.empty:
+                    ranking_faltas = df_faltas.groupby(['nome_colab', 'funcao_colab']).size().reset_index(name='Total')
+                    ranking_faltas = ranking_faltas.sort_values(by='Total', ascending=False).head(10)
+                    st.dataframe(ranking_faltas.rename(columns={'nome_colab': 'Colaborador', 'funcao_colab': 'Função', 'Total': 'Faltas'}), hide_index=True, use_container_width=True)
+                else:
+                    st.success("Nenhuma falta registrada!")
+
+            with col_ind2:
+                st.markdown("#### 🩺 Top 10 - Atestados")
+                df_atestado = df_conv[df_conv['status'] == 'Atestado']
+                if not df_atestado.empty:
+                    ranking_atestado = df_atestado.groupby(['nome_colab', 'funcao_colab']).size().reset_index(name='Total')
+                    ranking_atestado = ranking_atestado.sort_values(by='Total', ascending=False).head(10)
+                    st.dataframe(ranking_atestado.rename(columns={'nome_colab': 'Colaborador', 'funcao_colab': 'Função', 'Total': 'Atestados'}), hide_index=True, use_container_width=True)
+                else:
+                    st.success("Nenhum atestado registrado!")
+
+            with col_ind3:
+                st.markdown("#### ✅ Top 10 - Mais Presentes")
+                df_presenca = df_conv[df_conv['status'].isin(['Presente', 'Extra'])]
+                if not df_presenca.empty:
+                    ranking_presenca = df_presenca.groupby(['nome_colab', 'funcao_colab']).size().reset_index(name='Total')
+                    ranking_presenca = ranking_presenca.sort_values(by='Total', ascending=False).head(10)
+                    st.dataframe(ranking_presenca.rename(columns={'nome_colab': 'Colaborador', 'funcao_colab': 'Função', 'Total': 'Presenças'}), hide_index=True, use_container_width=True)
+                else:
+                    st.info("Sem dados de presença.")
+    except Exception as e:
+        st.error(f"Erro ao carregar indicadores: {e}")
+
+# ==========================================
+# ABA 5: CONFIGURAÇÕES E IMPORTAÇÕES
 # ==========================================
 with tab_config:
     st.markdown("### 📋 Sincronizar Obras (Trello JSON)")
@@ -425,7 +512,7 @@ with tab_config:
                         
                         try: diaria = float(row.get('VALOR DIÁRIA (R$)', 0))
                         except: diaria = 0.0
-                        if diaria <= 0: diaria = 240.0 # Padrão de R$ 240,00 por profissional
+                        if diaria <= 0: diaria = 240.0
                         
                         try: passagem = float(row.get('PASSAGEM', 0))
                         except: passagem = 0.0
