@@ -109,6 +109,10 @@ def limpar_funcao(texto):
     texto_limpo = unicodedata.normalize('NFKD', texto_limpo).encode('ASCII', 'ignore').decode('utf-8')
     return texto_limpo
 
+def normalizar(texto):
+    if not texto: return ""
+    return ''.join(c for c in unicodedata.normalize('NFD', str(texto)) if unicodedata.category(c) != 'Mn').upper().strip()
+
 def get_cor_funcao(funcao):
     cores = ["🟥", "🟧", "🟨", "🟩", "🟦", "🟪", "🟫", "⬛"]
     hash_num = sum(ord(c) for c in str(funcao))
@@ -124,8 +128,11 @@ def buscar_obras():
     except Exception: return []
 
 def buscar_colaboradores():
-    try: return supabase.table("colaboradores").select("*").eq("ativo", True).execute().data
-    except Exception: return []
+    try: 
+        res = supabase.table("colaboradores").select("*").execute().data
+        return res if res else []
+    except Exception: 
+        return []
 
 obras = buscar_obras()
 colaboradores = buscar_colaboradores()
@@ -345,7 +352,6 @@ else:
     with tab_dashboard:
         st.markdown("### 🎛️ Painel de Controle e Auditoria de Presenças")
         
-        # Filtros do Topo (Data, Unidade, Busca, Status)
         col_f1, col_f2, col_f3, col_f4 = st.columns(4)
         with col_f1:
             data_filtro_dash = st.date_input("Data de Auditoria:", value=datetime.date.today(), format="DD/MM/YYYY", key="d_dash")
@@ -358,30 +364,28 @@ else:
         with col_f4:
             status_filtro_dash = st.selectbox("Status:", ["Todos", "Presente", "Falta", "Atestado", "Extra"], key="st_dash")
 
-        # Busca dados do dia selecionado
         try:
             query_dash = supabase.table("convocacoes").select("*").eq("data", data_filtro_dash.isoformat())
             if unidade_dash != "TODAS":
-                # Filtra os IDs de obras que pertencem à unidade selecionada
                 obras_ids_unidade = [o['id'] for o in obras if o['unidade'] == unidade_dash]
                 if obras_ids_unidade:
                     query_dash = query_dash.in_("obra_id", obras_ids_unidade)
                 else:
-                    query_dash = query_dash.eq("obra_id", "00000000-0000-0000-0000-000000000000") # vazio
+                    query_dash = query_dash.eq("obra_id", "00000000-0000-0000-0000-000000000000")
             convs_dash = query_dash.execute().data
         except:
             convs_dash = []
 
-        # Enriquece dados com obra e colaborador
         lista_processada = []
         for c in convs_dash:
             ob = dict_obras.get(c['obra_id'], {"unidade": "GERAL", "nome": "Desconhecida"})
             colab = dict_colaboradores.get(c['colaborador_id'], {"nome": "Desconhecido", "funcao": "-", "valor_diaria": 240.0})
             
-            # Filtro por nome
-            if busca_colab and busca_colab.upper() not in colab['nome'].upper():
-                continue
-            # Filtro por status
+            # Filtro por nome com suporte a busca insensível a acentos
+            if busca_colab:
+                if normalizar(busca_colab) not in normalizar(colab['nome']):
+                    continue
+
             if status_filtro_dash != "Todos" and c.get('status') != status_filtro_dash:
                 continue
 
@@ -423,14 +427,12 @@ else:
         if not lista_processada:
             st.info("Nenhum registro encontrado para os filtros selecionados nesta data.")
         else:
-            # Botão rápido para marcar todos como presentes na visão ADM
             if st.button("✅ Marcar Todos da Lista como Presentes"):
                 for item in lista_processada:
                     supabase.table("convocacoes").update({"status": "Presente"}).eq("id", item['id']).execute()
                 st.success("Registros atualizados para Presente!")
                 st.rerun()
 
-            # Renderiza agrupado por Obra / Unidade estilo o print
             df_view = pd.DataFrame(lista_processada)
             obras_unicas_view = df_view['obra_nome'].unique()
 
