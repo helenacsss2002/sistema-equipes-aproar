@@ -16,7 +16,6 @@ from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 # --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR (WIDE - ESCURO / COMPACTO) ---
 st.set_page_config(page_title="APROAR - Controle de Presenças", page_icon="👷", layout="wide")
 
-# CSS Moderno com Tema Escuro, Sidebar Menor e Azul APROAR
 st.markdown("""
     <style>
     .stApp {
@@ -27,7 +26,6 @@ st.markdown("""
         color: #F8FAFC !important;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
-    /* Sidebar Escura, Moderna e Mais Estreita */
     section[data-testid="stSidebar"] {
         background-color: #1E293B !important;
         border-right: 1px solid #334155;
@@ -39,7 +37,6 @@ st.markdown("""
         padding-left: 15px;
         padding-right: 15px;
     }
-    /* Inputs e Selects Limpos no Tema Escuro */
     div[data-baseweb="select"] > div, 
     div[data-baseweb="base-input"] > div, 
     div[data-baseweb="input"] > div,
@@ -65,7 +62,6 @@ st.markdown("""
         background-color: #2563EB !important;
         color: #FFFFFF !important;
     }
-    /* Botões Principais no Azul APROAR */
     .stButton > button {
         background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%) !important;
         color: #FFFFFF !important;
@@ -81,7 +77,6 @@ st.markdown("""
         transform: translateY(-1px);
         box-shadow: 0 6px 16px rgba(37, 99, 235, 0.4);
     }
-    /* Containers com Efeito de Elevação Suave */
     div[data-testid="stVerticalBlock"] > div[style*="border"] {
         background-color: #1E293B !important;
         border: 1px solid #334155 !important;
@@ -98,10 +93,11 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- MAPA DE MESES PARA INTEGRAÇÃO ---
+# --- MESES EM PORTUGUÊS ---
 MESES_PT = {
-    1: "JANEIRO", 2: "FEVEREIRO", 3: "MARÇO", 4: "ABRIL", 5: "MAIO", 6: "JUNHO",
-    7: "JULHO", 8: "AGOSTO", 9: "SETEMBRO", 10: "OUTUBRO", 11: "NOVEMBRO", 12: "DEZEMBRO"
+    1: "JANEIRO", 2: "FEVEREIRO", 3: "MARÇO", 4: "ABRIL",
+    5: "MAIO", 6: "JUNHO", 7: "JULHO", 8: "AGOSTO",
+    9: "SETEMBRO", 10: "OUTUBRO", 11: "NOVEMBRO", 12: "DEZEMBRO"
 }
 
 # --- CONEXÃO COM SUPABASE ---
@@ -167,62 +163,70 @@ def to_latin(texto):
     if not texto: return ""
     return str(texto).encode('latin-1', 'replace').decode('latin-1')
 
-# --- SINCRONIZAÇÃO COM TRELLO (DINÂMICA: MÊS ATUAL / LISTA ESPECÍFICA / EM EXECUÇÃO) ---
-def executar_sincronizacao_trello(termo_busca=None):
+# --- SINCRONIZAÇÃO COM TRELLO (MÊS VIGENTE OU SELEÇÃO MANUAL) ---
+def obter_listas_trello():
     url_trello = "https://trello.com/b/TX8hGvmI.json"
     try:
         resp = requests.get(url_trello, timeout=10)
-        if resp.status_code != 200:
-            return False, "Erro ao acessar o quadro público do Trello."
-        
-        data = resp.json()
-        lists = data.get('lists', [])
-        cards = data.get('cards', [])
-        
-        id_lista = None
-        mes_atual_nome = MESES_PT[datetime.date.today().month]
-        termos_testar = [termo_busca] if termo_busca else [f"MEDICOES {mes_atual_nome}", "EM EXECUCAO", "EXECUCAO"]
-        
-        for t in termos_testar:
-            if not t: continue
-            t_norm = normalizar(t)
-            for lst in lists:
-                nome_lista = normalizar(lst.get('name', ''))
-                if t_norm in nome_lista:
-                    id_lista = lst.get('id')
-                    break
-            if id_lista: break
-        
-        if not id_lista:
-            return False, "Nenhuma lista correspondente encontrada no quadro do Trello."
-        
-        cards_alvo = [c for c in cards if c.get('idList') == id_lista and not c.get('closed', False)]
-        
-        obras_atuais = buscar_obras()
-        nomes_cadastrados = {normalizar(o['nome']) for o in obras_atuais}
-        
-        novas_inseridas = 0
-        for card in cards_alvo:
-            nome_card = card.get('name', '').strip()
-            if not nome_card:
-                continue
-            
-            unidade_card = identificar_unidade(nome_card)
-            
-            if normalizar(nome_card) not in nomes_cadastrados:
-                supabase.table("obras").insert({
-                    "unidade": unidade_card,
-                    "nome": nome_card
-                }).execute()
-                novas_inseridas += 1
-                nomes_cadastrados.add(normalizar(nome_card))
-                
-        st.cache_data.clear()
-        return True, f"Sincronização realizada com sucesso! {novas_inseridas} nova(s) obra(s) adicionadas à base."
-    except Exception as e:
-        return False, f"Erro na conexão com o Trello: {e}"
+        if resp.status_code == 200:
+            data = resp.json()
+            return data.get('lists', []), data.get('cards', [])
+    except Exception:
+        pass
+    return [], []
 
-# --- BUSCA DE DADOS COM CACHE (OTIMIZAÇÃO DE VELOCIDADE) ---
+def executar_sincronizacao_trello(id_lista_target=None):
+    lists, cards = obter_listas_trello()
+    if not lists:
+        return False, "Erro ao acessar o quadro público do Trello."
+    
+    id_lista_execucao = id_lista_target
+    nome_lista_alvo = ""
+    
+    # Caso nenhuma lista seja explicitamente selecionada, busca a do mês vigente (ex: "MEDIÇÃO AGOSTO 2026")
+    if not id_lista_execucao:
+        hoje = datetime.date.today()
+        mes_vigente = MESES_PT.get(hoje.month, "")
+        ano_vigente = str(hoje.year)
+        termo_busca = f"MEDICAO {mes_vigente} {ano_vigente}"
+        
+        for lst in lists:
+            nome_norm = normalizar(lst.get('name', ''))
+            if termo_busca in nome_norm or "EM EXECUCAO" in nome_norm:
+                id_lista_execucao = lst.get('id')
+                nome_lista_alvo = lst.get('name')
+                break
+    else:
+        for lst in lists:
+            if lst.get('id') == id_lista_execucao:
+                nome_lista_alvo = lst.get('name')
+                break
+
+    if not id_lista_execucao:
+        return False, "Nenhuma lista do mês vigente ou de execução foi encontrada no Trello."
+    
+    cards_execucao = [c for c in cards if c.get('idList') == id_lista_execucao and not c.get('closed', False)]
+    obras_atuais = buscar_obras()
+    nomes_cadastrados = {normalizar(o['nome']) for o in obras_atuais}
+    
+    novas_inseridas = 0
+    for card in cards_execucao:
+        nome_card = card.get('name', '').strip()
+        if not nome_card: continue
+        
+        unidade_card = identificar_unidade(nome_card)
+        if normalizar(nome_card) not in nomes_cadastrados:
+            supabase.table("obras").insert({
+                "unidade": unidade_card,
+                "nome": nome_card
+            }).execute()
+            novas_inseridas += 1
+            nomes_cadastrados.add(normalizar(nome_card))
+            
+    st.cache_data.clear()
+    return True, f"Sincronização de '{nome_lista_alvo}' realizada com sucesso! {novas_inseridas} nova(s) obra(s) adicionada(s)."
+
+# --- BUSCA DE DADOS COM CACHE ---
 @st.cache_data(ttl=30)
 def buscar_obras():
     try: return supabase.table("obras").select("*").execute().data
@@ -306,9 +310,10 @@ if modo_campo:
     ])
     
     with tab_apontamento_campo:
-        engenheiro_apont = st.selectbox("Seu Nome:", ENGENHEIROS, key="eng_apont_c")
-        data_apont = datetime.date.today()
-        st.write(f"📅 Data: {data_apont.strftime('%d/%m/%Y')}")
+        col_c1, col_c2 = st.columns(2)
+        with col_c1:
+            engenheiro_apont = st.selectbox("Seu Nome (Engenheiro):", ENGENHEIROS, key="eng_apont_c")
+            data_apont = st.date_input("Data do Apontamento:", value=datetime.date.today(), format="DD/MM/YYYY", key="dt_apont_c")
         
         try:
             convocacoes_hoje = supabase.table("convocacoes").select("*").eq("engenheiro", engenheiro_apont).eq("data", data_apont.isoformat()).execute().data
@@ -320,17 +325,21 @@ if modo_campo:
                 conv['dados_obra'] = dict_obras.get(conv['obra_id'], {"unidade": "Desconhecida", "nome": "Desconhecida"})
                 
             unidades_convocadas = sorted(list(set([c['dados_obra']['unidade'] for c in convocacoes_hoje])))
-            unidade_filtro = st.selectbox("Unidade:", unidades_convocadas, key="f_u_c")
+            with col_c2:
+                unidade_filtro = st.selectbox("Unidade:", ["TODAS"] + unidades_convocadas, key="f_u_c")
+                obras_convocadas = sorted(list(set([c['dados_obra']['nome'] for c in convocacoes_hoje if unidade_filtro == "TODAS" or c['dados_obra']['unidade'] == unidade_filtro])))
+                obra_filtro = st.selectbox("Obra / Serviço:", ["TODAS"] + obras_convocadas, key="f_o_c")
             
-            obras_convocadas = sorted(list(set([c['dados_obra']['nome'] for c in convocacoes_hoje if c['dados_obra']['unidade'] == unidade_filtro])))
-            obra_filtro = st.selectbox("Obra:", obras_convocadas, key="f_o_c")
+            convocacoes_render = [
+                c for c in convocacoes_hoje 
+                if (unidade_filtro == "TODAS" or c['dados_obra']['unidade'] == unidade_filtro)
+                and (obra_filtro == "TODAS" or c['dados_obra']['nome'] == obra_filtro)
+            ]
             
-            convocacoes_render = [c for c in convocacoes_hoje if c['dados_obra']['unidade'] == unidade_filtro and c['dados_obra']['nome'] == obra_filtro]
-            
-            if st.button("✅ MARCAR TODOS COMO PRESENTES"):
+            if st.button("✅ MARCAR TODOS COMO PRESENTES", key="btn_all_pres_campo"):
                 for c in convocacoes_render:
                     supabase.table("convocacoes").update({"status": "Presente (Integral)"}).eq("id", c['id']).execute()
-                st.success("Atualizado!")
+                st.success("Todos marcados como Presente (Integral)!")
                 st.rerun()
 
             opcoes_status = ["Presente (Integral)", "Presente (Só Manhã)", "Presente (Só Tarde)", "Saída Antecipada", "Falta", "Atestado", "Extra"]
@@ -352,82 +361,57 @@ if modo_campo:
                     with st.expander("💸 Extra / Obs"):
                         val_atual = float(conv.get("valor_extra") or 0.0)
                         obs_atual = conv.get("observacao") or ""
-                        val_extra = st.number_input("Extra (R$)", value=val_atual, step=10.0, key=f"v_{c_id}")
+                        val_extra = st.number_input("Horas Extras / Valor (R$)", value=val_atual, step=10.0, key=f"v_{c_id}")
                         obs = st.text_input("Obs / Justificativa", value=obs_atual, key=f"o_{c_id}")
                         if st.button("Salvar", key=f"btn_{c_id}"):
                             supabase.table("convocacoes").update({"valor_extra": val_extra, "observacao": obs}).eq("id", c_id).execute()
                             st.success("Salvo!")
         else:
-            st.warning("Nenhuma equipe convocada para hoje sob sua responsabilidade.")
+            st.warning("Nenhuma equipe convocada para este engenheiro na data selecionada.")
 
     with tab_convocacao_campo:
         if obras and colaboradores:
-            engenheiro_conv = st.selectbox("Seu Nome:", ENGENHEIROS, key="eng_c_conv")
-            amanha = datetime.date.today() + datetime.timedelta(days=1)
-            data_conv = st.date_input("Data:", value=amanha, format="DD/MM/YYYY", key="d_c_campo")
-            
+            engenheiro_conv = st.selectbox("Seu Nome (Engenheiro):", ENGENHEIROS, key="eng_c_conv")
+            data_conv_auto = datetime.date.today() + datetime.timedelta(days=1)
+            st.info(f"📅 **Data de Convocação Automática:** {data_conv_auto.strftime('%d/%m/%Y')} (Dia seguinte)")
+            st.write("⏱️ **Turno Fixo:** `Integral`")
+
             unidades_unicas = sorted(list(set([o['unidade'] for o in obras])))
             unidade_selecionada = st.selectbox("Unidade:", unidades_unicas, key="u_c_sel")
             
             obras_da_unidade = {o['nome']: o['id'] for o in obras if o['unidade'] == unidade_selecionada}
-            obra_selecionada = st.selectbox("Obra:", list(obras_da_unidade.keys()), key="o_c_sel")
-
-            turno_conv = st.selectbox("Turno / Período:", ["Integral", "Manhã", "Tarde"], key="turno_c_sel")
-            
-            # BUSCA NOMINAL E SELEÇÃO DE COLABORADOR NO CAMPO
-            st.markdown("#### Seleção Nominal de Colaboradores")
-            lista_nomes_colabs = [c['nome'] for c in colaboradores]
-            nome_busca_campo = st.selectbox("Buscar Colaborador pelo Nome:", options=[""] + lista_nomes_colabs, key="busca_nom_campo")
-            
-            funcao_auto_campo = ""
-            if nome_busca_campo:
-                obj_colab = next((c for c in colaboradores if c['nome'] == nome_busca_campo), None)
-                if obj_colab:
-                    funcao_auto_campo = obj_colab['funcao']
-            st.text_input("Função do Colaborador:", value=funcao_auto_campo, disabled=True, key="func_auto_c")
+            obra_selecionada = st.selectbox("Obra / Serviço:", list(obras_da_unidade.keys()), key="o_c_sel")
 
             funcoes_disponiveis = sorted(list(set([c['funcao'] for c in colaboradores])))
-            frente_selecionada = st.selectbox("Filtrar por Função (opcional para lista):", ["TODAS"] + funcoes_disponiveis, key="f_c_sel")
+            filtro_funcao = st.selectbox("Filtrar por Função (Opcional):", ["TODAS"] + funcoes_disponiveis, key="f_c_sel_campo")
 
-            colaboradores_filtrados = colaboradores if frente_selecionada == "TODAS" else [c for c in colaboradores if c['funcao'] == frente_selecionada]
-            opcoes_colaboradores = {c['nome']: c['id'] for c in colaboradores_filtrados}
-            
-            padrao_sel = [nome_busca_campo] if nome_busca_campo and nome_busca_campo in opcoes_colaboradores else []
-            equipe_selecionada = st.multiselect("Confirmar Selecionados:", list(opcoes_colaboradores.keys()), default=padrao_sel, key="eq_c_sel")
+            if filtro_funcao != "TODAS":
+                colabs_filtrados = [c for c in colaboradores if c['funcao'] == filtro_funcao]
+            else:
+                colabs_filtrados = colaboradores
 
-            with st.container(border=True):
-                st.markdown(f"#### 👁️ Panorama de {engenheiro_conv} ({data_conv.strftime('%d/%m/%Y')})")
-                try:
-                    convs_eng_data = supabase.table("convocacoes").select("*").eq("engenheiro", engenheiro_conv).eq("data", data_conv.isoformat()).execute().data
-                except:
-                    convs_eng_data = []
-                
-                ids_ja_alocados_eng = {c['colaborador_id'] for c in convs_eng_data}
-                nomes_ja_alocados = [dict_colaboradores.get(cid, {}).get('nome', '') for cid in ids_ja_alocados_eng]
-                if nomes_ja_alocados:
-                    st.caption("Já escalados por você hoje: " + ", ".join(nomes_ja_alocados))
-                else:
-                    st.caption("Nenhum escalado por você nesta data.")
+            mapa_colab_opcoes = {f"{c['nome']}  ({c['funcao']})": c['id'] for c in colabs_filtrados}
+            equipe_selecionada = st.multiselect("Buscar / Selecionar Colaboradores:", list(mapa_colab_opcoes.keys()), key="eq_c_sel_campo")
 
-            if st.button("CONFIRMAR CONVOCAÇÃO", type="primary", use_container_width=True):
+            if st.button("CONFIRMAR CONVOCAÇÃO", type="primary", use_container_width=True, key="btn_conv_campo"):
                 if not equipe_selecionada:
                     st.warning("Selecione pelo menos um colaborador.")
                 else:
                     obra_id = obras_da_unidade[obra_selecionada]
                     sucessos = 0
-                    for nome in equipe_selecionada:
-                        c_id = opcoes_colaboradores[nome]
+                    for label_colab in equipe_selecionada:
+                        c_id = mapa_colab_opcoes[label_colab]
                         supabase.table("convocacoes").insert({
                             "obra_id": obra_id,
                             "colaborador_id": c_id,
-                            "data": data_conv.isoformat(),
+                            "data": data_conv_auto.isoformat(),
                             "engenheiro": engenheiro_conv,
                             "status": "Presente (Integral)",
                             "valor_extra": 0,
-                            "observacao": f"Turno: {turno_conv}"
+                            "observacao": "Turno: Integral"
                         }).execute()
                         sucessos += 1
-                    st.success(f"✅ {sucessos} colaborador(es) convocado(s) para o turno {turno_conv}!")
+                    st.success(f"✅ {sucessos} colaborador(es) convocado(s) para o turno Integral!")
                     st.rerun()
         else:
             st.info("Cadastre obras e colaboradores na administração.")
@@ -443,7 +427,6 @@ else:
     if "menu_ativo" not in st.session_state:
         st.session_state.menu_ativo = "🎛️ DASHBOARD"
 
-    # --- MENU LATERAL EM MAIÚSCULAS ---
     with st.sidebar:
         if os.path.exists("logo.png"):
             st.image("logo.png", use_container_width=True)
@@ -472,9 +455,7 @@ else:
 
     menu_escolhido = st.session_state.menu_ativo
 
-    # --- CONTEÚDO PRINCIPAL ---
-
-    # 1. DASHBOARD
+    # --- 1. DASHBOARD ---
     if menu_escolhido == "🎛️ DASHBOARD":
         st.markdown("## 🎛️ DASHBOARD E AUDITORIA DE PRESENÇAS")
         
@@ -568,7 +549,6 @@ else:
                 st.rerun()
 
             df_view = pd.DataFrame(lista_processada)
-            
             for eng_resp in df_view['engenheiro'].unique():
                 df_eng = df_view[df_view['engenheiro'] == eng_resp]
                 st.markdown(f"### 👷 Engenheiro Responsável: `{eng_resp}`")
@@ -581,9 +561,9 @@ else:
                         st.markdown(f"**Unidade:** {unidade_nome} &nbsp;|&nbsp; **Obra:** {obra_n}")
                         for idx, row in subset.iterrows():
                             c_id = row['id']
-                            c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
+                            c1, c2, c3 = st.columns([3, 2, 2])
                             with c1:
-                                st.markdown(f"**{row['colab_nome']}** &nbsp; `{row['colab_funcao']}` &nbsp; <small style='color:#94A3B8;'>({row['data_item']})</small>", unsafe_allow_html=True)
+                                st.markdown(f"{row['colab_nome']} &nbsp; `{row['colab_funcao']}` &nbsp; <small style='color:#94A3B8;'>({row['data_item']})</small>", unsafe_allow_html=True)
                                 obs_val = st.text_input("Obs", value=row['observacao'], placeholder="Obs...", key=f"obs_{c_id}", label_visibility="collapsed")
                                 if obs_val != row['observacao']:
                                     supabase.table("convocacoes").update({"observacao": obs_val}).eq("id", c_id).execute()
@@ -600,114 +580,134 @@ else:
                                 if extra_val != float(row['valor_extra']):
                                     supabase.table("convocacoes").update({"valor_extra": extra_val}).eq("id", c_id).execute()
                                 st.caption(f"R$ {row['custo']:.2f}")
-                            with c4:
-                                st.write("")
-                                if st.button("🗑️", key=f"del_c_{c_id}", help="Excluir Convocação"):
-                                    supabase.table("convocacoes").delete().eq("id", c_id).execute()
-                                    st.toast("Convocação excluída com sucesso!")
-                                    st.rerun()
                             st.divider()
 
-    # 2. CONVOCAÇÃO (MELHORIAS: BUSCA NOMINAL + CONVOLUÇÃO DE UNIDADES/OBRAS + REMOÇÃO RÁPIDA)
+    # --- 2. CONVOCAÇÃO ---
     elif menu_escolhido == "📋 CONVOCAÇÃO":
-        st.markdown("## 📋 NOVA CONVOCAÇÃO DE EQUIPE")
-        if obras and colaboradores:
-            col_eng, col_data_conv, col_data_exec = st.columns(3)
-            with col_eng:
-                engenheiro_conv = st.selectbox("Engenheiro responsável:", ENGENHEIROS, key="eng_conv")
-            with col_data_conv:
-                dt_hoje = datetime.date.today()
-                data_solic = st.date_input("Data do Pedido:", value=dt_hoje, format="DD/MM/YYYY", key="dt_solic_c")
-            with col_data_exec:
-                amanha = dt_hoje + datetime.timedelta(days=1)
-                data_conv = st.date_input("Data do Serviço:", value=amanha, format="DD/MM/YYYY", key="dt_serv_c")
+        st.markdown("## 📋 CONVOCAÇÃO E GERENCIAMENTO DE EQUIPE")
+        tab_nova_conv, tab_corrigir_conv = st.tabs(["➕ Nova Convocação", "✏️ Correção / Reatribuição Administrativa"])
 
-            antecedencia_dias = (data_conv - data_solic).days
-            if antecedencia_dias < 0:
-                st.warning("⚠️ Atenção: A data do serviço é anterior à data da convocação.")
+        with tab_nova_conv:
+            if obras and colaboradores:
+                col_eng, col_info = st.columns(2)
+                with col_eng:
+                    engenheiro_conv = st.selectbox("Engenheiro responsável:", ENGENHEIROS, key="eng_conv_adm")
+                with col_info:
+                    data_conv_auto = datetime.date.today() + datetime.timedelta(days=1)
+                    st.info(f"📅 **Data da Convocação:** {data_conv_auto.strftime('%d/%m/%Y')} (Dia seguinte automático)")
+                    st.write("⏱️ **Turno Fixo:** `Integral`")
+
+                unidades_unicas = sorted(list(set([o['unidade'] for o in obras])))
+                col_u, col_o = st.columns(2)
+                with col_u:
+                    unidade_selecionada = st.selectbox("Unidade:", unidades_unicas, key="u_adm_sel")
+                obras_da_unidade = {o['nome']: o['id'] for o in obras if o['unidade'] == unidade_selecionada}
+                with col_o:
+                    obra_selecionada = st.selectbox("Obra / Serviço:", list(obras_da_unidade.keys()), key="o_adm_sel")
+
+                funcoes_disponiveis = sorted(list(set([c['funcao'] for c in colaboradores])))
+                filtro_funcao_adm = st.selectbox("Filtrar por Função (Opcional):", ["TODAS"] + funcoes_disponiveis, key="f_adm_sel")
+
+                if filtro_funcao_adm != "TODAS":
+                    colabs_filtrados_adm = [c for c in colaboradores if c['funcao'] == filtro_funcao_adm]
+                else:
+                    colabs_filtrados_adm = colaboradores
+
+                mapa_colab_adm = {f"{c['nome']}  ({c['funcao']})": c['id'] for c in colabs_filtrados_adm}
+                equipe_selecionada = st.multiselect("Buscar ou Selecionar Colaboradores:", list(mapa_colab_adm.keys()), key="eq_adm_sel")
+
+                with st.container(border=True):
+                    st.markdown(f"**Panorama de {engenheiro_conv} ({data_conv_auto.strftime('%d/%m/%Y')})**")
+                    try:
+                        convs_eng_data = supabase.table("convocacoes").select("*").eq("engenheiro", engenheiro_conv).eq("data", data_conv_auto.isoformat()).execute().data
+                    except:
+                        convs_eng_data = []
+                    ids_ja_alocados_eng = {c['colaborador_id'] for c in convs_eng_data}
+                    nomes_ja_alocados = [dict_colaboradores.get(cid, {}).get('nome', '') for cid in ids_ja_alocados_eng]
+                    if nomes_ja_alocados:
+                        st.caption("Já escalados por você nesta data: " + ", ".join(nomes_ja_alocados))
+                    else:
+                        st.caption("Nenhum escalado por você ainda para amanhã.")
+
+                if st.button("CONFIRMAR CONVOCAÇÃO", type="primary", use_container_width=True, key="btn_confirm_conv_adm"):
+                    if not equipe_selecionada:
+                        st.warning("Selecione pelo menos um colaborador.")
+                    else:
+                        obra_id = obras_da_unidade[obra_selecionada]
+                        sucessos = 0
+                        for label_colab in equipe_selecionada:
+                            c_id = mapa_colab_adm[label_colab]
+                            supabase.table("convocacoes").insert({
+                                "obra_id": obra_id,
+                                "colaborador_id": c_id,
+                                "data": data_conv_auto.isoformat(),
+                                "engenheiro": engenheiro_conv,
+                                "status": "Presente (Integral)",
+                                "valor_extra": 0,
+                                "observacao": "Turno: Integral"
+                            }).execute()
+                            sucessos += 1
+                        st.success(f"✅ {sucessos} colaborador(es) convocado(s) para o turno Integral!")
+                        st.rerun()
             else:
-                st.info(f"⏱️ Antecedência de convocação: **{antecedencia_dias} dia(s)**")
+                st.info("Cadastre obras e colaboradores na aba Configurações.")
 
-            unidades_unicas = sorted(list(set([o['unidade'] for o in obras])))
-            col_u, col_o = st.columns(2)
-            with col_u:
-                unidade_selecionada = st.selectbox("Selecione a Unidade:", unidades_unicas, key="u_sel_adm_c")
+        with tab_corrigir_conv:
+            st.markdown("### ✏️ Correção Administrativa de Unidade / Obra")
+            st.write("Corrija divergências de planejamento ou erros de convocação reatribuindo convocações existentes.")
             
-            obras_da_unidade = {o['nome']: o['id'] for o in obras if o['unidade'] == unidade_selecionada}
-            with col_o:
-                obra_selecionada = st.selectbox("Selecione a Obra / Serviço:", list(obras_da_unidade.keys()), key="o_sel_adm_c")
-
-            turno_conv_adm = st.selectbox("Turno / Período:", ["Integral", "Manhã", "Tarde"], key="turno_conv_adm")
-
-            st.markdown("---")
-            st.markdown("### 👤 Seleção do Colaborador")
+            c_corr1, c_corr2 = st.columns(2)
+            with c_corr1:
+                data_corr = st.date_input("Data da Convocação para Corrigir:", value=datetime.date.today() + datetime.timedelta(days=1), format="DD/MM/YYYY", key="d_corr")
             
-            col_b1, col_b2 = st.columns(2)
-            with col_b1:
-                lista_nomes_colabs = [c['nome'] for c in colaboradores]
-                nome_busca_adm = st.selectbox("Buscar Colaborador pelo Nome:", options=[""] + lista_nomes_colabs, key="busca_nom_adm")
-            
-            funcao_auto_adm = ""
-            if nome_busca_adm:
-                obj_c = next((c for c in colaboradores if c['nome'] == nome_busca_adm), None)
-                if obj_c:
-                    funcao_auto_adm = obj_c['funcao']
-            with col_b2:
-                st.text_input("Função (Automático):", value=funcao_auto_adm, disabled=True, key="func_auto_adm")
+            try:
+                convs_existentes = supabase.table("convocacoes").select("*").eq("data", data_corr.isoformat()).execute().data
+            except:
+                convs_existentes = []
 
-            funcoes_disponiveis = sorted(list(set([c['funcao'] for c in colaboradores])))
-            frente_selecionada = st.selectbox("Filtro Adicional por Função:", ["TODAS"] + funcoes_disponiveis, key="filt_func_adm")
+            if not convs_existentes:
+                st.info("Nenhuma convocação encontrada nesta data para correção.")
+            else:
+                mapa_convs_corr = {}
+                for item in convs_existentes:
+                    colab_inf = dict_colaboradores.get(item['colaborador_id'], {})
+                    obra_inf = dict_obras.get(item['obra_id'], {})
+                    rotulo = f"{colab_inf.get('nome','N/A')} - Atual: [{obra_inf.get('unidade','N/A')}] {obra_inf.get('nome','N/A')} (Eng: {item.get('engenheiro','')})"
+                    mapa_convs_corr[rotulo] = item
 
-            colaboradores_filtrados = colaboradores if frente_selecionada == "TODAS" else [c for c in colaboradores if c['funcao'] == frente_selecionada]
-            opcoes_colaboradores = {c['nome']: c['id'] for c in colaboradores_filtrados}
-            
-            padrao_mult = [nome_busca_adm] if nome_busca_adm and nome_busca_adm in opcoes_colaboradores else []
-            equipe_selecionada = st.multiselect("Colaboradores Selecionados para a Lista:", list(opcoes_colaboradores.keys()), default=padrao_mult, key="msel_eq_adm")
+                with c_corr2:
+                    conv_selecionada_rotulo = st.selectbox("Selecione a Convocação a ser Corrigida:", list(mapa_convs_corr.keys()), key="conv_sel_corr")
 
-            with st.container(border=True):
-                st.markdown(f"**Panorama de {engenheiro_conv} ({data_conv.strftime('%d/%m/%Y')})**")
-                try:
-                    convs_eng_data = supabase.table("convocacoes").select("*").eq("engenheiro", engenheiro_conv).eq("data", data_conv.isoformat()).execute().data
-                except:
-                    convs_eng_data = []
-                ids_ja_alocados_eng = {c['colaborador_id'] for c in convs_eng_data}
-                nomes_ja_alocados = [dict_colaboradores.get(cid, {}).get('nome', '') for cid in ids_ja_alocados_eng]
-                if nomes_ja_alocados:
-                    st.caption("Já escalados por você nesta data: " + ", ".join(nomes_ja_alocados))
-                else:
-                    st.caption("Nenhum escalado por você ainda nesta data.")
+                registro_corr = mapa_convs_corr[conv_selecionada_rotulo]
+                
+                c_dest1, c_dest2, c_dest3 = st.columns(3)
+                with c_dest1:
+                    unidades_disponiveis = sorted(list(set([o['unidade'] for o in obras])))
+                    nova_unidade_corr = st.selectbox("Nova Unidade:", unidades_disponiveis, key="u_dest_corr")
+                with c_dest2:
+                    obras_nova_u = {o['nome']: o['id'] for o in obras if o['unidade'] == nova_unidade_corr}
+                    nova_obra_corr = st.selectbox("Nova Obra / Serviço:", list(obras_nova_u.keys()), key="o_dest_corr")
+                with c_dest3:
+                    novo_eng_corr = st.selectbox("Engenheiro Responsável:", ENGENHEIROS, index=ENGENHEIROS.index(registro_corr.get('engenheiro', ENGENHEIROS[0])) if registro_corr.get('engenheiro') in ENGENHEIROS else 0, key="eng_dest_corr")
 
-            if st.button("CONFIRMAR CONVOCAÇÃO", type="primary", use_container_width=True):
-                if not equipe_selecionada:
-                    st.warning("Selecione pelo menos um colaborador.")
-                else:
-                    obra_id = obras_da_unidade[obra_selecionada]
-                    sucessos = 0
-                    for nome in equipe_selecionada:
-                        c_id = opcoes_colaboradores[nome]
-                        supabase.table("convocacoes").insert({
-                            "obra_id": obra_id,
-                            "colaborador_id": c_id,
-                            "data": data_conv.isoformat(),
-                            "engenheiro": engenheiro_conv,
-                            "status": "Presente (Integral)",
-                            "valor_extra": 0,
-                            "observacao": f"Turno: {turno_conv_adm}"
-                        }).execute()
-                        sucessos += 1
-                    st.success(f"✅ {sucessos} colaborador(es) convocado(s) para a obra {obra_selecionada}!")
+                if st.button("SALVAR CORREÇÃO DE CONVOCAÇÃO", type="primary"):
+                    nova_obra_id = obras_nova_u[nova_obra_corr]
+                    supabase.table("convocacoes").update({
+                        "obra_id": nova_obra_id,
+                        "engenheiro": novo_eng_corr
+                    }).eq("id", registro_corr['id']).execute()
+                    st.success("✅ Convocação corrigida e reatribuída com sucesso!")
                     st.rerun()
-        else:
-            st.info("Cadastre obras e colaboradores na aba Configurações.")
 
-    # 3. APONTAMENTO
+    # --- 3. APONTAMENTO ---
     elif menu_escolhido == "✅ APONTAMENTO":
         st.markdown("## ✅ APONTAMENTO DIÁRIO DE CAMPO")
-        col_eng_ap, col_data_ap = st.columns(2)
-        with col_eng_ap:
-            engenheiro_apont = st.selectbox("Engenheiro:", ENGENHEIROS, key="eng_apont_adm")
-        with col_data_ap:
-            data_apont = st.date_input("Data do Apontamento:", value=datetime.date.today(), format="DD/MM/YYYY", key="dt_apont_adm")
+        
+        c_ap1, c_ap2, c_ap3, c_ap4 = st.columns(4)
+        with c_ap1:
+            engenheiro_apont = st.selectbox("Engenheiro:", ENGENHEIROS, key="eng_apont_adm_main")
+        with c_ap2:
+            data_apont = st.date_input("Data do Apontamento:", value=datetime.date.today(), format="DD/MM/YYYY", key="dt_apont_adm_main")
         
         try:
             convocacoes_hoje = supabase.table("convocacoes").select("*").eq("engenheiro", engenheiro_apont).eq("data", data_apont.isoformat()).execute().data
@@ -719,19 +719,22 @@ else:
                 conv['dados_obra'] = dict_obras.get(conv['obra_id'], {"unidade": "Desconhecida", "nome": "Desconhecida"})
                 
             unidades_convocadas = sorted(list(set([c['dados_obra']['unidade'] for c in convocacoes_hoje])))
-            col_ua, col_oa = st.columns(2)
-            with col_ua:
-                unidade_filtro = st.selectbox("Unidade:", unidades_convocadas, key="filtro_u_apont_adm")
-            obras_convocadas = sorted(list(set([c['dados_obra']['nome'] for c in convocacoes_hoje if c['dados_obra']['unidade'] == unidade_filtro])))
-            with col_oa:
-                obra_filtro = st.selectbox("Obra:", obras_convocadas, key="filtro_o_apont_adm")
+            with c_ap3:
+                unidade_filtro = st.selectbox("Unidade:", ["TODAS"] + unidades_convocadas, key="filtro_u_apont_adm_main")
+            obras_convocadas = sorted(list(set([c['dados_obra']['nome'] for c in convocacoes_hoje if unidade_filtro == "TODAS" or c['dados_obra']['unidade'] == unidade_filtro])))
+            with c_ap4:
+                obra_filtro = st.selectbox("Obra / Serviço:", ["TODAS"] + obras_convocadas, key="filtro_o_apont_adm_main")
             
-            convocacoes_render = [c for c in convocacoes_hoje if c['dados_obra']['unidade'] == unidade_filtro and c['dados_obra']['nome'] == obra_filtro]
+            convocacoes_render = [
+                c for c in convocacoes_hoje 
+                if (unidade_filtro == "TODAS" or c['dados_obra']['unidade'] == unidade_filtro)
+                and (obra_filtro == "TODAS" or c['dados_obra']['nome'] == obra_filtro)
+            ]
             
-            if st.button("✅ MARCAR TODOS COMO PRESENTES", key="btn_all_present_adm"):
+            if st.button("✅ MARCAR TODOS COMO PRESENTES", key="btn_all_present_adm_main"):
                 for c in convocacoes_render:
                     supabase.table("convocacoes").update({"status": "Presente (Integral)"}).eq("id", c['id']).execute()
-                st.success("Atualizado!")
+                st.success("Todos marcados como Presente (Integral)!")
                 st.rerun()
 
             opcoes_status = ["Presente (Integral)", "Presente (Só Manhã)", "Presente (Só Tarde)", "Saída Antecipada", "Falta", "Atestado", "Extra"]
@@ -745,7 +748,7 @@ else:
                     status_atual = conv.get("status", "Presente (Integral)")
                     idx = opcoes_status.index(status_atual) if status_atual in opcoes_status else 0
                     
-                    st.markdown(f"**{nome}** &nbsp; {cor} `{funcao}`")
+                    st.markdown(f"**{nome}** &nbsp; {cor} `{funcao}` &nbsp; <small style='color:#94A3B8;'>[{conv['dados_obra']['unidade']} - {conv['dados_obra']['nome']}]</small>", unsafe_allow_html=True)
                     status_sel = st.selectbox("Status", opcoes_status, index=idx, key=f"status_adm_{c_id}")
                     if status_sel != status_atual:
                         supabase.table("convocacoes").update({"status": status_sel}).eq("id", c_id).execute()
@@ -754,40 +757,58 @@ else:
                     with st.expander("💸 Extra / Obs"):
                         val_atual = float(conv.get("valor_extra") or 0.0)
                         obs_atual = conv.get("observacao") or ""
-                        val_extra = st.number_input("Extra (R$)", value=val_atual, step=10.0, key=f"val_adm_{c_id}")
+                        val_extra = st.number_input("Horas Extras / Valor (R$)", value=val_atual, step=10.0, key=f"val_adm_{c_id}")
                         obs = st.text_input("Obs / Justificativa", value=obs_atual, key=f"obs_adm_field_{c_id}")
                         if st.button("Salvar Detalhes", key=f"btn_save_adm_{c_id}"):
                             supabase.table("convocacoes").update({"valor_extra": val_extra, "observacao": obs}).eq("id", c_id).execute()
                             st.success("Salvo!")
         else:
-            st.warning("Nenhuma equipe convocada para este engenheiro nesta data.")
+            st.warning("Nenhuma equipe convocada para os filtros selecionados.")
 
-    # 4. RELATÓRIOS (COM FILTROS EXPANDIDOS POR UNIDADE E OBRA)
+    # --- 4. RELATÓRIOS ---
     elif menu_escolhido == "📊 RELATÓRIOS":
         st.markdown("## 📊 RELATÓRIO DE CUSTOS E FECHAMENTO")
-        col_rel_eng, col_rel_unid = st.columns(2)
-        with col_rel_eng:
+        
+        # Filtro de Periodicidade
+        c_p1, c_p2, c_p3 = st.columns(3)
+        with c_p1:
+            periodicidade = st.selectbox("Periodicidade:", ["Personalizado", "Diário", "Semanal", "Mensal"], key="rel_periodo")
+        
+        hoje = datetime.date.today()
+        if periodicidade == "Diário":
+            dt_inicio_def = hoje
+            dt_fim_def = hoje
+        elif periodicidade == "Semanal":
+            dt_inicio_def = hoje - datetime.timedelta(days=7)
+            dt_fim_def = hoje
+        elif periodicidade == "Mensal":
+            dt_inicio_def = hoje.replace(day=1)
+            dt_fim_def = hoje
+        else:
+            dt_inicio_def = hoje
+            dt_fim_def = hoje
+
+        with c_p2:
+            data_inicio_rel = st.date_input("Início:", value=dt_inicio_def, format="DD/MM/YYYY", key="data_ini_rel")
+        with c_p3:
+            data_fim_rel = st.date_input("Fim:", value=dt_fim_def, format="DD/MM/YYYY", key="data_fim_rel")
+
+        col_r1, col_r2 = st.columns(2)
+        with col_r1:
             eng_relatorio = st.selectbox("Engenheiro:", ["TODOS OS ENGENHEIROS"] + ENGENHEIROS, key="eng_rel")
-        with col_rel_unid:
-            unidades_cad = sorted(list(set([o['unidade'] for o in obras]))) if obras else []
-            unidade_relatorio = st.selectbox("Unidade:", ["TODAS AS UNIDADES"] + unidades_cad, key="unid_rel")
-        
-        col_d1, col_d2 = st.columns(2)
-        with col_d1:
-            data_inicio_rel = st.date_input("Início:", value=datetime.date.today() - datetime.timedelta(days=7), format="DD/MM/YYYY", key="data_ini")
-        with col_d2:
-            data_fim_rel = st.date_input("Fim:", value=datetime.date.today(), format="DD/MM/YYYY", key="data_fim")
-        
+        with col_r2:
+            obras_rel_lista = sorted(list(set([o['nome'] for o in obras]))) if obras else []
+            obra_relatorio = st.selectbox("Filtro por Obra:", ["TODAS AS OBRAS"] + obras_rel_lista, key="obra_rel")
+
         query_rel = supabase.table("convocacoes").select("*").gte("data", data_inicio_rel.isoformat()).lte("data", data_fim_rel.isoformat())
         if eng_relatorio != "TODOS OS ENGENHEIROS":
             query_rel = query_rel.eq("engenheiro", eng_relatorio)
-            
+        if obra_relatorio != "TODAS AS OBRAS":
+            obra_id_filtro = next((o['id'] for o in obras if o['nome'] == obra_relatorio), None)
+            if obra_id_filtro:
+                query_rel = query_rel.eq("obra_id", obra_id_filtro)
+                
         dados_relatorio = query_rel.execute().data if data_inicio_rel <= data_fim_rel else []
-
-        # Filtro de Unidade em Memória
-        if unidade_relatorio != "TODAS AS UNIDADES" and dados_relatorio:
-            ids_obras_unid = {o['id'] for o in obras if o['unidade'] == unidade_relatorio}
-            dados_relatorio = [r for r in dados_relatorio if r['obra_id'] in ids_obras_unid]
 
         col_btn1, col_btn2 = st.columns(2)
 
@@ -813,7 +834,7 @@ else:
                             pdf.set_font("Arial", 'B', 14)
                             pdf.cell(0, 10, txt=to_latin(f"APROAR - RELATÓRIO DE CUSTOS | ENG: {eng}"), ln=True, align='C')
                             pdf.set_font("Arial", size=10)
-                            pdf.cell(0, 8, txt=to_latin(f"Período: {data_inicio_rel.strftime('%d/%m/%Y')} a {data_fim_rel.strftime('%d/%m/%Y')}"), ln=True, align='C')
+                            pdf.cell(0, 8, txt=to_latin(f"Período: {data_inicio_rel.strftime('%d/%m/%Y')} a {data_fim_rel.strftime('%d/%m/%Y')} ({periodicidade})"), ln=True, align='C')
                             pdf.ln(5)
                             
                             for o_id, apontamentos in obras_eng.items():
@@ -892,16 +913,10 @@ else:
                             })
                         
                         df_excel = pd.DataFrame(lista_excel)
-                        
                         cores_engenheiros = {
-                            "VICTOR": "E0F2FE",
-                            "EDUARDO": "DCFCE7",
-                            "GUSTAVO": "FEF9C3",
-                            "JOEL": "F3E8FF",
-                            "NETO": "FFEDD5",
-                            "SOARES": "FFE4E6",
-                            "GABRIEL": "CCFBF1",
-                            "PAULO": "F1F5F9"
+                            "VICTOR": "E0F2FE", "EDUARDO": "DCFCE7", "GUSTAVO": "FEF9C3",
+                            "JOEL": "F3E8FF", "NETO": "FFEDD5", "SOARES": "FFE4E6",
+                            "GABRIEL": "CCFBF1", "PAULO": "F1F5F9"
                         }
                         
                         wb = openpyxl.Workbook()
@@ -912,10 +927,8 @@ else:
                         font_obra_hdr = Font(name="Arial", size=10, bold=True, color="1E293B")
                         fill_obra_hdr = PatternFill(start_color="E2E8F0", end_color="E2E8F0", fill_type="solid")
                         borda_fina = Border(
-                            left=Side(style='thin', color='CBD5E1'),
-                            right=Side(style='thin', color='CBD5E1'),
-                            top=Side(style='thin', color='CBD5E1'),
-                            bottom=Side(style='thin', color='CBD5E1')
+                            left=Side(style='thin', color='CBD5E1'), right=Side(style='thin', color='CBD5E1'),
+                            top=Side(style='thin', color='CBD5E1'), bottom=Side(style='thin', color='CBD5E1')
                         )
                         
                         for data_str in sorted(df_excel['Data'].unique()):
@@ -928,7 +941,6 @@ else:
                             
                             for unidade_nome in sorted(df_dia['Unidade'].unique()):
                                 df_unidade = df_dia[df_dia['Unidade'] == unidade_nome]
-                                
                                 for obra_nome in sorted(df_unidade['Obra'].unique()):
                                     df_obra = df_unidade[df_unidade['Obra'] == obra_nome]
                                     
@@ -946,14 +958,12 @@ else:
                                     current_row += 1
                                     
                                     inicio_dados_obra = current_row
-                                    
                                     for _, r in df_obra.iterrows():
                                         eng_resp = r["Engenheiro"]
                                         cor_hex = cores_engenheiros.get(str(eng_resp).upper(), "FFFFFF")
                                         fill_engenheiro = PatternFill(start_color=cor_hex, end_color=cor_hex, fill_type="solid")
                                         
                                         celula_custo_formula = f"=E{current_row}+F{current_row}"
-                                        
                                         linha_dados = [
                                             r["Colaborador"], r["Funcao"], r["Engenheiro"], r["Status"],
                                             r["Diaria"], r["Extra"], celula_custo_formula, r["Observacao"]
@@ -973,7 +983,6 @@ else:
                                         current_row += 1
                                     
                                     fim_dados_obra = current_row - 1
-                                    
                                     ws.cell(row=current_row, column=5, value=f"TOTAL OBRA {obra_nome}:").font = Font(name="Arial", size=10, bold=True)
                                     ws.cell(row=current_row, column=5).alignment = Alignment(horizontal="right")
                                     
@@ -981,7 +990,6 @@ else:
                                     celula_subtotal.font = Font(name="Arial", size=10, bold=True)
                                     celula_subtotal.number_format = 'R$ #,##0.00'
                                     celula_subtotal.border = borda_fina
-                                    
                                     current_row += 2
 
                             for col in ws.columns:
@@ -1006,133 +1014,117 @@ else:
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                         )
                 except Exception as e:
-                    st.error(f"Erro ao gerar Excel por dias: {e}")
+                    st.error(f"Erro ao gerar Excel: {e}")
 
-    # 5. INDICADORES & ABSENTEÍSMO (IMPLEMENTAÇÃO COMPLETA)
+    # --- 5. INDICADORES (OPERACIONAIS E ABSENTEÍSMO) ---
     elif menu_escolhido == "📈 INDICADORES":
         st.markdown("## 📈 INDICADORES OPERACIONAIS E ABSENTEÍSMO")
         
-        col_i1, col_i2, col_i3 = st.columns(3)
-        with col_i1:
-            data_ini_ind = st.date_input("Início do Período:", value=datetime.date.today() - datetime.timedelta(days=30), format="DD/MM/YYYY", key="ind_ini")
-        with col_i2:
-            data_fim_ind = st.date_input("Fim do Período:", value=datetime.date.today(), format="DD/MM/YYYY", key="ind_fim")
-        with col_i3:
-            unidades_ind_disp = sorted(list(set([o['unidade'] for o in obras]))) if obras else []
-            unidade_ind = st.selectbox("Filtrar Unidade:", ["TODAS"] + unidades_ind_disp, key="ind_u")
+        c_ind1, c_ind2, c_ind3 = st.columns(3)
+        with c_ind1:
+            d_ini_ind = st.date_input("Início:", value=datetime.date.today() - datetime.timedelta(days=30), format="DD/MM/YYYY", key="d_ini_ind")
+        with c_ind2:
+            d_fim_ind = st.date_input("Fim:", value=datetime.date.today(), format="DD/MM/YYYY", key="d_fim_ind")
+        with c_ind3:
+            unidades_list = sorted(list(set([o['unidade'] for o in obras]))) if obras else []
+            u_filtro_ind = st.selectbox("Filtrar por Unidade:", ["TODAS AS UNIDADES"] + unidades_list, key="u_filtro_ind")
 
         try:
-            query_ind = supabase.table("convocacoes").select("*").gte("data", data_ini_ind.isoformat()).lte("data", data_fim_ind.isoformat())
-            convs_ind = query_ind.execute().data
+            q_ind = supabase.table("convocacoes").select("*").gte("data", d_ini_ind.isoformat()).lte("data", d_fim_ind.isoformat())
+            dados_ind = q_ind.execute().data
         except:
-            convs_ind = []
+            dados_ind = []
 
-        if not convs_ind:
-            st.info("Nenhum dado encontrado para o período selecionado.")
+        if not dados_ind:
+            st.warning("Nenhum registro encontrado para o período informado.")
         else:
-            df_ind = pd.DataFrame(convs_ind)
-            df_ind['unidade'] = df_ind['obra_id'].apply(lambda oid: dict_obras.get(oid, {}).get('unidade', 'GERAL'))
-            df_ind['obra_nome'] = df_ind['obra_id'].apply(lambda oid: dict_obras.get(oid, {}).get('nome', 'N/A'))
-            df_ind['colab_nome'] = df_ind['colaborador_id'].apply(lambda cid: dict_colaboradores.get(cid, {}).get('nome', 'N/A'))
-            df_ind['colab_funcao'] = df_ind['colaborador_id'].apply(lambda cid: dict_colaboradores.get(cid, {}).get('funcao', 'N/A'))
+            registros_ind = []
+            for item in dados_ind:
+                ob = dict_obras.get(item['obra_id'], {"unidade": "GERAL", "nome": "Desconhecida"})
+                if u_filtro_ind != "TODAS AS UNIDADES" and ob['unidade'] != u_filtro_ind:
+                    continue
+                registros_ind.append({
+                    "id": item['id'],
+                    "unidade": ob['unidade'],
+                    "status": item.get('status', 'Presente (Integral)'),
+                    "engenheiro": item.get('engenheiro', 'N/A')
+                })
 
-            if unidade_ind != "TODAS":
-                df_ind = df_ind[df_ind['unidade'] == unidade_ind]
-
+            df_ind = pd.DataFrame(registros_ind)
+            
             if df_ind.empty:
-                st.warning("Nenhum registro para esta unidade no período.")
+                st.info("Nenhum registro encontrado para a unidade selecionada.")
             else:
-                total_registros = len(df_ind)
+                total_conv = len(df_ind)
                 total_faltas = len(df_ind[df_ind['status'] == 'Falta'])
                 total_atestados = len(df_ind[df_ind['status'] == 'Atestado'])
-                total_presencas = len(df_ind[df_ind['status'].str.contains('Presente', na=False) | (df_ind['status'] == 'Extra')])
-                taxa_absenteismo = ((total_faltas + total_atestados) / total_registros * 100) if total_registros > 0 else 0
+                total_ausencias = total_faltas + total_atestados
+                taxa_absenteismo = (total_ausencias / total_conv * 100) if total_conv > 0 else 0.0
 
-                m1, m2, m3, m4, m5 = st.columns(5)
-                m1.metric("Total Convocações", total_registros)
-                m2.metric("Presenças", total_presencas)
-                m3.metric("Faltas", total_faltas)
-                m4.metric("Atestados", total_atestados)
-                m5.metric("Taxa Absenteísmo", f"{taxa_absenteismo:.1f}%")
+                m_ind1, m_ind2, m_ind3, m_ind4 = st.columns(4)
+                m_ind1.metric("CONVOCAÇÕES TOTAL", total_conv)
+                m_ind2.metric("FALTAS", total_faltas)
+                m_ind3.metric("ATESTADOS", total_atestados)
+                m_ind4.metric("TAXA DE ABSENTEÍSMO", f"{taxa_absenteismo:.1f}%")
 
                 st.markdown("---")
+                st.markdown("### 🏢 DETALHAMENTO E CONSOLIDAÇÃO DE FALTAS POR UNIDADE")
                 
-                col_chart1, col_chart2 = st.columns(2)
-                
-                with col_chart1:
-                    st.markdown("### 🚨 Ranking Nominal de Faltas & Ocorrências")
-                    df_ausencias = df_ind[df_ind['status'].isin(['Falta', 'Atestado', 'Saída Antecipada'])]
-                    if df_ausencias.empty:
-                        st.success("Nenhuma falta ou atestado registrado no período!")
-                    else:
-                        ranking_faltas = df_ausencias.groupby(['colab_nome', 'colab_funcao', 'unidade', 'status']).size().reset_index(name='Qtd_Faltas')
-                        ranking_faltas = ranking_faltas.sort_values(by='Qtd_Faltas', ascending=False)
-                        
-                        st.dataframe(
-                            ranking_faltas.rename(columns={
-                                'colab_nome': 'Colaborador',
-                                'colab_funcao': 'Função',
-                                'unidade': 'Unidade',
-                                'status': 'Tipo',
-                                'Qtd_Faltas': 'Qtd'
-                            }),
-                            use_container_width=True,
-                            hide_index=True
-                        )
+                resumo_unidades = []
+                for und in df_ind['unidade'].unique():
+                    df_u = df_ind[df_ind['unidade'] == und]
+                    t_u = len(df_u)
+                    f_u = len(df_u[df_u['status'] == 'Falta'])
+                    a_u = len(df_u[df_u['status'] == 'Atestado'])
+                    aus_u = f_u + a_u
+                    taxa_u = (aus_u / t_u * 100) if t_u > 0 else 0.0
+                    resumo_unidades.append({
+                        "Unidade": und,
+                        "Convocações": t_u,
+                        "Faltas": f_u,
+                        "Atestados": a_u,
+                        "Total Ausências": aus_u,
+                        "Taxa Absenteísmo (%)": round(taxa_u, 1)
+                    })
 
-                with col_chart2:
-                    st.markdown("### 📍 Detalhamento das Ocorrências")
-                    if df_ausencias.empty:
-                        st.info("Sem ocorrências para exibir.")
-                    else:
-                        for _, row_aus in df_ausencias.iterrows():
-                            cor_tag = "🔴" if row_aus['status'] == 'Falta' else ("🟡" if row_aus['status'] == 'Atestado' else "🟧")
-                            st.markdown(
-                                f"{cor_tag} **{row_aus['colab_nome']}** (`{row_aus['colab_funcao']}`) — "
-                                f"**{row_aus['status']}** em `{row_aus['data']}` <br>"
-                                f"<small style='color:#94A3B8;'>Unidade: {row_aus['unidade']} | Obra: {row_aus['obra_nome']}</small>",
-                                unsafe_allow_html=True
-                            )
-                            st.divider()
+                df_resumo_u = pd.DataFrame(resumo_unidades).sort_values(by="Taxa Absenteísmo (%)", ascending=False)
+                st.dataframe(df_resumo_u, use_container_width=True, hide_index=True)
 
-    # 6. DISPONIBILIDADE
+    # --- 6. DISPONIBILIDADE ---
     elif menu_escolhido == "👥 DISPONIBILIDADE":
         render_aba_disponibilidade("admin")
 
-    # 7. CONFIGURAÇÕES (COM MULTI-OPÇÃO DO TRELLO E GERENCIAMENTO DE DADOS)
+    # --- 7. CONFIGURAÇÕES E SINCRONIZAÇÃO TRELLO ---
     elif menu_escolhido == "⚙️ CONFIGURAÇÕES":
         st.markdown("## ⚙️ CONFIGURAÇÕES E GERENCIAMENTO")
         
-        # Seção de Sincronização Trello
+        # Sincronização Dinâmica Trello (Mês Vigente ou Dropdown Manual)
         with st.container(border=True):
             st.markdown("### 🔄 Sincronização com o Trello")
-            st.write("Sincronize automaticamente os cartões do quadro do Trello para cadastrar novas obras.")
+            st.write("Sincronize automaticamente as obras da lista do mês vigente ou selecione manualmente uma lista específica do quadro.")
             
-            mes_atual_str = MESES_PT[datetime.date.today().month]
-            col_tr1, col_tr2 = st.columns([2, 1])
-            with col_tr1:
-                opcao_trello = st.radio(
-                    "Origem / Nome da Lista do Trello:",
-                    [f"Automático (Lista 'MEDIÇÕES {mes_atual_str}')", "Em Execução ('EM EXECUÇÃO')", "Nome Personalizado"],
-                    key="radio_trello_opt"
-                )
+            lists_trello, _ = obter_listas_trello()
             
-            termo_final_trello = None
-            if "Automático" in opcao_trello:
-                termo_final_trello = f"MEDICOES {mes_atual_str}"
-            elif "Em Execução" in opcao_trello:
-                termo_final_trello = "EM EXECUCAO"
-            else:
-                termo_final_trello = st.text_input("Digite o nome exato da lista do Trello:", value=f"MEDIÇÕES {mes_atual_str}")
-
-            if st.button("SINCRONIZAR OBRAS DO TRELLO AGORA"):
-                with st.spinner(f"Buscando obras no Trello (Lista: '{termo_final_trello}')..."):
-                    sucesso, mensagem = executar_sincronizacao_trello(termo_busca=termo_final_trello)
-                    if sucesso:
-                        st.success(mensagem)
-                        st.rerun()
-                    else:
-                        st.error(mensagem)
+            c_tr1, c_tr2 = st.columns(2)
+            with c_tr1:
+                if st.button("🚀 SINCRONIZAR MÊS VIGENTE (AUTOMÁTICO)", type="primary"):
+                    with st.spinner("Sincronizando mês vigente..."):
+                        sucesso, me = executar_sincronizacao_trello()
+                        if sucesso: st.success(me); st.rerun()
+                        else: st.error(me)
+            
+            with c_tr2:
+                if lists_trello:
+                    mapa_listas = {l['name']: l['id'] for l in lists_trello if not l.get('closed', False)}
+                    lista_manual_sel = st.selectbox("Ou selecione uma Lista do Trello:", list(mapa_listas.keys()), key="sel_trello_manual")
+                    if st.button("🔄 SINCRONIZAR LISTA SELECIONADA"):
+                        id_sel = mapa_listas[lista_manual_sel]
+                        with st.spinner(f"Sincronizando {lista_manual_sel}..."):
+                            sucesso, me = executar_sincronizacao_trello(id_lista_target=id_sel)
+                            if sucesso: st.success(me); st.rerun()
+                            else: st.error(me)
+                else:
+                    st.caption("Não foi possível obter o menu suspenso de listas do Trello.")
 
         st.markdown("---")
         tab_cad_obra, tab_cad_colab, tab_limpeza = st.tabs(["🏗️ Obras", "👷 Colaboradores", "🗑️ Limpeza de Dados"])
