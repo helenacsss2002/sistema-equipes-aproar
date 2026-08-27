@@ -162,15 +162,6 @@ def to_latin(texto):
     return str(texto).encode('latin-1', 'replace').decode('latin-1')
 
 # --- SINCRONIZAÇÃO COM TRELLO (QUADRO DE ORÇAMENTOS - EM EXECUÇÃO) ---[cite: 3]
-def sincronizar_obras_trello_automatico():
-    hoje_str = datetime.date.today().isoformat()
-    if st.session_state.get("ultima_sincronizacao_trello") == hoje_str:
-        return 
-    
-    sucesso, msg = executar_sincronizacao_trello()
-    if sucesso:
-        st.session_state["ultima_sincronizacao_trello"] = hoje_str
-
 def executar_sincronizacao_trello():
     url_trello = "https://trello.com/b/TX8hGvmI.json"
     try:
@@ -213,26 +204,25 @@ def executar_sincronizacao_trello():
                 novas_inseridas += 1
                 nomes_cadastrados.add(normalizar(nome_card))
                 
+        # Limpa o cache para recarregar as obras novas imediatamente
+        st.cache_data.clear()
         return True, f"Sincronização realizada com sucesso! {novas_inseridas} nova(s) obra(s) da lista 'EM EXECUÇÃO' foram adicionadas."[cite: 3]
     except Exception as e:
         return False, f"Erro na conexão com o Trello: {e}"[cite: 3]
 
-# --- BUSCA DE DADOS ---
+# --- BUSCA DE DADOS COM CACHE (OTIMIZAÇÃO DE VELOCIDADE) ---
+@st.cache_data(ttl=30)
 def buscar_obras():
     try: return supabase.table("obras").select("*").execute().data
     except Exception: return []
 
+@st.cache_data(ttl=30)
 def buscar_colaboradores():
     try: 
         res = supabase.table("colaboradores").select("*").execute().data
         return res if res else []
     except Exception: 
         return []
-
-try:
-    sincronizar_obras_trello_automatico()
-except:
-    pass
 
 obras = buscar_obras()
 colaboradores = buscar_colaboradores()
@@ -711,7 +701,7 @@ else:
         else:
             st.warning("Nenhuma equipe convocada para este engenheiro nesta data.")
 
-    # 4. RELATÓRIOS (PDF E EXCEL COM ABAS POR DIAS E CORES POR ENGENHEIRO)
+    # 4. RELATÓRIOS
     elif menu_escolhido == "📊 RELATÓRIOS":
         st.markdown("## 📊 RELATÓRIO DE CUSTOS E FECHAMENTO")
         col_rel_eng, _ = st.columns(2)
@@ -833,20 +823,19 @@ else:
                         
                         df_excel = pd.DataFrame(lista_excel)
                         
-                        # Paleta de cores suaves por engenheiro para diferenciar na tabela
                         cores_engenheiros = {
-                            "VICTOR": "E0F2FE",   # Azul Claro
-                            "EDUARDO": "DCFCE7",  # Verde Claro
-                            "GUSTAVO": "FEF9C3",  # Amarelo Claro
-                            "JOEL": "F3E8FF",     # Roxo Claro
-                            "NETO": "FFEDD5",     # Laranja Claro
-                            "SOARES": "FFE4E6",   # Rosa Claro
-                            "GABRIEL": "CCFBF1",  # Verde Água Claro
-                            "PAULO": "F1F5F9"     # Cinza Claro
+                            "VICTOR": "E0F2FE",
+                            "EDUARDO": "DCFCE7",
+                            "GUSTAVO": "FEF9C3",
+                            "JOEL": "F3E8FF",
+                            "NETO": "FFEDD5",
+                            "SOARES": "FFE4E6",
+                            "GABRIEL": "CCFBF1",
+                            "PAULO": "F1F5F9"
                         }
                         
                         wb = openpyxl.Workbook()
-                        wb.remove(wb.active) # Remove aba padrão
+                        wb.remove(wb.active)
                         
                         font_titulo = Font(name="Arial", size=11, bold=True, color="FFFFFF")
                         fill_cabecalho = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
@@ -859,30 +848,25 @@ else:
                             bottom=Side(style='thin', color='CBD5E1')
                         )
                         
-                        # CRIAR ABAS SEPARADAS POR DIA DISTINTO
                         for data_str in sorted(df_excel['Data'].unique()):
                             df_dia = df_excel[df_excel['Data'] == data_str]
-                            nome_aba = str(data_str) 
-                            ws = wb.create_sheet(title=nome_aba)
+                            ws = wb.create_sheet(title=str(data_str))
                             
                             current_row = 1
                             ws.cell(row=current_row, column=1, value=f"APONTAMENTO DIÁRIO DE EQUIPES - DATA: {data_str}").font = Font(name="Arial", size=12, bold=True)
                             current_row += 2
                             
-                            # Agrupar por Unidade e depois por Obra dentro do dia
                             for unidade_nome in sorted(df_dia['Unidade'].unique()):
                                 df_unidade = df_dia[df_dia['Unidade'] == unidade_nome]
                                 
                                 for obra_nome in sorted(df_unidade['Obra'].unique()):
                                     df_obra = df_unidade[df_unidade['Obra'] == obra_nome]
                                     
-                                    # Cabeçalho da Obra / Unidade
                                     ws.cell(row=current_row, column=1, value=f"UNIDADE: {unidade_nome}  |  OBRA: {obra_nome}").font = font_obra_hdr
                                     for c_idx in range(1, 9):
                                         ws.cell(row=current_row, column=c_idx).fill = fill_obra_hdr
                                     current_row += 1
                                     
-                                    # Cabeçalhos da Tabela
                                     colunas_tabela = ["Colaborador", "Função", "Engenheiro Resp.", "Status", "Diária (R$)", "Extra (R$)", "Custo Total (R$)", "Observação"]
                                     for c_idx, col_nome in enumerate(colunas_tabela, 1):
                                         cell = ws.cell(row=current_row, column=c_idx, value=col_nome)
@@ -893,13 +877,11 @@ else:
                                     
                                     inicio_dados_obra = current_row
                                     
-                                    # Inserir registros da obra com cor diferenciada por engenheiro e fórmula SUM em inglês
                                     for _, r in df_obra.iterrows():
                                         eng_resp = r["Engenheiro"]
                                         cor_hex = cores_engenheiros.get(str(eng_resp).upper(), "FFFFFF")
                                         fill_engenheiro = PatternFill(start_color=cor_hex, end_color=cor_hex, fill_type="solid")
                                         
-                                        # Fórmula do Excel para o Custo Total do Colaborador (Diária + Extra)
                                         celula_custo_formula = f"=E{current_row}+F{current_row}"
                                         
                                         linha_dados = [
@@ -922,7 +904,6 @@ else:
                                     
                                     fim_dados_obra = current_row - 1
                                     
-                                    # Linha de Subtotal da Obra com a função SUM em inglês exigida pelo openpyxl
                                     ws.cell(row=current_row, column=5, value=f"TOTAL OBRA {obra_nome}:").font = Font(name="Arial", size=10, bold=True)
                                     ws.cell(row=current_row, column=5).alignment = Alignment(horizontal="right")
                                     
@@ -931,9 +912,8 @@ else:
                                     celula_subtotal.number_format = 'R$ #,##0.00'
                                     celula_subtotal.border = borda_fina
                                     
-                                    current_row += 2 # Espaço entre obras
+                                    current_row += 2
 
-                            # Ajuste de largura das colunas
                             for col in ws.columns:
                                 max_len = 0
                                 col_letter = openpyxl.utils.get_column_letter(col[0].column)
@@ -967,10 +947,25 @@ else:
     elif menu_escolhido == "👥 DISPONIBILIDADE":
         render_aba_disponibilidade("admin")
 
-    # 7. CONFIGURAÇÕES
+    # 7. CONFIGURAÇÕES (COM BOTÃO DO TRELLO E BOTÃO DE LIMPEZA)
     elif menu_escolhido == "⚙️ CONFIGURAÇÕES":
-        st.markdown("## ⚙️ CONFIGURAÇÕES E CADASTROS")
-        tab_cad_obra, tab_cad_colab = st.tabs(["🏗️ Obras", "👷 Colaboradores"])
+        st.markdown("## ⚙️ CONFIGURAÇÕES E GERENCIAMENTO")
+        
+        # Seção de Sincronização Trello Manual
+        with st.container(border=True):
+            st.markdown("### 🔄 Sincronização com o Trello")
+            st.write("Clique no botão abaixo para buscar as obras ativas na lista 'EM EXECUÇÃO' do quadro do Trello[cite: 3].")
+            if st.button("SINCRONIZAR OBRAS DO TRELLO AGORA"):
+                with st.spinner("Buscando obras no Trello..."):
+                    sucesso, mensagem = executar_sincronizacao_trello()
+                    if sucesso:
+                        st.success(mensagem)
+                        st.rerun()
+                    else:
+                        st.error(mensagem)
+
+        st.markdown("---")
+        tab_cad_obra, tab_cad_colab, tab_limpeza = st.tabs(["🏗️ Obras", "👷 Colaboradores", "🗑️ Limpeza de Dados"])
         
         with tab_cad_obra:
             st.markdown("### Cadastrar Nova Obra")
@@ -981,6 +976,7 @@ else:
                 if submit_obra:
                     if nome_obra and unidade_obra:
                         supabase.table("obras").insert({"nome": nome_obra, "unidade": unidade_obra.upper()}).execute()
+                        st.cache_data.clear()
                         st.success("Obra cadastrada com sucesso!")
                         st.rerun()
                     else:
@@ -1000,7 +996,21 @@ else:
                             "funcao": limpar_funcao(funcao_colab), 
                             "valor_diaria": diaria_colab
                         }).execute()
+                        st.cache_data.clear()
                         st.success("Colaborador cadastrado com sucesso!")
                         st.rerun()
                     else:
                         st.warning("Preencha todos os campos.")
+
+        with tab_limpeza:
+            st.markdown("### 🗑️ Limpeza e Manutenção de Registros")
+            st.write("Use esta seção para remover registros incorretos ou limpar dados antigos de convocações/apontamentos.")
+            
+            data_limpeza = st.date_input("Selecionar data para limpeza de convocações:", value=datetime.date.today(), format="DD/MM/YYYY")
+            if st.button("🗑️ EXCLUIR CONVOCAÇÕES DESTA DATA", type="primary"):
+                try:
+                    supabase.table("convocacoes").delete().eq("data", data_limpeza.isoformat()).execute()
+                    st.success(f"Todas as convocações do dia {data_limpeza.strftime('%d/%m/%Y')} foram removidas com sucesso!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erro ao limpar dados: {e}")
