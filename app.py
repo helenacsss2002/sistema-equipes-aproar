@@ -8,10 +8,10 @@ import unicodedata
 import re
 import os
 
-# --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR ---
+# --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR (LAYOUT WIDE COM SIDEBAR) ---
 st.set_page_config(page_title="APROAR - Controle de Presenças", page_icon="👷", layout="wide")
 
-# CSS Moderno, limpo e corporativo
+# CSS Moderno, limpo e corporativo inspirado em painéis de controle
 st.markdown("""
     <style>
     .stApp {
@@ -21,6 +21,11 @@ st.markdown("""
     h1, h2, h3, h4, p, label, .stMarkdown, span {
         color: #F8FAFC !important;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    /* Estilização da Sidebar */
+    section[data-testid="stSidebar"] {
+        background-color: #090C22 !important;
+        border-right: 1px solid #1E293B;
     }
     div[data-baseweb="select"] > div, 
     div[data-baseweb="base-input"] > div, 
@@ -149,21 +154,6 @@ dict_colaboradores = {c['id']: c for c in colaboradores} if colaboradores else {
 dict_obras = {o['id']: o for o in obras} if obras else {}
 
 ENGENHEIROS = ["EDUARDO", "GABRIEL", "GUSTAVO", "JOEL", "NETO", "PAULO", "SOARES", "VICTOR"]
-
-# --- CABEÇALHO COM LOGO ---
-col_l1, col_l2, col_l3 = st.columns([2, 3, 2])
-with col_l2:
-    if os.path.exists("logo.png"):
-        st.image("logo.png", use_container_width=True)
-    else:
-        st.markdown("""
-            <div style="background: linear-gradient(135deg, #0C102B 0%, #161B3D 100%); padding: 15px; border-radius: 12px; text-align: center; margin-bottom: 15px; border: 1px solid #2D3568;">
-                <h2 style="color: #FFFFFF; font-family: sans-serif; letter-spacing: 2px; margin: 0;">APROAR</h2>
-                <p style="color: #60A5FA; font-size: 0.9rem; font-weight: bold; margin-top: 5px;">CONTROLE DE PRESENÇAS</p>
-            </div>
-        """, unsafe_allow_html=True)
-
-st.markdown("---")
 
 # --- FUNÇÃO AUXILIAR PARA RENDERIZAR A ABA DE DISPONIBILIDADE ---
 def render_aba_disponibilidade(key_suffix=""):
@@ -343,25 +333,30 @@ if modo_campo:
 
 else:
     # ==========================================
-    # VISÃO ADMINISTRATIVA MODERNA & FLUIDA
+    # VISÃO ADMINISTRATIVA COM SIDEBAR DE NAVEGAÇÃO
     # ==========================================
-    st.markdown("### ⚙️ Painel Administrativo")
     
-    # Menu de Navegação Superior Clean (Substituindo abas aglomeradas)
-    menu_escolhido = st.radio(
-        "Navegação Administrativa",
-        ["🎛️ Dashboard", "📋 Convocação", "✅ Apontamento", "📊 Relatórios", "📈 Indicadores", "👥 Disponibilidade", "⚙️ Configurações"],
-        horizontal=True,
-        label_visibility="collapsed"
-    )
-    
-    st.markdown("---")
+    # --- MENU LATERAL (SIDEBAR) ---
+    with st.sidebar:
+        if os.path.exists("logo.png"):
+            st.image("logo.png", use_container_width=True)
+        else:
+            st.markdown("<h2 style='text-align: center; color: white;'>APROAR</h2>", unsafe_allow_html=True)
+        
+        st.markdown("### 🧭 Torre de Controle")
+        menu_escolhido = st.radio(
+            "Navegação",
+            ["🎛️ Dashboard", "📋 Convocação", "✅ Apontamento", "📊 Relatórios", "📈 Indicadores", "👥 Disponibilidade", "⚙️ Configurações"],
+            label_visibility="collapsed"
+        )
+        st.markdown("---")
+        st.caption("APROAR Engenharia © 2026")
 
-    # ==========================================
+    # --- CONTEÚDO PRINCIPAL (ÁREA WIDE) ---
+
     # 1. DASHBOARD
-    # ==========================================
     if menu_escolhido == "🎛️ Dashboard":
-        st.markdown("#### 🎛️ Dashboard e Auditoria de Presenças")
+        st.markdown("### 🎛️ Dashboard e Auditoria de Presenças")
         
         col_f1, col_f2, col_f3, col_f4 = st.columns(4)
         with col_f1:
@@ -420,7 +415,7 @@ else:
                 "custo": diaria_calc + extra
             })
 
-        # Métricas do dia
+        # Métricas do dia (Cards Dimensionados)
         total_conv = len(lista_processada)
         total_pres = len([x for x in lista_processada if "Presente" in x['status'] or x['status'] == 'Extra'])
         total_atest = len([x for x in lista_processada if x['status'] == 'Atestado'])
@@ -478,12 +473,10 @@ else:
                             st.caption(f"R$ {row['custo']:.2f}")
                         st.divider()
 
-    # ==========================================
     # 2. CONVOCAÇÃO
-    # ==========================================
     elif menu_escolhido == "📋 Convocação":
+        st.markdown("### 📋 Nova Convocação de Equipe")
         if obras and colaboradores:
-            st.markdown("#### 📋 Nova Convocação de Equipe")
             col_eng, col_data = st.columns(2)
             with col_eng:
                 engenheiro_conv = st.selectbox("Engenheiro responsável:", ENGENHEIROS, key="eng_conv")
@@ -543,11 +536,9 @@ else:
         else:
             st.info("Cadastre obras e colaboradores na aba Configurações.")
 
-    # ==========================================
     # 3. APONTAMENTO
-    # ==========================================
     elif menu_escolhido == "✅ Apontamento":
-        st.markdown("#### ✅ Apontamento Diário de Campo")
+        st.markdown("### ✅ Apontamento Diário de Campo")
         col_eng_ap, col_data_ap = st.columns(2)
         with col_eng_ap:
             engenheiro_apont = st.selectbox("Engenheiro:", ENGENHEIROS, key="eng_apont_adm")
@@ -607,11 +598,9 @@ else:
         else:
             st.warning("Nenhuma equipe convocada para este engenheiro nesta data.")
 
-    # ==========================================
     # 4. RELATÓRIOS
-    # ==========================================
     elif menu_escolhido == "📊 Relatórios":
-        st.markdown("#### 📊 Relatório de Custos e Fechamento")
+        st.markdown("### 📊 Relatório de Custos e Fechamento")
         col_rel_eng, _ = st.columns(2)
         with col_rel_eng:
             eng_relatorio = st.selectbox("Engenheiro:", ["TODOS OS ENGENHEIROS"] + ENGENHEIROS, key="eng_rel")
@@ -702,11 +691,9 @@ else:
             except Exception as e:
                 st.error(f"Erro: {e}")
 
-    # ==========================================
     # 5. INDICADORES
-    # ==========================================
     elif menu_escolhido == "📈 Indicadores":
-        st.markdown("#### 📈 Indicadores de Desempenho")
+        st.markdown("### 📈 Indicadores de Desempenho")
         try:
             all_conv = supabase.table("convocacoes").select("*").execute().data
             if not all_conv:
@@ -745,23 +732,19 @@ else:
         except Exception as e:
             st.error(f"Erro ao carregar indicadores: {e}")
 
-    # ==========================================
     # 6. DISPONIBILIDADE
-    # ==========================================
     elif menu_escolhido == "👥 Disponibilidade":
         render_aba_disponibilidade("adm")
 
-    # ==========================================
     # 7. CONFIGURAÇÕES
-    # ==========================================
     elif menu_escolhido == "⚙️ Configurações":
-        st.markdown("#### ⚙️ Sincronização e Manutenção")
+        st.markdown("### ⚙️ Sincronização e Manutenção")
         arquivo_json = st.file_uploader("JSON do Trello", type=["json"])
         if arquivo_json and st.button("🔄 Importar Obras"):
             trello_data = json.load(arquivo_json)
             list_id = next((lst['id'] for lst in trello_data.get('lists', []) if lst.get('name', '').upper() == 'EM EXECUÇÃO'), None)
             if list_id:
-                cards = [c for c in trello_data.get('cards', []) if c.get('idList') == list_id]
+                cards = [c for c in trello_data.get('cards', []) if c.get('idList'] == list_id]
                 novas_obras = [{"unidade": identificar_unidade(c.get('name', '')), "nome": c.get('name', '').split('|')[0].strip()} for c in cards]
                 existentes = {f"{o['unidade']} - {o['nome']}" for o in supabase.table("obras").select("unidade, nome").execute().data}
                 inserir = [o for o in novas_obras if f"{o['unidade']} - {o['nome']}" not in existentes]
