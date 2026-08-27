@@ -10,7 +10,7 @@ import re
 # --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR ---
 st.set_page_config(page_title="APROAR - Gestão de Obras", page_icon="👷", layout="centered")
 
-# CSS para o tema escuro APROAR e visibilidade perfeita dos inputs
+# CSS para o tema escuro APROAR, cards modernos e visibilidade perfeita dos inputs
 st.markdown("""
     <style>
     .stApp {
@@ -134,7 +134,7 @@ dict_obras = {o['id']: o for o in obras} if obras else {}
 
 ENGENHEIROS = ["EDUARDO", "GABRIEL", "GUSTAVO", "JOEL", "NETO", "PAULO", "SOARES", "VICTOR"]
 
-# --- FUNÇÃO AUXILIAR PARA RENDERIZAR A ABA DE DISPONIBILIDADE (LAYOUT ABERTO) ---
+# --- FUNÇÃO AUXILIAR PARA RENDERIZAR A ABA DE DISPONIBILIDADE (ABERTA POR FUNÇÃO) ---
 def render_aba_disponibilidade(key_suffix=""):
     st.markdown("### 👥 Disponibilidade de Equipe por Função")
     st.write("Consulte diretamente quem já está convocado e quem está disponível (sobrando) para a data selecionada.")
@@ -155,40 +155,40 @@ def render_aba_disponibilidade(key_suffix=""):
 
     st.markdown("---")
     for func in funcoes:
-        st.markdown(f"#### 🔹 Função: {func}")
-        colabs_func = [c for c in colaboradores if c['funcao'] == func]
-        ocupados_func = [c for c in colabs_func if c['id'] in ids_ocupados]
-        disponiveis_func = [c for c in colabs_func if c['id'] not in ids_ocupados]
-        
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown(f"**🔴 Convocados ({len(ocupados_func)})**")
-            if ocupados_func:
-                for oc in ocupados_func:
-                    conv_info = next((item for item in convs_disp if item['colaborador_id'] == oc['id']), None)
-                    obra_nome = "Obra"
-                    if conv_info:
-                        ob_inf = dict_obras.get(conv_info['obra_id'], {})
-                        obra_nome = f"{ob_inf.get('unidade','')} - {ob_inf.get('nome','')}"
-                    st.markdown(f"• {oc['nome']} <br><small style='color:#94A3B8;'>({obra_nome})</small>", unsafe_allow_html=True)
-            else:
-                st.caption("Nenhum convocado nesta função.")
-                
-        with c2:
-            st.markdown(f"**🟢 Disponíveis / Sobrando ({len(disponiveis_func)})**")
-            if disponiveis_func:
-                for disp in disponiveis_func:
-                    st.markdown(f"• {disp['nome']}")
-            else:
-                st.caption("Nenhum disponível nesta função.")
-        st.markdown("---")
+        with st.container(border=True):
+            st.markdown(f"#### 🔹 Função: {func}")
+            colabs_func = [c for c in colaboradores if c['funcao'] == func]
+            ocupados_func = [c for c in colabs_func if c['id'] in ids_ocupados]
+            disponiveis_func = [c for c in colabs_func if c['id'] not in ids_ocupados]
+            
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown(f"**🔴 Convocados ({len(ocupados_func)})**")
+                if ocupados_func:
+                    for oc in ocupados_func:
+                        conv_info = next((item for item in convs_disp if item['colaborador_id'] == oc['id']), None)
+                        obra_nome = "Obra"
+                        if conv_info:
+                            ob_inf = dict_obras.get(conv_info['obra_id'], {})
+                            obra_nome = f"{ob_inf.get('unidade','')} - {ob_inf.get('nome','')}"
+                        st.markdown(f"• {oc['nome']} <br><small style='color:#94A3B8;'>({obra_nome})</small>", unsafe_allow_html=True)
+                else:
+                    st.caption("Nenhum convocado nesta função.")
+                    
+            with c2:
+                st.markdown(f"**🟢 Disponíveis / Sobrando ({len(disponiveis_func)})**")
+                if disponiveis_func:
+                    for disp in disponiveis_func:
+                        st.markdown(f"• {disp['nome']}")
+                else:
+                    st.caption("Nenhum disponível nesta função.")
 
 # --- VERIFICAÇÃO DE MODO (CAMPO vs ADM) ---
 parametros_url = st.query_params
 modo_campo = parametros_url.get("modo") == "campo"
 
 if modo_campo:
-    # VISÃO ESSENCIAL DO ENGENHEIRO NO CELULAR
+    # VISÃO ESSENCIAL DO ENGENHEIRO NO CELULAR (ESTILO APP / CARDS)
     st.title("👷 APROAR - Campo")
     tab_apontamento_campo, tab_convocacao_campo, tab_disp_campo = st.tabs([
         "✅ Apontamento Hoje", "📋 Convocação Amanhã", "👥 Disponibilidade"
@@ -221,27 +221,27 @@ if modo_campo:
             opcoes_status = ["Presente", "Falta", "Atestado", "Extra"]
             
             for conv in convocacoes_render:
-                c_id = conv['id']
-                dados_colab = dict_colaboradores.get(conv['colaborador_id'], {"nome": "Desconhecido", "funcao": "-"})
-                nome = dados_colab['nome']
-                funcao = dados_colab['funcao']
-                status_atual = conv.get("status", "Presente")
-                idx = opcoes_status.index(status_atual) if status_atual in opcoes_status else 0
-                
-                st.markdown(f"**{nome}** (`{funcao}`)")
-                status_sel = st.radio("Status", opcoes_status, index=idx, key=f"st_{c_id}", horizontal=True, label_visibility="collapsed")
-                if status_sel != status_atual:
-                    supabase.table("convocacoes").update({"status": status_sel}).eq("id", c_id).execute()
-                
-                with st.expander("💸 Extra / Observação"):
-                    val_atual = float(conv.get("valor_extra") or 0.0)
-                    obs_atual = conv.get("observacao") or ""
-                    val_extra = st.number_input("Extra (R$)", value=val_atual, step=10.0, key=f"v_{c_id}")
-                    obs = st.text_input("Justificativa", value=obs_atual, key=f"o_{c_id}")
-                    if st.button("Salvar Detalhes", key=f"btn_{c_id}"):
-                        supabase.table("convocacoes").update({"valor_extra": val_extra, "observacao": obs}).eq("id", c_id).execute()
-                        st.success("Salvo!")
-                st.divider()
+                with st.container(border=True):
+                    c_id = conv['id']
+                    dados_colab = dict_colaboradores.get(conv['colaborador_id'], {"nome": "Desconhecido", "funcao": "-"})
+                    nome = dados_colab['nome']
+                    funcao = dados_colab['funcao']
+                    status_atual = conv.get("status", "Presente")
+                    idx = opcoes_status.index(status_atual) if status_atual in opcoes_status else 0
+                    
+                    st.markdown(f"**{nome}** (`{funcao}`)")
+                    status_sel = st.radio("Status", opcoes_status, index=idx, key=f"st_{c_id}", horizontal=True, label_visibility="collapsed")
+                    if status_sel != status_atual:
+                        supabase.table("convocacoes").update({"status": status_sel}).eq("id", c_id).execute()
+                    
+                    with st.expander("💸 Extra / Observação"):
+                        val_atual = float(conv.get("valor_extra") or 0.0)
+                        obs_atual = conv.get("observacao") or ""
+                        val_extra = st.number_input("Extra (R$)", value=val_atual, step=10.0, key=f"v_{c_id}")
+                        obs = st.text_input("Justificativa", value=obs_atual, key=f"o_{c_id}")
+                        if st.button("Salvar Detalhes", key=f"btn_{c_id}"):
+                            supabase.table("convocacoes").update({"valor_extra": val_extra, "observacao": obs}).eq("id", c_id).execute()
+                            st.success("Salvo!")
         else:
             st.warning("Nenhuma equipe convocada por você para hoje.")
 
@@ -261,28 +261,32 @@ if modo_campo:
             funcoes_disponiveis = sorted(list(set([c['funcao'] for c in colaboradores])))
             frente_selecionada = st.selectbox("Função:", funcoes_disponiveis, key="f_c_sel")
 
-            # Panorama em tempo real: Mostra quem já foi convocado para esta data
-            st.markdown(f"--- \n#### 👁️ Panorama: Já convocados para {data_conv.strftime('%d/%m/%Y')}")
-            try:
-                convs_data = supabase.table("convocacoes").select("*").eq("data", data_conv.isoformat()).execute().data
-            except:
-                convs_data = []
-            if convs_data:
-                ids_ja_alocados = {c['colaborador_id'] for c in convs_data}
-                alocados_nesta_funcao = [c for c in colaboradores if c['funcao'] == frente_selecionada and c['id'] in ids_ja_alocados]
-                if alocados_nesta_funcao:
-                    st.markdown(f"*Nesta função ({frente_selecionada}) já estão escalados:* " + ", ".join([c['nome'] for c in alocados_nesta_funcao]))
-                else:
-                    st.caption(f"Nenhum colaborador alocado nesta função para o dia {data_conv.strftime('%d/%m/%Y')}.")
-            else:
-                st.caption("Nenhuma convocação registrada para esta data ainda.")
-            st.markdown("---")
-
             colaboradores_filtrados = [c for c in colaboradores if c['funcao'] == frente_selecionada]
             opcoes_colaboradores = {c['nome']: c['id'] for c in colaboradores_filtrados}
-            equipe_selecionada = st.multiselect("Selecione para convocar:", list(opcoes_colaboradores.keys()), key="eq_c_sel")
+            
+            # 1. SELEÇÃO EM CIMA
+            equipe_selecionada = st.multiselect("Selecione os colaboradores para esta frente:", list(opcoes_colaboradores.keys()), key="eq_c_sel")
 
-            if st.button("Convocação Rápida", type="primary", use_container_width=True):
+            # 2. PANORAMA LOGO ABAIXO (ACOMPANHAMENTO EM TEMPO REAL)
+            with st.container(border=True):
+                st.markdown(f"#### 👁️ Panorama: Suas Convocações ({data_conv.strftime('%d/%m/%Y')})")
+                try:
+                    convs_eng_data = supabase.table("convocacoes").select("*").eq("engenheiro", engenheiro_conv).eq("data", data_conv.isoformat()).execute().data
+                except:
+                    convs_eng_data = []
+                
+                ids_ja_alocados_eng = {c['colaborador_id'] for c in convs_eng_data}
+                nomes_ja_alocados = [dict_colaboradores.get(cid, {}).get('nome', '') for cid in ids_ja_alocados_eng]
+
+                if nomes_ja_alocados:
+                    st.markdown(f"📌 **Já escalados por você hoje:** " + ", ".join(nomes_ja_alocados))
+                else:
+                    st.caption("Você ainda não registrou nenhuma convocação para esta data.")
+
+                if equipe_selecionada:
+                    st.markdown(f"✨ **Selecionados agora:** " + ", ".join(equipe_selecionada))
+
+            if st.button("Confirmar Convocação Rápida", type="primary", use_container_width=True):
                 if not equipe_selecionada:
                     st.warning("Selecione alguém.")
                 else:
@@ -297,7 +301,7 @@ if modo_campo:
                         st.success("✅ Convocado com sucesso!")
                         st.rerun()
                     except:
-                        st.error("Erro: Colaborador já possui convocação neste dia.")
+                        st.error("Erro: Um ou mais colaboradores já possuem convocação neste dia.")
         else:
             st.info("Aguardando cadastro de obras/colaboradores pela administração.")
 
@@ -337,26 +341,30 @@ else:
             funcoes_disponiveis = sorted(list(set([c['funcao'] for c in colaboradores])))
             frente_selecionada = st.selectbox("Frente de Trabalho:", funcoes_disponiveis)
 
-            # Panorama em tempo real para o ADM
-            st.markdown(f"--- \n#### 👁️ Panorama: Já convocados para {data_conv.strftime('%d/%m/%Y')}")
-            try:
-                convs_data = supabase.table("convocacoes").select("*").eq("data", data_conv.isoformat()).execute().data
-            except:
-                convs_data = []
-            if convs_data:
-                ids_ja_alocados = {c['colaborador_id'] for c in convs_data}
-                alocados_nesta_funcao = [c for c in colaboradores if c['funcao'] == frente_selecionada and c['id'] in ids_ja_alocados]
-                if alocados_nesta_funcao:
-                    st.markdown(f"*Nesta função ({frente_selecionada}) já estão escalados:* " + ", ".join([c['nome'] for c in alocados_nesta_funcao]))
-                else:
-                    st.caption(f"Nenhum colaborador alocado nesta função para o dia {data_conv.strftime('%d/%m/%Y')}.")
-            else:
-                st.caption("Nenhuma convocação registrada para esta data ainda.")
-            st.markdown("---")
-
             colaboradores_filtrados = [c for c in colaboradores if c['funcao'] == frente_selecionada]
             opcoes_colaboradores = {c['nome']: c['id'] for c in colaboradores_filtrados}
+            
+            # 1. SELEÇÃO EM CIMA
             equipe_selecionada = st.multiselect("Selecione os colaboradores para esta frente:", list(opcoes_colaboradores.keys()))
+
+            # 2. PANORAMA LOGO ABAIXO
+            with st.container(border=True):
+                st.markdown(f"#### 👁️ Panorama: Convocações de {engenheiro_conv} ({data_conv.strftime('%d/%m/%Y')})")
+                try:
+                    convs_eng_data = supabase.table("convocacoes").select("*").eq("engenheiro", engenheiro_conv).eq("data", data_conv.isoformat()).execute().data
+                except:
+                    convs_eng_data = []
+                
+                ids_ja_alocados_eng = {c['colaborador_id'] for c in convs_eng_data}
+                nomes_ja_alocados = [dict_colaboradores.get(cid, {}).get('nome', '') for cid in ids_ja_alocados_eng]
+
+                if nomes_ja_alocados:
+                    st.markdown(f"📌 **Já escalados por este engenheiro hoje:** " + ", ".join(nomes_ja_alocados))
+                else:
+                    st.caption("Nenhuma convocação registrada para este engenheiro nesta data.")
+
+                if equipe_selecionada:
+                    st.markdown(f"✨ **Selecionados agora:** " + ", ".join(equipe_selecionada))
 
             if st.button("Confirmar Convocação", type="primary", use_container_width=True):
                 if not equipe_selecionada:
@@ -411,27 +419,27 @@ else:
             with st.form("form_apontamentos_extras"):
                 dados_para_atualizar = {}
                 for conv in convocacoes_render:
-                    c_id = conv['id']
-                    dados_colab = dict_colaboradores.get(conv['colaborador_id'], {"nome": "Desconhecido", "funcao": "-"})
-                    nome = dados_colab['nome']
-                    funcao = dados_colab['funcao']
-                    cor = get_cor_funcao(funcao)
-                    status_atual = conv.get("status", "Presente")
-                    idx = opcoes_status.index(status_atual) if status_atual in opcoes_status else 0
-                    
-                    st.markdown(f"**{nome}** &nbsp; {cor} `{funcao}`")
-                    status_sel = st.radio("Status", opcoes_status, index=idx, key=f"status_{c_id}", horizontal=True, label_visibility="collapsed")
-                    if status_sel != status_atual:
-                        supabase.table("convocacoes").update({"status": status_sel}).eq("id", c_id).execute()
-                    
-                    with st.expander("💸 Inserir Extra ou Observação"):
-                        val_atual = float(conv.get("valor_extra") or 0.0)
-                        obs_atual = conv.get("observacao") or ""
-                        val_extra = st.number_input("Bonificação / Extra (R$)", value=val_atual, step=10.0, key=f"val_{c_id}")
-                        obs = st.text_input("Justificativa / Acordo", value=obs_atual, key=f"obs_{c_id}")
-                    
-                    dados_para_atualizar[c_id] = {"valor_extra": val_extra, "observacao": obs}
-                    st.divider()
+                    with st.container(border=True):
+                        c_id = conv['id']
+                        dados_colab = dict_colaboradores.get(conv['colaborador_id'], {"nome": "Desconhecido", "funcao": "-"})
+                        nome = dados_colab['nome']
+                        funcao = dados_colab['funcao']
+                        cor = get_cor_funcao(funcao)
+                        status_atual = conv.get("status", "Presente")
+                        idx = opcoes_status.index(status_atual) if status_atual in opcoes_status else 0
+                        
+                        st.markdown(f"**{nome}** &nbsp; {cor} `{funcao}`")
+                        status_sel = st.radio("Status", opcoes_status, index=idx, key=f"status_{c_id}", horizontal=True, label_visibility="collapsed")
+                        if status_sel != status_atual:
+                            supabase.table("convocacoes").update({"status": status_sel}).eq("id", c_id).execute()
+                        
+                        with st.expander("💸 Inserir Extra ou Observação"):
+                            val_atual = float(conv.get("valor_extra") or 0.0)
+                            obs_atual = conv.get("observacao") or ""
+                            val_extra = st.number_input("Bonificação / Extra (R$)", value=val_atual, step=10.0, key=f"val_{c_id}")
+                            obs = st.text_input("Justificativa / Acordo", value=obs_atual, key=f"obs_{c_id}")
+                        
+                        dados_para_atualizar[c_id] = {"valor_extra": val_extra, "observacao": obs}
                 
                 if st.form_submit_button("💾 Salvar Extras e Observações", type="primary", use_container_width=True):
                     try:
