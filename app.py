@@ -135,12 +135,11 @@ dict_obras = {o['id']: o for o in obras} if obras else {}
 
 ENGENHEIROS = ["EDUARDO", "GABRIEL", "GUSTAVO", "JOEL", "NETO", "PAULO", "SOARES", "VICTOR"]
 
-# --- EXIBIÇÃO DA LOGO OFICIAL ---
+# --- EXIBIÇÃO DA LOGO OFICIAL (logo.png) ---
 col_l1, col_l2, col_l3 = st.columns([1, 2, 1])
 with col_l2:
-    logo_path = "logo.jpg" if os.path.exists("logo.jpg") else ("logo.png" if os.path.exists("logo.png") else None)
-    if logo_path:
-        st.image(logo_path, use_container_width=True)
+    if os.path.exists("logo.png"):
+        st.image("logo.png", use_container_width=True)
     else:
         st.markdown("""
             <div style="background: linear-gradient(135deg, #0C102B 0%, #161B3D 100%); padding: 25px; border-radius: 12px; text-align: center; margin-bottom: 25px; border: 1px solid #2D3568;">
