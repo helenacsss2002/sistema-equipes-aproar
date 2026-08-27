@@ -636,7 +636,7 @@ else:
         else:
             st.warning("Nenhuma equipe convocada para este engenheiro nesta data.")
 
-    # 4. RELATÓRIOS (PDF E EXCEL COM ABAS SEPARADAS POR DIA)
+    # 4. RELATÓRIOS (PDF E EXCEL COM ESTRUTURA PROFISSIONAL E SEPARAÇÃO POR ENGENHEIRO)
     elif menu_escolhido == "📊 RELATÓRIOS":
         st.markdown("## 📊 RELATÓRIO DE CUSTOS E FECHAMENTO")
         col_rel_eng, _ = st.columns(2)
@@ -729,7 +729,7 @@ else:
                     st.error(f"Erro ao gerar PDF: {e}")
 
         with col_btn2:
-            if st.button("📊 Gerar Excel", use_container_width=True):
+            if st.button("📊 Gerar Excel Estilizado", use_container_width=True):
                 try:
                     if data_inicio_rel > data_fim_rel:
                         st.error("Data inicial maior que a final.")
@@ -746,7 +746,7 @@ else:
                             
                             lista_excel.append({
                                 "Data": row.get('data'),
-                                "Engenheiro": row.get('engenheiro'),
+                                "Engenheiro": row.get('engenheiro', 'N/A'),
                                 "Unidade": ob['unidade'],
                                 "Obra": ob['nome'],
                                 "Colaborador": colab.get('nome', 'N/A'),
@@ -761,20 +761,139 @@ else:
                         df_excel = pd.DataFrame(lista_excel)
                         
                         buffer = io.BytesIO()
-                        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-                            datas_unicas = sorted(df_excel['Data'].unique())
-                            for data_str in datas_unicas:
-                                df_dia = df_excel[df_excel['Data'] == data_str]
-                                try:
-                                    dt_obj = datetime.date.fromisoformat(data_str)
-                                    nome_aba = dt_obj.strftime('%d-%m-%Y')
-                                except:
-                                    nome_aba = str(data_str)
+                        wb = openpyxl.Workbook()
+                        wb.remove(wb.active) # Remove aba padrão
+                        
+                        datas_unicas = sorted(df_excel['Data'].unique())
+                        
+                        # Estilos OpenPyXL (Padrão Corporativo Profissional)
+                        font_title = Font(name='Arial', size=11, bold=True, color='FFFFFF')
+                        fill_title = PatternFill(start_color='1E293B', end_color='1E293B', fill_type='solid')
+                        
+                        font_eng = Font(name='Arial', size=10, bold=True, color='FFFFFF')
+                        fill_eng = PatternFill(start_color='2563EB', end_color='2563EB', fill_type='solid')
+                        
+                        font_header = Font(name='Arial', size=9, bold=True, color='FFFFFF')
+                        fill_header = PatternFill(start_color='475569', end_color='475569', fill_type='solid')
+                        
+                        font_data = Font(name='Arial', size=9)
+                        font_total = Font(name='Arial', size=9, bold=True)
+                        fill_total = PatternFill(start_color='F1F5F9', end_color='F1F5F9', fill_type='solid')
+                        
+                        border_thin = Border(
+                            left=Side(style='thin', color='CBD5E1'),
+                            right=Side(style='thin', color='CBD5E1'),
+                            top=Side(style='thin', color='CBD5E1'),
+                            bottom=Side(style='thin', color='CBD5E1')
+                        )
+                        
+                        for data_str in datas_unicas:
+                            df_dia = df_excel[df_excel['Data'] == data_str]
+                            try:
+                                dt_obj = datetime.date.fromisoformat(data_str)
+                                nome_aba = dt_obj.strftime('%d-%m-%Y')
+                            except:
+                                nome_aba = str(data_str)
                                 
-                                df_dia.to_excel(writer, sheet_name=nome_aba, index=False)
+                            ws = wb.create_sheet(title=nome_aba)
+                            ws.views.sheetView[0].showGridLines = True
+                            
+                            current_row = 1
+                            
+                            # Título principal da aba
+                            ws.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=9)
+                            cell_title = ws.cell(row=current_row, column=1, value=f"APROAR - CONTROLE DE APONTAMENTOS ({dt_obj.strftime('%d/%m/%Y') if 'dt_obj' in locals() else data_str})")
+                            cell_title.font = font_title
+                            cell_title.fill = fill_title
+                            cell_title.alignment = Alignment(horizontal='center', vertical='center')
+                            ws.row_dimensions[current_row].height = 24
+                            current_row += 2
+                            
+                            # Separar convocações por engenheiro no mesmo dia
+                            engenheiros_dia = sorted(df_dia['Engenheiro'].unique())
+                            
+                            for eng in engenheiros_dia:
+                                df_eng = df_dia[df_dia['Engenheiro'] == eng]
                                 
+                                # Bloco / Cabeçalho do Engenheiro
+                                ws.merge_cells(start_row=current_row, start_column=1, end_row=current_row, end_column=9)
+                                cell_eng = ws.cell(row=current_row, column=1, value=f"ENGENHEIRO RESPONSÁVEL: {eng}")
+                                cell_eng.font = font_eng
+                                cell_eng.fill = fill_eng
+                                cell_eng.alignment = Alignment(horizontal='left', vertical='center', indent=1)
+                                ws.row_dimensions[current_row].height = 20
+                                current_row += 1
+                                
+                                # Cabeçalhos da Tabela
+                                headers = ["Unidade", "Obra", "Colaborador", "Função", "Status", "Diária (R$)", "Extra (R$)", "Custo Total (R$)", "Observação"]
+                                for col_idx, h_text in enumerate(headers, 1):
+                                    cell = ws.cell(row=current_row, column=col_idx, value=h_text)
+                                    cell.font = font_header
+                                    cell.fill = fill_header
+                                    cell.alignment = Alignment(horizontal='center', vertical='center')
+                                    cell.border = border_thin
+                                ws.row_dimensions[current_row].height = 20
+                                current_row += 1
+                                
+                                # Linhas de dados
+                                start_data_row = current_row
+                                for _, r_data in df_eng.iterrows():
+                                    row_values = [
+                                        r_data["Unidade"],
+                                        r_data["Obra"],
+                                        r_data["Colaborador"],
+                                        r_data["Função"],
+                                        r_data["Status"],
+                                        r_data["Diária (R$)"],
+                                        r_data["Extra (R$)"],
+                                        r_data["Custo Total (R$)"],
+                                        r_data["Observação"]
+                                    ]
+                                    for col_idx, val in enumerate(row_values, 1):
+                                        cell = ws.cell(row=current_row, column=col_idx, value=val)
+                                        cell.font = font_data
+                                        cell.border = border_thin
+                                        
+                                        if col_idx in [6, 7, 8]: # Valores monetários
+                                            cell.number_format = 'R$ #,##0.00'
+                                            cell.alignment = Alignment(horizontal='right', vertical='center')
+                                        elif col_idx in [1, 5]: # Unidade e Status
+                                            cell.alignment = Alignment(horizontal='center', vertical='center')
+                                        else:
+                                            cell.alignment = Alignment(horizontal='left', vertical='center')
+                                            
+                                    ws.row_dimensions[current_row].height = 18
+                                    current_row += 1
+                                end_data_row = current_row - 1
+                                
+                                # Linha de Subtotal por Engenheiro
+                                ws.cell(row=current_row, column=1, value=f"TOTAL {eng}").font = font_total
+                                ws.cell(row=current_row, column=8, value=f"=SUM(H{start_data_row}:H{end_data_row})").font = font_total
+                                ws.cell(row=current_row, column=8).number_format = 'R$ #,##0.00'
+                                ws.cell(row=current_row, column=8).alignment = Alignment(horizontal='right', vertical='center')
+                                
+                                for c_i in range(1, 10):
+                                    cell_sub = ws.cell(row=current_row, column=c_i)
+                                    cell_sub.border = border_thin
+                                    cell_sub.fill = fill_total
+                                    if c_i < 8 and c_i > 1:
+                                        pass
+                                ws.row_dimensions[current_row].height = 20
+                                current_row += 2 # Espaço entre os blocos de engenheiros
+                            
+                            # Ajuste automático de largura das colunas
+                            for col in ws.columns:
+                                max_len = 0
+                                col_letter = openpyxl.utils.get_column_letter(col[0].column)
+                                for cell in col:
+                                    if cell.value:
+                                        val_str = str(cell.value)
+                                        if not val_str.startswith("="):
+                                            max_len = max(max_len, len(val_str))
+                                ws.column_dimensions[col_letter].width = max(max_len + 4, 14)
+
                         st.download_button(
-                            label="📥 Baixar Excel por Dias",
+                            label="📥 Baixar Excel Estilizado",
                             data=buffer.getvalue(),
                             file_name=f"relatorio_custos_{data_inicio_rel.strftime('%d-%m-%Y')}_a_{data_fim_rel.strftime('%d-%m-%Y')}.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
