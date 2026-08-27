@@ -247,6 +247,19 @@ dict_obras = {o['id']: o for o in obras} if obras else {}
 
 ENGENHEIROS = ["EDUARDO", "GABRIEL", "GUSTAVO", "JOEL", "NETO", "PAULO", "SOARES", "VICTOR"]
 
+# --- SEÇÃO DE LIMPEZA DE TESTES ---
+        with st.container(border=True):
+            st.markdown("### 🗑️ Limpeza de Convocações de Teste")
+            st.write("Use o botão abaixo para apagar todas as convocações e reiniciar os testes do zero:")
+            if st.button("🗑️ Apagar Todas as Convocações", type="secondary", use_container_width=True):
+                try:
+                    # Deleta todos os registros da tabela convocacoes
+                    supabase.table("convocacoes").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
+                    st.success("Todas as convocações de teste foram apagadas com sucesso!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erro ao limpar convocações: {e}")
+
 # --- FUNÇÃO AUXILIAR PARA RENDERIZAR A ABA DE DISPONIBILIDADE ---
 def render_aba_disponibilidade(key_suffix=""):
     st.markdown("### 👥 DISPONIBILIDADE DE EQUIPE POR FUNÇÃO")
