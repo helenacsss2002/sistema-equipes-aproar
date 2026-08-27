@@ -28,24 +28,13 @@ except Exception as e:
 def limpar_unidade(texto):
     if not texto: return "GERAL"
     texto_limpo = unicodedata.normalize('NFKD', str(texto)).encode('ASCII', 'ignore').decode('utf-8').upper().strip()
-    
     macro_unidades = {
-        "HORIZONTE": "HORIZONTE",
-        "FIEC": "FIEC",
-        "CASA DA INDUSTRIA": "FIEC",
-        "DR": "FIEC",
-        "BARRA": "BARRA",
-        "COLISEU": "COLISEU",
-        "MARACANAU": "MARACANAÚ",
-        "ESCRITORIO": "ESCRITÓRIO",
-        "CENTRO": "CENTRO",
-        "MUSEU": "MUSEU",
-        "UNIFOR": "UNIFOR"
+        "HORIZONTE": "HORIZONTE", "FIEC": "FIEC", "CASA DA INDUSTRIA": "FIEC", "DR": "FIEC",
+        "BARRA": "BARRA", "COLISEU": "COLISEU", "MARACANAU": "MARACANAÚ", "ESCRITORIO": "ESCRITÓRIO",
+        "CENTRO": "CENTRO", "MUSEU": "MUSEU", "UNIFOR": "UNIFOR"
     }
-    
     for chave, valor in macro_unidades.items():
-         if chave in texto_limpo:
-             return valor
+         if chave in texto_limpo: return valor
     return texto_limpo
 
 def limpar_funcao(texto):
@@ -59,6 +48,11 @@ def get_cor_funcao(funcao):
     cores = ["🟥", "🟧", "🟨", "🟩", "🟦", "🟪", "🟫", "⬛"]
     hash_num = sum(ord(c) for c in str(funcao))
     return cores[hash_num % len(cores)]
+
+def to_latin(texto):
+    """Garante que os acentos funcionem no PDF padrao (Latin-1)"""
+    if not texto: return ""
+    return str(texto).encode('latin-1', 'replace').decode('latin-1')
 
 # --- BUSCA DE DADOS ---
 def buscar_obras():
@@ -80,11 +74,10 @@ ENGENHEIROS = ["EDUARDO", "GABRIEL", "GUSTAVO", "JOEL", "NETO", "PAULO", "SOARES
 st.title("👷 Gestão de Equipes")
 
 tab_convocacao, tab_apontamento, tab_relatorios, tab_config = st.tabs(["📋 Convocação", "✅ Apontamento", "📊 Relatório", "⚙️ Config"])
-
 hoje = datetime.date.today().isoformat()
 
 # ==========================================
-# ABA 1: CONVOCAÇÃO
+# ABA 1: CONVOCAÇÃO (MÚLTIPLAS OBRAS)
 # ==========================================
 with tab_convocacao:
     if obras and colaboradores:
@@ -92,14 +85,12 @@ with tab_convocacao:
         engenheiro_conv = st.selectbox("Engenheiro responsável:", ENGENHEIROS, key="eng_conv")
         
         unidades_unicas = sorted(list(set([o['unidade'] for o in obras])))
-        col_u, col_o = st.columns(2)
-        
-        with col_u:
-            unidade_selecionada = st.selectbox("Unidade:", unidades_unicas)
+        unidade_selecionada = st.selectbox("Unidade:", unidades_unicas)
         
         obras_da_unidade = {o['nome']: o['id'] for o in obras if o['unidade'] == unidade_selecionada}
-        with col_o:
-            obra_selecionada = st.selectbox("Obra/Serviço:", list(obras_da_unidade.keys()))
+        
+        # AGORA É MÚLTIPLA ESCOLHA!
+        obras_selecionadas = st.multiselect("Selecione uma ou mais Obras/Serviços:", list(obras_da_unidade.keys()))
 
         st.markdown("### Montar Equipe")
         funcoes_disponiveis = sorted(list(set([c['funcao'] for c in colaboradores])))
@@ -113,24 +104,28 @@ with tab_convocacao:
         if st.button("Confirmar Convocação", type="primary", use_container_width=True):
             if not equipe_selecionada:
                 st.warning("⚠️ Selecione pelo menos um colaborador.")
+            elif not obras_selecionadas:
+                st.warning("⚠️ Selecione pelo menos uma obra.")
             else:
-                obra_id = obras_da_unidade[obra_selecionada]
                 dados_insercao = []
-                for nome in equipe_selecionada:
-                    dados_insercao.append({
-                        "obra_id": obra_id,
-                        "colaborador_id": opcoes_colaboradores[nome],
-                        "data": hoje,
-                        "engenheiro": engenheiro_conv,
-                        "status": "Presente",
-                        "valor_extra": 0,
-                        "observacao": ""
-                    })
+                # Faz um laço para cadastrar a equipe em TODAS as obras selecionadas
+                for obra_nome in obras_selecionadas:
+                    obra_id = obras_da_unidade[obra_nome]
+                    for nome in equipe_selecionada:
+                        dados_insercao.append({
+                            "obra_id": obra_id,
+                            "colaborador_id": opcoes_colaboradores[nome],
+                            "data": hoje,
+                            "engenheiro": engenheiro_conv,
+                            "status": "Presente",
+                            "valor_extra": 0,
+                            "observacao": ""
+                        })
                 try:
                     supabase.table("convocacoes").insert(dados_insercao).execute()
-                    st.success("✅ Equipe convocada com sucesso!")
+                    st.success(f"✅ Equipe convocada com sucesso para {len(obras_selecionadas)} obra(s)!")
                 except Exception as e:
-                    st.error("❌ Erro: Possível duplicidade. Colaborador já convocado hoje.")
+                    st.error("❌ Erro: Possível duplicidade. Colaborador já convocado para a mesma obra hoje.")
     else:
         st.info("Cadastre obras (JSON) e colaboradores (Excel) na aba Configurações.")
 
@@ -201,51 +196,78 @@ with tab_apontamento:
         st.warning("Nenhuma equipe convocada por você para a data de hoje.")
 
 # ==========================================
-# ABA 3: RELATÓRIOS
+# ABA 3: RELATÓRIOS (NOVA DINÂMICA)
 # ==========================================
 with tab_relatorios:
-    st.markdown("### 📊 Relatório do Dia")
+    st.markdown("### 📊 Relatório Diário Profissional")
     eng_relatorio = st.selectbox("Selecione o Engenheiro:", ENGENHEIROS, key="eng_rel")
     
-    if st.button("Gerar PDF de Custos/Apontamento"):
+    if st.button("Gerar PDF de Apontamentos"):
         try:
             dados_relatorio = supabase.table("convocacoes").select("*").eq("engenheiro", eng_relatorio).eq("data", hoje).execute().data
             if not dados_relatorio:
-                st.warning("Sem apontamentos hoje.")
+                st.warning("Sem apontamentos hoje para gerar relatório.")
             else:
-                pdf = FPDF()
+                # Agrupar os dados por Obra para o relatório ficar organizado
+                agrupado_por_obra = {}
+                for row in dados_relatorio:
+                    obra_id = row['obra_id']
+                    if obra_id not in agrupado_por_obra:
+                        agrupado_por_obra[obra_id] = []
+                    agrupado_por_obra[obra_id].append(row)
+
+                pdf = FPDF(orientation='L') # Landscape para caber a tabela
                 pdf.add_page()
-                pdf.set_font("Arial", 'B', 14)
-                pdf.cell(200, 10, txt="Relatorio de Apontamentos e Acordos", ln=True, align='C')
-                pdf.set_font("Arial", size=10)
-                pdf.cell(200, 10, txt=f"Data: {hoje} | Engenheiro: {eng_relatorio}", ln=True, align='C')
+                
+                # Título
+                pdf.set_font("Arial", 'B', 16)
+                pdf.cell(0, 10, txt=to_latin("RELATÓRIO DIÁRIO DE APONTAMENTOS"), ln=True, align='C')
+                pdf.set_font("Arial", size=11)
+                pdf.cell(0, 10, txt=to_latin(f"Data: {hoje} | Engenheiro Responsável: {eng_relatorio}"), ln=True, align='C')
                 pdf.ln(5)
                 
-                for row in dados_relatorio:
-                    colab = dict_colaboradores.get(row['colaborador_id'], {})
-                    dados_ob = dict_obras.get(row['obra_id'], {"nome": "N/A", "unidade": "N/A"})
+                # Iterar por cada obra e desenhar a tabela
+                for o_id, apontamentos in agrupado_por_obra.items():
+                    dados_ob = dict_obras.get(o_id, {"nome": "N/A", "unidade": "N/A"})
                     
-                    nome = colab.get('nome', 'N/A')
-                    status = row.get('status', 'N/A')
-                    extra = row.get('valor_extra', 0)
-                    obs = row.get('observacao', '')
+                    pdf.set_font("Arial", 'B', 12)
+                    pdf.set_fill_color(220, 220, 220)
+                    titulo_obra = f"Unidade: {dados_ob['unidade']} | Obra/Serviço: {dados_ob['nome']}"
+                    pdf.cell(0, 10, txt=to_latin(titulo_obra), ln=True, fill=True)
                     
+                    # Cabeçalho da Tabela
                     pdf.set_font("Arial", 'B', 10)
-                    nome_pdf = unicodedata.normalize('NFKD', nome).encode('ASCII', 'ignore').decode('utf-8')
-                    unidade_pdf = unicodedata.normalize('NFKD', dados_ob['unidade']).encode('ASCII', 'ignore').decode('utf-8')
-                    obra_pdf = unicodedata.normalize('NFKD', dados_ob['nome']).encode('ASCII', 'ignore').decode('utf-8')
+                    pdf.cell(80, 8, to_latin("Colaborador"), border=1)
+                    pdf.cell(60, 8, to_latin("Função"), border=1)
+                    pdf.cell(30, 8, to_latin("Status"), border=1, align='C')
+                    pdf.cell(30, 8, to_latin("Extra (R$)"), border=1, align='C')
+                    pdf.cell(75, 8, to_latin("Observação"), border=1, ln=True)
                     
-                    pdf.cell(0, 8, txt=f"Colaborador: {nome_pdf} | Obra: {unidade_pdf} - {obra_pdf}", ln=True)
+                    # Linhas da Tabela
                     pdf.set_font("Arial", '', 10)
-                    pdf.cell(0, 6, txt=f"Status: {status} | Bonificacao/Extra: R$ {extra:.2f}", ln=True)
-                    if obs:
-                        obs_pdf = unicodedata.normalize('NFKD', obs).encode('ASCII', 'ignore').decode('utf-8')
-                        pdf.cell(0, 6, txt=f"Obs: {obs_pdf}", ln=True)
-                    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-                    pdf.ln(3)
+                    for row in apontamentos:
+                        colab = dict_colaboradores.get(row['colaborador_id'], {})
+                        nome = colab.get('nome', 'N/A')
+                        funcao = colab.get('funcao', 'N/A')
+                        status = row.get('status', 'N/A')
+                        extra = row.get('valor_extra', 0)
+                        obs = row.get('observacao', '')
+                        
+                        # Tratamento para textos longos (truncando para caber na célula da tabela)
+                        nome_str = (nome[:35] + '..') if len(nome) > 35 else nome
+                        func_str = (funcao[:25] + '..') if len(funcao) > 25 else funcao
+                        obs_str = (obs[:40] + '..') if len(obs) > 40 else obs
+                        
+                        pdf.cell(80, 8, to_latin(nome_str), border=1)
+                        pdf.cell(60, 8, to_latin(func_str), border=1)
+                        pdf.cell(30, 8, to_latin(status), border=1, align='C')
+                        pdf.cell(30, 8, to_latin(f"R$ {extra:.2f}"), border=1, align='C')
+                        pdf.cell(75, 8, to_latin(obs_str), border=1, ln=True)
+                    
+                    pdf.ln(8)
                 
                 pdf_bytes = pdf.output(dest='S').encode('latin1')
-                st.download_button(label="📥 Baixar Relatório", data=pdf_bytes, file_name=f"Relatorio_{eng_relatorio}.pdf", mime="application/pdf")
+                st.download_button(label="📥 Baixar Relatório PDF", data=pdf_bytes, file_name=f"Relatorio_Apontamento_{eng_relatorio}.pdf", mime="application/pdf")
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
 
@@ -263,18 +285,15 @@ with tab_config:
                 try:
                     trello_data = json.load(arquivo_json)
                     list_execucao_id = None
-                    
                     for lst in trello_data.get('lists', []):
                         if lst.get('name', '').upper() == 'EM EXECUÇÃO' and not lst.get('closed', False):
                             list_execucao_id = lst.get('id')
                             break
-                    
                     if not list_execucao_id:
                         st.error("❌ Lista 'EM EXECUÇÃO' não encontrada.")
                     else:
                         cards = [c for c in trello_data.get('cards', []) if c.get('idList') == list_execucao_id and not c.get('closed', False)]
                         novas_obras = []
-                        
                         for c in cards:
                             nome_card = c.get('name', '')
                             partes = [p.strip() for p in nome_card.split('|')]
@@ -292,13 +311,11 @@ with tab_config:
                         if novas_obras:
                             existentes = supabase.table("obras").select("unidade, nome").execute().data
                             set_existentes = {f"{o['unidade']} - {o['nome']}" for o in existentes}
-                            
                             inserir = [o for o in novas_obras if f"{o['unidade']} - {o['nome']}" not in set_existentes]
-                            
                             if inserir:
                                 supabase.table("obras").insert(inserir).execute()
                                 st.success(f"🎉 {len(inserir)} novas obras padronizadas e salvas!")
-                                st.rerun() # Atualiza a tela automaticamente
+                                st.rerun()
                             else:
                                 st.info("👍 Obras atualizadas. Sem novos registros.")
                         else:
@@ -347,7 +364,7 @@ with tab_config:
                     if novos_colaboradores:
                         supabase.table("colaboradores").insert(novos_colaboradores).execute()
                         st.success(f"🎉 {len(novos_colaboradores)} colaboradores importados sem duplicidade de funções.")
-                        st.rerun() # Atualiza a tela automaticamente
+                        st.rerun()
                     else:
                         st.info("Nenhum colaborador novo foi encontrado.")
                 except Exception as e:
