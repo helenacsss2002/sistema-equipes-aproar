@@ -7,12 +7,11 @@ from fpdf import FPDF
 import unicodedata
 import re
 import os
-from PIL import Image
 
 # --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR ---
 st.set_page_config(page_title="APROAR - Controle de Presenças", page_icon="👷", layout="centered")
 
-# CSS para o tema escuro APROAR, cards modernos e inputs
+# CSS para o tema escuro APROAR, cards modernos, inputs e logo 100% branca e nítida
 st.markdown("""
     <style>
     .stApp {
@@ -21,6 +20,14 @@ st.markdown("""
     }
     h1, h2, h3, h4, p, label, .stMarkdown, span {
         color: #F8FAFC !important;
+    }
+    /* Deixa a logo perfeitamente branca e nítida no tema escuro */
+    .logo-container img {
+        filter: brightness(0) invert(1);
+        width: 100%;
+        max-width: 320px;
+        display: block;
+        margin: 0 auto;
     }
     div[data-baseweb="select"] > div, 
     div[data-baseweb="base-input"] > div, 
@@ -136,24 +143,15 @@ dict_obras = {o['id']: o for o in obras} if obras else {}
 
 ENGENHEIROS = ["EDUARDO", "GABRIEL", "GUSTAVO", "JOEL", "NETO", "PAULO", "SOARES", "VICTOR"]
 
-# --- TRATAMENTO E EXIBIÇÃO DA LOGO COM TRANSPARÊNCIA REAL ---
+# --- CABEÇALHO COM A LOGO BRANCA E NÍDIDA ---
 col_l1, col_l2, col_l3 = st.columns([1, 2, 1])
 with col_l2:
     logo_path = "logo.jpg" if os.path.exists("logo.jpg") else ("logo.png" if os.path.exists("logo.png") else None)
     if logo_path:
-        try:
-            img = Image.open(logo_path).convert("RGBA")
-            datas = img.getdata()
-            new_data = []
-            for item in datas:
-                if item[0] > 230 and item[1] > 230 and item[2] > 230:
-                    new_data.append((255, 255, 255, 0))
-                else:
-                    new_data.append(item)
-            img.putdata(new_data)
-            st.image(img, use_container_width=True)
-        except Exception:
-            st.image(logo_path, use_container_width=True)
+        st.markdown(f'<div class="logo-container"><img src="app/static/{logo_path}" onerror="this.style.display=\'none\'">', unsafe_allow_html=True)
+        # Fallback direto via st.image com o container CSS
+        st.image(logo_path, use_container_width=True)
+        st.markdown('</div>', unsafe_allow_html=True)
     else:
         st.markdown("""
             <div style="background: linear-gradient(135deg, #0C102B 0%, #161B3D 100%); padding: 25px; border-radius: 12px; text-align: center; margin-bottom: 25px; border: 1px solid #2D3568;">
