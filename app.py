@@ -649,7 +649,7 @@ else:
         else:
             st.warning("Nenhuma equipe convocada para este engenheiro nesta data.")
 
-    # 4. RELATÓRIOS (PDF E EXCEL COM ABAS POR DIAS E CORES POR ENGENHEIRO)
+    # 4. RELATÓRIOS
     elif menu_escolhido == "📊 RELATÓRIOS":
         st.markdown("## 📊 RELATÓRIO DE CUSTOS E FECHAMENTO")
         col_rel_eng, _ = st.columns(2)
@@ -771,20 +771,19 @@ else:
                         
                         df_excel = pd.DataFrame(lista_excel)
                         
-                        # Paleta de cores suaves por engenheiro para diferenciar na tabela
                         cores_engenheiros = {
-                            "VICTOR": "E0F2FE",   # Azul Claro
-                            "EDUARDO": "DCFCE7",  # Verde Claro
-                            "GUSTAVO": "FEF9C3",  # Amarelo Claro
-                            "JOEL": "F3E8FF",     # Roxo Claro
-                            "NETO": "FFEDD5",     # Laranja Claro
-                            "SOARES": "FFE4E6",   # Rosa Claro
-                            "GABRIEL": "CCFBF1",  # Verde Água Claro
-                            "PAULO": "F1F5F9"     # Cinza Claro
+                            "VICTOR": "E0F2FE",
+                            "EDUARDO": "DCFCE7",
+                            "GUSTAVO": "FEF9C3",
+                            "JOEL": "F3E8FF",
+                            "NETO": "FFEDD5",
+                            "SOARES": "FFE4E6",
+                            "GABRIEL": "CCFBF1",
+                            "PAULO": "F1F5F9"
                         }
                         
                         wb = openpyxl.Workbook()
-                        wb.remove(wb.active) # Remove aba padrão
+                        wb.remove(wb.active)
                         
                         font_titulo = Font(name="Arial", size=10, bold=True, color="FFFFFF")
                         fill_cabecalho = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
@@ -797,7 +796,6 @@ else:
                             bottom=Side(style='thin', color='CBD5E1')
                         )
                         
-                        # CRIAR ABAS SEPARADAS POR DIA DISTINTO
                         for data_str in sorted(df_excel['Data'].unique()):
                             df_dia = df_excel[df_excel['Data'] == data_str]
                             nome_aba = str(data_str) 
@@ -808,21 +806,18 @@ else:
                             ws.cell(row=current_row, column=1, value=f"APONTAMENTO DIÁRIO DE EQUIPES - DATA: {data_str}").font = Font(name="Arial", size=12, bold=True)
                             current_row += 2
                             
-                            # Agrupar por Unidade e depois por Obra dentro do dia
                             for unidade_nome in sorted(df_dia['Unidade'].unique()):
                                 df_unidade = df_dia[df_dia['Unidade'] == unidade_nome]
                                 
                                 for obra_nome in sorted(df_unidade['Obra'].unique()):
                                     df_obra = df_unidade[df_unidade['Obra'] == obra_nome]
                                     
-                                    # Cabeçalho da Obra / Unidade
                                     ws.cell(row=current_row, column=1, value=f"Unidade: {unidade_nome} | Obra: {obra_nome}").font = font_obra_hdr
                                     for col_idx in range(1, 8):
                                         ws.cell(row=current_row, column=col_idx).fill = fill_obra_hdr
                                         ws.cell(row=current_row, column=col_idx).border = borda_fina
                                     current_row += 1
                                     
-                                    # Cabeçalhos das Colunas
                                     headers = ["Engenheiro", "Colaborador", "Função", "Status", "Diária (R$)", "Extra (R$)", "Observação"]
                                     for col_idx, h_text in enumerate(headers, 1):
                                         cell = ws.cell(row=current_row, column=col_idx, value=h_text)
@@ -832,7 +827,6 @@ else:
                                         cell.border = borda_fina
                                     current_row += 1
                                     
-                                    # Inserção das Linhas de Dados com Cores por Engenheiro
                                     for _, row in df_obra.iterrows():
                                         eng_val = str(row['Engenheiro'])
                                         cor_hex = cores_engenheiros.get(eng_val.upper(), "FFFFFF")
@@ -859,9 +853,8 @@ else:
                                             elif col_idx in [4]:
                                                 cell.alignment = Alignment(horizontal="center")
                                         current_row += 1
-                                    current_row += 2 # Espaço entre obras
+                                    current_row += 2
                             
-                            # Ajuste Automático de Largura das Colunas
                             for col in ws.columns:
                                 max_len = max(len(str(cell.value or '')) for cell in col)
                                 col_letter = openpyxl.utils.get_column_letter(col[0].column)
@@ -879,3 +872,109 @@ else:
                         )
                 except Exception as e:
                     st.error(f"Erro ao gerar Excel: {e}")
+
+    # 5. INDICADORES (ADICIONADO E CORRIGIDO)
+    elif menu_escolhido == "📈 INDICADORES":
+        st.markdown("## 📈 INDICADORES E ANÁLISE DE DESEMPENHO")
+        try:
+            all_conv = supabase.table("convocacoes").select("*").execute().data
+        except:
+            all_conv = []
+        
+        if not all_conv:
+            st.info("Nenhum dado de convocação registrado para gerar indicadores.")
+        else:
+            df_ind = pd.DataFrame(all_conv)
+            df_ind['obra_nome'] = df_ind['obra_id'].apply(lambda x: dict_obras.get(x, {}).get('nome', 'N/A'))
+            df_ind['unidade'] = df_ind['obra_id'].apply(lambda x: dict_obras.get(x, {}).get('unidade', 'N/A'))
+            df_ind['colab_nome'] = df_ind['colaborador_id'].apply(lambda x: dict_colaboradores.get(x, {}).get('nome', 'N/A'))
+            df_ind['funcao'] = df_ind['colaborador_id'].apply(lambda x: dict_colaboradores.get(x, {}).get('funcao', 'N/A'))
+            df_ind['diaria_base'] = df_ind.apply(lambda r: calcular_diaria_proporcional(r.get('status', ''), dict_colaboradores.get(r['colaborador_id'], {}).get('valor_diaria', 240.0)), axis=1)
+            df_ind['custo_total'] = df_ind['diaria_base'] + df_ind['valor_extra'].fillna(0)
+
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Total de Apontamentos", len(df_ind))
+            c2.metric("Custo Acumulado", f"R$ {df_ind['custo_total'].sum():,.2f}".replace(",", "X").replace(".", ",").replace("X", "."))
+            c3.metric("Obras Ativas", df_ind['obra_id'].nunique())
+
+            st.markdown("---")
+            col_chart1, col_chart2 = st.columns(2)
+            with col_chart1:
+                st.markdown("### 💰 Custo por Unidade")
+                custo_unidade = df_ind.groupby('unidade')['custo_total'].sum().reset_index()
+                st.bar_chart(custo_unidade.set_index('unidade'))
+            with col_chart2:
+                st.markdown("### 👷 Apontamentos por Engenheiro")
+                eng_counts = df_ind['engenheiro'].value_counts().reset_index()
+                eng_counts.columns = ['Engenheiro', 'Quantidade']
+                st.bar_chart(eng_counts.set_index('Engenheiro'))
+
+            st.markdown("### 📊 Status Gerais de Apontamento")
+            st.dataframe(df_ind['status'].value_counts().reset_index(), use_container_width=True)
+
+    # 6. DISPONIBILIDADE (ADICIONADO E CORRIGIDO)
+    elif menu_escolhido == "👥 DISPONIBILIDADE":
+        render_aba_disponibilidade("admin_panel")
+
+    # 7. CONFIGURAÇÕES (ADICIONADO E CORRIGIDO)
+    elif menu_escolhido == "⚙️ CONFIGURAÇÕES":
+        st.markdown("## ⚙️ CONFIGURAÇÕES E CADASTROS")
+        tab_c1, tab_c2 = st.tabs(["🏗️ Obras / Unidades", "👥 Colaboradores"])
+        
+        with tab_c1:
+            st.markdown("### Cadastrar Nova Obra")
+            with st.form("form_nova_obra"):
+                nova_unidade = st.text_input("Unidade (Ex: MARACANAÚ, SEBRAE, FIEC...)")
+                novo_nome_obra = st.text_input("Nome da Obra / Serviço")
+                btn_cad_obra = st.form_submit_button("Cadastrar Obra")
+                if btn_cad_obra:
+                    if nova_unidade and novo_nome_obra:
+                        try:
+                            supabase.table("obras").insert({
+                                "unidade": nova_unidade.upper(),
+                                "nome": novo_nome_obra
+                            }).execute()
+                            st.success("Obra cadastrada com sucesso!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Erro ao cadastrar obra: {e}")
+                    else:
+                        st.warning("Preencha todos os campos.")
+            
+            st.markdown("---")
+            st.markdown("### Obras Cadastradas")
+            if obras:
+                df_obras = pd.DataFrame(obras)
+                st.dataframe(df_obras[['id', 'unidade', 'nome']], use_container_width=True)
+            else:
+                st.info("Nenhuma obra cadastrada.")
+
+        with tab_c2:
+            st.markdown("### Cadastrar Novo Colaborador")
+            with st.form("form_novo_colab"):
+                nome_colab = st.text_input("Nome Completo")
+                funcao_colab = st.text_input("Função / Cargo (Ex: PEDREIRO, CARPINTEIRO...)")
+                valor_diaria_colab = st.number_input("Valor da Diária Base (R$)", value=240.0, step=10.0)
+                btn_cad_colab = st.form_submit_button("Cadastrar Colaborador")
+                if btn_cad_colab:
+                    if nome_colab and funcao_colab:
+                        try:
+                            supabase.table("colaboradores").insert({
+                                "nome": nome_colab.upper(),
+                                "funcao": funcao_colab.upper(),
+                                "valor_diaria": float(valor_diaria_colab)
+                            }).execute()
+                            st.success("Colaborador cadastrado com sucesso!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Erro ao cadastrar colaborador: {e}")
+                    else:
+                        st.warning("Preencha os campos obrigatórios.")
+
+            st.markdown("---")
+            st.markdown("### Colaboradores Cadastrados")
+            if colaboradores:
+                df_colabs = pd.DataFrame(colaboradores)
+                st.dataframe(df_colabs[['id', 'nome', 'funcao', 'valor_diaria']], use_container_width=True)
+            else:
+                st.info("Nenhum colaborador cadastrado.")
