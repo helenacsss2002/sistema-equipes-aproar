@@ -26,13 +26,9 @@ except Exception as e:
 
 # --- FUNÇÕES DE LIMPEZA E PADRONIZAÇÃO ---
 def identificar_unidade(nome_card):
-    """Lê o nome do card inteiro para classificar corretamente a unidade, independente do padrão de digitação."""
     if not nome_card: return "GERAL"
-    
-    # Padroniza tirando acentos para facilitar a busca
     texto = unicodedata.normalize('NFKD', str(nome_card)).encode('ASCII', 'ignore').decode('utf-8').upper()
     
-    # Ordem de prioridade na busca (busca na string inteira)
     if "APRL005" in texto or "MARACANAU" in texto: return "MARACANAÚ"
     if "SEBRAE" in texto: return "SEBRAE"
     if "UNIFOR" in texto: return "UNIFOR"
@@ -45,11 +41,9 @@ def identificar_unidade(nome_card):
     if "CASA DA INDUSTRIA" in texto or "FIEC" in texto or " DR " in texto or "| SESI DR |" in texto or "| SESI DR" in texto: return "FIEC"
     if "CENTRO" in texto: return "CENTRO"
     
-    # Se não achou por palavra-chave, tenta pegar a segunda parte do split pela barra (|)
     partes = str(nome_card).split('|')
     if len(partes) >= 2:
         return partes[1].strip().upper()
-        
     return "GERAL"
 
 def limpar_funcao(texto):
@@ -99,7 +93,6 @@ with tab_convocacao:
         with col_eng:
             engenheiro_conv = st.selectbox("Engenheiro responsável:", ENGENHEIROS, key="eng_conv")
         with col_data:
-            # Por padrão a convocação é feita sempre para o dia seguinte
             amanha = datetime.date.today() + datetime.timedelta(days=1)
             data_conv = st.date_input("Data da Obra/Serviço:", value=amanha, format="DD/MM/YYYY")
 
@@ -155,7 +148,6 @@ with tab_apontamento:
     with col_eng_ap:
         engenheiro_apont = st.selectbox("Engenheiro:", ENGENHEIROS, key="eng_apont")
     with col_data_ap:
-        # Por padrão o apontamento exibe a equipe do dia atual
         data_apont = st.date_input("Data do Apontamento:", value=datetime.date.today(), format="DD/MM/YYYY")
     
     try:
@@ -218,10 +210,10 @@ with tab_apontamento:
         st.warning(f"Nenhuma equipe convocada por {engenheiro_apont} para o dia {data_apont.strftime('%d/%m/%Y')}.")
 
 # ==========================================
-# ABA 3: RELATÓRIOS
+# ABA 3: RELATÓRIOS (COM CÁLCULO DE CUSTOS E DIÁRIAS)
 # ==========================================
 with tab_relatorios:
-    st.markdown("### 📊 Relatório Diário Profissional")
+    st.markdown("### 📊 Relatório Diário Profissional (Custos)")
     col_rel_eng, col_rel_data = st.columns(2)
     with col_rel_eng:
         opcoes_relatorio = ["TODOS OS ENGENHEIROS"] + ENGENHEIROS
@@ -229,9 +221,8 @@ with tab_relatorios:
     with col_rel_data:
         data_rel = st.date_input("Data do Relatório:", value=datetime.date.today(), format="DD/MM/YYYY")
     
-    if st.button("Gerar PDF de Apontamentos"):
+    if st.button("Gerar PDF de Custos e Apontamentos"):
         try:
-            # Se for todos, busca sem filtro de engenheiro. Se for específico, filtra pelo nome.
             if eng_relatorio == "TODOS OS ENGENHEIROS":
                 dados_relatorio = supabase.table("convocacoes").select("*").eq("data", data_rel.isoformat()).execute().data
             else:
@@ -240,7 +231,6 @@ with tab_relatorios:
             if not dados_relatorio:
                 st.warning(f"Sem apontamentos registrados para {data_rel.strftime('%d/%m/%Y')}.")
             else:
-                # Agrupamento: Primeiro por Engenheiro, depois por Obra
                 agrupado_eng = {}
                 for row in dados_relatorio:
                     eng = row.get('engenheiro', 'NÃO IDENTIFICADO')
@@ -251,14 +241,15 @@ with tab_relatorios:
 
                 pdf = FPDF(orientation='L')
                 
-                # Gera uma página nova por engenheiro
                 for eng, obras_eng in agrupado_eng.items():
                     pdf.add_page()
                     pdf.set_font("Arial", 'B', 16)
-                    pdf.cell(0, 10, txt=to_latin("RELATÓRIO DIÁRIO DE APONTAMENTOS"), ln=True, align='C')
+                    pdf.cell(0, 10, txt=to_latin("RELATÓRIO DIÁRIO DE CUSTOS E APONTAMENTOS"), ln=True, align='C')
                     pdf.set_font("Arial", size=11)
                     pdf.cell(0, 10, txt=to_latin(f"Data Referência: {data_rel.strftime('%d/%m/%Y')} | Engenheiro: {eng}"), ln=True, align='C')
                     pdf.ln(5)
+                    
+                    custo_total_engenheiro = 0.0
                     
                     for o_id, apontamentos in obras_eng.items():
                         dados_ob = dict_obras.get(o_id, {"nome": "N/A", "unidade": "N/A"})
@@ -270,35 +261,58 @@ with tab_relatorios:
                         
                         pdf.set_font("Arial", 'B', 10)
                         pdf.cell(80, 8, to_latin("Colaborador"), border=1)
-                        pdf.cell(60, 8, to_latin("Função"), border=1)
-                        pdf.cell(30, 8, to_latin("Status"), border=1, align='C')
+                        pdf.cell(50, 8, to_latin("Função"), border=1)
+                        pdf.cell(25, 8, to_latin("Status"), border=1, align='C')
+                        pdf.cell(30, 8, to_latin("Diária (R$)"), border=1, align='C')
                         pdf.cell(30, 8, to_latin("Extra (R$)"), border=1, align='C')
-                        pdf.cell(75, 8, to_latin("Observação"), border=1, ln=True)
+                        pdf.cell(69, 8, to_latin("Observação"), border=1, ln=True)
                         
                         pdf.set_font("Arial", '', 10)
+                        custo_total_obra = 0.0
+                        
                         for row in apontamentos:
                             colab = dict_colaboradores.get(row['colaborador_id'], {})
                             nome = colab.get('nome', 'N/A')
                             funcao = colab.get('funcao', 'N/A')
-                            status = row.get('status', 'N/A')
-                            extra = row.get('valor_extra', 0)
+                            status = row.get('status', 'Presente')
+                            extra = float(row.get('valor_extra', 0) or 0)
                             obs = row.get('observacao', '')
                             
-                            nome_str = (nome[:35] + '..') if len(nome) > 35 else nome
-                            func_str = (funcao[:25] + '..') if len(funcao) > 25 else funcao
-                            obs_str = (obs[:40] + '..') if len(obs) > 40 else obs
+                            # Se estiver Presente ou Extra, contabiliza a diária padrão (R$ 240 ou o valor do cadastro)
+                            diaria_base = 0.0
+                            if status in ["Presente", "Extra"]:
+                                diaria_base = float(colab.get('valor_diaria') or 240.0)
+                            
+                            subtotal_colab = diaria_base + extra
+                            custo_total_obra += subtotal_colab
+                            
+                            nome_str = (nome[:32] + '..') if len(nome) > 32 else nome
+                            func_str = (funcao[:20] + '..') if len(funcao) > 20 else funcao
+                            obs_str = (obs[:35] + '..') if len(obs) > 35 else obs
                             
                             pdf.cell(80, 8, to_latin(nome_str), border=1)
-                            pdf.cell(60, 8, to_latin(func_str), border=1)
-                            pdf.cell(30, 8, to_latin(status), border=1, align='C')
+                            pdf.cell(50, 8, to_latin(func_str), border=1)
+                            pdf.cell(25, 8, to_latin(status), border=1, align='C')
+                            pdf.cell(30, 8, to_latin(f"R$ {diaria_base:.2f}"), border=1, align='C')
                             pdf.cell(30, 8, to_latin(f"R$ {extra:.2f}"), border=1, align='C')
-                            pdf.cell(75, 8, to_latin(obs_str), border=1, ln=True)
+                            pdf.cell(69, 8, to_latin(obs_str), border=1, ln=True)
                         
-                        pdf.ln(8)
+                        # Exibe o Custo Total da Obra logo abaixo da tabela
+                        pdf.set_font("Arial", 'B', 10)
+                        pdf.set_fill_color(245, 245, 245)
+                        pdf.cell(214, 8, to_latin(f"CUSTO TOTAL DA OBRA/SERVIÇO:"), border=1, align='R', fill=True)
+                        pdf.cell(70, 8, to_latin(f"R$ {custo_total_obra:.2f}"), border=1, align='C', fill=True, ln=True)
+                        pdf.ln(6)
+                        
+                        custo_total_engenheiro += custo_total_obra
+                    
+                    # Rodapé com o Custo Total Geral do Engenheiro na página
+                    pdf.set_font("Arial", 'B', 11)
+                    pdf.cell(0, 8, to_latin(f"CUSTO TOTAL GERAL DE MÃO DE OBRA (ENGENHEIRO {eng}): R$ {custo_total_engenheiro:.2f}"), ln=True, align='R')
                 
                 pdf_bytes = pdf.output(dest='S').encode('latin1')
-                nome_arquivo = f"Relatorio_Apontamento_{eng_relatorio}_{data_rel.strftime('%d-%m-%Y')}.pdf"
-                st.download_button(label="📥 Baixar Relatório PDF", data=pdf_bytes, file_name=nome_arquivo, mime="application/pdf")
+                nome_arquivo = f"Relatorio_Custos_{eng_relatorio}_{data_rel.strftime('%d-%m-%Y')}.pdf"
+                st.download_button(label="📥 Baixar Relatório de Custos PDF", data=pdf_bytes, file_name=nome_arquivo, mime="application/pdf")
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
 
@@ -307,7 +321,6 @@ with tab_relatorios:
 # ==========================================
 with tab_config:
     st.markdown("### 📋 Sincronizar Obras (Trello JSON)")
-    st.info("O sistema mapeia unidades através do nome completo do serviço. (Ex: APRL005 é enviado para MARACANAÚ).")
     arquivo_json = st.file_uploader("Selecione o arquivo JSON do Trello", type=["json"], key="json_trello")
     
     if arquivo_json is not None:
@@ -327,13 +340,8 @@ with tab_config:
                         novas_obras = []
                         for c in cards:
                             nome_card = c.get('name', '')
-                            
                             partes = [p.strip() for p in nome_card.split('|')]
-                            if len(partes) >= 2:
-                                nome_obra = partes[0]
-                            else:
-                                nome_obra = nome_card
-                                
+                            nome_obra = partes[0] if len(partes) >= 2 else nome_card
                             unidade_limpa = identificar_unidade(nome_card)
                             novas_obras.append({"unidade": unidade_limpa, "nome": nome_obra})
                         
@@ -375,6 +383,8 @@ with tab_config:
                         
                         try: diaria = float(row.get('VALOR DIÁRIA (R$)', 0))
                         except: diaria = 0.0
+                        # Se não vier preenchido na planilha, define o padrão de R$ 240,00
+                        if diaria <= 0: diaria = 240.0
                         
                         try: passagem = float(row.get('PASSAGEM', 0))
                         except: passagem = 0.0
@@ -391,7 +401,7 @@ with tab_config:
                     
                     if novos_colaboradores:
                         supabase.table("colaboradores").insert(novos_colaboradores).execute()
-                        st.success(f"🎉 {len(novos_colaboradores)} colaboradores importados sem duplicidade de funções.")
+                        st.success(f"🎉 {len(novos_colaboradores)} colaboradores importados com sucesso.")
                         st.rerun()
                     else:
                         st.info("Nenhum colaborador novo foi encontrado.")
