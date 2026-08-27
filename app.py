@@ -288,6 +288,76 @@ def criar_ou_obter_colaborador_manual(nome, tipo, funcao_livre="", avulso=False)
     except Exception:
         return None, None, "Não foi possível cadastrar o nome informado."
 
+def gerar_excel_colaboradores(lista_colaboradores):
+    """Gera uma planilha Excel com a base atual de colaboradores do Supabase."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Colaboradores"
+
+    # Título e metadados
+    ws.merge_cells("A1:E1")
+    ws["A1"] = "APROAR ENGENHARIA - BASE ATUALIZADA DE COLABORADORES"
+    ws["A1"].font = Font(name="Arial", size=13, bold=True, color="FFFFFF")
+    ws["A1"].fill = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
+    ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[1].height = 24
+
+    ws.merge_cells("A2:E2")
+    ws["A2"] = f"Gerado em: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')} | Total de colaboradores: {len(lista_colaboradores)}"
+    ws["A2"].font = Font(name="Arial", size=9, italic=True, color="64748B")
+    ws["A2"].alignment = Alignment(horizontal="left")
+
+    headers = ["Nome", "Função", "Categoria", "Valor da Diária (R$)", "Avulso"]
+    linha_header = 4
+    for col_idx, header in enumerate(headers, 1):
+        cell = ws.cell(row=linha_header, column=col_idx, value=header)
+        cell.font = Font(name="Arial", size=10, bold=True, color="FFFFFF")
+        cell.fill = PatternFill(start_color="2563EB", end_color="2563EB", fill_type="solid")
+        cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    borda = Border(
+        left=Side(style="thin", color="CBD5E1"),
+        right=Side(style="thin", color="CBD5E1"),
+        top=Side(style="thin", color="CBD5E1"),
+        bottom=Side(style="thin", color="CBD5E1")
+    )
+
+    ordenados = sorted(lista_colaboradores, key=lambda c: normalizar(c.get("nome", "")))
+    for row_idx, colab in enumerate(ordenados, linha_header + 1):
+        funcao = str(colab.get("funcao") or "").strip()
+        valor_diaria = obter_valor_diaria_colaborador(colab)
+        categoria = "Ajudante" if abs(valor_diaria - VALOR_DIARIA_AJUDANTE) < 0.01 else "Profissional"
+        avulso = "SIM" if normalizar(funcao).startswith("AVULSO -") else "NÃO"
+
+        valores = [
+            str(colab.get("nome") or "").strip(),
+            funcao,
+            categoria,
+            valor_diaria,
+            avulso,
+        ]
+        for col_idx, valor in enumerate(valores, 1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=valor)
+            cell.font = Font(name="Arial", size=9)
+            cell.border = borda
+            cell.alignment = Alignment(vertical="center", horizontal="left" if col_idx in [1, 2] else "center")
+            if col_idx == 4:
+                cell.number_format = 'R$ #,##0.00'
+                cell.alignment = Alignment(horizontal="right", vertical="center")
+
+    fim = linha_header + len(ordenados)
+    if fim >= linha_header:
+        ws.auto_filter.ref = f"A{linha_header}:E{fim}"
+    ws.freeze_panes = "A5"
+
+    larguras = {"A": 38, "B": 30, "C": 16, "D": 22, "E": 12}
+    for coluna, largura in larguras.items():
+        ws.column_dimensions[coluna].width = largura
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()
+
 def buscar_convocacao_existente(colaborador_id, data_convocacao):
     try:
         return (
@@ -476,9 +546,290 @@ def render_aba_disponibilidade(key_suffix=""):
                 else:
                     st.caption("Nenhum disponível.")
 
-# --- VERIFICAÇÃO DE MODO (CAMPO/ENGENHEIRO VIA ?eng OU ?modo=campo) ---
+
+# --- FUNÇÕES DO PORTAL FINANCEIRO ---
+def obter_ciclo_financeiro(data_ref=None):
+    """Retorna o ciclo semanal de extras: terça-feira até segunda-feira."""
+    data_ref = data_ref or datetime.date.today()
+    dias_desde_terca = (data_ref.weekday() - 1) % 7  # terça = 1
+    inicio = data_ref - datetime.timedelta(days=dias_desde_terca)
+    fim = inicio + datetime.timedelta(days=6)
+    pagamento = fim + datetime.timedelta(days=1)
+    return inicio, fim, pagamento
+
+
+def listar_ciclos_financeiros(qtd=26):
+    """Gera ciclos semanais recentes para consulta do Financeiro."""
+    hoje = datetime.date.today()
+    inicio_atual, _, _ = obter_ciclo_financeiro(hoje)
+    ciclos = []
+    for i in range(qtd):
+        inicio = inicio_atual - datetime.timedelta(days=7 * i)
+        fim = inicio + datetime.timedelta(days=6)
+        pagamento = fim + datetime.timedelta(days=1)
+        em_aberto = hoje <= fim and hoje >= inicio
+        ciclos.append({
+            "inicio": inicio,
+            "fim": fim,
+            "pagamento": pagamento,
+            "em_aberto": em_aberto,
+            "rotulo": (
+                f"{inicio.strftime('%d/%m/%Y')} a {fim.strftime('%d/%m/%Y')}"
+                + (" • EM ABERTO" if em_aberto else f" • pagamento {pagamento.strftime('%d/%m/%Y')}")
+            )
+        })
+    return ciclos
+
+
+def carregar_dados_financeiro(data_inicio, data_fim):
+    """Busca convocações do período e prepara extras e faltas/atestados sem expor Obra/Serviço."""
+    try:
+        registros = (
+            supabase.table("convocacoes")
+            .select("*")
+            .gte("data", data_inicio.isoformat())
+            .lte("data", data_fim.isoformat())
+            .execute().data or []
+        )
+    except Exception:
+        registros = []
+
+    extras = []
+    ausencias = []
+    for row in registros:
+        obra = dict_obras.get(row.get("obra_id"), {})
+        colab = dict_colaboradores.get(row.get("colaborador_id"), {})
+        unidade = str(obra.get("unidade") or "NÃO IDENTIFICADA")
+        nome = str(colab.get("nome") or "NÃO IDENTIFICADO")
+        funcao = str(colab.get("funcao") or "-")
+        status = str(row.get("status") or "")
+        data_iso = str(row.get("data") or "")
+        try:
+            data_br = datetime.date.fromisoformat(data_iso).strftime("%d/%m/%Y")
+        except Exception:
+            data_br = data_iso
+        try:
+            valor_extra = float(row.get("valor_extra") or 0.0)
+        except Exception:
+            valor_extra = 0.0
+
+        base = {
+            "Data": data_br,
+            "Data ISO": data_iso,
+            "Colaborador": nome,
+            "Função": funcao,
+            "Unidade": unidade,
+            "Engenheiro": str(row.get("engenheiro") or "N/A"),
+            "Status": status,
+        }
+
+        # Financeiro considera como extra qualquer valor lançado pelo engenheiro,
+        # independentemente do status do apontamento.
+        if valor_extra > 0:
+            item_extra = dict(base)
+            item_extra["Valor Extra (R$)"] = valor_extra
+            extras.append(item_extra)
+
+        if status in ["Falta", "Atestado"]:
+            ausencias.append(dict(base))
+
+    extras.sort(key=lambda x: (x.get("Data ISO", ""), normalizar(x.get("Colaborador", ""))))
+    ausencias.sort(key=lambda x: (x.get("Data ISO", ""), normalizar(x.get("Colaborador", ""))))
+    return extras, ausencias
+
+
+def resumir_extras_financeiro(extras):
+    """Consolida as extras por colaborador para o pagamento semanal."""
+    if not extras:
+        return pd.DataFrame(columns=["Colaborador", "Função", "Unidades", "Lançamentos", "Total Extra (R$)"])
+
+    df = pd.DataFrame(extras)
+    resumo = (
+        df.groupby(["Colaborador", "Função"], dropna=False)
+        .agg(
+            Unidades=("Unidade", lambda s: ", ".join(sorted(set(str(v) for v in s if str(v).strip())))),
+            Lançamentos=("Valor Extra (R$)", "size"),
+            **{"Total Extra (R$)": ("Valor Extra (R$)", "sum")}
+        )
+        .reset_index()
+        .sort_values(by=["Total Extra (R$)", "Colaborador"], ascending=[False, True])
+    )
+    return resumo
+
+
+def gerar_excel_financeiro(extras, ausencias, data_inicio, data_fim, data_pagamento):
+    """Gera relatório financeiro semanal em Excel."""
+    wb = openpyxl.Workbook()
+    ws_resumo = wb.active
+    ws_resumo.title = "Resumo Extras"
+
+    fill_titulo = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
+    fill_header = PatternFill(start_color="2563EB", end_color="2563EB", fill_type="solid")
+    font_titulo = Font(name="Arial", size=12, bold=True, color="FFFFFF")
+    font_header = Font(name="Arial", size=10, bold=True, color="FFFFFF")
+    borda = Border(
+        left=Side(style="thin", color="CBD5E1"), right=Side(style="thin", color="CBD5E1"),
+        top=Side(style="thin", color="CBD5E1"), bottom=Side(style="thin", color="CBD5E1")
+    )
+
+    def cabecalho_planilha(ws, titulo, subtitulo, total_colunas):
+        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=total_colunas)
+        c = ws.cell(1, 1, titulo)
+        c.font = font_titulo
+        c.fill = fill_titulo
+        c.alignment = Alignment(horizontal="center")
+        ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=total_colunas)
+        ws.cell(2, 1, subtitulo).font = Font(name="Arial", size=9, italic=True, color="64748B")
+
+    resumo = resumir_extras_financeiro(extras)
+    total_extra = sum(float(x.get("Valor Extra (R$)") or 0) for x in extras)
+    subtitulo = (
+        f"Ciclo: {data_inicio.strftime('%d/%m/%Y')} a {data_fim.strftime('%d/%m/%Y')} | "
+        f"Pagamento: {data_pagamento.strftime('%d/%m/%Y')} | Total: {formatar_reais(total_extra)}"
+    )
+    cabecalho_planilha(ws_resumo, "APROAR - RELATÓRIO SEMANAL DE EXTRAS", subtitulo, 5)
+    headers_resumo = ["Colaborador", "Função", "Unidades", "Lançamentos", "Total Extra (R$)"]
+    for ci, nome in enumerate(headers_resumo, 1):
+        cell = ws_resumo.cell(4, ci, nome)
+        cell.font = font_header
+        cell.fill = fill_header
+        cell.alignment = Alignment(horizontal="center")
+    for ri, (_, r) in enumerate(resumo.iterrows(), 5):
+        vals = [r["Colaborador"], r["Função"], r["Unidades"], int(r["Lançamentos"]), float(r["Total Extra (R$)"])]
+        for ci, val in enumerate(vals, 1):
+            cell = ws_resumo.cell(ri, ci, val)
+            cell.border = borda
+            cell.font = Font(name="Arial", size=9)
+            if ci == 5:
+                cell.number_format = 'R$ #,##0.00'
+    ws_resumo.freeze_panes = "A5"
+    for col, largura in {"A": 38, "B": 28, "C": 38, "D": 14, "E": 20}.items():
+        ws_resumo.column_dimensions[col].width = largura
+
+    ws_det = wb.create_sheet("Detalhe Extras")
+    cabecalho_planilha(ws_det, "DETALHAMENTO DE EXTRAS", subtitulo, 6)
+    headers_det = ["Data", "Colaborador", "Função", "Unidade", "Engenheiro", "Valor Extra (R$)"]
+    for ci, nome in enumerate(headers_det, 1):
+        cell = ws_det.cell(4, ci, nome)
+        cell.font = font_header
+        cell.fill = fill_header
+        cell.alignment = Alignment(horizontal="center")
+    for ri, item in enumerate(extras, 5):
+        vals = [item["Data"], item["Colaborador"], item["Função"], item["Unidade"], item["Engenheiro"], item["Valor Extra (R$)"]]
+        for ci, val in enumerate(vals, 1):
+            cell = ws_det.cell(ri, ci, val)
+            cell.border = borda
+            cell.font = Font(name="Arial", size=9)
+            if ci == 6:
+                cell.number_format = 'R$ #,##0.00'
+    ws_det.freeze_panes = "A5"
+    for col, largura in {"A": 14, "B": 38, "C": 28, "D": 28, "E": 18, "F": 20}.items():
+        ws_det.column_dimensions[col].width = largura
+
+    ws_aus = wb.create_sheet("Faltas e Atestados")
+    cabecalho_planilha(
+        ws_aus,
+        "FALTAS E ATESTADOS DO CICLO",
+        f"Período: {data_inicio.strftime('%d/%m/%Y')} a {data_fim.strftime('%d/%m/%Y')}",
+        6
+    )
+    headers_aus = ["Data", "Colaborador", "Função", "Unidade", "Status", "Engenheiro"]
+    for ci, nome in enumerate(headers_aus, 1):
+        cell = ws_aus.cell(4, ci, nome)
+        cell.font = font_header
+        cell.fill = fill_header
+        cell.alignment = Alignment(horizontal="center")
+    for ri, item in enumerate(ausencias, 5):
+        vals = [item["Data"], item["Colaborador"], item["Função"], item["Unidade"], item["Status"], item["Engenheiro"]]
+        for ci, val in enumerate(vals, 1):
+            cell = ws_aus.cell(ri, ci, val)
+            cell.border = borda
+            cell.font = Font(name="Arial", size=9)
+    ws_aus.freeze_panes = "A5"
+    for col, largura in {"A": 14, "B": 38, "C": 28, "D": 28, "E": 16, "F": 18}.items():
+        ws_aus.column_dimensions[col].width = largura
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()
+
+
+def gerar_pdf_financeiro(extras, ausencias, data_inicio, data_fim, data_pagamento):
+    """Gera um relatório financeiro compacto em PDF, sem Obra/Serviço."""
+    pdf = FPDF(orientation="L")
+    pdf.set_auto_page_break(auto=True, margin=12)
+    pdf.add_page()
+    pdf.set_font("Arial", "B", 14)
+    pdf.cell(0, 9, to_latin("APROAR - RELATÓRIO FINANCEIRO SEMANAL"), ln=True, align="C")
+    pdf.set_font("Arial", "", 9)
+    pdf.cell(
+        0, 7,
+        to_latin(
+            f"Ciclo de extras: {data_inicio.strftime('%d/%m/%Y')} a {data_fim.strftime('%d/%m/%Y')} | "
+            f"Pagamento previsto: {data_pagamento.strftime('%d/%m/%Y')}"
+        ),
+        ln=True, align="C"
+    )
+    pdf.ln(3)
+
+    resumo = resumir_extras_financeiro(extras)
+    total_extra = sum(float(x.get("Valor Extra (R$)") or 0) for x in extras)
+    pdf.set_font("Arial", "B", 11)
+    pdf.cell(0, 7, to_latin(f"EXTRAS - TOTAL A PAGAR: {formatar_reais(total_extra)}"), ln=True)
+
+    widths = [72, 48, 72, 28, 36]
+    headers = ["Colaborador", "Função", "Unidade(s)", "Lanç.", "Total"]
+    pdf.set_font("Arial", "B", 8)
+    for w, h in zip(widths, headers):
+        pdf.cell(w, 6, to_latin(h), border=1, align="C")
+    pdf.ln()
+    pdf.set_font("Arial", "", 8)
+    if resumo.empty:
+        pdf.cell(sum(widths), 6, to_latin("Nenhuma extra lançada neste ciclo."), border=1, ln=True)
+    else:
+        for _, r in resumo.iterrows():
+            vals = [
+                str(r["Colaborador"])[:34], str(r["Função"])[:22], str(r["Unidades"])[:33],
+                str(int(r["Lançamentos"])), formatar_reais(float(r["Total Extra (R$)"]))
+            ]
+            aligns = ["L", "L", "L", "C", "R"]
+            for w, v, a in zip(widths, vals, aligns):
+                pdf.cell(w, 6, to_latin(v), border=1, align=a)
+            pdf.ln()
+
+    pdf.ln(5)
+    pdf.set_font("Arial", "B", 11)
+    pdf.cell(0, 7, to_latin("FALTAS E ATESTADOS"), ln=True)
+    widths2 = [25, 68, 45, 45, 30, 40]
+    headers2 = ["Data", "Colaborador", "Função", "Unidade", "Status", "Engenheiro"]
+    pdf.set_font("Arial", "B", 8)
+    for w, h in zip(widths2, headers2):
+        pdf.cell(w, 6, to_latin(h), border=1, align="C")
+    pdf.ln()
+    pdf.set_font("Arial", "", 8)
+    if not ausencias:
+        pdf.cell(sum(widths2), 6, to_latin("Nenhuma falta ou atestado neste ciclo."), border=1, ln=True)
+    else:
+        for item in ausencias:
+            vals = [
+                item["Data"], item["Colaborador"][:32], item["Função"][:20],
+                item["Unidade"][:20], item["Status"], item["Engenheiro"][:18]
+            ]
+            aligns = ["C", "L", "L", "L", "C", "C"]
+            for w, v, a in zip(widths2, vals, aligns):
+                pdf.cell(w, 6, to_latin(v), border=1, align=a)
+            pdf.ln()
+
+    return pdf.output(dest="S").encode("latin1")
+
+# --- VERIFICAÇÃO DE MODO POR PARÂMETRO DE URL ---
 parametros_url = st.query_params
 modo_campo = "eng" in parametros_url or parametros_url.get("modo") in ["campo", "eng"]
+modo_financeiro = (
+    "financeiro" in parametros_url
+    or "fin" in parametros_url
+    or parametros_url.get("modo") in ["financeiro", "fin"]
+)
 
 if modo_campo:
     st.markdown("### 📲 ACESSO ENGENHEIRO DE CAMPO")
@@ -695,6 +1046,130 @@ if modo_campo:
 
     with tab_disp_campo:
         render_aba_disponibilidade("campo")
+
+elif modo_financeiro:
+    # ==========================================
+    # PORTAL FINANCEIRO (?financeiro)
+    # ==========================================
+    st.markdown("### 💰 ACESSO FINANCEIRO")
+    st.caption("Conferência semanal de extras, faltas e atestados. As extras são fechadas em ciclos de terça-feira a segunda-feira.")
+
+    ciclos_fin = listar_ciclos_financeiros(26)
+    mapa_ciclos_fin = {c["rotulo"]: c for c in ciclos_fin}
+
+    # Na terça-feira, o financeiro normalmente paga o ciclo que encerrou na segunda anterior.
+    indice_padrao_fin = 1 if datetime.date.today().weekday() == 1 and len(ciclos_fin) > 1 else 0
+    ciclo_rotulo_fin = st.selectbox(
+        "Ciclo semanal:",
+        list(mapa_ciclos_fin.keys()),
+        index=indice_padrao_fin,
+        key="ciclo_financeiro"
+    )
+    ciclo_fin = mapa_ciclos_fin[ciclo_rotulo_fin]
+    data_ini_fin = ciclo_fin["inicio"]
+    data_fim_fin = ciclo_fin["fim"]
+    data_pag_fin = ciclo_fin["pagamento"]
+
+    cf1, cf2, cf3 = st.columns(3)
+    cf1.metric("INÍCIO", data_ini_fin.strftime("%d/%m/%Y"))
+    cf2.metric("FIM", data_fim_fin.strftime("%d/%m/%Y"))
+    cf3.metric("PAGAMENTO", data_pag_fin.strftime("%d/%m/%Y"))
+
+    extras_fin, ausencias_fin = carregar_dados_financeiro(data_ini_fin, data_fim_fin)
+    total_extra_fin = sum(float(x.get("Valor Extra (R$)") or 0.0) for x in extras_fin)
+    nomes_extra_fin = {normalizar(x.get("Colaborador", "")) for x in extras_fin}
+    total_faltas_fin = sum(1 for x in ausencias_fin if x.get("Status") == "Falta")
+    total_atest_fin = sum(1 for x in ausencias_fin if x.get("Status") == "Atestado")
+
+    tab_fin_extra, tab_fin_aus, tab_fin_rel = st.tabs([
+        "💸 EXTRAS", "🚫 FALTAS / ATESTADOS", "📄 RELATÓRIO"
+    ])
+
+    with tab_fin_extra:
+        fm1, fm2, fm3 = st.columns(3)
+        fm1.metric("TOTAL A PAGAR", formatar_reais(total_extra_fin))
+        fm2.metric("COLABORADORES", len(nomes_extra_fin))
+        fm3.metric("LANÇAMENTOS", len(extras_fin))
+
+        st.markdown("### Consolidado por colaborador")
+        resumo_fin = resumir_extras_financeiro(extras_fin)
+        if resumo_fin.empty:
+            st.info("Nenhuma extra foi lançada neste ciclo.")
+        else:
+            resumo_view = resumo_fin.copy()
+            resumo_view["Total Extra"] = resumo_view["Total Extra (R$)"].apply(formatar_reais)
+            resumo_view = resumo_view.drop(columns=["Total Extra (R$)"])
+            st.dataframe(resumo_view, use_container_width=True, hide_index=True)
+
+            st.markdown("### Detalhamento por dia")
+            detalhe_extra_view = pd.DataFrame(extras_fin)[[
+                "Data", "Colaborador", "Função", "Unidade", "Engenheiro", "Valor Extra (R$)"
+            ]].copy()
+            detalhe_extra_view["Valor Extra"] = detalhe_extra_view["Valor Extra (R$)"].apply(formatar_reais)
+            detalhe_extra_view = detalhe_extra_view.drop(columns=["Valor Extra (R$)"])
+            st.dataframe(detalhe_extra_view, use_container_width=True, hide_index=True)
+
+    with tab_fin_aus:
+        fa1, fa2, fa3 = st.columns(3)
+        fa1.metric("FALTAS", total_faltas_fin)
+        fa2.metric("ATESTADOS", total_atest_fin)
+        fa3.metric("TOTAL OCORRÊNCIAS", len(ausencias_fin))
+
+        if not ausencias_fin:
+            st.info("Nenhuma falta ou atestado foi registrado neste ciclo.")
+        else:
+            df_aus_fin = pd.DataFrame(ausencias_fin)[[
+                "Data", "Colaborador", "Função", "Unidade", "Status", "Engenheiro"
+            ]]
+            st.dataframe(df_aus_fin, use_container_width=True, hide_index=True)
+
+            st.markdown("### Resumo nominal")
+            resumo_aus_fin = (
+                df_aus_fin.groupby(["Colaborador", "Função"], dropna=False)
+                .agg(
+                    Faltas=("Status", lambda s: int((s == "Falta").sum())),
+                    Atestados=("Status", lambda s: int((s == "Atestado").sum())),
+                    Unidades=("Unidade", lambda s: ", ".join(sorted(set(str(v) for v in s if str(v).strip()))))
+                )
+                .reset_index()
+            )
+            resumo_aus_fin["Total"] = resumo_aus_fin["Faltas"] + resumo_aus_fin["Atestados"]
+            resumo_aus_fin = resumo_aus_fin.sort_values(by=["Total", "Colaborador"], ascending=[False, True])
+            st.dataframe(resumo_aus_fin, use_container_width=True, hide_index=True)
+
+    with tab_fin_rel:
+        st.markdown("### Relatório do ciclo")
+        st.write(
+            f"Período **{data_ini_fin.strftime('%d/%m/%Y')} a {data_fim_fin.strftime('%d/%m/%Y')}** • "
+            f"Pagamento das extras em **{data_pag_fin.strftime('%d/%m/%Y')}**."
+        )
+        st.info(
+            f"Total de extras: {formatar_reais(total_extra_fin)} • "
+            f"Faltas: {total_faltas_fin} • Atestados: {total_atest_fin}"
+        )
+
+        excel_fin = gerar_excel_financeiro(extras_fin, ausencias_fin, data_ini_fin, data_fim_fin, data_pag_fin)
+        pdf_fin = gerar_pdf_financeiro(extras_fin, ausencias_fin, data_ini_fin, data_fim_fin, data_pag_fin)
+
+        fr1, fr2 = st.columns(2)
+        with fr1:
+            st.download_button(
+                "📊 BAIXAR RELATÓRIO EXCEL",
+                data=excel_fin,
+                file_name=f"financeiro_extras_{data_ini_fin.strftime('%d-%m-%Y')}_a_{data_fim_fin.strftime('%d-%m-%Y')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                key="download_fin_excel"
+            )
+        with fr2:
+            st.download_button(
+                "📄 BAIXAR RELATÓRIO PDF",
+                data=pdf_fin,
+                file_name=f"financeiro_extras_{data_ini_fin.strftime('%d-%m-%Y')}_a_{data_fim_fin.strftime('%d-%m-%Y')}.pdf",
+                mime="application/pdf",
+                use_container_width=True,
+                key="download_fin_pdf"
+            )
 
 else:
     # ==========================================
@@ -1671,7 +2146,7 @@ else:
                     st.info("Nenhum card ou lista encontrado para esse termo.")
 
         st.markdown("---")
-        tab_cad_obra, tab_cad_colab, tab_limpeza = st.tabs(["🏗️ Obras", "👷 Colaboradores", "🗑️ Limpeza de Dados"])
+        tab_cad_obra, tab_cad_colab, tab_export_colab, tab_limpeza = st.tabs(["🏗️ Obras", "👷 Colaboradores", "📥 Exportar Colaboradores", "🗑️ Limpeza de Dados"])
         
         with tab_cad_obra:
             st.markdown("### Cadastrar Nova Obra")
@@ -1713,6 +2188,45 @@ else:
                             st.error("Não foi possível cadastrar. Verifique se esse nome já existe.")
                     else:
                         st.warning("Informe o nome do colaborador.")
+
+        with tab_export_colab:
+            st.markdown("### 📥 Exportar Planilha Atualizada de Colaboradores")
+            st.write("Baixe a base mais recente diretamente do Supabase. A planilha é gerada no momento do download.")
+
+            try:
+                colaboradores_export = supabase.table("colaboradores").select("*").execute().data or []
+            except Exception as e:
+                colaboradores_export = []
+                st.error(f"Não foi possível carregar a base de colaboradores: {e}")
+
+            if colaboradores_export:
+                linhas_preview = []
+                for c in sorted(colaboradores_export, key=lambda x: normalizar(x.get("nome", ""))):
+                    funcao_exp = str(c.get("funcao") or "").strip()
+                    valor_exp = obter_valor_diaria_colaborador(c)
+                    categoria_exp = "Ajudante" if abs(valor_exp - VALOR_DIARIA_AJUDANTE) < 0.01 else "Profissional"
+                    linhas_preview.append({
+                        "Nome": str(c.get("nome") or "").strip(),
+                        "Função": funcao_exp,
+                        "Categoria": categoria_exp,
+                        "Diária": formatar_reais(valor_exp),
+                        "Avulso": "SIM" if normalizar(funcao_exp).startswith("AVULSO -") else "NÃO",
+                    })
+
+                st.caption(f"Base atual: {len(linhas_preview)} colaborador(es).")
+                st.dataframe(pd.DataFrame(linhas_preview), use_container_width=True, hide_index=True)
+
+                arquivo_colaboradores = gerar_excel_colaboradores(colaboradores_export)
+                st.download_button(
+                    label="📥 BAIXAR PLANILHA ATUALIZADA (.XLSX)",
+                    data=arquivo_colaboradores,
+                    file_name=f"colaboradores_aproar_{datetime.date.today().strftime('%Y-%m-%d')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    type="primary"
+                )
+            else:
+                st.info("Nenhum colaborador cadastrado para exportação.")
 
         with tab_limpeza:
             st.markdown("### 🗑️ Limpeza e Manutenção de Registros")
