@@ -6,6 +6,7 @@ import json
 from fpdf import FPDF
 import unicodedata
 import re
+import os
 
 # --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR ---
 st.set_page_config(page_title="APROAR - Controle de Presenças", page_icon="👷", layout="centered")
@@ -134,13 +135,20 @@ dict_obras = {o['id']: o for o in obras} if obras else {}
 
 ENGENHEIROS = ["EDUARDO", "GABRIEL", "GUSTAVO", "JOEL", "NETO", "PAULO", "SOARES", "VICTOR"]
 
-# --- CABEÇALHO COM LOGO INSTITUCIONAL APROAR ---
-st.markdown("""
-    <div style="background: linear-gradient(135deg, #0C102B 0%, #161B3D 100%); padding: 25px; border-radius: 12px; text-align: center; margin-bottom: 25px; border: 1px solid #2D3568;">
-        <h1 style="color: #FFFFFF; font-family: sans-serif; letter-spacing: 2px; margin: 0;">APROAR</h1>
-        <p style="color: #60A5FA; font-size: 1.1rem; font-weight: bold; margin-top: 5px;">CONTROLE DE PRESENÇAS</p>
-    </div>
-""", unsafe_allow_html=True)
+# --- CABEÇALHO COM A LOGO DO REPOSITÓRIO (logo.jpg) ---
+col_l1, col_l2, col_l3 = st.columns([1, 2, 1])
+with col_l2:
+    if os.path.exists("logo.jpg"):
+        st.image("logo.jpg", use_container_width=True)
+    elif os.path.exists("logo.png"):
+        st.image("logo.png", use_container_width=True)
+    else:
+        st.markdown("""
+            <div style="background: linear-gradient(135deg, #0C102B 0%, #161B3D 100%); padding: 25px; border-radius: 12px; text-align: center; margin-bottom: 25px; border: 1px solid #2D3568;">
+                <h1 style="color: #FFFFFF; font-family: sans-serif; letter-spacing: 2px; margin: 0;">APROAR</h1>
+                <p style="color: #60A5FA; font-size: 1.1rem; font-weight: bold; margin-top: 5px;">CONTROLE DE PRESENÇAS</p>
+            </div>
+        """, unsafe_allow_html=True)
 
 # --- FUNÇÃO AUXILIAR PARA RENDERIZAR A ABA DE DISPONIBILIDADE ---
 def render_aba_disponibilidade(key_suffix=""):
