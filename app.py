@@ -2146,7 +2146,7 @@ else:
                     st.info("Nenhum card ou lista encontrado para esse termo.")
 
         st.markdown("---")
-        tab_cad_obra, tab_cad_colab, tab_export_colab, tab_limpeza = st.tabs(["🏗️ Obras", "👷 Colaboradores", "📥 Exportar Colaboradores", "🗑️ Limpeza de Dados"])
+        tab_cad_obra, tab_cad_colab, tab_import_colab, tab_limpeza = st.tabs(["🏗️ Obras", "👷 Colaboradores", "📤 Importar Colaboradores", "🗑️ Limpeza de Dados"])
         
         with tab_cad_obra:
             st.markdown("### Cadastrar Nova Obra")
@@ -2189,44 +2189,222 @@ else:
                     else:
                         st.warning("Informe o nome do colaborador.")
 
-        with tab_export_colab:
-            st.markdown("### 📥 Exportar Planilha Atualizada de Colaboradores")
-            st.write("Baixe a base mais recente diretamente do Supabase. A planilha é gerada no momento do download.")
+        with tab_import_colab:
+            st.markdown("### 📤 Importar Planilha de Colaboradores")
+            st.write(
+                "Envie uma planilha para adicionar novos colaboradores ou atualizar cadastros existentes. "
+                "A conferência é feita pelo nome e nenhum colaborador ausente da planilha será excluído."
+            )
 
-            try:
-                colaboradores_export = supabase.table("colaboradores").select("*").execute().data or []
-            except Exception as e:
-                colaboradores_export = []
-                st.error(f"Não foi possível carregar a base de colaboradores: {e}")
+            if st.session_state.get("msg_import_colab"):
+                st.success(st.session_state.pop("msg_import_colab"))
 
-            if colaboradores_export:
-                linhas_preview = []
-                for c in sorted(colaboradores_export, key=lambda x: normalizar(x.get("nome", ""))):
-                    funcao_exp = str(c.get("funcao") or "").strip()
-                    valor_exp = obter_valor_diaria_colaborador(c)
-                    categoria_exp = "Ajudante" if abs(valor_exp - VALOR_DIARIA_AJUDANTE) < 0.01 else "Profissional"
-                    linhas_preview.append({
-                        "Nome": str(c.get("nome") or "").strip(),
-                        "Função": funcao_exp,
-                        "Categoria": categoria_exp,
-                        "Diária": formatar_reais(valor_exp),
-                        "Avulso": "SIM" if normalizar(funcao_exp).startswith("AVULSO -") else "NÃO",
-                    })
+            arquivo_import = st.file_uploader(
+                "Selecione a planilha de colaboradores:",
+                type=["xlsx", "xls", "csv"],
+                key="arquivo_import_colaboradores"
+            )
 
-                st.caption(f"Base atual: {len(linhas_preview)} colaborador(es).")
-                st.dataframe(pd.DataFrame(linhas_preview), use_container_width=True, hide_index=True)
+            if arquivo_import is not None:
+                try:
+                    nome_arquivo = arquivo_import.name.lower()
+                    if nome_arquivo.endswith(".csv"):
+                        try:
+                            df_import = pd.read_csv(arquivo_import, sep=None, engine="python")
+                        except UnicodeDecodeError:
+                            arquivo_import.seek(0)
+                            df_import = pd.read_csv(arquivo_import, sep=None, engine="python", encoding="latin-1")
+                    else:
+                        df_import = pd.read_excel(arquivo_import)
+                except Exception as e:
+                    df_import = pd.DataFrame()
+                    st.error(f"Não foi possível ler a planilha: {e}")
 
-                arquivo_colaboradores = gerar_excel_colaboradores(colaboradores_export)
-                st.download_button(
-                    label="📥 BAIXAR PLANILHA ATUALIZADA (.XLSX)",
-                    data=arquivo_colaboradores,
-                    file_name=f"colaboradores_aproar_{datetime.date.today().strftime('%Y-%m-%d')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True,
-                    type="primary"
-                )
-            else:
-                st.info("Nenhum colaborador cadastrado para exportação.")
+                if not df_import.empty:
+                    df_import.columns = [str(c).strip() for c in df_import.columns]
+                    colunas = list(df_import.columns)
+
+                    def localizar_coluna_import(candidatos):
+                        mapa = {normalizar(c): c for c in colunas}
+                        for candidato in candidatos:
+                            if normalizar(candidato) in mapa:
+                                return mapa[normalizar(candidato)]
+                        for c in colunas:
+                            c_norm = normalizar(c)
+                            if any(normalizar(cand) in c_norm for cand in candidatos):
+                                return c
+                        return None
+
+                    col_nome_auto = localizar_coluna_import([
+                        "NOME", "NOME COMPLETO", "COLABORADOR", "FUNCIONARIO", "FUNCIONÁRIO", "EMPREGADO"
+                    ])
+                    col_funcao_auto = localizar_coluna_import([
+                        "FUNCAO", "FUNÇÃO", "CARGO", "FUNCAO/CARGO", "FUNÇÃO/CARGO"
+                    ])
+                    col_categoria_auto = localizar_coluna_import([
+                        "CATEGORIA", "TIPO", "CLASSIFICACAO", "CLASSIFICAÇÃO"
+                    ])
+                    col_avulso_auto = localizar_coluna_import(["AVULSO"])
+
+                    c_imp1, c_imp2 = st.columns(2)
+                    with c_imp1:
+                        idx_nome = colunas.index(col_nome_auto) if col_nome_auto in colunas else 0
+                        col_nome_import = st.selectbox(
+                            "Coluna do NOME:",
+                            colunas,
+                            index=idx_nome,
+                            key="map_nome_import"
+                        )
+                    with c_imp2:
+                        opcoes_funcao = ["(não usar)"] + colunas
+                        idx_funcao = opcoes_funcao.index(col_funcao_auto) if col_funcao_auto in colunas else 0
+                        col_funcao_import = st.selectbox(
+                            "Coluna da FUNÇÃO/CARGO:",
+                            opcoes_funcao,
+                            index=idx_funcao,
+                            key="map_funcao_import"
+                        )
+
+                    c_imp3, c_imp4 = st.columns(2)
+                    with c_imp3:
+                        opcoes_categoria = ["(inferir pela função)"] + colunas
+                        idx_categoria = opcoes_categoria.index(col_categoria_auto) if col_categoria_auto in colunas else 0
+                        col_categoria_import = st.selectbox(
+                            "Coluna PROFISSIONAL/AJUDANTE (opcional):",
+                            opcoes_categoria,
+                            index=idx_categoria,
+                            key="map_categoria_import"
+                        )
+                    with c_imp4:
+                        opcoes_avulso = ["(não usar)"] + colunas
+                        idx_avulso = opcoes_avulso.index(col_avulso_auto) if col_avulso_auto in colunas else 0
+                        col_avulso_import = st.selectbox(
+                            "Coluna AVULSO (opcional):",
+                            opcoes_avulso,
+                            index=idx_avulso,
+                            key="map_avulso_import"
+                        )
+
+                    registros_por_nome = {}
+                    linhas_invalidas = 0
+                    for _, linha in df_import.iterrows():
+                        nome_val = linha.get(col_nome_import)
+                        if pd.isna(nome_val) or not str(nome_val).strip():
+                            linhas_invalidas += 1
+                            continue
+
+                        nome_limpo = " ".join(str(nome_val).strip().split()).upper()
+
+                        funcao_val = ""
+                        if col_funcao_import != "(não usar)":
+                            bruto_funcao = linha.get(col_funcao_import)
+                            if not pd.isna(bruto_funcao):
+                                funcao_val = str(bruto_funcao).strip()
+
+                        if col_categoria_import != "(inferir pela função)":
+                            bruto_categoria = linha.get(col_categoria_import)
+                            categoria_txt = "" if pd.isna(bruto_categoria) else normalizar(bruto_categoria)
+                            if "AJUD" in categoria_txt or "AUX" in categoria_txt or "SERVENT" in categoria_txt:
+                                tipo_val = "Ajudante"
+                            elif "PROF" in categoria_txt:
+                                tipo_val = "Profissional"
+                            else:
+                                tipo_val = inferir_tipo_colaborador(funcao_val)
+                        else:
+                            tipo_val = inferir_tipo_colaborador(funcao_val)
+
+                        avulso_val = False
+                        if col_avulso_import != "(não usar)":
+                            bruto_avulso = linha.get(col_avulso_import)
+                            if not pd.isna(bruto_avulso):
+                                avulso_txt = normalizar(bruto_avulso)
+                                avulso_val = avulso_txt in ["SIM", "S", "TRUE", "VERDADEIRO", "1", "X"]
+
+                        if not funcao_val:
+                            funcao_val = tipo_val.upper()
+                        if avulso_val and not normalizar(funcao_val).startswith("AVULSO -"):
+                            funcao_val = f"AVULSO - {funcao_val}"
+
+                        funcao_salva = limpar_funcao(funcao_val)
+                        diaria_salva = valor_diaria_por_tipo(tipo_val)
+
+                        # Se o mesmo nome aparecer mais de uma vez na planilha, mantém a última ocorrência.
+                        registros_por_nome[normalizar(nome_limpo)] = {
+                            "nome": nome_limpo,
+                            "funcao": funcao_salva,
+                            "tipo": tipo_val,
+                            "valor_diaria": diaria_salva,
+                            "avulso": avulso_val,
+                        }
+
+                    registros_import = list(registros_por_nome.values())
+
+                    if registros_import:
+                        preview_import = pd.DataFrame([
+                            {
+                                "Nome": r["nome"],
+                                "Função": r["funcao"],
+                                "Categoria": r["tipo"],
+                                "Diária": formatar_reais(r["valor_diaria"]),
+                                "Avulso": "SIM" if r["avulso"] else "NÃO",
+                            }
+                            for r in registros_import
+                        ])
+                        st.caption(
+                            f"{len(registros_import)} colaborador(es) pronto(s) para importar. "
+                            + (f"{linhas_invalidas} linha(s) sem nome foram ignoradas." if linhas_invalidas else "")
+                        )
+                        st.dataframe(preview_import, use_container_width=True, hide_index=True)
+
+                        if st.button(
+                            "📤 IMPORTAR / ATUALIZAR COLABORADORES",
+                            type="primary",
+                            use_container_width=True,
+                            key="btn_importar_colaboradores"
+                        ):
+                            try:
+                                atuais_import = supabase.table("colaboradores").select("*").execute().data or []
+                                mapa_atuais = {
+                                    normalizar(c.get("nome", "")): c
+                                    for c in atuais_import
+                                    if c.get("nome")
+                                }
+
+                                novos = 0
+                                atualizados = 0
+                                erros = []
+
+                                for reg in registros_import:
+                                    existente = mapa_atuais.get(normalizar(reg["nome"]))
+                                    payload = {
+                                        "nome": reg["nome"],
+                                        "funcao": reg["funcao"],
+                                        "valor_diaria": reg["valor_diaria"],
+                                    }
+                                    try:
+                                        if existente:
+                                            supabase.table("colaboradores").update(payload).eq("id", existente["id"]).execute()
+                                            atualizados += 1
+                                        else:
+                                            retorno = supabase.table("colaboradores").insert(payload).execute().data or []
+                                            novos += 1
+                                            if retorno:
+                                                mapa_atuais[normalizar(reg["nome"])] = retorno[0]
+                                    except Exception:
+                                        erros.append(reg["nome"])
+
+                                st.cache_data.clear()
+                                mensagem = f"Importação concluída: {novos} novo(s) e {atualizados} atualizado(s)."
+                                if erros:
+                                    mensagem += f" Não foi possível importar {len(erros)} registro(s)."
+                                st.session_state["msg_import_colab"] = mensagem
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Erro durante a importação: {e}")
+                    else:
+                        st.warning("A planilha não possui colaboradores válidos para importar.")
+                elif arquivo_import is not None:
+                    st.warning("A planilha está vazia ou não pôde ser interpretada.")
 
         with tab_limpeza:
             st.markdown("### 🗑️ Limpeza e Manutenção de Registros")
