@@ -8,40 +8,42 @@ import unicodedata
 import re
 import os
 
-# --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR ---
-st.set_page_config(page_title="APROAR - Controle de Presenças", page_icon="👷", layout="wide")
+# --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR (WIDE) ---
+st.set_page_config(page_title="APROAR - Torre de Controle", page_icon="👷", layout="wide")
 
-# CSS Moderno, limpo e corporativo inspirado em painéis de controle
+# CSS Super Moderno inspirado em Dashboards SaaS & Logística
 st.markdown("""
     <style>
     .stApp {
-        background-color: #0C102B;
+        background-color: #080C1F;
         color: #F8FAFC;
     }
     h1, h2, h3, h4, p, label, .stMarkdown, span {
         color: #F8FAFC !important;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
-    /* Estilização da Sidebar */
+    /* Sidebar Moderna */
     section[data-testid="stSidebar"] {
-        background-color: #090C22 !important;
+        background-color: #050814 !important;
         border-right: 1px solid #1E293B;
+        padding-top: 20px;
     }
+    /* Inputs e Selects Sleek */
     div[data-baseweb="select"] > div, 
     div[data-baseweb="base-input"] > div, 
     div[data-baseweb="input"] > div,
     input, textarea, div[role="combobox"] {
-        background-color: #161B3D !important;
+        background-color: #111836 !important;
         color: #FFFFFF !important;
-        border-color: #2D3568 !important;
+        border-color: #1E293B !important;
         border-radius: 8px !important;
     }
     ul[data-baseweb="menu"], div[data-baseweb="popover"] {
-        background-color: #161B3D !important;
+        background-color: #111836 !important;
         color: #FFFFFF !important;
     }
     li[role="option"] {
-        background-color: #161B3D !important;
+        background-color: #111836 !important;
         color: #FFFFFF !important;
     }
     li[role="option"]:hover {
@@ -51,19 +53,30 @@ st.markdown("""
         background-color: #2563EB !important;
         color: #FFFFFF !important;
     }
+    /* Botões Modernos */
     .stButton > button {
-        background-color: #2563EB !important;
+        background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%) !important;
         color: #FFFFFF !important;
         border: none !important;
         border-radius: 8px !important;
         font-weight: 600;
         padding: 0.5rem 1rem;
+        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2);
+        transition: all 0.3s ease;
     }
     .stButton > button:hover {
-        background-color: #1D4ED8 !important;
+        transform: translateY(-1px);
+        box-shadow: 0 6px 16px rgba(37, 99, 235, 0.4);
+    }
+    /* Containers com Efeito de Elevação */
+    div[data-testid="stVerticalBlock"] > div[style*="border"] {
+        background-color: #0F172A !important;
+        border: 1px solid #1E293B !important;
+        border-radius: 12px !important;
+        padding: 16px;
     }
     .streamlit-expanderHeader {
-        background-color: #161B3D !important;
+        background-color: #111836 !important;
         border-radius: 8px;
     }
     hr {
@@ -333,7 +346,7 @@ if modo_campo:
 
 else:
     # ==========================================
-    # VISÃO ADMINISTRATIVA COM SIDEBAR DE NAVEGAÇÃO
+    # TORRE DE CONTROLE ADMINISTRATIVA (MODERNA)
     # ==========================================
     
     # --- MENU LATERAL (SIDEBAR) ---
@@ -341,9 +354,10 @@ else:
         if os.path.exists("logo.png"):
             st.image("logo.png", use_container_width=True)
         else:
-            st.markdown("<h2 style='text-align: center; color: white;'>APROAR</h2>", unsafe_allow_html=True)
+            st.markdown("<h2 style='text-align: center; color: white; letter-spacing: 2px;'>APROAR</h2>", unsafe_allow_html=True)
         
-        st.markdown("### 🧭 Torre de Controle")
+        st.markdown("<p style='text-align: center; color: #60A5FA; font-size: 0.8rem; font-weight: bold; margin-bottom: 20px;'>TORRE DE CONTROLE</p>", unsafe_allow_html=True)
+        
         menu_escolhido = st.radio(
             "Navegação",
             ["🎛️ Dashboard", "📋 Convocação", "✅ Apontamento", "📊 Relatórios", "📈 Indicadores", "👥 Disponibilidade", "⚙️ Configurações"],
@@ -356,7 +370,7 @@ else:
 
     # 1. DASHBOARD
     if menu_escolhido == "🎛️ Dashboard":
-        st.markdown("### 🎛️ Dashboard e Auditoria de Presenças")
+        st.markdown("## 🎛️ Dashboard e Auditoria de Presenças")
         
         col_f1, col_f2, col_f3, col_f4 = st.columns(4)
         with col_f1:
@@ -415,7 +429,7 @@ else:
                 "custo": diaria_calc + extra
             })
 
-        # Métricas do dia (Cards Dimensionados)
+        # Métricas do dia (Cartões Estilizados)
         total_conv = len(lista_processada)
         total_pres = len([x for x in lista_processada if "Presente" in x['status'] or x['status'] == 'Extra'])
         total_atest = len([x for x in lista_processada if x['status'] == 'Atestado'])
@@ -475,7 +489,7 @@ else:
 
     # 2. CONVOCAÇÃO
     elif menu_escolhido == "📋 Convocação":
-        st.markdown("### 📋 Nova Convocação de Equipe")
+        st.markdown("## 📋 Nova Convocação de Equipe")
         if obras and colaboradores:
             col_eng, col_data = st.columns(2)
             with col_eng:
@@ -538,7 +552,7 @@ else:
 
     # 3. APONTAMENTO
     elif menu_escolhido == "✅ Apontamento":
-        st.markdown("### ✅ Apontamento Diário de Campo")
+        st.markdown("## ✅ Apontamento Diário de Campo")
         col_eng_ap, col_data_ap = st.columns(2)
         with col_eng_ap:
             engenheiro_apont = st.selectbox("Engenheiro:", ENGENHEIROS, key="eng_apont_adm")
@@ -600,7 +614,7 @@ else:
 
     # 4. RELATÓRIOS
     elif menu_escolhido == "📊 Relatórios":
-        st.markdown("### 📊 Relatório de Custos e Fechamento")
+        st.markdown("## 📊 Relatório de Custos e Fechamento")
         col_rel_eng, _ = st.columns(2)
         with col_rel_eng:
             eng_relatorio = st.selectbox("Engenheiro:", ["TODOS OS ENGENHEIROS"] + ENGENHEIROS, key="eng_rel")
@@ -693,7 +707,7 @@ else:
 
     # 5. INDICADORES
     elif menu_escolhido == "📈 Indicadores":
-        st.markdown("### 📈 Indicadores de Desempenho")
+        st.markdown("## 📈 Indicadores de Desempenho")
         try:
             all_conv = supabase.table("convocacoes").select("*").execute().data
             if not all_conv:
@@ -738,7 +752,7 @@ else:
 
     # 7. CONFIGURAÇÕES
     elif menu_escolhido == "⚙️ Configurações":
-        st.markdown("### ⚙️ Sincronização e Manutenção")
+        st.markdown("## ⚙️ Sincronização e Manutenção")
         arquivo_json = st.file_uploader("JSON do Trello", type=["json"])
         if arquivo_json and st.button("🔄 Importar Obras"):
             trello_data = json.load(arquivo_json)
