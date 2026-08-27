@@ -25,28 +25,32 @@ except Exception as e:
     st.stop()
 
 # --- FUNÇÕES DE LIMPEZA E PADRONIZAÇÃO ---
-def limpar_unidade(texto):
-    if not texto: return "GERAL"
-    texto_limpo = unicodedata.normalize('NFKD', str(texto)).encode('ASCII', 'ignore').decode('utf-8').upper().strip()
+def identificar_unidade(nome_card):
+    """Lê o nome do card inteiro para classificar corretamente a unidade, independente do padrão de digitação."""
+    if not nome_card: return "GERAL"
     
-    macro_unidades = {
-        "HORIZONTE": "HORIZONTE",
-        "FIEC": "FIEC", "CASA DA INDUSTRIA": "FIEC", "DR": "FIEC",
-        "BARRA": "BARRA",
-        "COLISEU": "COLISEU",
-        "MARACANAU": "MARACANAÚ", "APRL005": "MARACANAÚ",
-        "ESCRITORIO": "ESCRITÓRIO",
-        "CENTRO": "CENTRO",
-        "MUSEU": "MUSEU",
-        "UNIFOR": "UNIFOR",
-        "SEBRAE": "SEBRAE",
-        "IDALYA": "IDALYA E MATHEUS", "MATHEUS": "IDALYA E MATHEUS"
-    }
+    # Padroniza tirando acentos para facilitar a busca
+    texto = unicodedata.normalize('NFKD', str(nome_card)).encode('ASCII', 'ignore').decode('utf-8').upper()
     
-    for chave, valor in macro_unidades.items():
-         if chave in texto_limpo:
-             return valor
-    return texto_limpo
+    # Ordem de prioridade na busca (busca na string inteira)
+    if "APRL005" in texto or "MARACANAU" in texto: return "MARACANAÚ"
+    if "SEBRAE" in texto: return "SEBRAE"
+    if "UNIFOR" in texto: return "UNIFOR"
+    if "IDALYA" in texto or "MATHEUS" in texto: return "IDALYA E MATHEUS"
+    if "COLISEU" in texto: return "COLISEU"
+    if "BARRA" in texto: return "BARRA DO CEARÁ"
+    if "MUSEU" in texto: return "MUSEU"
+    if "HORIZONTE" in texto: return "HORIZONTE"
+    if "ESCRITORIO" in texto: return "ESCRITÓRIO"
+    if "CASA DA INDUSTRIA" in texto or "FIEC" in texto or " DR " in texto or "| SESI DR |" in texto or "| SESI DR" in texto: return "FIEC"
+    if "CENTRO" in texto: return "CENTRO"
+    
+    # Se não achou por palavra-chave, tenta pegar a segunda parte do split pela barra (|)
+    partes = str(nome_card).split('|')
+    if len(partes) >= 2:
+        return partes[1].strip().upper()
+        
+    return "GERAL"
 
 def limpar_funcao(texto):
     if not texto or str(texto).upper() == 'NAN': return "INDEFINIDA"
@@ -61,7 +65,6 @@ def get_cor_funcao(funcao):
     return cores[hash_num % len(cores)]
 
 def to_latin(texto):
-    """Trata a acentuação para o gerador de PDF"""
     if not texto: return ""
     return str(texto).encode('latin-1', 'replace').decode('latin-1')
 
@@ -87,18 +90,18 @@ st.title("👷 Gestão de Equipes")
 tab_convocacao, tab_apontamento, tab_relatorios, tab_config = st.tabs(["📋 Convocação", "✅ Apontamento", "📊 Relatório", "⚙️ Config"])
 
 # ==========================================
-# ABA 1: CONVOCAÇÃO (SÓ PODE CONVOCAR PRA 1 OBRA)
+# ABA 1: CONVOCAÇÃO
 # ==========================================
 with tab_convocacao:
     if obras and colaboradores:
         st.markdown("### Informações da Demanda")
         col_eng, col_data = st.columns(2)
         with col_eng:
-            engenheiro_conv = st.selectbox("Engenheiro:", ENGENHEIROS, key="eng_conv")
+            engenheiro_conv = st.selectbox("Engenheiro responsável:", ENGENHEIROS, key="eng_conv")
         with col_data:
-            # Data padrão é SEMPRE O DIA SEGUINTE
+            # Por padrão a convocação é feita sempre para o dia seguinte
             amanha = datetime.date.today() + datetime.timedelta(days=1)
-            data_conv = st.date_input("Data do Serviço:", value=amanha, format="DD/MM/YYYY")
+            data_conv = st.date_input("Data da Obra/Serviço:", value=amanha, format="DD/MM/YYYY")
 
         unidades_unicas = sorted(list(set([o['unidade'] for o in obras])))
         col_u, col_o = st.columns(2)
@@ -137,14 +140,14 @@ with tab_convocacao:
                     })
                 try:
                     supabase.table("convocacoes").insert(dados_insercao).execute()
-                    st.success(f"✅ Equipe convocada com sucesso para o dia {data_conv.strftime('%d/%m/%Y')}!")
+                    st.success(f"✅ Equipe convocada com sucesso para {data_conv.strftime('%d/%m/%Y')}!")
                 except Exception as e:
-                    st.error("❌ Erro: O sistema bloqueou a ação pois um ou mais colaboradores selecionados já estão convocados para outra demanda neste mesmo dia.")
+                    st.error("❌ Erro: O sistema bloqueou a ação pois o colaborador já está convocado para o mesmo dia em outra obra.")
     else:
         st.info("Cadastre obras (JSON) e colaboradores (Excel) na aba Configurações.")
 
 # ==========================================
-# ABA 2: APONTAMENTOS (BUSCA PELA DATA SELECIONADA)
+# ABA 2: APONTAMENTOS
 # ==========================================
 with tab_apontamento:
     st.markdown("### Apontamento Diário")
@@ -152,32 +155,32 @@ with tab_apontamento:
     with col_eng_ap:
         engenheiro_apont = st.selectbox("Engenheiro:", ENGENHEIROS, key="eng_apont")
     with col_data_ap:
-        # Data padrão é HOJE
+        # Por padrão o apontamento exibe a equipe do dia atual
         data_apont = st.date_input("Data do Apontamento:", value=datetime.date.today(), format="DD/MM/YYYY")
     
     try:
-        convocacoes_do_dia = supabase.table("convocacoes").select("*").eq("engenheiro", engenheiro_apont).eq("data", data_apont.isoformat()).execute().data
+        convocacoes_hoje = supabase.table("convocacoes").select("*").eq("engenheiro", engenheiro_apont).eq("data", data_apont.isoformat()).execute().data
     except:
-        convocacoes_do_dia = []
+        convocacoes_hoje = []
 
-    if convocacoes_do_dia:
-        for conv in convocacoes_do_dia:
+    if convocacoes_hoje:
+        for conv in convocacoes_hoje:
             conv['dados_obra'] = dict_obras.get(conv['obra_id'], {"unidade": "Desconhecida", "nome": "Desconhecida"})
             
-        unidades_convocadas = sorted(list(set([c['dados_obra']['unidade'] for c in convocacoes_do_dia])))
+        unidades_convocadas = sorted(list(set([c['dados_obra']['unidade'] for c in convocacoes_hoje])))
         
         st.markdown("##### Filtrar a equipe por:")
         col_ua, col_oa = st.columns(2)
         with col_ua:
             unidade_filtro = st.selectbox("Unidade Convocada:", unidades_convocadas, key="filtro_u_apont")
         
-        obras_convocadas = sorted(list(set([c['dados_obra']['nome'] for c in convocacoes_do_dia if c['dados_obra']['unidade'] == unidade_filtro])))
+        obras_convocadas = sorted(list(set([c['dados_obra']['nome'] for c in convocacoes_hoje if c['dados_obra']['unidade'] == unidade_filtro])))
         with col_oa:
             obra_filtro = st.selectbox("Obra Convocada:", obras_convocadas, key="filtro_o_apont")
         
-        convocacoes_render = [c for c in convocacoes_do_dia if c['dados_obra']['unidade'] == unidade_filtro and c['dados_obra']['nome'] == obra_filtro]
+        convocacoes_render = [c for c in convocacoes_hoje if c['dados_obra']['unidade'] == unidade_filtro and c['dados_obra']['nome'] == obra_filtro]
         
-        st.info("Marque as exceções do dia e insira bonificações se necessário.")
+        st.info("Marque as exceções e insira bonificações se necessário.")
         with st.form("form_apontamentos"):
             alteracoes = {}
             opcoes_status = ["Presente", "Falta", "Atestado", "Extra"]
@@ -204,7 +207,7 @@ with tab_apontamento:
                 alteracoes[c_id] = {"status": status_sel, "valor_extra": val_extra, "observacao": obs}
                 st.divider()
             
-            if st.form_submit_button("Salvar Apontamentos", type="primary", use_container_width=True):
+            if st.form_submit_button("Salvar Apontamentos desta Obra", type="primary", use_container_width=True):
                 try:
                     for c_id, dados in alteracoes.items():
                         supabase.table("convocacoes").update(dados).eq("id", c_id).execute()
@@ -219,72 +222,83 @@ with tab_apontamento:
 # ==========================================
 with tab_relatorios:
     st.markdown("### 📊 Relatório Diário Profissional")
-    col_eng_rel, col_data_rel = st.columns(2)
-    with col_eng_rel:
-        eng_relatorio = st.selectbox("Engenheiro:", ENGENHEIROS, key="eng_rel")
-    with col_data_rel:
-        data_rel = st.date_input("Data do Relatório:", value=datetime.date.today(), format="DD/MM/YYYY", key="data_rel")
+    col_rel_eng, col_rel_data = st.columns(2)
+    with col_rel_eng:
+        opcoes_relatorio = ["TODOS OS ENGENHEIROS"] + ENGENHEIROS
+        eng_relatorio = st.selectbox("Gerar relatório para:", opcoes_relatorio, key="eng_rel")
+    with col_rel_data:
+        data_rel = st.date_input("Data do Relatório:", value=datetime.date.today(), format="DD/MM/YYYY")
     
     if st.button("Gerar PDF de Apontamentos"):
         try:
-            dados_relatorio = supabase.table("convocacoes").select("*").eq("engenheiro", eng_relatorio).eq("data", data_rel.isoformat()).execute().data
-            if not dados_relatorio:
-                st.warning(f"Sem apontamentos registrados para o dia {data_rel.strftime('%d/%m/%Y')}.")
+            # Se for todos, busca sem filtro de engenheiro. Se for específico, filtra pelo nome.
+            if eng_relatorio == "TODOS OS ENGENHEIROS":
+                dados_relatorio = supabase.table("convocacoes").select("*").eq("data", data_rel.isoformat()).execute().data
             else:
-                agrupado_por_obra = {}
+                dados_relatorio = supabase.table("convocacoes").select("*").eq("engenheiro", eng_relatorio).eq("data", data_rel.isoformat()).execute().data
+            
+            if not dados_relatorio:
+                st.warning(f"Sem apontamentos registrados para {data_rel.strftime('%d/%m/%Y')}.")
+            else:
+                # Agrupamento: Primeiro por Engenheiro, depois por Obra
+                agrupado_eng = {}
                 for row in dados_relatorio:
-                    obra_id = row['obra_id']
-                    if obra_id not in agrupado_por_obra:
-                        agrupado_por_obra[obra_id] = []
-                    agrupado_por_obra[obra_id].append(row)
+                    eng = row.get('engenheiro', 'NÃO IDENTIFICADO')
+                    ob = row['obra_id']
+                    if eng not in agrupado_eng: agrupado_eng[eng] = {}
+                    if ob not in agrupado_eng[eng]: agrupado_eng[eng][ob] = []
+                    agrupado_eng[eng][ob].append(row)
 
                 pdf = FPDF(orientation='L')
-                pdf.add_page()
                 
-                pdf.set_font("Arial", 'B', 16)
-                pdf.cell(0, 10, txt=to_latin("RELATÓRIO DIÁRIO DE APONTAMENTOS"), ln=True, align='C')
-                pdf.set_font("Arial", size=11)
-                pdf.cell(0, 10, txt=to_latin(f"Data Referência: {data_rel.strftime('%d/%m/%Y')} | Engenheiro: {eng_relatorio}"), ln=True, align='C')
-                pdf.ln(5)
-                
-                for o_id, apontamentos in agrupado_por_obra.items():
-                    dados_ob = dict_obras.get(o_id, {"nome": "N/A", "unidade": "N/A"})
+                # Gera uma página nova por engenheiro
+                for eng, obras_eng in agrupado_eng.items():
+                    pdf.add_page()
+                    pdf.set_font("Arial", 'B', 16)
+                    pdf.cell(0, 10, txt=to_latin("RELATÓRIO DIÁRIO DE APONTAMENTOS"), ln=True, align='C')
+                    pdf.set_font("Arial", size=11)
+                    pdf.cell(0, 10, txt=to_latin(f"Data Referência: {data_rel.strftime('%d/%m/%Y')} | Engenheiro: {eng}"), ln=True, align='C')
+                    pdf.ln(5)
                     
-                    pdf.set_font("Arial", 'B', 12)
-                    pdf.set_fill_color(220, 220, 220)
-                    titulo_obra = f"Unidade: {dados_ob['unidade']} | Obra/Serviço: {dados_ob['nome']}"
-                    pdf.cell(0, 10, txt=to_latin(titulo_obra), ln=True, fill=True)
-                    
-                    pdf.set_font("Arial", 'B', 10)
-                    pdf.cell(80, 8, to_latin("Colaborador"), border=1)
-                    pdf.cell(60, 8, to_latin("Função"), border=1)
-                    pdf.cell(30, 8, to_latin("Status"), border=1, align='C')
-                    pdf.cell(30, 8, to_latin("Extra (R$)"), border=1, align='C')
-                    pdf.cell(75, 8, to_latin("Observação"), border=1, ln=True)
-                    
-                    pdf.set_font("Arial", '', 10)
-                    for row in apontamentos:
-                        colab = dict_colaboradores.get(row['colaborador_id'], {})
-                        nome = colab.get('nome', 'N/A')
-                        funcao = colab.get('funcao', 'N/A')
-                        status = row.get('status', 'N/A')
-                        extra = row.get('valor_extra', 0)
-                        obs = row.get('observacao', '')
+                    for o_id, apontamentos in obras_eng.items():
+                        dados_ob = dict_obras.get(o_id, {"nome": "N/A", "unidade": "N/A"})
                         
-                        nome_str = (nome[:35] + '..') if len(nome) > 35 else nome
-                        func_str = (funcao[:25] + '..') if len(funcao) > 25 else funcao
-                        obs_str = (obs[:40] + '..') if len(obs) > 40 else obs
+                        pdf.set_font("Arial", 'B', 12)
+                        pdf.set_fill_color(220, 220, 220)
+                        titulo_obra = f"Unidade: {dados_ob['unidade']} | Obra/Serviço: {dados_ob['nome']}"
+                        pdf.cell(0, 10, txt=to_latin(titulo_obra), ln=True, fill=True)
                         
-                        pdf.cell(80, 8, to_latin(nome_str), border=1)
-                        pdf.cell(60, 8, to_latin(func_str), border=1)
-                        pdf.cell(30, 8, to_latin(status), border=1, align='C')
-                        pdf.cell(30, 8, to_latin(f"R$ {extra:.2f}"), border=1, align='C')
-                        pdf.cell(75, 8, to_latin(obs_str), border=1, ln=True)
-                    
-                    pdf.ln(8)
+                        pdf.set_font("Arial", 'B', 10)
+                        pdf.cell(80, 8, to_latin("Colaborador"), border=1)
+                        pdf.cell(60, 8, to_latin("Função"), border=1)
+                        pdf.cell(30, 8, to_latin("Status"), border=1, align='C')
+                        pdf.cell(30, 8, to_latin("Extra (R$)"), border=1, align='C')
+                        pdf.cell(75, 8, to_latin("Observação"), border=1, ln=True)
+                        
+                        pdf.set_font("Arial", '', 10)
+                        for row in apontamentos:
+                            colab = dict_colaboradores.get(row['colaborador_id'], {})
+                            nome = colab.get('nome', 'N/A')
+                            funcao = colab.get('funcao', 'N/A')
+                            status = row.get('status', 'N/A')
+                            extra = row.get('valor_extra', 0)
+                            obs = row.get('observacao', '')
+                            
+                            nome_str = (nome[:35] + '..') if len(nome) > 35 else nome
+                            func_str = (funcao[:25] + '..') if len(funcao) > 25 else funcao
+                            obs_str = (obs[:40] + '..') if len(obs) > 40 else obs
+                            
+                            pdf.cell(80, 8, to_latin(nome_str), border=1)
+                            pdf.cell(60, 8, to_latin(func_str), border=1)
+                            pdf.cell(30, 8, to_latin(status), border=1, align='C')
+                            pdf.cell(30, 8, to_latin(f"R$ {extra:.2f}"), border=1, align='C')
+                            pdf.cell(75, 8, to_latin(obs_str), border=1, ln=True)
+                        
+                        pdf.ln(8)
                 
                 pdf_bytes = pdf.output(dest='S').encode('latin1')
-                st.download_button(label="📥 Baixar Relatório PDF", data=pdf_bytes, file_name=f"Relatorio_{eng_relatorio}_{data_rel.strftime('%d-%m-%Y')}.pdf", mime="application/pdf")
+                nome_arquivo = f"Relatorio_Apontamento_{eng_relatorio}_{data_rel.strftime('%d-%m-%Y')}.pdf"
+                st.download_button(label="📥 Baixar Relatório PDF", data=pdf_bytes, file_name=nome_arquivo, mime="application/pdf")
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
 
@@ -293,6 +307,7 @@ with tab_relatorios:
 # ==========================================
 with tab_config:
     st.markdown("### 📋 Sincronizar Obras (Trello JSON)")
+    st.info("O sistema mapeia unidades através do nome completo do serviço. (Ex: APRL005 é enviado para MARACANAÚ).")
     arquivo_json = st.file_uploader("Selecione o arquivo JSON do Trello", type=["json"], key="json_trello")
     
     if arquivo_json is not None:
@@ -312,16 +327,14 @@ with tab_config:
                         novas_obras = []
                         for c in cards:
                             nome_card = c.get('name', '')
-                            partes = [p.strip() for p in nome_card.split('|')]
                             
+                            partes = [p.strip() for p in nome_card.split('|')]
                             if len(partes) >= 2:
                                 nome_obra = partes[0]
-                                unidade_crua = partes[1]
                             else:
                                 nome_obra = nome_card
-                                unidade_crua = "GERAL"
-                            
-                            unidade_limpa = limpar_unidade(unidade_crua)
+                                
+                            unidade_limpa = identificar_unidade(nome_card)
                             novas_obras.append({"unidade": unidade_limpa, "nome": nome_obra})
                         
                         if novas_obras:
@@ -378,7 +391,7 @@ with tab_config:
                     
                     if novos_colaboradores:
                         supabase.table("colaboradores").insert(novos_colaboradores).execute()
-                        st.success(f"🎉 {len(novos_colaboradores)} colaboradores importados.")
+                        st.success(f"🎉 {len(novos_colaboradores)} colaboradores importados sem duplicidade de funções.")
                         st.rerun()
                     else:
                         st.info("Nenhum colaborador novo foi encontrado.")
