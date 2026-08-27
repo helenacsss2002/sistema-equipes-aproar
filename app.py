@@ -163,10 +163,9 @@ def to_latin(texto):
 
 # --- SINCRONIZAÇÃO COM TRELLO (QUADRO DE ORÇAMENTOS - EM EXECUÇÃO) ---
 def sincronizar_obras_trello_automatico():
-    # Cache/Verificação diária para rodar automaticamente a cada 1 dia
     hoje_str = datetime.date.today().isoformat()
     if st.session_state.get("ultima_sincronizacao_trello") == hoje_str:
-        return # Já sincronizou hoje
+        return 
     
     sucesso, msg = executar_sincronizacao_trello()
     if sucesso:
@@ -183,7 +182,6 @@ def executar_sincronizacao_trello():
         lists = data.get('lists', [])
         cards = data.get('cards', [])
         
-        # Encontrar a lista "EM EXECUÇÃO"
         id_lista_execucao = None
         for lst in lists:
             nome_lista = normalizar(lst.get('name', ''))
@@ -194,10 +192,8 @@ def executar_sincronizacao_trello():
         if not id_lista_execucao:
             return False, "Lista 'EM EXECUÇÃO' não foi encontrada no quadro do Trello."
         
-        # Filtrar cards ativos da lista de execução
         cards_execucao = [c for c in cards if c.get('idList') == id_lista_execucao and not c.get('closed', False)]
         
-        # Obter obras já cadastradas no Supabase
         obras_atuais = buscar_obras()
         nomes_cadastrados = {normalizar(o['nome']) for o in obras_atuais}
         
@@ -233,7 +229,6 @@ def buscar_colaboradores():
     except Exception: 
         return []
 
-# Executar sincronização automática diária em segundo plano
 try:
     sincronizar_obras_trello_automatico()
 except:
@@ -246,19 +241,6 @@ dict_colaboradores = {c['id']: c for c in colaboradores} if colaboradores else {
 dict_obras = {o['id']: o for o in obras} if obras else {}
 
 ENGENHEIROS = ["EDUARDO", "GABRIEL", "GUSTAVO", "JOEL", "NETO", "PAULO", "SOARES", "VICTOR"]
-
-# --- SEÇÃO DE LIMPEZA DE TESTES ---
-        with st.container(border=True):
-            st.markdown("### 🗑️ Limpeza de Convocações de Teste")
-            st.write("Use o botão abaixo para apagar todas as convocações e reiniciar os testes do zero:")
-            if st.button("🗑️ Apagar Todas as Convocações", type="secondary", use_container_width=True):
-                try:
-                    # Deleta todos os registros da tabela convocacoes
-                    supabase.table("convocacoes").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
-                    st.success("Todas as convocações de teste foram apagadas com sucesso!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Erro ao limpar convocações: {e}")
 
 # --- FUNÇÃO AUXILIAR PARA RENDERIZAR A ABA DE DISPONIBILIDADE ---
 def render_aba_disponibilidade(key_suffix=""):
@@ -996,7 +978,7 @@ else:
     elif menu_escolhido == "👥 DISPONIBILIDADE":
         render_aba_disponibilidade("admin_panel")
 
-    # 7. CONFIGURAÇÕES (COM SINCRONIZAÇÃO DO TRELLO)
+    # 7. CONFIGURAÇÕES (COM SINCRONIZAÇÃO DO TRELLO E BOTÃO DE LIMPEZA)
     elif menu_escolhido == "⚙️ CONFIGURAÇÕES":
         st.markdown("## ⚙️ CONFIGURAÇÕES E CADASTROS")
         
@@ -1012,6 +994,18 @@ else:
                         st.rerun()
                     else:
                         st.error(msg)
+        
+        # --- SEÇÃO DE LIMPEZA DE TESTES ---
+        with st.container(border=True):
+            st.markdown("### 🗑️ Limpeza de Convocações de Teste")
+            st.write("Use o botão abaixo para apagar todas as convocações e reiniciar os testes do zero:")
+            if st.button("🗑️ Apagar Todas as Convocações", type="secondary", use_container_width=True):
+                try:
+                    supabase.table("convocacoes").delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
+                    st.success("Todas as convocações de teste foram apagadas com sucesso!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Erro ao limpar convocações: {e}")
         
         tab_c1, tab_c2 = st.tabs(["🏗️ Obras / Unidades", "👥 Colaboradores"])
         
