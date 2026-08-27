@@ -7,11 +7,12 @@ from fpdf import FPDF
 import unicodedata
 import re
 import os
+from PIL import Image
 
 # --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR ---
 st.set_page_config(page_title="APROAR - Controle de Presenças", page_icon="👷", layout="centered")
 
-# CSS para o tema escuro APROAR, cards modernos, transparência na logo e inputs
+# CSS para o tema escuro APROAR, cards modernos e inputs
 st.markdown("""
     <style>
     .stApp {
@@ -20,10 +21,6 @@ st.markdown("""
     }
     h1, h2, h3, h4, p, label, .stMarkdown, span {
         color: #F8FAFC !important;
-    }
-    /* Deixa o fundo da logo transparente no tema escuro */
-    .logo-container img {
-        mix-blend-mode: multiply;
     }
     div[data-baseweb="select"] > div, 
     div[data-baseweb="base-input"] > div, 
@@ -139,17 +136,25 @@ dict_obras = {o['id']: o for o in obras} if obras else {}
 
 ENGENHEIROS = ["EDUARDO", "GABRIEL", "GUSTAVO", "JOEL", "NETO", "PAULO", "SOARES", "VICTOR"]
 
-# --- CABEÇALHO COM A LOGO COM FUNDO TRANSPARENTE (CSS MIX-BLEND-MODE) ---
+# --- TRATAMENTO E EXIBIÇÃO DA LOGO COM TRANSPARÊNCIA REAL ---
 col_l1, col_l2, col_l3 = st.columns([1, 2, 1])
 with col_l2:
-    if os.path.exists("logo.jpg"):
-        st.markdown('<div class="logo-container">', unsafe_allow_html=True)
-        st.image("logo.jpg", use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
-    elif os.path.exists("logo.png"):
-        st.markdown('<div class="logo-container">', unsafe_allow_html=True)
-        st.image("logo.png", use_container_width=True)
-        st.markdown('</div>', unsafe_allow_html=True)
+    logo_path = "logo.jpg" if os.path.exists("logo.jpg") else ("logo.png" if os.path.exists("logo.png") else None)
+    if logo_path:
+        try:
+            img = Image.open(logo_path).convert("RGBA")
+            datas = img.getdata()
+            new_data = []
+            # Remove pixels brancos ou muito claros transformando-os em transparentes
+            for item in datas:
+                if item[0] > 230 and item[1] > 230 and item[2] > 230:
+                    new_data.append((255, 255, 255, 0))
+                else:
+                    new_data.append(item)
+            img.putdata(new_data)
+            st.image(img, use_container_width=True)
+        except Exception:
+            st.image(logo_path, use_container_width=True)
     else:
         st.markdown("""
             <div style="background: linear-gradient(135deg, #0C102B 0%, #161B3D 100%); padding: 25px; border-radius: 12px; text-align: center; margin-bottom: 25px; border: 1px solid #2D3568;">
@@ -632,7 +637,7 @@ else:
             trello_data = json.load(arquivo_json)
             list_id = next((lst['id'] for lst in trello_data.get('lists', []) if lst.get('name', '').upper() == 'EM EXECUÇÃO'), None)
             if list_id:
-                cards = [c for c in trello_data.get('cards', []) if c.get('idList') == list_id]
+                cards = [c for c in trello_data.get('cards', []) if c.get('idList'] == list_id]
                 novas_obras = [{"unidade": identificar_unidade(c.get('name', '')), "nome": c.get('name', '').split('|')[0].strip()} for c in cards]
                 existentes = {f"{o['unidade']} - {o['nome']}" for o in supabase.table("obras").select("unidade, nome").execute().data}
                 inserir = [o for o in novas_obras if f"{o['unidade']} - {o['nome']}" not in existentes]
