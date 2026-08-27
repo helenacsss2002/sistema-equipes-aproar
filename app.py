@@ -28,13 +28,24 @@ except Exception as e:
 def limpar_unidade(texto):
     if not texto: return "GERAL"
     texto_limpo = unicodedata.normalize('NFKD', str(texto)).encode('ASCII', 'ignore').decode('utf-8').upper().strip()
+    
     macro_unidades = {
-        "HORIZONTE": "HORIZONTE", "FIEC": "FIEC", "CASA DA INDUSTRIA": "FIEC", "DR": "FIEC",
-        "BARRA": "BARRA", "COLISEU": "COLISEU", "MARACANAU": "MARACANAÚ", "ESCRITORIO": "ESCRITÓRIO",
-        "CENTRO": "CENTRO", "MUSEU": "MUSEU", "UNIFOR": "UNIFOR"
+        "HORIZONTE": "HORIZONTE",
+        "FIEC": "FIEC", "CASA DA INDUSTRIA": "FIEC", "DR": "FIEC",
+        "BARRA": "BARRA",
+        "COLISEU": "COLISEU",
+        "MARACANAU": "MARACANAÚ", "APRL005": "MARACANAÚ",
+        "ESCRITORIO": "ESCRITÓRIO",
+        "CENTRO": "CENTRO",
+        "MUSEU": "MUSEU",
+        "UNIFOR": "UNIFOR",
+        "SEBRAE": "SEBRAE",
+        "IDALYA": "IDALYA E MATHEUS", "MATHEUS": "IDALYA E MATHEUS"
     }
+    
     for chave, valor in macro_unidades.items():
-         if chave in texto_limpo: return valor
+         if chave in texto_limpo:
+             return valor
     return texto_limpo
 
 def limpar_funcao(texto):
@@ -50,7 +61,7 @@ def get_cor_funcao(funcao):
     return cores[hash_num % len(cores)]
 
 def to_latin(texto):
-    """Garante que os acentos funcionem no PDF padrao (Latin-1)"""
+    """Trata a acentuação para o gerador de PDF"""
     if not texto: return ""
     return str(texto).encode('latin-1', 'replace').decode('latin-1')
 
@@ -74,23 +85,30 @@ ENGENHEIROS = ["EDUARDO", "GABRIEL", "GUSTAVO", "JOEL", "NETO", "PAULO", "SOARES
 st.title("👷 Gestão de Equipes")
 
 tab_convocacao, tab_apontamento, tab_relatorios, tab_config = st.tabs(["📋 Convocação", "✅ Apontamento", "📊 Relatório", "⚙️ Config"])
-hoje = datetime.date.today().isoformat()
 
 # ==========================================
-# ABA 1: CONVOCAÇÃO (MÚLTIPLAS OBRAS)
+# ABA 1: CONVOCAÇÃO (SÓ PODE CONVOCAR PRA 1 OBRA)
 # ==========================================
 with tab_convocacao:
     if obras and colaboradores:
         st.markdown("### Informações da Demanda")
-        engenheiro_conv = st.selectbox("Engenheiro responsável:", ENGENHEIROS, key="eng_conv")
-        
+        col_eng, col_data = st.columns(2)
+        with col_eng:
+            engenheiro_conv = st.selectbox("Engenheiro:", ENGENHEIROS, key="eng_conv")
+        with col_data:
+            # Data padrão é SEMPRE O DIA SEGUINTE
+            amanha = datetime.date.today() + datetime.timedelta(days=1)
+            data_conv = st.date_input("Data do Serviço:", value=amanha, format="DD/MM/YYYY")
+
         unidades_unicas = sorted(list(set([o['unidade'] for o in obras])))
-        unidade_selecionada = st.selectbox("Unidade:", unidades_unicas)
+        col_u, col_o = st.columns(2)
+        
+        with col_u:
+            unidade_selecionada = st.selectbox("Unidade:", unidades_unicas)
         
         obras_da_unidade = {o['nome']: o['id'] for o in obras if o['unidade'] == unidade_selecionada}
-        
-        # AGORA É MÚLTIPLA ESCOLHA!
-        obras_selecionadas = st.multiselect("Selecione uma ou mais Obras/Serviços:", list(obras_da_unidade.keys()))
+        with col_o:
+            obra_selecionada = st.selectbox("Obra/Serviço:", list(obras_da_unidade.keys()))
 
         st.markdown("### Montar Equipe")
         funcoes_disponiveis = sorted(list(set([c['funcao'] for c in colaboradores])))
@@ -104,59 +122,60 @@ with tab_convocacao:
         if st.button("Confirmar Convocação", type="primary", use_container_width=True):
             if not equipe_selecionada:
                 st.warning("⚠️ Selecione pelo menos um colaborador.")
-            elif not obras_selecionadas:
-                st.warning("⚠️ Selecione pelo menos uma obra.")
             else:
+                obra_id = obras_da_unidade[obra_selecionada]
                 dados_insercao = []
-                # Faz um laço para cadastrar a equipe em TODAS as obras selecionadas
-                for obra_nome in obras_selecionadas:
-                    obra_id = obras_da_unidade[obra_nome]
-                    for nome in equipe_selecionada:
-                        dados_insercao.append({
-                            "obra_id": obra_id,
-                            "colaborador_id": opcoes_colaboradores[nome],
-                            "data": hoje,
-                            "engenheiro": engenheiro_conv,
-                            "status": "Presente",
-                            "valor_extra": 0,
-                            "observacao": ""
-                        })
+                for nome in equipe_selecionada:
+                    dados_insercao.append({
+                        "obra_id": obra_id,
+                        "colaborador_id": opcoes_colaboradores[nome],
+                        "data": data_conv.isoformat(),
+                        "engenheiro": engenheiro_conv,
+                        "status": "Presente",
+                        "valor_extra": 0,
+                        "observacao": ""
+                    })
                 try:
                     supabase.table("convocacoes").insert(dados_insercao).execute()
-                    st.success(f"✅ Equipe convocada com sucesso para {len(obras_selecionadas)} obra(s)!")
+                    st.success(f"✅ Equipe convocada com sucesso para o dia {data_conv.strftime('%d/%m/%Y')}!")
                 except Exception as e:
-                    st.error("❌ Erro: Possível duplicidade. Colaborador já convocado para a mesma obra hoje.")
+                    st.error("❌ Erro: O sistema bloqueou a ação pois um ou mais colaboradores selecionados já estão convocados para outra demanda neste mesmo dia.")
     else:
         st.info("Cadastre obras (JSON) e colaboradores (Excel) na aba Configurações.")
 
 # ==========================================
-# ABA 2: APONTAMENTOS
+# ABA 2: APONTAMENTOS (BUSCA PELA DATA SELECIONADA)
 # ==========================================
 with tab_apontamento:
     st.markdown("### Apontamento Diário")
-    engenheiro_apont = st.selectbox("Engenheiro:", ENGENHEIROS, key="eng_apont")
+    col_eng_ap, col_data_ap = st.columns(2)
+    with col_eng_ap:
+        engenheiro_apont = st.selectbox("Engenheiro:", ENGENHEIROS, key="eng_apont")
+    with col_data_ap:
+        # Data padrão é HOJE
+        data_apont = st.date_input("Data do Apontamento:", value=datetime.date.today(), format="DD/MM/YYYY")
     
     try:
-        convocacoes_hoje = supabase.table("convocacoes").select("*").eq("engenheiro", engenheiro_apont).eq("data", hoje).execute().data
+        convocacoes_do_dia = supabase.table("convocacoes").select("*").eq("engenheiro", engenheiro_apont).eq("data", data_apont.isoformat()).execute().data
     except:
-        convocacoes_hoje = []
+        convocacoes_do_dia = []
 
-    if convocacoes_hoje:
-        for conv in convocacoes_hoje:
+    if convocacoes_do_dia:
+        for conv in convocacoes_do_dia:
             conv['dados_obra'] = dict_obras.get(conv['obra_id'], {"unidade": "Desconhecida", "nome": "Desconhecida"})
             
-        unidades_convocadas = sorted(list(set([c['dados_obra']['unidade'] for c in convocacoes_hoje])))
+        unidades_convocadas = sorted(list(set([c['dados_obra']['unidade'] for c in convocacoes_do_dia])))
         
         st.markdown("##### Filtrar a equipe por:")
         col_ua, col_oa = st.columns(2)
         with col_ua:
             unidade_filtro = st.selectbox("Unidade Convocada:", unidades_convocadas, key="filtro_u_apont")
         
-        obras_convocadas = sorted(list(set([c['dados_obra']['nome'] for c in convocacoes_hoje if c['dados_obra']['unidade'] == unidade_filtro])))
+        obras_convocadas = sorted(list(set([c['dados_obra']['nome'] for c in convocacoes_do_dia if c['dados_obra']['unidade'] == unidade_filtro])))
         with col_oa:
             obra_filtro = st.selectbox("Obra Convocada:", obras_convocadas, key="filtro_o_apont")
         
-        convocacoes_render = [c for c in convocacoes_hoje if c['dados_obra']['unidade'] == unidade_filtro and c['dados_obra']['nome'] == obra_filtro]
+        convocacoes_render = [c for c in convocacoes_do_dia if c['dados_obra']['unidade'] == unidade_filtro and c['dados_obra']['nome'] == obra_filtro]
         
         st.info("Marque as exceções do dia e insira bonificações se necessário.")
         with st.form("form_apontamentos"):
@@ -185,7 +204,7 @@ with tab_apontamento:
                 alteracoes[c_id] = {"status": status_sel, "valor_extra": val_extra, "observacao": obs}
                 st.divider()
             
-            if st.form_submit_button("Salvar Apontamentos desta Obra", type="primary", use_container_width=True):
+            if st.form_submit_button("Salvar Apontamentos", type="primary", use_container_width=True):
                 try:
                     for c_id, dados in alteracoes.items():
                         supabase.table("convocacoes").update(dados).eq("id", c_id).execute()
@@ -193,22 +212,25 @@ with tab_apontamento:
                 except Exception as e:
                     st.error(f"Erro ao salvar: {e}")
     else:
-        st.warning("Nenhuma equipe convocada por você para a data de hoje.")
+        st.warning(f"Nenhuma equipe convocada por {engenheiro_apont} para o dia {data_apont.strftime('%d/%m/%Y')}.")
 
 # ==========================================
-# ABA 3: RELATÓRIOS (NOVA DINÂMICA)
+# ABA 3: RELATÓRIOS
 # ==========================================
 with tab_relatorios:
     st.markdown("### 📊 Relatório Diário Profissional")
-    eng_relatorio = st.selectbox("Selecione o Engenheiro:", ENGENHEIROS, key="eng_rel")
+    col_eng_rel, col_data_rel = st.columns(2)
+    with col_eng_rel:
+        eng_relatorio = st.selectbox("Engenheiro:", ENGENHEIROS, key="eng_rel")
+    with col_data_rel:
+        data_rel = st.date_input("Data do Relatório:", value=datetime.date.today(), format="DD/MM/YYYY", key="data_rel")
     
     if st.button("Gerar PDF de Apontamentos"):
         try:
-            dados_relatorio = supabase.table("convocacoes").select("*").eq("engenheiro", eng_relatorio).eq("data", hoje).execute().data
+            dados_relatorio = supabase.table("convocacoes").select("*").eq("engenheiro", eng_relatorio).eq("data", data_rel.isoformat()).execute().data
             if not dados_relatorio:
-                st.warning("Sem apontamentos hoje para gerar relatório.")
+                st.warning(f"Sem apontamentos registrados para o dia {data_rel.strftime('%d/%m/%Y')}.")
             else:
-                # Agrupar os dados por Obra para o relatório ficar organizado
                 agrupado_por_obra = {}
                 for row in dados_relatorio:
                     obra_id = row['obra_id']
@@ -216,17 +238,15 @@ with tab_relatorios:
                         agrupado_por_obra[obra_id] = []
                     agrupado_por_obra[obra_id].append(row)
 
-                pdf = FPDF(orientation='L') # Landscape para caber a tabela
+                pdf = FPDF(orientation='L')
                 pdf.add_page()
                 
-                # Título
                 pdf.set_font("Arial", 'B', 16)
                 pdf.cell(0, 10, txt=to_latin("RELATÓRIO DIÁRIO DE APONTAMENTOS"), ln=True, align='C')
                 pdf.set_font("Arial", size=11)
-                pdf.cell(0, 10, txt=to_latin(f"Data: {hoje} | Engenheiro Responsável: {eng_relatorio}"), ln=True, align='C')
+                pdf.cell(0, 10, txt=to_latin(f"Data Referência: {data_rel.strftime('%d/%m/%Y')} | Engenheiro: {eng_relatorio}"), ln=True, align='C')
                 pdf.ln(5)
                 
-                # Iterar por cada obra e desenhar a tabela
                 for o_id, apontamentos in agrupado_por_obra.items():
                     dados_ob = dict_obras.get(o_id, {"nome": "N/A", "unidade": "N/A"})
                     
@@ -235,7 +255,6 @@ with tab_relatorios:
                     titulo_obra = f"Unidade: {dados_ob['unidade']} | Obra/Serviço: {dados_ob['nome']}"
                     pdf.cell(0, 10, txt=to_latin(titulo_obra), ln=True, fill=True)
                     
-                    # Cabeçalho da Tabela
                     pdf.set_font("Arial", 'B', 10)
                     pdf.cell(80, 8, to_latin("Colaborador"), border=1)
                     pdf.cell(60, 8, to_latin("Função"), border=1)
@@ -243,7 +262,6 @@ with tab_relatorios:
                     pdf.cell(30, 8, to_latin("Extra (R$)"), border=1, align='C')
                     pdf.cell(75, 8, to_latin("Observação"), border=1, ln=True)
                     
-                    # Linhas da Tabela
                     pdf.set_font("Arial", '', 10)
                     for row in apontamentos:
                         colab = dict_colaboradores.get(row['colaborador_id'], {})
@@ -253,7 +271,6 @@ with tab_relatorios:
                         extra = row.get('valor_extra', 0)
                         obs = row.get('observacao', '')
                         
-                        # Tratamento para textos longos (truncando para caber na célula da tabela)
                         nome_str = (nome[:35] + '..') if len(nome) > 35 else nome
                         func_str = (funcao[:25] + '..') if len(funcao) > 25 else funcao
                         obs_str = (obs[:40] + '..') if len(obs) > 40 else obs
@@ -267,7 +284,7 @@ with tab_relatorios:
                     pdf.ln(8)
                 
                 pdf_bytes = pdf.output(dest='S').encode('latin1')
-                st.download_button(label="📥 Baixar Relatório PDF", data=pdf_bytes, file_name=f"Relatorio_Apontamento_{eng_relatorio}.pdf", mime="application/pdf")
+                st.download_button(label="📥 Baixar Relatório PDF", data=pdf_bytes, file_name=f"Relatorio_{eng_relatorio}_{data_rel.strftime('%d-%m-%Y')}.pdf", mime="application/pdf")
         except Exception as e:
             st.error(f"Erro ao gerar PDF: {e}")
 
@@ -276,7 +293,6 @@ with tab_relatorios:
 # ==========================================
 with tab_config:
     st.markdown("### 📋 Sincronizar Obras (Trello JSON)")
-    st.info("O sistema unifica os nomes das unidades e limpa discrepâncias (ex: SESI Centro vira CENTRO).")
     arquivo_json = st.file_uploader("Selecione o arquivo JSON do Trello", type=["json"], key="json_trello")
     
     if arquivo_json is not None:
@@ -326,7 +342,6 @@ with tab_config:
     st.divider()
     
     st.markdown("### 📥 Sincronizar Base de Colaboradores (Excel)")
-    st.info("O sistema remove numerações e acentos das funções (ex: 076 - PEDREIRO vira PEDREIRO).")
     arquivo_excel = st.file_uploader("Selecione a planilha Excel", type=["xlsx"], key="excel_colab")
     
     if arquivo_excel is not None:
@@ -363,7 +378,7 @@ with tab_config:
                     
                     if novos_colaboradores:
                         supabase.table("colaboradores").insert(novos_colaboradores).execute()
-                        st.success(f"🎉 {len(novos_colaboradores)} colaboradores importados sem duplicidade de funções.")
+                        st.success(f"🎉 {len(novos_colaboradores)} colaboradores importados.")
                         st.rerun()
                     else:
                         st.info("Nenhum colaborador novo foi encontrado.")
