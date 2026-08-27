@@ -7,6 +7,7 @@ from fpdf import FPDF
 import unicodedata
 import re
 import os
+import io
 
 # --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR (WIDE - ESCURO / COMPACTO) ---
 st.set_page_config(page_title="APROAR - Controle de Presenças", page_icon="👷", layout="wide")
@@ -178,7 +179,7 @@ ENGENHEIROS = ["EDUARDO", "GABRIEL", "GUSTAVO", "JOEL", "NETO", "PAULO", "SOARES
 
 # --- FUNÇÃO AUXILIAR PARA RENDERIZAR A ABA DE DISPONIBILIDADE ---
 def render_aba_disponibilidade(key_suffix=""):
-    st.markdown("### 👥 Disponibilidade de Equipe por Função")
+    st.markdown("### 👥 DISPONIBILIDADE DE EQUIPE POR FUNÇÃO")
     st.write("Consulte quem já está convocado e quem está disponível para a data selecionada.")
     
     data_disp = st.date_input("Data de referência:", value=datetime.date.today() + datetime.timedelta(days=1), format="DD/MM/YYYY", key=f"data_disp_{key_suffix}")
@@ -198,14 +199,14 @@ def render_aba_disponibilidade(key_suffix=""):
     st.markdown("---")
     for func in funcoes:
         with st.container(border=True):
-            st.markdown(f"#### 🔹 {func}")
+            st.markdown(f"#### 🔹 {func.upper()}")
             colabs_func = [c for c in colaboradores if c['funcao'] == func]
             ocupados_func = [c for c in colabs_func if c['id'] in ids_ocupados]
             disponiveis_func = [c for c in colabs_func if c['id'] not in ids_ocupados]
             
             c1, c2 = st.columns(2)
             with c1:
-                st.markdown(f"**🔴 Convocados ({len(ocupados_func)})**")
+                st.markdown(f"**🔴 CONVOCADOS ({len(ocupados_func)})**")
                 if ocupados_func:
                     for oc in ocupados_func:
                         conv_info = next((item for item in convs_disp if item['colaborador_id'] == oc['id']), None)
@@ -218,21 +219,21 @@ def render_aba_disponibilidade(key_suffix=""):
                     st.caption("Nenhum.")
                     
             with c2:
-                st.markdown(f"**🟢 Disponíveis ({len(disponiveis_func)})**")
+                st.markdown(f"**🟢 DISPONÍVEIS ({len(disponiveis_func)})**")
                 if disponiveis_func:
                     for disp in disponiveis_func:
                         st.markdown(f"• {disp['nome']}")
                 else:
                     st.caption("Nenhum disponível.")
 
-# --- VERIFICAÇÃO DE MODO (CAMPO vs ADM) ---
+# --- VERIFICAÇÃO DE MODO (CAMPO/ENGENHEIRO VIA ?eng OU ?modo=campo) ---
 parametros_url = st.query_params
-modo_campo = parametros_url.get("modo") == "campo"
+modo_campo = "eng" in parametros_url or parametros_url.get("modo") in ["campo", "eng"]
 
 if modo_campo:
-    st.markdown("### 📲 Acesso Rápido - Campo")
+    st.markdown("### 📲 ACESSO ENGENHEIRO DE CAMPO")
     tab_apontamento_campo, tab_convocacao_campo, tab_disp_campo = st.tabs([
-        "✅ Apontamento", "📋 Convocação", "👥 Disponibilidade"
+        "✅ APONTAMENTO", "📋 CONVOCAÇÃO", "👥 DISPONIBILIDADE"
     ])
     
     with tab_apontamento_campo:
@@ -257,7 +258,7 @@ if modo_campo:
             
             convocacoes_render = [c for c in convocacoes_hoje if c['dados_obra']['unidade'] == unidade_filtro and c['dados_obra']['nome'] == obra_filtro]
             
-            if st.button("✅ Marcar Todos como Presentes"):
+            if st.button("✅ MARCAR TODOS COMO PRESENTES"):
                 for c in convocacoes_render:
                     supabase.table("convocacoes").update({"status": "Presente (Integral)"}).eq("id", c['id']).execute()
                 st.success("Atualizado!")
@@ -325,7 +326,7 @@ if modo_campo:
                 else:
                     st.caption("Nenhum escalado.")
 
-            if st.button("Confirmar Convocação", type="primary", use_container_width=True):
+            if st.button("CONFIRMAR CONVOCAÇÃO", type="primary", use_container_width=True):
                 if not equipe_selecionada:
                     st.warning("Selecione alguém.")
                 else:
@@ -357,9 +358,9 @@ else:
     # ==========================================
     
     if "menu_ativo" not in st.session_state:
-        st.session_state.menu_ativo = "🎛️ Dashboard"
+        st.session_state.menu_ativo = "🎛️ DASHBOARD"
 
-    # --- MENU LATERAL (SIDEBAR MENOR + TEXTO ABAIXO DA LOGO) ---
+    # --- MENU LATERAL EM MAIÚSCULAS ---
     with st.sidebar:
         if os.path.exists("logo.png"):
             st.image("logo.png", use_container_width=True)
@@ -368,7 +369,15 @@ else:
         
         st.markdown("<p style='text-align: center; font-size: 10px; color: #94A3B8; letter-spacing: 1.5px; margin-top: -5px; margin-bottom: 20px; font-weight: 700;'>CONTROLE DE APONTAMENTOS</p>", unsafe_allow_html=True)
         
-        itens_menu = ["🎛️ Dashboard", "📋 Convocação", "✅ Apontamento", "📊 Relatórios", "📈 Indicadores", "👥 Disponibilidade", "⚙️ Configurações"]
+        itens_menu = [
+            "🎛️ DASHBOARD", 
+            "📋 CONVOCAÇÃO", 
+            "✅ APONTAMENTO", 
+            "📊 RELATÓRIOS", 
+            "📈 INDICADORES", 
+            "👥 DISPONIBILIDADE", 
+            "⚙️ CONFIGURAÇÕES"
+        ]
         
         for item in itens_menu:
             if st.button(item, key=f"btn_nav_{item}", use_container_width=True):
@@ -383,8 +392,8 @@ else:
     # --- CONTEÚDO PRINCIPAL ---
 
     # 1. DASHBOARD
-    if menu_escolhido == "🎛️ Dashboard":
-        st.markdown("## 🎛️ Dashboard e Auditoria de Presenças")
+    if menu_escolhido == "🎛️ DASHBOARD":
+        st.markdown("## 🎛️ DASHBOARD E AUDITORIA DE PRESENÇAS")
         
         col_f1, col_f2, col_f3, col_f4 = st.columns(4)
         with col_f1:
@@ -463,7 +472,7 @@ else:
         if not lista_processada:
             st.info("Nenhum registro encontrado.")
         else:
-            if st.button("✅ Marcar Todos como Presentes (Integral)"):
+            if st.button("✅ MARCAR TODOS COMO PRESENTES (INTEGRAL)"):
                 for item in lista_processada:
                     supabase.table("convocacoes").update({"status": "Presente (Integral)"}).eq("id", item['id']).execute()
                 st.success("Atualizado!")
@@ -501,8 +510,8 @@ else:
                         st.divider()
 
     # 2. CONVOCAÇÃO
-    elif menu_escolhido == "📋 Convocação":
-        st.markdown("## 📋 Nova Convocação de Equipe")
+    elif menu_escolhido == "📋 CONVOCAÇÃO":
+        st.markdown("## 📋 NOVA CONVOCAÇÃO DE EQUIPE")
         if obras and colaboradores:
             col_eng, col_data = st.columns(2)
             with col_eng:
@@ -540,7 +549,7 @@ else:
                 else:
                     st.caption("Nenhum escalado ainda.")
 
-            if st.button("Confirmar Convocação", type="primary", use_container_width=True):
+            if st.button("CONFIRMAR CONVOCAÇÃO", type="primary", use_container_width=True):
                 if not equipe_selecionada:
                     st.warning("Selecione alguém.")
                 else:
@@ -564,8 +573,8 @@ else:
             st.info("Cadastre obras e colaboradores na aba Configurações.")
 
     # 3. APONTAMENTO
-    elif menu_escolhido == "✅ Apontamento":
-        st.markdown("## ✅ Apontamento Diário de Campo")
+    elif menu_escolhido == "✅ APONTAMENTO":
+        st.markdown("## ✅ APONTAMENTO DIÁRIO DE CAMPO")
         col_eng_ap, col_data_ap = st.columns(2)
         with col_eng_ap:
             engenheiro_apont = st.selectbox("Engenheiro:", ENGENHEIROS, key="eng_apont_adm")
@@ -591,7 +600,7 @@ else:
             
             convocacoes_render = [c for c in convocacoes_hoje if c['dados_obra']['unidade'] == unidade_filtro and c['dados_obra']['nome'] == obra_filtro]
             
-            if st.button("✅ Marcar Todos como Presentes", key="btn_all_present_adm"):
+            if st.button("✅ MARCAR TODOS COMO PRESENTES", key="btn_all_present_adm"):
                 for c in convocacoes_render:
                     supabase.table("convocacoes").update({"status": "Presente (Integral)"}).eq("id", c['id']).execute()
                 st.success("Atualizado!")
@@ -625,9 +634,9 @@ else:
         else:
             st.warning("Nenhuma equipe convocada para este engenheiro nesta data.")
 
-    # 4. RELATÓRIOS
-    elif menu_escolhido == "📊 Relatórios":
-        st.markdown("## 📊 Relatório de Custos e Fechamento")
+    # 4. RELATÓRIOS (PDF E EXCEL ORGANIZADO)
+    elif menu_escolhido == "📊 RELATÓRIOS":
+        st.markdown("## 📊 RELATÓRIO DE CUSTOS E FECHAMENTO")
         col_rel_eng, _ = st.columns(2)
         with col_rel_eng:
             eng_relatorio = st.selectbox("Engenheiro:", ["TODOS OS ENGENHEIROS"] + ENGENHEIROS, key="eng_rel")
@@ -638,17 +647,20 @@ else:
         with col_d2:
             data_fim_rel = st.date_input("Fim:", value=datetime.date.today(), format="DD/MM/YYYY", key="data_fim")
         
-        if st.button("Gerar PDF", type="primary"):
-            try:
-                if data_inicio_rel > data_fim_rel:
-                    st.error("Data inicial maior que a final.")
-                else:
-                    query = supabase.table("convocacoes").select("*").gte("data", data_inicio_rel.isoformat()).lte("data", data_fim_rel.isoformat())
-                    if eng_relatorio != "TODOS OS ENGENHEIROS":
-                        query = query.eq("engenheiro", eng_relatorio)
-                    dados_relatorio = query.execute().data
-                    
-                    if not dados_relatorio:
+        col_btn1, col_btn2 = st.columns(2)
+        
+        # --- BUSCA OS DADOS DO PERÍODO ---
+        query_rel = supabase.table("convocacoes").select("*").gte("data", data_inicio_rel.isoformat()).lte("data", data_fim_rel.isoformat())
+        if eng_relatorio != "TODOS OS ENGENHEIROS":
+            query_rel = query_rel.eq("engenheiro", eng_relatorio)
+        dados_relatorio = query_rel.execute().data if data_inicio_rel <= data_fim_rel else []
+
+        with col_btn1:
+            if st.button("📄 Gerar PDF", type="primary", use_container_width=True):
+                try:
+                    if data_inicio_rel > data_fim_rel:
+                        st.error("Data inicial maior que a final.")
+                    elif not dados_relatorio:
                         st.warning("Sem dados no período.")
                     else:
                         agrupado_eng = {}
@@ -716,13 +728,60 @@ else:
                             pdf.cell(0, 7, to_latin(f"TOTAL GERAL ({eng}): R$ {custo_total_engenheiro:.2f}"), ln=True, align='R')
                         
                         pdf_bytes = pdf.output(dest='S').encode('latin1')
-                        st.download_button("📥 Baixar Relatório PDF", data=pdf_bytes, file_name="Relatorio_Custos_Aproar.pdf", mime="application/pdf")
-            except Exception as e:
-                st.error(f"Erro: {e}")
+                        st.download_button("📥 Baixar Relatório PDF", data=pdf_bytes, file_name=f"Relatorio_Custos_Aproar_{data_inicio_rel.strftime('%d%m%Y')}.pdf", mime="application/pdf", use_container_width=True)
+                except Exception as e:
+                    st.error(f"Erro ao gerar PDF: {e}")
+
+        with col_btn2:
+            if st.button("📊 Gerar Excel", type="primary", use_container_width=True):
+                try:
+                    if data_inicio_rel > data_fim_rel:
+                        st.error("Data inicial maior que a final.")
+                    elif not dados_relatorio:
+                        st.warning("Sem dados no período.")
+                    else:
+                        registros_excel = []
+                        for row in dados_relatorio:
+                            colab = dict_colaboradores.get(row['colaborador_id'], {})
+                            ob = dict_obras.get(row['obra_id'], {})
+                            status = row.get('status', 'Presente (Integral)')
+                            diaria_base = calcular_diaria_proporcional(status, colab.get('valor_diaria'))
+                            extra = float(row.get('valor_extra', 0) or 0)
+                            
+                            registros_excel.append({
+                                "Data": row.get('data', ''),
+                                "Engenheiro": row.get('engenheiro', 'N/A'),
+                                "Unidade": ob.get('unidade', 'N/A'),
+                                "Obra / Serviço": ob.get('nome', 'N/A'),
+                                "Colaborador": colab.get('nome', 'N/A'),
+                                "Função": colab.get('funcao', 'N/A'),
+                                "Status": status,
+                                "Diária (R$)": diaria_base,
+                                "Extra (R$)": extra,
+                                "Custo Total (R$)": diaria_base + extra,
+                                "Observação": row.get('observacao', '')
+                            })
+                        
+                        df_excel = pd.DataFrame(registros_excel)
+                        
+                        buffer = io.BytesIO()
+                        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                            df_excel.to_excel(writer, index=False, sheet_name='Relatório de Custos')
+                        excel_bytes = buffer.getvalue()
+
+                        st.download_button(
+                            label="📥 Baixar Planilha Excel (.xlsx)",
+                            data=excel_bytes,
+                            file_name=f"Relatorio_Custos_Aproar_{data_inicio_rel.strftime('%d%m%Y')}_a_{data_fim_rel.strftime('%d%m%Y')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True
+                        )
+                except Exception as e:
+                    st.error(f"Erro ao gerar Excel: {e}")
 
     # 5. INDICADORES
-    elif menu_escolhido == "📈 Indicadores":
-        st.markdown("## 📈 Indicadores de Desempenho")
+    elif menu_escolhido == "📈 INDICADORES":
+        st.markdown("## 📈 INDICADORES DE DESEMPENHO")
         try:
             all_conv = supabase.table("convocacoes").select("*").execute().data
             if not all_conv:
@@ -762,14 +821,14 @@ else:
             st.error(f"Erro ao carregar indicadores: {e}")
 
     # 6. DISPONIBILIDADE
-    elif menu_escolhido == "👥 Disponibilidade":
+    elif menu_escolhido == "👥 DISPONIBILIDADE":
         render_aba_disponibilidade("adm")
 
     # 7. CONFIGURAÇÕES
-    elif menu_escolhido == "⚙️ Configurações":
-        st.markdown("## ⚙️ Sincronização e Manutenção")
+    elif menu_escolhido == "⚙️ CONFIGURAÇÕES":
+        st.markdown("## ⚙️ SINCRONIZAÇÃO E MANUTENÇÃO")
         arquivo_json = st.file_uploader("JSON do Trello", type=["json"])
-        if arquivo_json and st.button("🔄 Importar Obras"):
+        if arquivo_json and st.button("🔄 IMPORTAR OBRAS"):
             trello_data = json.load(arquivo_json)
             list_id = next((lst['id'] for lst in trello_data.get('lists', []) if lst.get('name', '').upper() == 'EM EXECUÇÃO'), None)
             if list_id:
@@ -784,7 +843,7 @@ else:
 
         st.divider()
         arquivo_excel = st.file_uploader("Planilha Excel de Colaboradores", type=["xlsx"])
-        if arquivo_excel and st.button("🔄 Importar Colaboradores"):
+        if arquivo_excel and st.button("🔄 IMPORTAR COLABORADORES"):
             xls = pd.ExcelFile(arquivo_excel)
             df = pd.read_excel(xls, sheet_name="Base de dados" if "Base de dados" in xls.sheet_names else xls.sheet_names[0])
             existentes = {c['nome'] for c in colaboradores}
@@ -795,7 +854,7 @@ else:
                 st.rerun()
 
         st.divider()
-        if st.button("🗑️ Apagar Todas as Convocações", type="secondary"):
+        if st.button("🗑️ APAGAR TODAS AS CONVOCAÇÕES", type="secondary"):
             try:
                 res = supabase.table("convocacoes").select("id").execute()
                 if res.data:
