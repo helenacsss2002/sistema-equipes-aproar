@@ -11,7 +11,7 @@ import os
 # --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR (WIDE) ---
 st.set_page_config(page_title="APROAR - Torre de Controle", page_icon="👷", layout="wide")
 
-# CSS Super Moderno inspirado em Dashboards SaaS & Logística
+# CSS Moderno, limpo e corporativo (Remoção das bolinhas do menu lateral e melhorias visuais)
 st.markdown("""
     <style>
     .stApp {
@@ -22,12 +22,35 @@ st.markdown("""
         color: #F8FAFC !important;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
-    /* Sidebar Moderna */
+    
+    /* --- SIDEBAR MODERNA & ELEGANTE --- */
     section[data-testid="stSidebar"] {
         background-color: #050814 !important;
         border-right: 1px solid #1E293B;
-        padding-top: 20px;
+        padding-top: 10px;
     }
+    
+    /* Remove as bolinhas (radio indicators) do menu lateral e transforma em botões limpos */
+    section[data-testid="stSidebar"] div[role="radiogroup"] label div:first-child {
+        display: none !important;
+    }
+    section[data-testid="stSidebar"] div[role="radiogroup"] label {
+        background-color: transparent;
+        border-radius: 8px;
+        padding: 10px 14px;
+        margin: 6px 0;
+        width: 100%;
+        display: flex;
+        align-items: center;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        border: 1px solid transparent;
+    }
+    section[data-testid="stSidebar"] div[role="radiogroup"] label:hover {
+        background-color: #111836 !important;
+        border-color: #2563EB !important;
+    }
+    
     /* Inputs e Selects Sleek */
     div[data-baseweb="select"] > div, 
     div[data-baseweb="base-input"] > div, 
@@ -53,6 +76,7 @@ st.markdown("""
         background-color: #2563EB !important;
         color: #FFFFFF !important;
     }
+    
     /* Botões Modernos */
     .stButton > button {
         background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%) !important;
@@ -68,6 +92,7 @@ st.markdown("""
         transform: translateY(-1px);
         box-shadow: 0 6px 16px rgba(37, 99, 235, 0.4);
     }
+    
     /* Containers com Efeito de Elevação */
     div[data-testid="stVerticalBlock"] > div[style*="border"] {
         background-color: #0F172A !important;
