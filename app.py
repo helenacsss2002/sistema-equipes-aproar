@@ -8,47 +8,53 @@ import unicodedata
 import re
 import os
 
-# --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR (WIDE - CLARO) ---
+# --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR (WIDE - ESCURO / COMPACTO) ---
 st.set_page_config(page_title="APROAR - Controle de Presenças", page_icon="👷", layout="wide")
 
-# CSS Moderno com Fundo Branco e Azul APROAR
+# CSS Moderno com Tema Escuro, Sidebar Menor e Azul APROAR
 st.markdown("""
     <style>
     .stApp {
-        background-color: #FFFFFF;
-        color: #0F172A;
+        background-color: #0F172A;
+        color: #F8FAFC;
     }
     h1, h2, h3, h4, p, label, .stMarkdown, span {
-        color: #0F172A !important;
+        color: #F8FAFC !important;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
-    /* Sidebar Clara e Moderna */
+    /* Sidebar Escura, Moderna e Mais Estreita */
     section[data-testid="stSidebar"] {
-        background-color: #F8FAFC !important;
-        border-right: 1px solid #E2E8F0;
+        background-color: #1E293B !important;
+        border-right: 1px solid #334155;
+        width: 240px !important;
+        min-width: 240px !important;
         padding-top: 15px;
     }
-    /* Inputs e Selects Limpos */
+    section[data-testid="stSidebar"] > div:first-child {
+        padding-left: 15px;
+        padding-right: 15px;
+    }
+    /* Inputs e Selects Limpos no Tema Escuro */
     div[data-baseweb="select"] > div, 
     div[data-baseweb="base-input"] > div, 
     div[data-baseweb="input"] > div,
     input, textarea, div[role="combobox"] {
-        background-color: #FFFFFF !important;
-        color: #0F172A !important;
-        border-color: #CBD5E1 !important;
+        background-color: #0F172A !important;
+        color: #F8FAFC !important;
+        border-color: #334155 !important;
         border-radius: 8px !important;
     }
     ul[data-baseweb="menu"], div[data-baseweb="popover"] {
-        background-color: #FFFFFF !important;
-        color: #0F172A !important;
+        background-color: #1E293B !important;
+        color: #F8FAFC !important;
     }
     li[role="option"] {
-        background-color: #FFFFFF !important;
-        color: #0F172A !important;
+        background-color: #1E293B !important;
+        color: #F8FAFC !important;
     }
     li[role="option"]:hover {
-        background-color: #DBEAFE !important;
-        color: #1D4ED8 !important;
+        background-color: #334155 !important;
+        color: #60A5FA !important;
     }
     div[data-baseweb="tag"] {
         background-color: #2563EB !important;
@@ -62,27 +68,27 @@ st.markdown("""
         border-radius: 8px !important;
         font-weight: 600;
         padding: 0.5rem 1rem;
-        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.15);
+        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
         transition: all 0.3s ease;
         width: 100%;
     }
     .stButton > button:hover {
         transform: translateY(-1px);
-        box-shadow: 0 6px 16px rgba(37, 99, 235, 0.3);
+        box-shadow: 0 6px 16px rgba(37, 99, 235, 0.4);
     }
     /* Containers com Efeito de Elevação Suave */
     div[data-testid="stVerticalBlock"] > div[style*="border"] {
-        background-color: #F8FAFC !important;
-        border: 1px solid #E2E8F0 !important;
+        background-color: #1E293B !important;
+        border: 1px solid #334155 !important;
         border-radius: 12px !important;
         padding: 16px;
     }
     .streamlit-expanderHeader {
-        background-color: #F1F5F9 !important;
+        background-color: #334155 !important;
         border-radius: 8px;
     }
     hr {
-        border-color: #E2E8F0 !important;
+        border-color: #334155 !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -207,7 +213,7 @@ def render_aba_disponibilidade(key_suffix=""):
                         if conv_info:
                             ob_inf = dict_obras.get(conv_info['obra_id'], {})
                             obra_nome = f"{ob_inf.get('unidade','')} - {ob_inf.get('nome','')}"
-                        st.markdown(f"• {oc['nome']} <br><small style='color:#64748B;'>({obra_nome})</small>", unsafe_allow_html=True)
+                        st.markdown(f"• {oc['nome']} <br><small style='color:#94A3B8;'>({obra_nome})</small>", unsafe_allow_html=True)
                 else:
                     st.caption("Nenhum.")
                     
@@ -347,20 +353,20 @@ if modo_campo:
 
 else:
     # ==========================================
-    # PAINEL ADMINISTRATIVO (FUNDO BRANCO)
+    # PAINEL ADMINISTRATIVO (TEMA ESCURO)
     # ==========================================
     
     if "menu_ativo" not in st.session_state:
         st.session_state.menu_ativo = "🎛️ Dashboard"
 
-    # --- MENU LATERAL (SIDEBAR) ---
+    # --- MENU LATERAL (SIDEBAR MENOR + TEXTO ABAIXO DA LOGO) ---
     with st.sidebar:
         if os.path.exists("logo.png"):
             st.image("logo.png", use_container_width=True)
         else:
-            st.markdown("<h2 style='text-align: center; color: #0F172A; letter-spacing: 2px;'>APROAR</h2>", unsafe_allow_html=True)
+            st.markdown("<h2 style='text-align: center; color: #FFFFFF; letter-spacing: 2px;'>APROAR</h2>", unsafe_allow_html=True)
         
-        st.markdown("<div style='margin-bottom: 20px;'></div>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; font-size: 10px; color: #94A3B8; letter-spacing: 1.5px; margin-top: -5px; margin-bottom: 20px; font-weight: 700;'>CONTROLE DE APONTAMENTOS</p>", unsafe_allow_html=True)
         
         itens_menu = ["🎛️ Dashboard", "📋 Convocação", "✅ Apontamento", "📊 Relatórios", "📈 Indicadores", "👥 Disponibilidade", "⚙️ Configurações"]
         
@@ -475,7 +481,7 @@ else:
                         c_id = row['id']
                         c1, c2, c3 = st.columns([3, 2, 2])
                         with c1:
-                            st.markdown(f"{row['colab_nome']} &nbsp; `{row['colab_funcao']}` &nbsp; <small style='color:#64748B;'>({row['data_item']})</small>", unsafe_allow_html=True)
+                            st.markdown(f"{row['colab_nome']} &nbsp; `{row['colab_funcao']}` &nbsp; <small style='color:#94A3B8;'>({row['data_item']})</small>", unsafe_allow_html=True)
                             obs_val = st.text_input("Obs", value=row['observacao'], placeholder="Obs...", key=f"obs_{c_id}", label_visibility="collapsed")
                             if obs_val != row['observacao']:
                                 supabase.table("convocacoes").update({"observacao": obs_val}).eq("id", c_id).execute()
@@ -666,8 +672,10 @@ else:
                             for o_id, apontamentos in obras_eng.items():
                                 dados_ob = dict_obras.get(o_id, {"nome": "N/A", "unidade": "N/A"})
                                 pdf.set_font("Arial", 'B', 10)
-                                pdf.set_fill_color(220, 220, 220)
+                                pdf.set_fill_color(50, 60, 80)
+                                pdf.set_text_color(255, 255, 255)
                                 pdf.cell(0, 7, txt=to_latin(f"Unidade: {dados_ob['unidade']} | Obra: {dados_ob['nome']}"), ln=True, fill=True)
+                                pdf.set_text_color(0, 0, 0)
                                 
                                 pdf.set_font("Arial", 'B', 9)
                                 pdf.cell(25, 6, to_latin("Data"), border=1, align='C')
@@ -699,7 +707,7 @@ else:
                                     pdf.cell(51, 6, to_latin(obs[:25]), border=1, ln=True)
                                 
                                 pdf.set_font("Arial", 'B', 9)
-                                pdf.set_fill_color(245, 245, 245)
+                                pdf.set_fill_color(230, 230, 230)
                                 pdf.cell(224, 6, to_latin("TOTAL DA OBRA:"), border=1, align='R', fill=True)
                                 pdf.cell(53, 6, to_latin(f"R$ {custo_total_obra:.2f}"), border=1, align='C', fill=True, ln=True)
                                 pdf.ln(4)
