@@ -831,7 +831,7 @@ else:
                                     
                                     inicio_dados_obra = current_row
                                     
-                                    # Inserir registros da obra com cor diferenciada por engenheiro e fórmula de custo do colaborador
+                                    # Inserir registros da obra com cor diferenciada por engenheiro e fórmula SUM em inglês
                                     for _, r in df_obra.iterrows():
                                         eng_resp = r["Engenheiro"]
                                         cor_hex = cores_engenheiros.get(str(eng_resp).upper(), "FFFFFF")
@@ -860,11 +860,11 @@ else:
                                     
                                     fim_dados_obra = current_row - 1
                                     
-                                    # Linha de Subtotal da Obra com Fórmula SOMA correta para Excel em Português
+                                    # Linha de Subtotal da Obra com a função SUM em inglês exigida pelo openpyxl
                                     ws.cell(row=current_row, column=5, value=f"TOTAL OBRA {obra_nome}:").font = Font(name="Arial", size=10, bold=True)
                                     ws.cell(row=current_row, column=5).alignment = Alignment(horizontal="right")
                                     
-                                    celula_subtotal = ws.cell(row=current_row, column=7, value=f"=SOMA(G{inicio_dados_obra}:G{fim_dados_obra})")
+                                    celula_subtotal = ws.cell(row=current_row, column=7, value=f"=SUM(G{inicio_dados_obra}:G{fim_dados_obra})")
                                     celula_subtotal.font = Font(name="Arial", size=10, bold=True)
                                     celula_subtotal.number_format = 'R$ #,##0.00'
                                     celula_subtotal.border = borda_fina
