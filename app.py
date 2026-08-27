@@ -8,7 +8,7 @@ import unicodedata
 import re
 import os
 
-# --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR (MINIMALISTA) ---
+# --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR ---
 st.set_page_config(page_title="APROAR - Controle de Presenças", page_icon="👷", layout="centered")
 
 # CSS Minimalista, elegante e focado em respiro visual
@@ -303,26 +303,41 @@ if modo_campo:
                 ids_ja_alocados_eng = {c['colaborador_id'] for c in convs_eng_data}
                 nomes_ja_alocados = [dict_colaboradores.get(cid, {}).get('nome', '') for cid in ids_ja_alocados_eng]
                 if nomes_ja_alocados:
-                    st.markdown(f"📌 **Escalados:** " + ", ".join(nomes_ja_alocados))
+                    st.caption("Já escalados hoje: " + ", ".join(nomes_ja_alocados))
                 else:
-                    st.caption("Nenhum registrado.")
+                    st.caption("Nenhum escalado.")
 
             if st.button("Confirmar Convocação", type="primary", use_container_width=True):
                 if not equipe_selecionada:
                     st.warning("Selecione alguém.")
                 else:
                     obra_id = obras_da_unidade[obra_selecionada]
-                    dados_insercao = [{
-                        "obra_id": obra_id, "colaborador_id": opcoes_colaboradores[nome],
-                        "data": data_conv.isoformat(), "engenheiro": engenheiro_conv,
-                        "status": "Presente", "valor_extra": 0, "observacao": ""
-                    } for nome in equipe_selecionada]
-                    try:
-                        supabase.table("convocacoes").insert(dados_insercao).execute()
-                        st.success("✅ Convocado!")
+                    sucessos = 0
+                    erros = []
+                    for nome in equipe_selecionada:
+                        c_id = opcoes_colaboradores[nome]
+                        # Verifica individualmente se já existe convocação para este colaborador nesta data
+                        checagem = supabase.table("convocacoes").select("id").eq("colaborador_id", c_id).eq("data", data_conv.isoformat()).execute().data
+                        if checagem:
+                            erros.append(nome)
+                        else:
+                            supabase.table("convocacoes").insert({
+                                "obra_id": obra_id,
+                                "colaborador_id": c_id,
+                                "data": data_conv.isoformat(),
+                                "engenheiro": engenheiro_conv,
+                                "status": "Presente",
+                                "valor_extra": 0,
+                                "observacao": ""
+                            }).execute()
+                            sucessos += 1
+                    
+                    if sucessos > 0:
+                        st.success(f"✅ {sucessos} colaborador(es) convocado(s) com sucesso!")
+                    if erros:
+                        st.error(f"⚠️ Não convocado(s) (já possui(em) convocação no dia): {', '.join(erros)}")
+                    if sucessos > 0:
                         st.rerun()
-                    except:
-                        st.error("Erro: Colaborador já convocado neste dia.")
         else:
             st.info("Cadastre obras e colaboradores na administração.")
 
@@ -349,12 +364,17 @@ else:
             unidades_cadastradas = sorted(list(set([o['unidade'] for o in obras]))) if obras else []
             unidade_dash = st.selectbox("Unidade:", ["TODAS"] + unidades_cadastradas, key="u_dash")
         with col_f3:
-            busca_colab = st.text_input("Buscar colaborador:", placeholder="Ex: Alex...", key="busca_colab_dash")
+            busca_colab = st.text_input("Buscar colaborador:", placeholder="Ex: Erivaldo...", key="busca_colab_dash")
         with col_f4:
             status_filtro_dash = st.selectbox("Status:", ["Todos", "Presente", "Falta", "Atestado", "Extra"], key="st_dash")
 
         try:
-            query_dash = supabase.table("convocacoes").select("*").eq("data", data_filtro_dash.isoformat())
+            # Se buscou por nome específico, busca globalmente nas convocações para achar o colaborador
+            if busca_colab:
+                query_dash = supabase.table("convocacoes").select("*")
+            else:
+                query_dash = supabase.table("convocacoes").select("*").eq("data", data_filtro_dash.isoformat())
+
             if unidade_dash != "TODAS":
                 obras_ids_unidade = [o['id'] for o in obras if o['unidade'] == unidade_dash]
                 if obras_ids_unidade:
@@ -370,7 +390,7 @@ else:
             ob = dict_obras.get(c['obra_id'], {"unidade": "GERAL", "nome": "Desconhecida"})
             colab = dict_colaboradores.get(c['colaborador_id'], {"nome": "Desconhecido", "funcao": "-", "valor_diaria": 240.0})
             
-            # Filtro inteligente por nome (ignora acentos e maiúsculas, permitindo trechos como "alex")
+            # Filtro inteligente por nome (ignora acentos e maiúsculas)
             if busca_colab:
                 if normalizar(busca_colab) not in normalizar(colab['nome']):
                     continue
@@ -383,6 +403,7 @@ else:
             
             lista_processada.append({
                 "id": c['id'],
+                "data_item": c.get('data', ''),
                 "engenheiro": c.get('engenheiro', 'N/A'),
                 "unidade": ob['unidade'],
                 "obra_nome": ob['nome'],
@@ -433,7 +454,7 @@ else:
                         c_id = row['id']
                         c1, c2, c3 = st.columns([3, 2, 2])
                         with c1:
-                            st.markdown(f"{row['colab_nome']} &nbsp; `{row['colab_funcao']}`")
+                            st.markdown(f"{row['colab_nome']} &nbsp; `{row['colab_funcao']}` &nbsp; <small style='color:#94A3B8;'>({row['data_item']})</small>", unsafe_allow_html=True)
                             obs_val = st.text_input("Obs", value=row['observacao'], placeholder="Obs...", key=f"obs_{c_id}", label_visibility="collapsed")
                             if obs_val != row['observacao']:
                                 supabase.table("convocacoes").update({"observacao": obs_val}).eq("id", c_id).execute()
@@ -495,19 +516,33 @@ else:
                     st.warning("Selecione alguém.")
                 else:
                     obra_id = obras_da_unidade[obra_selecionada]
-                    dados_insercao = [{
-                        "obra_id": obra_id, "colaborador_id": opcoes_colaboradores[nome],
-                        "data": data_conv.isoformat(), "engenheiro": engenheiro_conv,
-                        "status": "Presente", "valor_extra": 0, "observacao": ""
-                    } for nome in equipe_selecionada]
-                    try:
-                        supabase.table("convocacoes").insert(dados_insercao).execute()
-                        st.success("✅ Convocado!")
+                    sucessos = 0
+                    erros = []
+                    for nome in equipe_selecionada:
+                        c_id = opcoes_colaboradores[nome]
+                        checagem = supabase.table("convocacoes").select("id").eq("colaborador_id", c_id).eq("data", data_conv.isoformat()).execute().data
+                        if checagem:
+                            erros.append(nome)
+                        else:
+                            supabase.table("convocacoes").insert({
+                                "obra_id": obra_id,
+                                "colaborador_id": c_id,
+                                "data": data_conv.isoformat(),
+                                "engenheiro": engenheiro_conv,
+                                "status": "Presente",
+                                "valor_extra": 0,
+                                "observacao": ""
+                            }).execute()
+                            sucessos += 1
+                    
+                    if sucessos > 0:
+                        st.success(f"✅ {sucessos} colaborador(es) convocado(s) com sucesso!")
+                    if erros:
+                        st.error(f"⚠️ Não convocado(s) (já possui(em) convocação no dia): {', '.join(erros)}")
+                    if sucessos > 0:
                         st.rerun()
-                    except:
-                        st.error("Erro: Colaborador já convocado neste dia.")
         else:
-            st.info("Cadastre obras e colaboradores na aba Configurações.")
+            st.info("Cadastre obras e colaboradores na administração.")
 
     with tab_relatorios:
         st.markdown("#### Relatório de Custos")
