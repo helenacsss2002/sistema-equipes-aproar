@@ -256,6 +256,112 @@ def montar_observacao_operacional(turno, observacao_livre=""):
         partes.append(f"Obs: {str(observacao_livre).strip()}")
     return " | ".join(partes)
 
+
+def formatar_nome_whatsapp(nome):
+    """Deixa nomes em formato legível para a mensagem, preservando partículas comuns."""
+    nome_fmt = " ".join(str(nome or "").strip().split()).title()
+    if not nome_fmt:
+        return "Colaborador não identificado"
+    minusculas = {"Da", "Das", "De", "Do", "Dos", "E"}
+    partes = nome_fmt.split()
+    return " ".join(p.lower() if i > 0 and p in minusculas else p for i, p in enumerate(partes))
+
+
+def formatar_unidade_whatsapp(unidade):
+    """Formata a Unidade para o cabeçalho da mensagem do WhatsApp."""
+    texto = " ".join(str(unidade or "").strip().split())
+    if not texto:
+        return "Unidade não identificada"
+    siglas = {"FIEC", "SEBRAE", "UNIFOR"}
+    if normalizar(texto) in siglas:
+        return normalizar(texto)
+    titulo = texto.title()
+    minusculas = {"Da", "Das", "De", "Do", "Dos", "E"}
+    partes = titulo.split()
+    return " ".join(p.lower() if i > 0 and p in minusculas else p for i, p in enumerate(partes))
+
+
+def rotulo_data_whatsapp(data_alvo):
+    hoje = datetime.date.today()
+    if data_alvo == hoje:
+        return f"hoje {data_alvo.strftime('%d/%m')}"
+    if data_alvo == hoje + datetime.timedelta(days=1):
+        return f"amanhã {data_alvo.strftime('%d/%m')}"
+    return f"o dia {data_alvo.strftime('%d/%m')}"
+
+
+def organizar_convocacoes_whatsapp(convocacoes, mostrar_funcao=False):
+    """Agrupa convocações por Unidade e Turno para montar a mensagem pronta para copiar."""
+    ordem_turnos = ["Integral", "Manhã", "Tarde", "Noite"]
+    agrupado = {}
+
+    for conv in convocacoes or []:
+        obra = dict_obras.get(conv.get("obra_id"), {})
+        unidade = obra.get("unidade") or "NÃO IDENTIFICADA"
+        colab = dict_colaboradores.get(conv.get("colaborador_id"), {})
+        nome = formatar_nome_whatsapp(colab.get("nome", ""))
+        funcao = str(colab.get("funcao", "") or "").strip()
+        turno, _ = decompor_observacao_operacional(conv.get("observacao", ""))
+
+        if mostrar_funcao and funcao:
+            funcao_fmt = funcao.replace("AVULSO - ", "").strip().title()
+            nome = f"{nome} ({funcao_fmt})"
+
+        agrupado.setdefault(unidade, {}).setdefault(turno, [])
+        if nome not in agrupado[unidade][turno]:
+            agrupado[unidade][turno].append(nome)
+
+    # Ordena colaboradores alfabeticamente e turnos na sequência operacional.
+    saida = {}
+    for unidade in sorted(agrupado.keys(), key=lambda x: normalizar(x)):
+        saida[unidade] = {}
+        for turno in ordem_turnos:
+            nomes = agrupado[unidade].get(turno, [])
+            if nomes:
+                saida[unidade][turno] = sorted(nomes, key=lambda x: normalizar(x))
+        # Compatibilidade para algum turno antigo/não previsto.
+        for turno, nomes in agrupado[unidade].items():
+            if turno not in saida[unidade] and nomes:
+                saida[unidade][turno] = sorted(nomes, key=lambda x: normalizar(x))
+    return saida
+
+
+def montar_mensagem_whatsapp(data_alvo, convocacoes, mostrar_funcao=False, aviso_pendentes=False, somente_unidade=None):
+    agrupado = organizar_convocacoes_whatsapp(convocacoes, mostrar_funcao=mostrar_funcao)
+    if somente_unidade is not None:
+        agrupado = {somente_unidade: agrupado.get(somente_unidade, {})} if somente_unidade in agrupado else {}
+
+    linhas = [f"Segue divisão de Equipes para {rotulo_data_whatsapp(data_alvo)}", ""]
+
+    for unidade, turnos in agrupado.items():
+        linhas.append(f"*{formatar_unidade_whatsapp(unidade)}*")
+        linhas.append("")
+
+        turnos_com_pessoas = [(turno, nomes) for turno, nomes in turnos.items() if nomes]
+        exibir_turnos = len(turnos_com_pessoas) > 1 or any(turno != "Integral" for turno, _ in turnos_com_pessoas)
+
+        contador = 1
+        for turno, nomes in turnos_com_pessoas:
+            if exibir_turnos:
+                linhas.append(f"_{turno}_")
+            for nome in nomes:
+                linhas.append(f"{contador}. {nome}")
+                contador += 1
+            if exibir_turnos:
+                linhas.append("")
+        linhas.append("")
+
+    if aviso_pendentes:
+        if agrupado:
+            linhas.append("As demais demandas serão enviadas pelos respectivos responsáveis.")
+        else:
+            linhas.append("As demandas serão enviadas pelos respectivos responsáveis.")
+
+    # Remove excesso de linhas vazias no fim sem mexer na separação interna.
+    while linhas and not str(linhas[-1]).strip():
+        linhas.pop()
+    return "\n".join(linhas)
+
 def criar_ou_obter_colaborador_manual(nome, tipo, funcao_livre="", avulso=False):
     """Cria um colaborador digitado pelo engenheiro sem exigir novas colunas no Supabase."""
     nome_limpo = " ".join(str(nome or "").strip().split())
@@ -1190,6 +1296,7 @@ else:
         itens_menu = [
             "🎛️ DASHBOARD", 
             "📋 CONVOCAÇÃO", 
+            "💬 WHATSAPP", 
             "✅ APONTAMENTO", 
             "📊 RELATÓRIOS", 
             "📈 INDICADORES", 
@@ -1594,6 +1701,97 @@ else:
                             supabase.table("convocacoes").delete().eq("id", registro_corr['id']).execute()
                             st.success("✅ Convocação excluída com sucesso.")
                             st.rerun()
+
+    # --- MENSAGEM PARA WHATSAPP ---
+    elif menu_escolhido == "💬 WHATSAPP":
+        st.markdown("## 💬 MENSAGEM DE CONVOCAÇÃO PARA WHATSAPP")
+        st.write("Gere a divisão de equipes no padrão do grupo de Colaboradores e copie a mensagem pronta.")
+
+        c_wpp1, c_wpp2 = st.columns([1, 1])
+        with c_wpp1:
+            data_wpp = st.date_input(
+                "Data da divisão:",
+                value=proximo_dia_util(datetime.date.today()),
+                format="DD/MM/YYYY",
+                key="data_mensagem_wpp"
+            )
+        with c_wpp2:
+            mostrar_funcao_wpp = st.checkbox(
+                "Mostrar função entre parênteses",
+                value=False,
+                key="mostrar_funcao_wpp"
+            )
+
+        try:
+            convocacoes_wpp = (
+                supabase.table("convocacoes")
+                .select("*")
+                .eq("data", data_wpp.isoformat())
+                .execute().data or []
+            )
+        except Exception as e:
+            convocacoes_wpp = []
+            st.error(f"Não foi possível carregar as convocações: {e}")
+
+        agrupado_wpp = organizar_convocacoes_whatsapp(convocacoes_wpp, mostrar_funcao=mostrar_funcao_wpp)
+        unidades_com_divisao = list(agrupado_wpp.keys())
+
+        unidades_cadastradas_wpp = sorted({
+            o.get("unidade") for o in obras
+            if o.get("unidade") and normalizar(o.get("unidade")) not in ["GERAL", "NAO IDENTIFICADA"]
+        }, key=lambda x: normalizar(x))
+        unidades_sem_divisao = [u for u in unidades_cadastradas_wpp if u not in unidades_com_divisao]
+
+        if unidades_com_divisao:
+            st.success(
+                f"{len(convocacoes_wpp)} convocação(ões) encontrada(s) em "
+                f"{len(unidades_com_divisao)} unidade(s)."
+            )
+        else:
+            st.warning("Ainda não há nenhuma convocação registrada para a data selecionada.")
+
+        if unidades_sem_divisao:
+            with st.expander("🔎 Unidades sem convocação registrada nesta data"):
+                st.write(", ".join(formatar_unidade_whatsapp(u) for u in unidades_sem_divisao))
+                st.caption("Essa lista é apenas uma referência; podem existir unidades sem atividade nesta data.")
+
+        aviso_pendentes_wpp = st.checkbox(
+            "Ainda existem demandas que serão enviadas por outros responsáveis",
+            value=bool(unidades_sem_divisao),
+            key="aviso_pendentes_wpp",
+            help="Ao marcar, o texto acrescenta: 'As demais demandas serão enviadas pelos respectivos responsáveis.'"
+        )
+
+        mensagem_geral_wpp = montar_mensagem_whatsapp(
+            data_wpp,
+            convocacoes_wpp,
+            mostrar_funcao=mostrar_funcao_wpp,
+            aviso_pendentes=aviso_pendentes_wpp
+        )
+
+        st.markdown("### 📋 Mensagem completa")
+        st.caption("Use o ícone de copiar no canto do bloco abaixo e cole diretamente no WhatsApp.")
+        st.code(mensagem_geral_wpp, language=None, wrap_lines=True)
+
+        if unidades_com_divisao:
+            st.markdown("### 🏢 Mensagem separada por Unidade")
+            st.caption("Caso prefira enviar a divisão de cada Unidade separadamente.")
+            for unidade in unidades_com_divisao:
+                with st.expander(f"📌 {formatar_unidade_whatsapp(unidade)}"):
+                    mensagem_unidade = montar_mensagem_whatsapp(
+                        data_wpp,
+                        convocacoes_wpp,
+                        mostrar_funcao=mostrar_funcao_wpp,
+                        aviso_pendentes=False,
+                        somente_unidade=unidade
+                    )
+                    st.code(mensagem_unidade, language=None, wrap_lines=True)
+
+        st.markdown("---")
+        st.caption(
+            "A mensagem usa somente a Unidade da convocação. Obra/Serviço não é exibida, "
+            "e os colaboradores são numerados automaticamente."
+        )
 
     # --- 3. APONTAMENTO ---
     elif menu_escolhido == "✅ APONTAMENTO":
