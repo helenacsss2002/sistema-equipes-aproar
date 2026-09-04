@@ -1313,7 +1313,11 @@ def inserir_convocacao_segura(obra_id, colaborador_id, data_convocacao, engenhei
     - Neto / Manhã + Gustavo / Integral -> conflito.
     - Neto / Integral + Gustavo / Tarde -> conflito.
     """
-    indisp = obter_indisponibilidade_colaborador(colaborador_id, data_convocacao)
+    indisp = (
+        obter_indisponibilidade_colaborador(colaborador_id, data_convocacao)
+        if "obter_indisponibilidade_colaborador" in globals()
+        else None
+    )
     if indisp:
         return False, (
             f"está indisponível ({indisp.get('motivo', 'Indisponível')}) de "
@@ -1918,8 +1922,110 @@ def buscar_colaboradores():
     except Exception: 
         return []
 
-obras = buscar_obras()
-colaboradores = buscar_colaboradores()
+# --- INDISPONIBILIDADES / FÉRIAS / ATESTADOS ---
+INDISP_UNIDADE = "__APROAR_INDISPONIBILIDADE__"
+INDISP_PREFIX = "APROAR_INDISP|"
+
+
+def eh_registro_indisponibilidade(obra):
+    return bool(obra) and (
+        str(obra.get("unidade") or "") == INDISP_UNIDADE
+        or str(obra.get("nome") or "").startswith(INDISP_PREFIX)
+    )
+
+
+def decodificar_indisponibilidade(obra):
+    if not eh_registro_indisponibilidade(obra):
+        return None
+    try:
+        bruto = str(obra.get("nome") or "")[len(INDISP_PREFIX):]
+        dados = json.loads(bruto)
+        if not isinstance(dados, dict):
+            return None
+        dados["id"] = obra.get("id")
+        return dados
+    except Exception:
+        return None
+
+
+def listar_indisponibilidades():
+    saida = []
+    for item in obras_todas:
+        dados = decodificar_indisponibilidade(item)
+        if dados:
+            saida.append(dados)
+    return saida
+
+
+def obter_colaborador_por_id(colaborador_id):
+    """Localiza o colaborador mesmo quando o Neon devolve UUID e o JSON guarda string."""
+    alvo = str(colaborador_id or "").strip()
+    if not alvo:
+        return {}
+
+    direto = dict_colaboradores.get(colaborador_id) if "dict_colaboradores" in globals() else None
+    if direto:
+        return direto
+
+    for colab in colaboradores if "colaboradores" in globals() else []:
+        if str(colab.get("id") or "").strip() == alvo:
+            return colab
+    return {}
+
+
+def obter_indisponibilidade_colaborador(colaborador_id, data_ref):
+    if isinstance(data_ref, datetime.datetime):
+        data_ref = data_ref.date()
+    alvo = str(colaborador_id or "").strip()
+    for item in listar_indisponibilidades():
+        if str(item.get("colaborador_id") or "").strip() != alvo:
+            continue
+        try:
+            ini = datetime.date.fromisoformat(str(item.get("inicio")))
+            fim = datetime.date.fromisoformat(str(item.get("fim")))
+        except Exception:
+            continue
+        if ini <= data_ref <= fim:
+            return item
+    return None
+
+
+def salvar_indisponibilidade(colaborador_id, motivo, inicio, fim, observacao=""):
+    if fim < inicio:
+        return False, "A data final não pode ser anterior à data inicial."
+    colab_ref = obter_colaborador_por_id(colaborador_id)
+    dados = {
+        "colaborador_id": str(colaborador_id),
+        "colaborador_nome": str(colab_ref.get("nome") or "").strip(),
+        "motivo": str(motivo),
+        "inicio": inicio.isoformat(),
+        "fim": fim.isoformat(),
+        "observacao": str(observacao or "").strip(),
+        "criado_em": agora_aproar().isoformat(),
+    }
+    try:
+        supabase.table("obras").insert({
+            "unidade": INDISP_UNIDADE,
+            "nome": INDISP_PREFIX + json.dumps(dados, ensure_ascii=False, separators=(",", ":")),
+        }).execute()
+        limpar_cache_operacional()
+        return True, "Indisponibilidade registrada."
+    except Exception as e:
+        return False, f"Não foi possível registrar a indisponibilidade: {e}"
+
+
+def excluir_indisponibilidade(registro_id):
+    try:
+        supabase.table("obras").delete().eq("id", registro_id).execute()
+        limpar_cache_operacional()
+        return True
+    except Exception:
+        return False
+
+
+obras_todas = buscar_obras() or []
+obras = [o for o in obras_todas if not eh_registro_indisponibilidade(o)]
+colaboradores = buscar_colaboradores() or []
 
 dict_colaboradores = {c['id']: c for c in colaboradores} if colaboradores else {}
 dict_obras = {o['id']: o for o in obras} if obras else {}
@@ -3490,14 +3596,17 @@ elif modo_campo:
                     unid_exist = obra_exist.get("unidade", "-")
                     if turnos_se_sobrepoem(t_exist, turno_conv_campo):
                         tem_sobreposicao = True
-                        sufixos.append(f"🚫 {t_exist} - {eng_exist} / {unid_exist}")
-                    else:
-                        sufixos.append(f"🟡 já {t_exist} - {eng_exist} / {unid_exist}")
+                    # Todos continuam selecionáveis. A validação real só ocorre ao confirmar.
+                    sufixos.append(f"já {t_exist} - {eng_exist} / {unid_exist}")
 
                 status_aloc = f" — {' | '.join(sufixos)}" if sufixos else ""
                 label = f"{c['nome']}  ({c.get('funcao', '-')}){status_aloc}"
                 mapa_colab_opcoes[label] = cid
 
+            st.caption(
+                "Todos os colaboradores continuam selecionáveis. Se houver sobreposição de turno, "
+                "a confirmação será bloqueada e o conflito ficará registrado para o Paulo."
+            )
             equipe_selecionada = st.multiselect(
                 "Selecionar colaboradores",
                 list(mapa_colab_opcoes.keys()),
@@ -3935,14 +4044,17 @@ else:
                         eng_exist = str(aloc.get("engenheiro") or "N/A")
                         obra_exist = dict_obras.get(aloc.get("obra_id"), {})
                         unid_exist = obra_exist.get("unidade", "-")
-                        if turnos_se_sobrepoem(t_exist, turno_conv_adm):
-                            sufixos.append(f"🚫 {t_exist} - {eng_exist} / {unid_exist}")
-                        else:
-                            sufixos.append(f"🟡 já {t_exist} - {eng_exist} / {unid_exist}")
+                        # Mantém todos os colaboradores selecionáveis. Se houver sobreposição,
+                        # a confirmação será bloqueada e o conflito será enviado ao Paulo.
+                        sufixos.append(f"já {t_exist} - {eng_exist} / {unid_exist}")
 
                     status_aloc = f" — {' | '.join(sufixos)}" if sufixos else ""
                     mapa_colab_adm[f"{c['nome']}  ({c.get('funcao','-')}){status_aloc}"] = cid
 
+                st.caption(
+                    "Os nomes já convocados continuam liberados para seleção. O sistema só bloqueia "
+                    "na confirmação quando os turnos se sobrepõem, registrando o conflito para o Paulo."
+                )
                 equipe_selecionada = st.multiselect(
                     "Buscar ou Selecionar Colaboradores Cadastrados:",
                     list(mapa_colab_adm.keys()),
