@@ -1099,6 +1099,7 @@ def gerar_excel_colaboradores(lista_colaboradores):
     return buffer.getvalue()
 
 def buscar_convocacao_existente(colaborador_id, data_convocacao):
+    """Retorna todas as alocações do colaborador naquela data."""
     try:
         return (
             supabase.table("convocacoes")
@@ -1110,20 +1111,144 @@ def buscar_convocacao_existente(colaborador_id, data_convocacao):
     except Exception:
         return []
 
-def registrar_conflito_convocacao(registro_existente, engenheiro_tentativa):
-    """Persiste a tentativa conflitante para o Paulo/Admin, sem criar uma segunda convocação."""
+
+def normalizar_turno_convocacao(turno):
+    """Padroniza os turnos usados na regra de conflito."""
+    t = normalizar(turno or "Integral")
+    mapa = {
+        "INTEGRAL": "Integral",
+        "MANHA": "Manhã",
+        "TARDE": "Tarde",
+        "NOITE": "Noite",
+    }
+    return mapa.get(t, "Integral")
+
+
+def turno_da_convocacao(registro):
+    """Lê o turno salvo na observação da convocação."""
+    try:
+        turno, _ = decompor_observacao_operacional(registro.get("observacao") or "")
+    except Exception:
+        turno = "Integral"
+    return normalizar_turno_convocacao(turno)
+
+
+def turnos_se_sobrepoem(turno_a, turno_b):
+    """
+    Regra operacional:
+    - Integral ocupa o dia inteiro e conflita com qualquer turno.
+    - Manhã conflita com Manhã/Integral.
+    - Tarde conflita com Tarde/Integral.
+    - Noite conflita com Noite/Integral.
+    - Turnos específicos diferentes podem coexistir no mesmo dia.
+    """
+    a = normalizar_turno_convocacao(turno_a)
+    b = normalizar_turno_convocacao(turno_b)
+    if "Integral" in (a, b):
+        return True
+    return a == b
+
+
+def _garantir_multiturno_neon():
+    """
+    No Neon, remove uma eventual restrição UNIQUE antiga em
+    (colaborador_id, data), pois agora o mesmo colaborador pode ter
+    duas alocações na mesma data desde que os turnos não se sobreponham.
+
+    A validação de sobreposição continua sendo feita pela aplicação.
+    """
+    if DB_BACKEND != "NEON" or not hasattr(supabase, "_connect"):
+        return True
+
+    if st.session_state.get("_schema_multiturno_ok"):
+        return True
+
+    try:
+        with supabase._connect() as conn:
+            with conn.cursor() as cur:
+                # Remove constraints UNIQUE exatamente em colaborador_id + data.
+                cur.execute("""
+                    SELECT con.conname,
+                           array_agg(att.attname ORDER BY u.ord) AS cols
+                    FROM pg_constraint con
+                    JOIN unnest(con.conkey) WITH ORDINALITY AS u(attnum, ord) ON TRUE
+                    JOIN pg_attribute att
+                      ON att.attrelid = con.conrelid
+                     AND att.attnum = u.attnum
+                    WHERE con.conrelid = 'convocacoes'::regclass
+                      AND con.contype = 'u'
+                    GROUP BY con.conname
+                """)
+                for row in cur.fetchall() or []:
+                    if isinstance(row, dict):
+                        nome_constraint = row.get("conname")
+                        cols = list(row.get("cols") or [])
+                    else:
+                        nome_constraint, cols = row
+                        cols = list(cols or [])
+                    if len(cols) == 2 and set(cols) == {"colaborador_id", "data"}:
+                        cur.execute(f'ALTER TABLE convocacoes DROP CONSTRAINT IF EXISTS "{nome_constraint}"')
+
+                # Remove índice UNIQUE direto equivalente, mas somente quando
+                # ele NÃO pertence a uma constraint (as constraints já foram tratadas acima).
+                cur.execute("""
+                    SELECT i.relname AS indexname,
+                           pg_get_indexdef(i.oid) AS indexdef
+                    FROM pg_class t
+                    JOIN pg_index ix ON t.oid = ix.indrelid
+                    JOIN pg_class i ON i.oid = ix.indexrelid
+                    LEFT JOIN pg_constraint con ON con.conindid = i.oid
+                    WHERE t.relname = 'convocacoes'
+                      AND ix.indisunique = TRUE
+                      AND con.oid IS NULL
+                """)
+                for row in cur.fetchall() or []:
+                    if isinstance(row, dict):
+                        idx_name = str(row.get("indexname") or "")
+                        idx_def = str(row.get("indexdef") or "")
+                    else:
+                        idx_name, idx_def = str(row[0] or ""), str(row[1] or "")
+                    idx_upper = idx_def.upper()
+                    if (
+                        "COLABORADOR_ID" in idx_upper
+                        and "DATA" in idx_upper
+                        and "OBSERVACAO" not in idx_upper
+                        and not idx_name.endswith("_pkey")
+                    ):
+                        cur.execute(f'DROP INDEX IF EXISTS "{idx_name}"')
+
+                conn.commit()
+
+        st.session_state["_schema_multiturno_ok"] = True
+        return True
+    except Exception as e:
+        st.session_state["_schema_multiturno_erro"] = f"{type(e).__name__}: {str(e)[:250]}"
+        return False
+
+
+def registrar_conflito_convocacao(
+    registro_existente,
+    engenheiro_tentativa,
+    turno_tentativa=None,
+    unidade_tentativa=None,
+):
+    """Persiste somente conflitos de turnos sobrepostos para o Paulo/Admin."""
     try:
         obs_atual = registro_existente.get("observacao") or ""
         meta = obter_metadata_operacional(obs_atual)
         conflitos = list(meta.get("conflitos_convocacao") or [])
         colab_id = registro_existente.get("colaborador_id")
         colab = obter_colaborador_por_id(colab_id) if "obter_colaborador_por_id" in globals() else {}
+        turno_original = turno_da_convocacao(registro_existente)
         conflitos.append({
             "tentativa_por": str(engenheiro_tentativa or "N/A"),
             "engenheiro_original": str(registro_existente.get("engenheiro") or "N/A"),
             "colaborador_id": str(colab_id or ""),
             "colaborador_nome": str((colab or {}).get("nome") or ""),
             "data_convocacao": str(registro_existente.get("data") or ""),
+            "turno_original": turno_original,
+            "turno_tentativa": normalizar_turno_convocacao(turno_tentativa),
+            "unidade_tentativa": str(unidade_tentativa or ""),
             "em": agora_aproar().isoformat(),
             "resolvido": False,
             "paulo_pendente": True,
@@ -1179,7 +1304,15 @@ def listar_conflitos_convocacao_pendentes(dias=90):
 
 
 def inserir_convocacao_segura(obra_id, colaborador_id, data_convocacao, engenheiro, turno):
-    """Bloqueia indisponibilidade/duplicidade e registra conflitos para auditoria."""
+    """
+    Bloqueia apenas indisponibilidade ou sobreposição real de turno.
+
+    Exemplos:
+    - Neto / Manhã + Gustavo / Tarde -> permitido.
+    - Neto / Manhã + Gustavo / Manhã -> conflito.
+    - Neto / Manhã + Gustavo / Integral -> conflito.
+    - Neto / Integral + Gustavo / Tarde -> conflito.
+    """
     indisp = obter_indisponibilidade_colaborador(colaborador_id, data_convocacao)
     if indisp:
         return False, (
@@ -1187,15 +1320,56 @@ def inserir_convocacao_segura(obra_id, colaborador_id, data_convocacao, engenhei
             f"{indisp.get('inicio', '')} a {indisp.get('fim', '')}"
         )
 
-    existente = buscar_convocacao_existente(colaborador_id, data_convocacao)
-    if existente:
-        reg = existente[0]
+    turno_tentativa = normalizar_turno_convocacao(turno)
+    existentes = buscar_convocacao_existente(colaborador_id, data_convocacao)
+
+    conflitos_outro_eng = []
+    duplicidades_mesmo_eng = []
+
+    for reg in existentes:
+        turno_existente = turno_da_convocacao(reg)
+        if not turnos_se_sobrepoem(turno_existente, turno_tentativa):
+            # Ex.: já está de manhã, mas a nova convocação é à tarde.
+            continue
+
         eng_atual = str(reg.get("engenheiro") or "N/A")
-        if normalizar(eng_atual) != normalizar(engenheiro):
-            registrado = registrar_conflito_convocacao(reg, engenheiro)
+        if normalizar(eng_atual) == normalizar(engenheiro):
+            duplicidades_mesmo_eng.append((reg, turno_existente))
+        else:
+            conflitos_outro_eng.append((reg, turno_existente, eng_atual))
+
+    # Se houver conflito com outro supervisor, bloqueia e manda para o Paulo.
+    if conflitos_outro_eng:
+        mensagens = []
+        obra_tentativa = dict_obras.get(obra_id, {}) if "dict_obras" in globals() else {}
+        unidade_tentativa = obra_tentativa.get("unidade", "")
+
+        for reg, turno_existente, eng_atual in conflitos_outro_eng:
+            registrado = registrar_conflito_convocacao(
+                reg,
+                engenheiro,
+                turno_tentativa=turno_tentativa,
+                unidade_tentativa=unidade_tentativa,
+            )
             complemento = " O conflito foi registrado para conferência do Paulo." if registrado else ""
-            return False, f"já foi convocado(a) por {eng_atual} para esta data.{complemento}"
-        return False, f"já estava convocado(a) por você para esta data"
+            mensagens.append(
+                f"já foi convocado(a) por {eng_atual} no turno {turno_existente}; "
+                f"a tentativa em {turno_tentativa} se sobrepõe.{complemento}"
+            )
+
+        return False, " ".join(mensagens)
+
+    # Mesmo engenheiro também não deve duplicar um turno que se sobrepõe.
+    if duplicidades_mesmo_eng:
+        turnos_existentes = ", ".join(sorted({t for _, t in duplicidades_mesmo_eng}))
+        return False, (
+            f"já estava convocado(a) por você em turno que se sobrepõe "
+            f"({turnos_existentes})"
+        )
+
+    # Se chegou aqui, pode haver outro registro na mesma data, mas em turno compatível.
+    # No Neon removemos a restrição antiga por data, caso ela exista.
+    _garantir_multiturno_neon()
 
     agora = agora_aproar()
     meta = {
@@ -1205,6 +1379,7 @@ def inserir_convocacao_segura(obra_id, colaborador_id, data_convocacao, engenhei
             agora.hour >= 16 and data_convocacao == proximo_dia_util(agora.date())
         ),
     }
+
     try:
         supabase.table("convocacoes").insert({
             "obra_id": obra_id,
@@ -1213,10 +1388,20 @@ def inserir_convocacao_segura(obra_id, colaborador_id, data_convocacao, engenhei
             "engenheiro": engenheiro,
             "status": "Presente (Integral)",
             "valor_extra": 0,
-            "observacao": montar_observacao_operacional(turno, "", meta)
+            "observacao": montar_observacao_operacional(turno_tentativa, "", meta)
         }).execute()
-        return True, "convocado(a) com sucesso"
-    except Exception:
+        limpar_cache_operacional()
+        return True, f"convocado(a) com sucesso no turno {turno_tentativa}"
+
+    except Exception as e:
+        detalhe = str(e)
+        if DB_BACKEND == "NEON" and "unique" in detalhe.lower():
+            erro_schema = st.session_state.get("_schema_multiturno_erro", "")
+            complemento = f" Diagnóstico: {erro_schema}" if erro_schema else ""
+            return False, (
+                "o turno é compatível, mas o banco ainda está restringindo duas alocações "
+                f"na mesma data.{complemento}"
+            )
         return False, "não pôde ser convocado(a); verifique os dados e tente novamente"
 
 
@@ -1756,186 +1941,41 @@ UNIDADES_APROAR = [
 
 # --- FUNÇÃO AUXILIAR PARA RENDERIZAR A ABA DE DISPONIBILIDADE ---
 def render_aba_disponibilidade(key_suffix=""):
-    st.markdown("### 👥 DISPONIBILIDADE DE EQUIPE POR FUNÇÃO")
-    st.write("Consulte quem já está convocado e quem está disponível para a data selecionada.")
-    
-    data_disp = st.date_input("Data de referência:", value=datetime.date.today() + datetime.timedelta(days=1), format="DD/MM/YYYY", key=f"data_disp_{key_suffix}")
-    
-    try:
-        convs_disp = supabase.table("convocacoes").select("*").eq("data", data_disp.isoformat()).execute().data
-    except:
-        convs_disp = []
-        
-    ids_ocupados = {c['colaborador_id'] for c in convs_disp}
-    funcoes = sorted(list(set([c['funcao'] for c in colaboradores])))
-    
-    if not funcoes:
-        st.info("Nenhum colaborador cadastrado.")
-        return
-
-    st.markdown("---")
-    for func in funcoes:
-        with st.container(border=True):
-            st.markdown(f"#### 🔹 {func.upper()}")
-            colabs_func = [c for c in colaboradores if c['funcao'] == func]
-            ocupados_func = [c for c in colabs_func if c['id'] in ids_ocupados]
-            disponiveis_func = [c for c in colabs_func if c['id'] not in ids_ocupados]
-            
-            c1, c2 = st.columns(2)
-            with c1:
-                st.markdown(f"**🔴 CONVOCADOS ({len(ocupados_func)})**")
-                if ocupados_func:
-                    for oc in ocupados_func:
-                        conv_info = next((item for item in convs_disp if item['colaborador_id'] == oc['id']), None)
-                        obra_nome = "Obra"
-                        eng_resp = ""
-                        if conv_info:
-                            ob_inf = dict_obras.get(conv_info['obra_id'], {})
-                            obra_nome = f"{ob_inf.get('unidade','')} - {ob_inf.get('nome','')}"
-                            eng_resp = f" (Eng: {conv_info.get('engenheiro', 'N/A')})"
-                        st.markdown(f"• {oc['nome']} <br><small style='color:#94A3B8;'>({obra_nome}{eng_resp})</small>", unsafe_allow_html=True)
-                else:
-                    st.caption("Nenhum.")
-                    
-            with c2:
-                st.markdown(f"**🟢 DISPONÍVEIS ({len(disponiveis_func)})**")
-                if disponiveis_func:
-                    for disp in disponiveis_func:
-                        st.markdown(f"• {disp['nome']}")
-                else:
-                    st.caption("Nenhum disponível.")
-
-
-
-
-# --- MELHORIAS OPERACIONAIS / RAMON ---
-INDISP_UNIDADE = "__APROAR_INDISPONIBILIDADE__"
-INDISP_PREFIX = "APROAR_INDISP|"
-
-
-def eh_registro_indisponibilidade(obra):
-    return bool(obra) and (
-        str(obra.get("unidade") or "") == INDISP_UNIDADE
-        or str(obra.get("nome") or "").startswith(INDISP_PREFIX)
-    )
-
-
-def decodificar_indisponibilidade(obra):
-    if not eh_registro_indisponibilidade(obra):
-        return None
-    try:
-        bruto = str(obra.get("nome") or "")[len(INDISP_PREFIX):]
-        dados = json.loads(bruto)
-        if not isinstance(dados, dict):
-            return None
-        dados["id"] = obra.get("id")
-        return dados
-    except Exception:
-        return None
-
-
-def listar_indisponibilidades():
-    saida = []
-    for item in obras_todas:
-        dados = decodificar_indisponibilidade(item)
-        if dados:
-            saida.append(dados)
-    return saida
-
-
-def obter_colaborador_por_id(colaborador_id):
-    """Localiza colaborador mesmo quando Neon retorna UUID e o JSON guarda o id como texto."""
-    alvo = str(colaborador_id or "").strip()
-    if not alvo:
-        return {}
-
-    # Tentativa direta para bancos que retornam string/int no mesmo tipo.
-    direto = dict_colaboradores.get(colaborador_id)
-    if direto:
-        return direto
-
-    # Neon/psycopg costuma devolver UUID; indisponibilidade é JSON e guarda string.
-    for colab in colaboradores:
-        if str(colab.get("id") or "").strip() == alvo:
-            return colab
-    return {}
-
-
-def obter_indisponibilidade_colaborador(colaborador_id, data_ref):
-    if isinstance(data_ref, datetime.datetime):
-        data_ref = data_ref.date()
-    for item in listar_indisponibilidades():
-        if str(item.get("colaborador_id")) != str(colaborador_id):
-            continue
-        try:
-            ini = datetime.date.fromisoformat(str(item.get("inicio")))
-            fim = datetime.date.fromisoformat(str(item.get("fim")))
-        except Exception:
-            continue
-        if ini <= data_ref <= fim:
-            return item
-    return None
-
-
-def salvar_indisponibilidade(colaborador_id, motivo, inicio, fim, observacao=""):
-    if fim < inicio:
-        return False, "A data final não pode ser anterior à data inicial."
-    colab_ref = obter_colaborador_por_id(colaborador_id)
-    dados = {
-        "colaborador_id": str(colaborador_id),
-        "colaborador_nome": str(colab_ref.get("nome") or "").strip(),
-        "motivo": str(motivo),
-        "inicio": inicio.isoformat(),
-        "fim": fim.isoformat(),
-        "observacao": str(observacao or "").strip(),
-        "criado_em": agora_aproar().isoformat(),
-    }
-    try:
-        supabase.table("obras").insert({
-            "unidade": INDISP_UNIDADE,
-            "nome": INDISP_PREFIX + json.dumps(dados, ensure_ascii=False, separators=(",", ":")),
-        }).execute()
-        limpar_cache_operacional()
-        return True, "Indisponibilidade registrada."
-    except Exception as e:
-        return False, f"Não foi possível registrar a indisponibilidade: {e}"
-
-
-def excluir_indisponibilidade(registro_id):
-    try:
-        supabase.table("obras").delete().eq("id", registro_id).execute()
-        limpar_cache_operacional()
-        return True
-    except Exception:
-        return False
-
-
-obras_todas = buscar_obras() or []
-obras = [o for o in obras_todas if not eh_registro_indisponibilidade(o)]
-colaboradores = buscar_colaboradores() or []
-
-dict_colaboradores = {c['id']: c for c in colaboradores} if colaboradores else {}
-dict_obras = {o['id']: o for o in obras} if obras else {}
-
-ENGENHEIROS = ["EDUARDO", "GABRIEL", "GUSTAVO", "JOEL", "NETO", "PAULO", "SOARES", "VICTOR"]
-
-# --- FUNÇÃO AUXILIAR PARA RENDERIZAR A ABA DE DISPONIBILIDADE ---
-def render_aba_disponibilidade(key_suffix=""):
     st.markdown("### 👥 Disponibilidade da equipe")
-    st.caption("Convocados, indisponíveis (férias/atestados/afastamentos) e pessoas livres para a data escolhida.")
-
-    data_disp = st.date_input(
-        "Data de referência:",
-        value=proximo_dia_util(agora_aproar().date()),
-        format="DD/MM/YYYY",
-        key=f"data_disp_{key_suffix}",
+    st.caption(
+        "A disponibilidade agora considera o turno. Quem está convocado de manhã pode continuar "
+        "disponível à tarde, desde que não esteja integral ou indisponível."
     )
+
+    cdata, cturno = st.columns(2)
+    with cdata:
+        data_disp = st.date_input(
+            "Data de referência:",
+            value=proximo_dia_util(agora_aproar().date()),
+            format="DD/MM/YYYY",
+            key=f"data_disp_{key_suffix}",
+        )
+    with cturno:
+        turno_disp = st.selectbox(
+            "Turno para consultar:",
+            ["Integral", "Manhã", "Tarde", "Noite"],
+            key=f"turno_disp_{key_suffix}",
+        )
+
     try:
-        convs_disp = supabase.table("convocacoes").select("*").eq("data", data_disp.isoformat()).execute().data or []
+        convs_disp = (
+            supabase.table("convocacoes")
+            .select("*")
+            .eq("data", data_disp.isoformat())
+            .execute().data or []
+        )
     except Exception:
         convs_disp = []
 
-    ids_convocados = {str(c.get("colaborador_id")) for c in convs_disp}
+    por_colaborador = {}
+    for conv in convs_disp:
+        por_colaborador.setdefault(str(conv.get("colaborador_id")), []).append(conv)
+
     indisponiveis_map = {}
     for c in colaboradores:
         ind = obter_indisponibilidade_colaborador(c.get("id"), data_disp)
@@ -1949,34 +1989,72 @@ def render_aba_disponibilidade(key_suffix=""):
 
     for func in funcoes:
         colabs_func = [c for c in colaboradores if str(c.get("funcao") or "INDEFINIDA") == func]
-        convocados = [c for c in colabs_func if str(c.get("id")) in ids_convocados]
-        indisponiveis = [c for c in colabs_func if str(c.get("id")) not in ids_convocados and str(c.get("id")) in indisponiveis_map]
-        disponiveis = [c for c in colabs_func if str(c.get("id")) not in ids_convocados and str(c.get("id")) not in indisponiveis_map]
+
+        ocupados = []
+        indisponiveis = []
+        disponiveis = []
+
+        for colab in colabs_func:
+            cid = str(colab.get("id"))
+            if cid in indisponiveis_map:
+                indisponiveis.append(colab)
+                continue
+
+            alocacoes = por_colaborador.get(cid, [])
+            sobrepostas = [
+                conv for conv in alocacoes
+                if turnos_se_sobrepoem(turno_da_convocacao(conv), turno_disp)
+            ]
+
+            if sobrepostas:
+                ocupados.append((colab, sobrepostas, alocacoes))
+            else:
+                disponiveis.append((colab, alocacoes))
 
         with st.container(border=True):
             st.markdown(f"#### {func.upper()}")
             c1, c2, c3 = st.columns(3)
+
             with c1:
-                st.markdown(f"**🔵 CONVOCADOS ({len(convocados)})**")
-                for oc in convocados:
-                    conv = next((x for x in convs_disp if str(x.get("colaborador_id")) == str(oc.get("id"))), None)
-                    ob = dict_obras.get((conv or {}).get("obra_id"), {})
-                    st.markdown(f"• **{oc.get('nome','-')}**")
-                    st.caption(f"{ob.get('unidade','-')} • Eng. {(conv or {}).get('engenheiro','-')}")
-                if not convocados:
+                st.markdown(f"**🔵 OCUPADOS EM {turno_disp.upper()} ({len(ocupados)})**")
+                for colab, sobrepostas, _ in ocupados:
+                    st.markdown(f"• **{colab.get('nome','-')}**")
+                    for conv in sobrepostas:
+                        ob = dict_obras.get(conv.get("obra_id"), {})
+                        turno_existente = turno_da_convocacao(conv)
+                        st.caption(
+                            f"{turno_existente} • {ob.get('unidade','-')} • "
+                            f"Eng. {conv.get('engenheiro','-')}"
+                        )
+                if not ocupados:
                     st.caption("Nenhum.")
+
             with c2:
                 st.markdown(f"**🔴 INDISPONÍVEIS ({len(indisponiveis)})**")
-                for oc in indisponiveis:
-                    ind = indisponiveis_map.get(str(oc.get("id")), {})
-                    st.markdown(f"• **{oc.get('nome','-')}**")
-                    st.caption(f"{ind.get('motivo','Indisponível')} • {ind.get('inicio','')} a {ind.get('fim','')}")
+                for colab in indisponiveis:
+                    ind = indisponiveis_map.get(str(colab.get("id")), {})
+                    st.markdown(f"• **{colab.get('nome','-')}**")
+                    st.caption(
+                        f"{ind.get('motivo','Indisponível')} • "
+                        f"{ind.get('inicio','')} a {ind.get('fim','')}"
+                    )
                 if not indisponiveis:
                     st.caption("Nenhum.")
+
             with c3:
-                st.markdown(f"**🟢 DISPONÍVEIS ({len(disponiveis)})**")
-                for oc in disponiveis:
-                    st.markdown(f"• {oc.get('nome','-')}")
+                st.markdown(f"**🟢 DISPONÍVEIS EM {turno_disp.upper()} ({len(disponiveis)})**")
+                for colab, outras_alocacoes in disponiveis:
+                    st.markdown(f"• **{colab.get('nome','-')}**")
+                    # Mostra ocupações em outros turnos, sem tratar como conflito.
+                    if outras_alocacoes:
+                        detalhes = []
+                        for conv in outras_alocacoes:
+                            ob = dict_obras.get(conv.get("obra_id"), {})
+                            detalhes.append(
+                                f"{turno_da_convocacao(conv)}: {ob.get('unidade','-')} "
+                                f"(Eng. {conv.get('engenheiro','-')})"
+                            )
+                        st.caption("Já alocado em outro turno: " + " • ".join(detalhes))
                 if not disponiveis:
                     st.caption("Nenhum.")
 
@@ -3383,7 +3461,43 @@ elif modo_campo:
             filtro_funcao = st.selectbox("Filtrar por função", ["TODAS"] + funcoes_disponiveis, key="f_c_sel_campo_novo")
             colabs_filtrados = [c for c in colaboradores if filtro_funcao == "TODAS" or c.get("funcao") == filtro_funcao]
 
-            mapa_colab_opcoes = {f"{c['nome']}  ({c.get('funcao', '-')})": c["id"] for c in colabs_filtrados}
+            # Mostra no próprio seletor se a pessoa já está ocupada em outro turno.
+            try:
+                convs_data_todos = (
+                    supabase.table("convocacoes")
+                    .select("*")
+                    .eq("data", data_conv_auto.isoformat())
+                    .execute().data or []
+                )
+            except Exception:
+                convs_data_todos = []
+
+            convs_por_colab = {}
+            for conv_exist in convs_data_todos:
+                convs_por_colab.setdefault(str(conv_exist.get("colaborador_id")), []).append(conv_exist)
+
+            mapa_colab_opcoes = {}
+            for c in colabs_filtrados:
+                cid = c["id"]
+                alocacoes = convs_por_colab.get(str(cid), [])
+                sufixos = []
+                tem_sobreposicao = False
+
+                for aloc in alocacoes:
+                    t_exist = turno_da_convocacao(aloc)
+                    eng_exist = str(aloc.get("engenheiro") or "N/A")
+                    obra_exist = dict_obras.get(aloc.get("obra_id"), {})
+                    unid_exist = obra_exist.get("unidade", "-")
+                    if turnos_se_sobrepoem(t_exist, turno_conv_campo):
+                        tem_sobreposicao = True
+                        sufixos.append(f"🚫 {t_exist} - {eng_exist} / {unid_exist}")
+                    else:
+                        sufixos.append(f"🟡 já {t_exist} - {eng_exist} / {unid_exist}")
+
+                status_aloc = f" — {' | '.join(sufixos)}" if sufixos else ""
+                label = f"{c['nome']}  ({c.get('funcao', '-')}){status_aloc}"
+                mapa_colab_opcoes[label] = cid
+
             equipe_selecionada = st.multiselect(
                 "Selecionar colaboradores",
                 list(mapa_colab_opcoes.keys()),
@@ -3702,7 +3816,7 @@ else:
             st.markdown("### 🚨 PAULO — conflitos de convocação")
             st.error(
                 f"Há **{qtd_conflitos} conflito(s) pendente(s)**: dois supervisores tentaram convocar "
-                "o mesmo colaborador para a mesma data. A segunda convocação foi bloqueada."
+                "o mesmo colaborador em turnos que se sobrepõem. A segunda convocação foi bloqueada."
             )
             if st.button("ABRIR FILA DE CONFLITOS", type="primary", key="abrir_conflitos_home"):
                 _ir_menu_admin("🚨 CONFLITOS")
@@ -3718,8 +3832,8 @@ else:
     elif menu_escolhido == "🚨 CONFLITOS":
         st.markdown("## 🚨 Conflitos de convocação")
         st.caption(
-            "Fila para conferência do Paulo. Quando dois supervisores tentam convocar a mesma pessoa "
-            "para a mesma data, a segunda tentativa é bloqueada e fica registrada aqui."
+            "Fila para conferência do Paulo. Só entra aqui quando dois supervisores tentam convocar "
+            "a mesma pessoa em turnos que se sobrepõem. Manhã + Tarde, por exemplo, é permitido."
         )
 
         conflitos_pendentes = listar_conflitos_convocacao_pendentes(90)
@@ -3744,9 +3858,14 @@ else:
                     for conflito in pend_conf:
                         instante = str(conflito.get("em") or "")
                         instante_fmt = instante[:16].replace("T", " ") if instante else "horário não registrado"
+                        turno_original = conflito.get("turno_original") or turno_da_convocacao(reg)
+                        turno_tentativa = conflito.get("turno_tentativa") or "Integral"
+                        unidade_tentativa = conflito.get("unidade_tentativa") or ""
+                        detalhe_unidade = f" • Unidade tentada: {unidade_tentativa}" if unidade_tentativa else ""
                         st.warning(
-                            f"⚠️ Tentativa posterior por **{conflito.get('tentativa_por','N/A')}** "
-                            f"em {instante_fmt}. A duplicidade foi bloqueada."
+                            f"⚠️ **{eng_original}** já tinha o colaborador em **{turno_original}**. "
+                            f"**{conflito.get('tentativa_por','N/A')}** tentou **{turno_tentativa}** "
+                            f"em {instante_fmt}{detalhe_unidade}. A sobreposição foi bloqueada."
                         )
 
                     if st.button(
@@ -3792,7 +3911,38 @@ else:
                 else:
                     colabs_filtrados_adm = colaboradores
 
-                mapa_colab_adm = {f"{c['nome']}  ({c.get('funcao','-')})": c['id'] for c in colabs_filtrados_adm}
+                try:
+                    convs_data_adm = (
+                        supabase.table("convocacoes")
+                        .select("*")
+                        .eq("data", data_conv_auto.isoformat())
+                        .execute().data or []
+                    )
+                except Exception:
+                    convs_data_adm = []
+
+                convs_por_colab_adm = {}
+                for conv_exist in convs_data_adm:
+                    convs_por_colab_adm.setdefault(str(conv_exist.get("colaborador_id")), []).append(conv_exist)
+
+                mapa_colab_adm = {}
+                for c in colabs_filtrados_adm:
+                    cid = c["id"]
+                    alocacoes = convs_por_colab_adm.get(str(cid), [])
+                    sufixos = []
+                    for aloc in alocacoes:
+                        t_exist = turno_da_convocacao(aloc)
+                        eng_exist = str(aloc.get("engenheiro") or "N/A")
+                        obra_exist = dict_obras.get(aloc.get("obra_id"), {})
+                        unid_exist = obra_exist.get("unidade", "-")
+                        if turnos_se_sobrepoem(t_exist, turno_conv_adm):
+                            sufixos.append(f"🚫 {t_exist} - {eng_exist} / {unid_exist}")
+                        else:
+                            sufixos.append(f"🟡 já {t_exist} - {eng_exist} / {unid_exist}")
+
+                    status_aloc = f" — {' | '.join(sufixos)}" if sufixos else ""
+                    mapa_colab_adm[f"{c['nome']}  ({c.get('funcao','-')}){status_aloc}"] = cid
+
                 equipe_selecionada = st.multiselect(
                     "Buscar ou Selecionar Colaboradores Cadastrados:",
                     list(mapa_colab_adm.keys()),
