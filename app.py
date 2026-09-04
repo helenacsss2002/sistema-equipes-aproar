@@ -1815,6 +1815,24 @@ def listar_indisponibilidades():
     return saida
 
 
+def obter_colaborador_por_id(colaborador_id):
+    """Localiza colaborador mesmo quando Neon retorna UUID e o JSON guarda o id como texto."""
+    alvo = str(colaborador_id or "").strip()
+    if not alvo:
+        return {}
+
+    # Tentativa direta para bancos que retornam string/int no mesmo tipo.
+    direto = dict_colaboradores.get(colaborador_id)
+    if direto:
+        return direto
+
+    # Neon/psycopg costuma devolver UUID; indisponibilidade é JSON e guarda string.
+    for colab in colaboradores:
+        if str(colab.get("id") or "").strip() == alvo:
+            return colab
+    return {}
+
+
 def obter_indisponibilidade_colaborador(colaborador_id, data_ref):
     if isinstance(data_ref, datetime.datetime):
         data_ref = data_ref.date()
@@ -1834,8 +1852,10 @@ def obter_indisponibilidade_colaborador(colaborador_id, data_ref):
 def salvar_indisponibilidade(colaborador_id, motivo, inicio, fim, observacao=""):
     if fim < inicio:
         return False, "A data final não pode ser anterior à data inicial."
+    colab_ref = obter_colaborador_por_id(colaborador_id)
     dados = {
         "colaborador_id": str(colaborador_id),
+        "colaborador_nome": str(colab_ref.get("nome") or "").strip(),
         "motivo": str(motivo),
         "inicio": inicio.isoformat(),
         "fim": fim.isoformat(),
@@ -2676,12 +2696,26 @@ def render_indisponibilidades_admin():
         st.info("Nenhuma indisponibilidade registrada.")
         return
     for item in registros:
-        colab = dict_colaboradores.get(item.get("colaborador_id"), {})
+        colab = obter_colaborador_por_id(item.get("colaborador_id"))
+        nome_colab = (
+            str(colab.get("nome") or "").strip()
+            or str(item.get("colaborador_nome") or "").strip()
+            or "Colaborador não encontrado"
+        )
+        try:
+            inicio_br = datetime.date.fromisoformat(str(item.get("inicio"))).strftime("%d/%m/%Y")
+        except Exception:
+            inicio_br = str(item.get("inicio") or "")
+        try:
+            fim_br = datetime.date.fromisoformat(str(item.get("fim"))).strftime("%d/%m/%Y")
+        except Exception:
+            fim_br = str(item.get("fim") or "")
+
         with st.container(border=True):
             a, b = st.columns([4, 1])
             with a:
-                st.markdown(f"**{colab.get('nome','Colaborador não encontrado')}** — {item.get('motivo','Indisponível')}")
-                st.caption(f"{item.get('inicio','')} a {item.get('fim','')}" + (f" • {item.get('observacao')}" if item.get('observacao') else ""))
+                st.markdown(f"**{nome_colab}** — {item.get('motivo','Indisponível')}")
+                st.caption(f"{inicio_br} a {fim_br}" + (f" • {item.get('observacao')}" if item.get('observacao') else ""))
             with b:
                 if st.button("Excluir", key=f"indisp_del_{item.get('id')}", use_container_width=True):
                     if excluir_indisponibilidade(item.get("id")):
@@ -3038,18 +3072,37 @@ modo_financeiro_solicitado = (
 modo_visualizador_solicitado = "view" in parametros_url or parametros_url.get("modo") in ["visualizador", "view"]
 
 edicao_liberada = _edicao_liberada()
-if not edicao_liberada:
+
+# REGRA DE ACESSO:
+# 1) ?eng é SEMPRE o Portal do Engenheiro e mantém as funções operacionais.
+# 2) ?financeiro é SEMPRE o Portal Financeiro.
+# 3) A URL administrativa normal abre em visualização para quem não informou a senha.
+# 4) A mesma URL administrativa libera o painel completo após a senha de edição.
+# 5) ?view permanece apenas como atalho opcional para consulta, sem interferir no ?eng.
+if modo_campo_solicitado:
+    modo_campo = True
+    modo_financeiro = False
+    modo_visualizador = False
+elif modo_financeiro_solicitado:
+    modo_campo = False
+    modo_financeiro = True
+    modo_visualizador = False
+elif modo_visualizador_solicitado:
+    modo_campo = False
+    modo_financeiro = False
+    modo_visualizador = True
+elif not edicao_liberada:
     modo_campo = False
     modo_financeiro = False
     modo_visualizador = True
 else:
-    modo_campo = modo_campo_solicitado
-    modo_financeiro = modo_financeiro_solicitado
-    modo_visualizador = modo_visualizador_solicitado
+    modo_campo = False
+    modo_financeiro = False
+    modo_visualizador = False
 
 if modo_visualizador:
-    st.markdown("## 👁️ Portal de consulta")
-    st.caption("Sem a senha, o sistema fica somente para consulta. Dashboard, Relatórios e Indicadores permanecem disponíveis.")
+    st.markdown("## 👁️ Painel Administrativo — Visualização")
+    st.caption("Dashboard, Relatórios e Indicadores ficam disponíveis para consulta. Use a senha de edição para liberar o painel administrativo completo.")
     _render_desbloqueio_edicao()
     secao_view = st.radio(
         "Navegação",
@@ -3071,7 +3124,6 @@ elif modo_campo:
     # ==========================================
     st.markdown("## 👷 Portal do Engenheiro")
     st.caption("Planeje a equipe de amanhã, faça o apontamento de hoje e consulte disponibilidade sem sair desta tela.")
-    _logout_disponivel()
 
     def _buscar_convocacoes_campo(engenheiro, data_ref):
         try:
@@ -3123,7 +3175,7 @@ elif modo_campo:
         )
 
     secoes_principais_campo = [
-        "📌 RESUMO", "👥 CONVOCADOS", "👥 DISPONIBILIDADE",
+        "📌 RESUMO", "👥 CONVOCADOS", "👥 DISPONIBILIDADE", "💬 WHATSAPP",
         "🎛️ DASHBOARD", "📊 RELATÓRIOS", "📈 INDICADORES"
     ]
     secoes_ocultas_campo = ["✅ APONTAMENTO", "📋 EQUIPE DE AMANHÃ"]
@@ -3394,7 +3446,43 @@ elif modo_campo:
                             st.warning(aviso)
 
     # --------------------------------------------------------------
-    # DISPONIBILIDADE
+    # WHATSAPP — MENSAGEM A PARTIR DAS CONVOCAÇÕES DO ENGENHEIRO
+    # --------------------------------------------------------------
+    elif secao_campo == "💬 WHATSAPP":
+        st.markdown("### 💬 Mensagem para WhatsApp")
+        st.caption("Gere a divisão das equipes a partir das suas próprias convocações.")
+
+        w1, w2 = st.columns(2)
+        with w1:
+            data_wpp_campo = st.date_input(
+                "Data da divisão",
+                value=amanha_campo,
+                format="DD/MM/YYYY",
+                key="data_wpp_campo_melhorias",
+            )
+        with w2:
+            mostrar_funcao_wpp_campo = st.checkbox(
+                "Mostrar função entre parênteses",
+                value=False,
+                key="mostrar_funcao_wpp_campo_melhorias",
+            )
+
+        convocacoes_wpp_campo = _buscar_convocacoes_campo(engenheiro_campo, data_wpp_campo)
+        if convocacoes_wpp_campo:
+            mensagem_wpp_campo = montar_mensagem_whatsapp(
+                data_wpp_campo,
+                convocacoes_wpp_campo,
+                mostrar_funcao=mostrar_funcao_wpp_campo,
+                aviso_pendentes=False,
+            )
+            st.success(f"{len(convocacoes_wpp_campo)} convocação(ões) encontrada(s) para esta data.")
+            st.caption("Use o botão de copiar do bloco abaixo e cole no WhatsApp.")
+            st.code(mensagem_wpp_campo, language=None, wrap_lines=True)
+        else:
+            st.info("Você ainda não possui convocações nessa data.")
+
+    # --------------------------------------------------------------
+    # CONSULTAS DO ENGENHEIRO
     # --------------------------------------------------------------
     elif secao_campo == "🎛️ DASHBOARD":
         render_dashboard_consulta("campo_dash_melhorias", engenheiro_campo)
@@ -3414,7 +3502,6 @@ elif modo_financeiro:
     # ==========================================
     st.markdown("### 💰 ACESSO FINANCEIRO")
     st.caption("Conferência semanal de extras, faltas e atestados. As extras são fechadas em ciclos de terça-feira a segunda-feira.")
-    _logout_disponivel()
 
     ciclos_fin = listar_ciclos_financeiros(26)
     mapa_ciclos_fin = {c["rotulo"]: c for c in ciclos_fin}
