@@ -12,22 +12,51 @@ import requests
 import openpyxl
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 
-# --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR (WIDE - ESCURO / COMPACTO) ---
+# --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR (CLARO / AZUL) ---
 st.set_page_config(page_title="APROAR - Controle de Presenças", page_icon="👷", layout="wide")
+
+# Paleta principal. Se a identidade visual mudar, basta alterar o azul aqui e no CSS abaixo.
+AZUL_APROAR = "#2563EB"
+AZUL_APROAR_ESCURO = "#1D4ED8"
 
 st.markdown("""
     <style>
-    .stApp {
-        background-color: #0F172A;
-        color: #F8FAFC;
+    :root {
+        --aproar-blue: #2563EB;
+        --aproar-blue-dark: #1D4ED8;
+        --aproar-blue-soft: #EFF6FF;
+        --aproar-bg: #FFFFFF;
+        --aproar-sidebar: #F8FAFC;
+        --aproar-text: #0F172A;
+        --aproar-muted: #64748B;
+        --aproar-border: #E2E8F0;
     }
-    h1, h2, h3, h4, p, label, .stMarkdown, span {
-        color: #F8FAFC !important;
+
+    html, body, [data-testid="stAppViewContainer"], .stApp,
+    [data-testid="stMain"], .main {
+        background-color: var(--aproar-bg) !important;
+        color: var(--aproar-text) !important;
+    }
+
+    [data-testid="stHeader"] {
+        background: rgba(255,255,255,0.96) !important;
+        border-bottom: 1px solid #F1F5F9 !important;
+    }
+
+    h1, h2, h3, h4, h5, h6, p, label,
+    .stMarkdown, .stText, span:not([data-baseweb="tag"] span) {
+        color: var(--aproar-text) !important;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     }
+
+    small, .stCaption, [data-testid="stCaptionContainer"],
+    [data-testid="stCaptionContainer"] p {
+        color: var(--aproar-muted) !important;
+    }
+
     section[data-testid="stSidebar"] {
-        background-color: #1E293B !important;
-        border-right: 1px solid #334155;
+        background-color: var(--aproar-sidebar) !important;
+        border-right: 1px solid var(--aproar-border) !important;
         width: 240px !important;
         min-width: 240px !important;
         padding-top: 15px;
@@ -36,59 +65,123 @@ st.markdown("""
         padding-left: 15px;
         padding-right: 15px;
     }
-    div[data-baseweb="select"] > div, 
-    div[data-baseweb="base-input"] > div, 
+    section[data-testid="stSidebar"] * {
+        color: var(--aproar-text);
+    }
+
+    /* Campos de formulário */
+    div[data-baseweb="select"] > div,
+    div[data-baseweb="base-input"] > div,
     div[data-baseweb="input"] > div,
+    [data-baseweb="textarea"] > div,
     input, textarea, div[role="combobox"] {
-        background-color: #0F172A !important;
-        color: #F8FAFC !important;
-        border-color: #334155 !important;
+        background-color: #FFFFFF !important;
+        color: var(--aproar-text) !important;
+        border-color: #CBD5E1 !important;
         border-radius: 8px !important;
+    }
+    input::placeholder, textarea::placeholder {
+        color: #94A3B8 !important;
     }
     ul[data-baseweb="menu"], div[data-baseweb="popover"] {
-        background-color: #1E293B !important;
-        color: #F8FAFC !important;
+        background-color: #FFFFFF !important;
+        color: var(--aproar-text) !important;
     }
     li[role="option"] {
-        background-color: #1E293B !important;
-        color: #F8FAFC !important;
+        background-color: #FFFFFF !important;
+        color: var(--aproar-text) !important;
     }
-    li[role="option"]:hover {
-        background-color: #334155 !important;
-        color: #60A5FA !important;
+    li[role="option"]:hover, li[role="option"][aria-selected="true"] {
+        background-color: var(--aproar-blue-soft) !important;
+        color: var(--aproar-blue-dark) !important;
     }
+
+    /* Tags do multiselect */
     div[data-baseweb="tag"] {
-        background-color: #2563EB !important;
+        background-color: var(--aproar-blue) !important;
         color: #FFFFFF !important;
     }
-    .stButton > button {
-        background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%) !important;
+    div[data-baseweb="tag"] * { color: #FFFFFF !important; }
+
+    /* Botões */
+    .stButton > button,
+    .stDownloadButton > button,
+    [data-testid="stFormSubmitButton"] > button,
+    [data-testid="stFileUploader"] button {
+        background: var(--aproar-blue) !important;
         color: #FFFFFF !important;
-        border: none !important;
+        border: 1px solid var(--aproar-blue) !important;
         border-radius: 8px !important;
-        font-weight: 600;
-        padding: 0.5rem 1rem;
-        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
-        transition: all 0.3s ease;
-        width: 100%;
+        font-weight: 600 !important;
+        box-shadow: none !important;
+        transition: all 0.18s ease;
     }
-    .stButton > button:hover {
+    .stButton > button *, .stDownloadButton > button *,
+    [data-testid="stFormSubmitButton"] > button *,
+    [data-testid="stFileUploader"] button * {
+        color: #FFFFFF !important;
+    }
+    .stButton > button:hover,
+    .stDownloadButton > button:hover,
+    [data-testid="stFormSubmitButton"] > button:hover,
+    [data-testid="stFileUploader"] button:hover {
+        background: var(--aproar-blue-dark) !important;
+        border-color: var(--aproar-blue-dark) !important;
         transform: translateY(-1px);
-        box-shadow: 0 6px 16px rgba(37, 99, 235, 0.4);
     }
-    div[data-testid="stVerticalBlock"] > div[style*="border"] {
-        background-color: #1E293B !important;
-        border: 1px solid #334155 !important;
+
+    /* Containers e métricas */
+    div[data-testid="stVerticalBlock"] > div[style*="border"],
+    [data-testid="stMetric"],
+    [data-testid="stExpander"] {
+        background-color: #FFFFFF !important;
+        border-color: var(--aproar-border) !important;
         border-radius: 12px !important;
-        padding: 16px;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04) !important;
     }
-    .streamlit-expanderHeader {
-        background-color: #334155 !important;
-        border-radius: 8px;
+    [data-testid="stMetricLabel"] *, [data-testid="stMetricValue"] * {
+        color: var(--aproar-text) !important;
     }
-    hr {
-        border-color: #334155 !important;
+
+    /* Abas */
+    [data-baseweb="tab-list"] {
+        gap: 4px;
+        border-bottom: 1px solid var(--aproar-border);
     }
+    [data-baseweb="tab"] {
+        color: #475569 !important;
+        background: transparent !important;
+    }
+    [data-baseweb="tab"][aria-selected="true"] {
+        color: var(--aproar-blue) !important;
+        font-weight: 700 !important;
+    }
+    [data-baseweb="tab-highlight"] {
+        background-color: var(--aproar-blue) !important;
+    }
+
+    /* Tabelas / editor */
+    [data-testid="stDataFrame"], [data-testid="stDataEditor"] {
+        border: 1px solid var(--aproar-border) !important;
+        border-radius: 10px !important;
+        overflow: hidden;
+    }
+
+    /* Upload */
+    [data-testid="stFileUploaderDropzone"] {
+        background: #F8FAFC !important;
+        border-color: #CBD5E1 !important;
+    }
+    [data-testid="stFileUploaderDropzone"] * {
+        color: var(--aproar-text) !important;
+    }
+
+    /* Alertas continuam coloridos, mas com texto legível */
+    [data-testid="stAlert"] p, [data-testid="stAlert"] span {
+        color: inherit !important;
+    }
+
+    hr { border-color: var(--aproar-border) !important; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -499,21 +592,137 @@ def inserir_convocacao_segura(obra_id, colaborador_id, data_convocacao, engenhei
         return False, "não pôde ser convocado(a); verifique se já existe uma convocação ou se o cadastro está válido"
 
 # --- SINCRONIZAÇÃO COM TRELLO (MÊS VIGENTE OU SELEÇÃO MANUAL) ---
-def obter_listas_trello():
-    url_trello = "https://trello.com/b/TX8hGvmI.json"
+TRELLO_BOARD_SHORTLINK = "TX8hGvmI"
+TRELLO_BOARD_SLUG = "or%C3%A7amentos"
+
+
+def _ler_secret_trello(*nomes, default=""):
+    """Aceita secrets planos ou uma seção [trello], sem exigir mudança imediata no deploy."""
+    for nome in nomes:
+        try:
+            valor = st.secrets.get(nome, "")
+            if valor:
+                return str(valor).strip()
+        except Exception:
+            pass
+
     try:
-        resp = requests.get(url_trello, timeout=10)
-        if resp.status_code == 200:
-            data = resp.json()
-            return data.get('lists', []), data.get('cards', [])
+        bloco = st.secrets.get("trello", {})
+        for nome in nomes:
+            chaves = [nome, nome.lower()]
+            if nome.startswith("TRELLO_"):
+                chaves.append(nome.replace("TRELLO_", "").lower())
+            for chave in chaves:
+                try:
+                    valor = bloco.get(chave, "")
+                except Exception:
+                    valor = ""
+                if valor:
+                    return str(valor).strip()
+    except Exception:
+        pass
+    return default
+
+
+def _normalizar_payload_trello(data):
+    if not isinstance(data, dict):
+        return [], []
+    listas = data.get("lists") or []
+    cards = data.get("cards") or []
+    if not isinstance(listas, list):
+        listas = []
+    if not isinstance(cards, list):
+        cards = []
+    return listas, cards
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def obter_listas_trello():
+    """
+    Lê o quadro ORÇAMENTOS de forma resiliente.
+
+    Ordem de tentativa:
+    1) API oficial do Trello, quando TRELLO_API_KEY estiver configurada;
+    2) export JSON público usando a URL completa do quadro;
+    3) export JSON público pelo shortlink antigo.
+
+    O quadro continua público, mas o endpoint .json pode variar/bloquear requisições
+    automáticas. Por isso não dependemos mais de uma única URL.
+    """
+    erros = []
+    shortlink = _ler_secret_trello("TRELLO_BOARD_SHORTLINK", "TRELLO_BOARD_ID", default=TRELLO_BOARD_SHORTLINK)
+    api_key = _ler_secret_trello("TRELLO_API_KEY", "TRELLO_KEY")
+    token = _ler_secret_trello("TRELLO_TOKEN", "TRELLO_API_TOKEN")
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (compatible; AproarControle/1.0)",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+        "Cache-Control": "no-cache",
+    }
+
+    # 1) API oficial - caminho preferencial em produção.
+    if api_key:
+        try:
+            params = {"key": api_key}
+            if token:
+                params["token"] = token
+
+            url_listas = f"https://api.trello.com/1/boards/{shortlink}/lists"
+            params_listas = {**params, "filter": "all", "fields": "id,name,closed"}
+            r_listas = requests.get(url_listas, params=params_listas, headers=headers, timeout=15)
+            r_listas.raise_for_status()
+            listas = r_listas.json()
+
+            url_cards = f"https://api.trello.com/1/boards/{shortlink}/cards"
+            params_cards = {**params, "filter": "all", "fields": "id,name,idList,closed"}
+            r_cards = requests.get(url_cards, params=params_cards, headers=headers, timeout=20)
+            r_cards.raise_for_status()
+            cards = r_cards.json()
+
+            if isinstance(listas, list) and isinstance(cards, list):
+                return listas, cards
+        except Exception as e:
+            erros.append(f"API oficial: {type(e).__name__}: {str(e)[:180]}")
+
+    # 2 e 3) Export público. A URL com slug evita alguns redirects/bloqueios do Trello.
+    urls_publicas = [
+        f"https://trello.com/b/{shortlink}/{TRELLO_BOARD_SLUG}.json",
+        f"https://trello.com/b/{shortlink}.json",
+    ]
+
+    for url in urls_publicas:
+        try:
+            resp = requests.get(url, headers=headers, timeout=20, allow_redirects=True)
+            if resp.status_code == 200:
+                listas, cards = _normalizar_payload_trello(resp.json())
+                # Um quadro pode excepcionalmente estar vazio; basta o payload ter as chaves esperadas.
+                if listas or cards or (isinstance(resp.json(), dict) and ("lists" in resp.json() or "cards" in resp.json())):
+                    return listas, cards
+            erros.append(f"{url}: HTTP {resp.status_code}")
+        except Exception as e:
+            erros.append(f"{url}: {type(e).__name__}: {str(e)[:180]}")
+
+    # O detalhe fica disponível apenas para a interface administrativa, sem derrubar o app.
+    try:
+        st.session_state["trello_ultimo_erro"] = " | ".join(erros[-3:])
     except Exception:
         pass
     return [], []
 
+
 def executar_sincronizacao_trello(id_lista_target=None, id_card_target=None):
     lists, cards = obter_listas_trello()
     if not lists and not cards:
-        return False, "Erro ao acessar o quadro público do Trello."
+        detalhe = ""
+        try:
+            detalhe = st.session_state.get("trello_ultimo_erro", "")
+        except Exception:
+            pass
+        msg = "Não foi possível ler o quadro ORÇAMENTOS do Trello agora."
+        if detalhe:
+            msg += " O acesso público falhou e a API oficial não respondeu."
+        return False, msg
 
     nome_alvo = ""
     cards_execucao = []
@@ -1468,7 +1677,7 @@ else:
         if os.path.exists("logo.png"):
             st.image("logo.png", use_container_width=True)
         else:
-            st.markdown("<h2 style='text-align: center; color: #FFFFFF; letter-spacing: 2px;'>APROAR</h2>", unsafe_allow_html=True)
+            st.markdown("<h2 style='text-align: center; color: #2563EB; letter-spacing: 2px;'>APROAR</h2>", unsafe_allow_html=True)
 
         st.markdown("<p style='text-align: center; font-size: 10px; color: #94A3B8; letter-spacing: 1.5px; margin-top: -5px; margin-bottom: 16px; font-weight: 700;'>GESTÃO DE EQUIPES</p>", unsafe_allow_html=True)
 
@@ -2534,7 +2743,8 @@ else:
                             else:
                                 st.error(me)
                 else:
-                    st.caption("Não foi possível obter as listas do Trello.")
+                    st.warning("Trello temporariamente indisponível. O sistema continuará funcionando com as obras já cadastradas.")
+                    st.caption("Se o problema persistir, configure TRELLO_API_KEY/TRELLO_TOKEN nos Secrets do Streamlit para usar a API oficial.")
 
             st.markdown("#### 🔎 Busca manual para medições retroativas")
             termo_trello = st.text_input(
