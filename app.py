@@ -26,7 +26,7 @@ st.markdown("""
         --aproar-blue-dark: #1D4ED8;
         --aproar-blue-soft: #EFF6FF;
         --aproar-bg: #FFFFFF;
-        --aproar-sidebar: #F8FAFC;
+        --aproar-sidebar: #0F172A;
         --aproar-text: #0F172A;
         --aproar-muted: #64748B;
         --aproar-border: #E2E8F0;
@@ -44,9 +44,16 @@ st.markdown("""
     }
 
     h1, h2, h3, h4, h5, h6, p, label,
-    .stMarkdown, .stText, span:not([data-baseweb="tag"] span) {
+    .stMarkdown, .stText {
         color: var(--aproar-text) !important;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+
+    /* Não sobrescreve a fonte dos ícones internos do Streamlit.
+       Isso evita aparecer texto como _arrow_right no lugar das setas. */
+    .material-symbols-rounded, .material-symbols-outlined,
+    [data-testid="stIconMaterial"] {
+        font-family: "Material Symbols Rounded", "Material Symbols Outlined" !important;
     }
 
     small, .stCaption, [data-testid="stCaptionContainer"],
@@ -55,8 +62,8 @@ st.markdown("""
     }
 
     section[data-testid="stSidebar"] {
-        background-color: var(--aproar-sidebar) !important;
-        border-right: 1px solid var(--aproar-border) !important;
+        background-color: #0F172A !important;
+        border-right: 1px solid #1E293B !important;
         width: 240px !important;
         min-width: 240px !important;
         padding-top: 15px;
@@ -65,8 +72,28 @@ st.markdown("""
         padding-left: 15px;
         padding-right: 15px;
     }
-    section[data-testid="stSidebar"] * {
-        color: var(--aproar-text);
+    section[data-testid="stSidebar"] p,
+    section[data-testid="stSidebar"] label,
+    section[data-testid="stSidebar"] .stMarkdown,
+    section[data-testid="stSidebar"] [data-testid="stCaptionContainer"],
+    section[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p {
+        color: #E2E8F0 !important;
+    }
+    section[data-testid="stSidebar"] hr {
+        border-color: #334155 !important;
+    }
+    section[data-testid="stSidebar"] [data-testid="stImage"] {
+        margin-top: 4px;
+        margin-bottom: 2px;
+    }
+    .aproar-sidebar-section {
+        color: #94A3B8 !important;
+        font-size: 10px !important;
+        line-height: 1.2 !important;
+        letter-spacing: 1.35px !important;
+        font-weight: 800 !important;
+        margin: 17px 2px 7px 2px !important;
+        text-transform: uppercase;
     }
 
     /* Campos de formulário */
@@ -128,6 +155,40 @@ st.markdown("""
         background: var(--aproar-blue-dark) !important;
         border-color: var(--aproar-blue-dark) !important;
         transform: translateY(-1px);
+    }
+
+    /* Navegação lateral: azul Aproar sobre fundo escuro */
+    section[data-testid="stSidebar"] .stButton > button {
+        min-height: 40px !important;
+        margin-bottom: 5px !important;
+        justify-content: flex-start !important;
+        padding-left: 14px !important;
+        background: #2563EB !important;
+        border-color: #2563EB !important;
+        color: #FFFFFF !important;
+    }
+    section[data-testid="stSidebar"] .stButton > button:hover {
+        background: #1D4ED8 !important;
+        border-color: #1D4ED8 !important;
+    }
+    section[data-testid="stSidebar"] .stButton > button * {
+        color: #FFFFFF !important;
+    }
+
+    /* Evita rolagem horizontal criada por componentes largos no modo wide */
+    html, body, [data-testid="stAppViewContainer"], [data-testid="stMain"] {
+        overflow-x: hidden !important;
+    }
+    main .block-container {
+        max-width: 100% !important;
+        padding-left: 2rem !important;
+        padding-right: 2rem !important;
+    }
+    @media (max-width: 900px) {
+        main .block-container {
+            padding-left: 1rem !important;
+            padding-right: 1rem !important;
+        }
     }
 
     /* Containers e métricas */
@@ -1677,22 +1738,22 @@ else:
         if os.path.exists("logo.png"):
             st.image("logo.png", use_container_width=True)
         else:
-            st.markdown("<h2 style='text-align: center; color: #2563EB; letter-spacing: 2px;'>APROAR</h2>", unsafe_allow_html=True)
+            st.markdown("<h2 style='text-align: center; color: #FFFFFF; letter-spacing: 2px;'>APROAR</h2>", unsafe_allow_html=True)
 
         st.markdown("<p style='text-align: center; font-size: 10px; color: #94A3B8; letter-spacing: 1.5px; margin-top: -5px; margin-bottom: 16px; font-weight: 700;'>GESTÃO DE EQUIPES</p>", unsafe_allow_html=True)
 
         st.button("🏠 INÍCIO", key="btn_nav_inicio", use_container_width=True, on_click=_ir_menu_admin, args=("🏠 INÍCIO",))
 
-        with st.expander("🛠️ OPERAÇÃO", expanded=True):
-            for item in ["📋 CONVOCAÇÃO", "✅ APONTAMENTO", "💬 WHATSAPP", "👥 DISPONIBILIDADE"]:
-                st.button(item, key=f"btn_nav_{item}_novo", use_container_width=True, on_click=_ir_menu_admin, args=(item,))
+        st.markdown("<div class='aproar-sidebar-section'>🛠 OPERAÇÃO</div>", unsafe_allow_html=True)
+        for item in ["📋 CONVOCAÇÃO", "✅ APONTAMENTO", "💬 WHATSAPP", "👥 DISPONIBILIDADE"]:
+            st.button(item, key=f"btn_nav_{item}_novo", use_container_width=True, on_click=_ir_menu_admin, args=(item,))
 
-        with st.expander("📊 ANÁLISE E FECHAMENTO", expanded=False):
-            for item in ["🎛️ DASHBOARD", "📊 RELATÓRIOS", "📈 INDICADORES"]:
-                st.button(item, key=f"btn_nav_{item}_novo", use_container_width=True, on_click=_ir_menu_admin, args=(item,))
+        st.markdown("<div class='aproar-sidebar-section'>📊 ANÁLISE E FECHAMENTO</div>", unsafe_allow_html=True)
+        for item in ["🎛️ DASHBOARD", "📊 RELATÓRIOS", "📈 INDICADORES"]:
+            st.button(item, key=f"btn_nav_{item}_novo", use_container_width=True, on_click=_ir_menu_admin, args=(item,))
 
-        with st.expander("⚙️ SISTEMA", expanded=False):
-            st.button("⚙️ CONFIGURAÇÕES", key="btn_nav_config_novo", use_container_width=True, on_click=_ir_menu_admin, args=("⚙️ CONFIGURAÇÕES",))
+        st.markdown("<div class='aproar-sidebar-section'>⚙ SISTEMA</div>", unsafe_allow_html=True)
+        st.button("⚙️ CONFIGURAÇÕES", key="btn_nav_config_novo", use_container_width=True, on_click=_ir_menu_admin, args=("⚙️ CONFIGURAÇÕES",))
 
         st.markdown("---")
         st.caption("APROAR Engenharia © 2026")
