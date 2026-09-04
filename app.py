@@ -3203,7 +3203,7 @@ elif modo_campo:
         )
 
     secoes_principais_campo = [
-        "📌 RESUMO", "👥 CONVOCADOS", "👥 DISPONIBILIDADE", "💬 WHATSAPP"
+        "📌 RESUMO", "👥 CONVOCADOS", "👥 DISPONIBILIDADE"
     ]
     secoes_ocultas_campo = ["✅ APONTAMENTO", "📋 EQUIPE DE AMANHÃ"]
     secoes_validas_campo = secoes_principais_campo + secoes_ocultas_campo
@@ -3471,42 +3471,6 @@ elif modo_campo:
                             )
                         for aviso in avisos:
                             st.warning(aviso)
-
-    # --------------------------------------------------------------
-    # WHATSAPP — MENSAGEM A PARTIR DAS CONVOCAÇÕES DO ENGENHEIRO
-    # --------------------------------------------------------------
-    elif secao_campo == "💬 WHATSAPP":
-        st.markdown("### 💬 Mensagem para WhatsApp")
-        st.caption("Gere a divisão das equipes a partir das suas próprias convocações.")
-
-        w1, w2 = st.columns(2)
-        with w1:
-            data_wpp_campo = st.date_input(
-                "Data da divisão",
-                value=amanha_campo,
-                format="DD/MM/YYYY",
-                key="data_wpp_campo_melhorias",
-            )
-        with w2:
-            mostrar_funcao_wpp_campo = st.checkbox(
-                "Mostrar função entre parênteses",
-                value=False,
-                key="mostrar_funcao_wpp_campo_melhorias",
-            )
-
-        convocacoes_wpp_campo = _buscar_convocacoes_campo(engenheiro_campo, data_wpp_campo)
-        if convocacoes_wpp_campo:
-            mensagem_wpp_campo = montar_mensagem_whatsapp(
-                data_wpp_campo,
-                convocacoes_wpp_campo,
-                mostrar_funcao=mostrar_funcao_wpp_campo,
-                aviso_pendentes=False,
-            )
-            st.success(f"{len(convocacoes_wpp_campo)} convocação(ões) encontrada(s) para esta data.")
-            st.caption("Use o botão de copiar do bloco abaixo e cole no WhatsApp.")
-            st.code(mensagem_wpp_campo, language=None, wrap_lines=True)
-        else:
-            st.info("Você ainda não possui convocações nessa data.")
 
     # --------------------------------------------------------------
     # DISPONIBILIDADE
