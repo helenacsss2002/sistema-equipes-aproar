@@ -1111,17 +1111,25 @@ def buscar_convocacao_existente(colaborador_id, data_convocacao):
         return []
 
 def registrar_conflito_convocacao(registro_existente, engenheiro_tentativa):
-    """Persiste a tentativa conflitante na própria convocação para aparecer ao Paulo/Admin."""
+    """Persiste a tentativa conflitante para o Paulo/Admin, sem criar uma segunda convocação."""
     try:
         obs_atual = registro_existente.get("observacao") or ""
         meta = obter_metadata_operacional(obs_atual)
         conflitos = list(meta.get("conflitos_convocacao") or [])
+        colab_id = registro_existente.get("colaborador_id")
+        colab = obter_colaborador_por_id(colab_id) if "obter_colaborador_por_id" in globals() else {}
         conflitos.append({
             "tentativa_por": str(engenheiro_tentativa or "N/A"),
+            "engenheiro_original": str(registro_existente.get("engenheiro") or "N/A"),
+            "colaborador_id": str(colab_id or ""),
+            "colaborador_nome": str((colab or {}).get("nome") or ""),
+            "data_convocacao": str(registro_existente.get("data") or ""),
             "em": agora_aproar().isoformat(),
             "resolvido": False,
+            "paulo_pendente": True,
         })
-        meta["conflitos_convocacao"] = conflitos[-20:]
+        meta["conflitos_convocacao"] = conflitos[-30:]
+        meta["tem_conflito_pendente"] = True
         turno, livre = decompor_observacao_operacional(obs_atual)
         nova_obs = montar_observacao_operacional(turno, livre, meta)
         supabase.table("convocacoes").update({"observacao": nova_obs}).eq("id", registro_existente.get("id")).execute()
@@ -1137,9 +1145,12 @@ def resolver_conflitos_convocacao(registro):
         meta = obter_metadata_operacional(obs_atual)
         conflitos = list(meta.get("conflitos_convocacao") or [])
         for conflito in conflitos:
-            conflito["resolvido"] = True
-            conflito["resolvido_em"] = agora_aproar().isoformat()
+            if not conflito.get("resolvido"):
+                conflito["resolvido"] = True
+                conflito["paulo_pendente"] = False
+                conflito["resolvido_em"] = agora_aproar().isoformat()
         meta["conflitos_convocacao"] = conflitos
+        meta["tem_conflito_pendente"] = any(not c.get("resolvido") for c in conflitos)
         turno, livre = decompor_observacao_operacional(obs_atual)
         supabase.table("convocacoes").update({
             "observacao": montar_observacao_operacional(turno, livre, meta)
@@ -1148,6 +1159,23 @@ def resolver_conflitos_convocacao(registro):
         return True
     except Exception:
         return False
+
+
+def listar_conflitos_convocacao_pendentes(dias=90):
+    """Retorna a fila de conflitos ainda não tratados pelo Paulo/Admin."""
+    try:
+        inicio = (datetime.date.today() - datetime.timedelta(days=int(dias))).isoformat()
+        registros = supabase.table("convocacoes").select("*").gte("data", inicio).execute().data or []
+    except Exception:
+        registros = []
+
+    saida = []
+    for reg in registros:
+        meta = obter_metadata_operacional(reg.get("observacao") or "")
+        pendentes = [c for c in (meta.get("conflitos_convocacao") or []) if not c.get("resolvido")]
+        if pendentes:
+            saida.append((reg, pendentes))
+    return saida
 
 
 def inserir_convocacao_segura(obra_id, colaborador_id, data_convocacao, engenheiro, turno):
@@ -3175,8 +3203,7 @@ elif modo_campo:
         )
 
     secoes_principais_campo = [
-        "📌 RESUMO", "👥 CONVOCADOS", "👥 DISPONIBILIDADE", "💬 WHATSAPP",
-        "🎛️ DASHBOARD", "📊 RELATÓRIOS", "📈 INDICADORES"
+        "📌 RESUMO", "👥 CONVOCADOS", "👥 DISPONIBILIDADE", "💬 WHATSAPP"
     ]
     secoes_ocultas_campo = ["✅ APONTAMENTO", "📋 EQUIPE DE AMANHÃ"]
     secoes_validas_campo = secoes_principais_campo + secoes_ocultas_campo
@@ -3482,17 +3509,8 @@ elif modo_campo:
             st.info("Você ainda não possui convocações nessa data.")
 
     # --------------------------------------------------------------
-    # CONSULTAS DO ENGENHEIRO
+    # DISPONIBILIDADE
     # --------------------------------------------------------------
-    elif secao_campo == "🎛️ DASHBOARD":
-        render_dashboard_consulta("campo_dash_melhorias", engenheiro_campo)
-
-    elif secao_campo == "📊 RELATÓRIOS":
-        render_relatorio_visualizador("campo_rel_melhorias", engenheiro_campo)
-
-    elif secao_campo == "📈 INDICADORES":
-        render_indicadores_cumprimento("campo_ind_melhorias", engenheiro_campo)
-
     elif secao_campo == "👥 DISPONIBILIDADE":
         render_aba_disponibilidade("campo_novo")
 
@@ -3642,7 +3660,7 @@ else:
         st.button("🏠 INÍCIO", key="btn_nav_inicio", use_container_width=True, on_click=_ir_menu_admin, args=("🏠 INÍCIO",))
 
         st.markdown("<div class='aproar-sidebar-section'>🛠 OPERAÇÃO</div>", unsafe_allow_html=True)
-        for item in ["📋 CONVOCAÇÃO", "✅ APONTAMENTO", "💬 WHATSAPP", "👥 DISPONIBILIDADE", "🚫 INDISPONIBILIDADE"]:
+        for item in ["📋 CONVOCAÇÃO", "🚨 CONFLITOS", "✅ APONTAMENTO", "💬 WHATSAPP", "👥 DISPONIBILIDADE", "🚫 INDISPONIBILIDADE"]:
             st.button(item, key=f"btn_nav_{item}_novo", use_container_width=True, on_click=_ir_menu_admin, args=(item,))
 
         st.markdown("<div class='aproar-sidebar-section'>📊 ANÁLISE E FECHAMENTO</div>", unsafe_allow_html=True)
@@ -3713,44 +3731,70 @@ else:
             st.info("Nenhuma convocação registrada para hoje.")
 
 
-        # Conflitos de convocação registrados para conferência do Paulo
-        try:
-            desde_conflitos = (hoje_admin - datetime.timedelta(days=45)).isoformat()
-            regs_conflito = supabase.table("convocacoes").select("*").gte("data", desde_conflitos).execute().data or []
-        except Exception:
-            regs_conflito = []
-        conflitos_pendentes = []
-        for reg in regs_conflito:
-            meta_conf = obter_metadata_operacional(reg.get("observacao") or "")
-            pend_conf = [c for c in (meta_conf.get("conflitos_convocacao") or []) if not c.get("resolvido")]
-            if pend_conf:
-                conflitos_pendentes.append((reg, pend_conf))
+        # Fila persistente de conflitos para o Paulo/Admin
+        conflitos_pendentes = listar_conflitos_convocacao_pendentes(90)
         if conflitos_pendentes:
-            st.markdown("### 🚨 Conflitos de convocação")
-            st.error(f"Existem {sum(len(p) for _, p in conflitos_pendentes)} tentativa(s) de dois supervisores convocarem a mesma pessoa.")
-            for reg, pend_conf in conflitos_pendentes:
-                colab_conf = dict_colaboradores.get(reg.get("colaborador_id"), {})
-                detalhes_conf = ", ".join(
-                    f"{x.get('tentativa_por','N/A')} em {str(x.get('em',''))[:16].replace('T',' ')}"
-                    for x in pend_conf
-                )
-                cc1, cc2 = st.columns([5, 1])
-                with cc1:
-                    st.markdown(
-                        f"**{colab_conf.get('nome','-')}** • {reg.get('data','')} • "
-                        f"originalmente com **{reg.get('engenheiro','-')}**"
-                    )
-                    st.caption(f"Nova(s) tentativa(s): {detalhes_conf}")
-                with cc2:
-                    if st.button("Resolver", key=f"resolver_conf_{reg.get('id')}", use_container_width=True):
-                        if resolver_conflitos_convocacao(reg):
-                            st.rerun()
+            qtd_conflitos = sum(len(p) for _, p in conflitos_pendentes)
+            st.markdown("### 🚨 PAULO — conflitos de convocação")
+            st.error(
+                f"Há **{qtd_conflitos} conflito(s) pendente(s)**: dois supervisores tentaram convocar "
+                "o mesmo colaborador para a mesma data. A segunda convocação foi bloqueada."
+            )
+            if st.button("ABRIR FILA DE CONFLITOS", type="primary", key="abrir_conflitos_home"):
+                _ir_menu_admin("🚨 CONFLITOS")
+                st.rerun()
 
         st.markdown("### Ações rápidas")
         q1, q2, q3 = st.columns(3)
         q1.button("✅ FECHAR APONTAMENTOS", type="primary", use_container_width=True, on_click=_ir_menu_admin, args=("✅ APONTAMENTO",))
         q2.button("📋 PLANEJAR AMANHÃ", use_container_width=True, on_click=_ir_menu_admin, args=("📋 CONVOCAÇÃO",))
         q3.button("📊 VER RELATÓRIOS", use_container_width=True, on_click=_ir_menu_admin, args=("📊 RELATÓRIOS",))
+
+    # --- CONFLITOS DE CONVOCAÇÃO / PAULO ---
+    elif menu_escolhido == "🚨 CONFLITOS":
+        st.markdown("## 🚨 Conflitos de convocação")
+        st.caption(
+            "Fila para conferência do Paulo. Quando dois supervisores tentam convocar a mesma pessoa "
+            "para a mesma data, a segunda tentativa é bloqueada e fica registrada aqui."
+        )
+
+        conflitos_pendentes = listar_conflitos_convocacao_pendentes(90)
+        total_conflitos = sum(len(p) for _, p in conflitos_pendentes)
+        st.metric("CONFLITOS PENDENTES", total_conflitos)
+
+        if not conflitos_pendentes:
+            st.success("Nenhum conflito de convocação pendente.")
+        else:
+            for reg, pend_conf in conflitos_pendentes:
+                colab_conf = obter_colaborador_por_id(reg.get("colaborador_id"))
+                nome_colab = (colab_conf or {}).get("nome") or next(
+                    (str(x.get("colaborador_nome") or "") for x in pend_conf if x.get("colaborador_nome")),
+                    "Colaborador não identificado",
+                )
+                eng_original = str(reg.get("engenheiro") or pend_conf[0].get("engenheiro_original") or "N/A")
+                data_reg = str(reg.get("data") or pend_conf[0].get("data_convocacao") or "")
+
+                with st.container(border=True):
+                    st.markdown(f"### {nome_colab}")
+                    st.markdown(f"**Data:** {data_reg}  \n**Convocado originalmente por:** {eng_original}")
+                    for conflito in pend_conf:
+                        instante = str(conflito.get("em") or "")
+                        instante_fmt = instante[:16].replace("T", " ") if instante else "horário não registrado"
+                        st.warning(
+                            f"⚠️ Tentativa posterior por **{conflito.get('tentativa_por','N/A')}** "
+                            f"em {instante_fmt}. A duplicidade foi bloqueada."
+                        )
+
+                    if st.button(
+                        "✅ MARCAR CONFLITO COMO RESOLVIDO",
+                        key=f"resolver_conf_pagina_{reg.get('id')}",
+                        use_container_width=True,
+                    ):
+                        if resolver_conflitos_convocacao(reg):
+                            st.success("Conflito marcado como resolvido.")
+                            st.rerun()
+                        else:
+                            st.error("Não foi possível atualizar o conflito.")
 
     # --- DASHBOARD / AUDITORIA ---
     elif menu_escolhido == "🎛️ DASHBOARD":
