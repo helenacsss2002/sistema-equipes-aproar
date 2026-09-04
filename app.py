@@ -3285,21 +3285,146 @@ else:
             )
 
             if arquivo_import is not None:
-                try:
-                    nome_arquivo = arquivo_import.name.lower()
+
+                def _localizar_linha_cabecalho_colaboradores(df_bruto, limite=20):
+                    """
+                    Procura automaticamente a linha de cabeçalho da tabela.
+                    Isso permite importar planilhas que tenham título, total, observações
+                    ou linhas em branco antes de 'Código | Nome | ...'.
+                    """
+                    candidatos_nome = {
+                        "NOME",
+                        "NOME COMPLETO",
+                        "COLABORADOR",
+                        "FUNCIONARIO",
+                        "FUNCIONÁRIO",
+                        "EMPREGADO",
+                    }
+
+                    qtd = min(len(df_bruto), limite)
+
+                    for idx in range(qtd):
+                        valores = []
+
+                        for valor in df_bruto.iloc[idx].tolist():
+                            if pd.isna(valor):
+                                continue
+
+                            txt = normalizar(str(valor))
+                            if txt:
+                                valores.append(txt)
+
+                        # Prioridade: linha que realmente contém uma coluna de nome.
+                        if any(v in candidatos_nome for v in valores):
+                            return idx
+
+                        # Também aceita cabeçalhos descritivos como
+                        # "Nome do colaborador", sem confundir o título
+                        # "COLABORADORES ADMITIDOS / ATIVOS" com cabeçalho.
+                        for v in valores:
+                            tokens = [t for t in re.split(r"[^A-Z0-9]+", v) if t]
+                            if "NOME" in tokens:
+                                return idx
+
+                    return None
+
+
+                def _ler_planilha_colaboradores(arquivo):
+                    """
+                    Lê XLS/XLSX/CSV detectando automaticamente o cabeçalho.
+                    Retorna (dataframe, linha_cabecalho_1_based).
+                    """
+                    nome_arquivo = arquivo.name.lower()
+
                     if nome_arquivo.endswith(".csv"):
+                        arquivo.seek(0)
+
                         try:
-                            df_import = pd.read_csv(arquivo_import, sep=None, engine="python")
+                            bruto = pd.read_csv(
+                                arquivo,
+                                sep=None,
+                                engine="python",
+                                header=None
+                            )
+                            encoding_usado = None
+
                         except UnicodeDecodeError:
-                            arquivo_import.seek(0)
-                            df_import = pd.read_csv(arquivo_import, sep=None, engine="python", encoding="latin-1")
+                            arquivo.seek(0)
+                            bruto = pd.read_csv(
+                                arquivo,
+                                sep=None,
+                                engine="python",
+                                header=None,
+                                encoding="latin-1"
+                            )
+                            encoding_usado = "latin-1"
+
+                        linha_header = _localizar_linha_cabecalho_colaboradores(bruto)
+
+                        arquivo.seek(0)
+
+                        kwargs = {
+                            "sep": None,
+                            "engine": "python",
+                            "header": linha_header if linha_header is not None else 0,
+                        }
+
+                        if encoding_usado:
+                            kwargs["encoding"] = encoding_usado
+
+                        df = pd.read_csv(
+                            arquivo,
+                            **kwargs
+                        )
+
                     else:
-                        df_import = pd.read_excel(arquivo_import)
+                        arquivo.seek(0)
+
+                        # Primeiro lê sem cabeçalho para encontrar onde a tabela começa.
+                        bruto = pd.read_excel(
+                            arquivo,
+                            header=None
+                        )
+
+                        linha_header = _localizar_linha_cabecalho_colaboradores(bruto)
+
+                        arquivo.seek(0)
+
+                        # Se não localizar nada, mantém compatibilidade com planilhas
+                        # convencionais cujo cabeçalho já está na primeira linha.
+                        df = pd.read_excel(
+                            arquivo,
+                            header=linha_header if linha_header is not None else 0
+                        )
+
+                    # Remove linhas e colunas completamente vazias.
+                    df = df.dropna(axis=0, how="all").dropna(axis=1, how="all")
+
+                    return df, (
+                        linha_header + 1
+                        if linha_header is not None
+                        else 1
+                    )
+
+
+                try:
+                    df_import, linha_cabecalho_detectada = _ler_planilha_colaboradores(
+                        arquivo_import
+                    )
+
                 except Exception as e:
                     df_import = pd.DataFrame()
+                    linha_cabecalho_detectada = None
                     st.error(f"Não foi possível ler a planilha: {e}")
 
+
                 if not df_import.empty:
+
+                    if linha_cabecalho_detectada:
+                        st.caption(
+                            f"✅ Cabeçalho da tabela identificado automaticamente na linha "
+                            f"{linha_cabecalho_detectada}."
+                        )
                     df_import.columns = [str(c).strip() for c in df_import.columns]
                     colunas = list(df_import.columns)
 
