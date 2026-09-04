@@ -1248,6 +1248,19 @@ dict_obras = {o['id']: o for o in obras} if obras else {}
 
 ENGENHEIROS = ["EDUARDO", "GABRIEL", "GUSTAVO", "JOEL", "NETO", "PAULO", "SOARES", "VICTOR"]
 
+UNIDADES_APROAR = [
+    "BARRA DO CEARÁ",
+    "MARACANAÚ",
+    "COLISEU",
+    "HORIZONTE",
+    "ESCRITÓRIO",
+    "CENTRO",
+    "MUSEU",
+    "FIEC",
+    "UNIFOR",
+    "SEBRAE",
+]
+
 # --- FUNÇÃO AUXILIAR PARA RENDERIZAR A ABA DE DISPONIBILIDADE ---
 def render_aba_disponibilidade(key_suffix=""):
     st.markdown("### 👥 DISPONIBILIDADE DE EQUIPE POR FUNÇÃO")
@@ -1878,7 +1891,7 @@ if modo_campo:
             st.info("Cadastre pelo menos uma Unidade/Obra na administração.")
         else:
             cc1, cc2 = st.columns(2)
-            unidades_unicas = sorted({o["unidade"] for o in obras if o.get("unidade")})
+            unidades_unicas = UNIDADES_APROAR.copy()
             with cc1:
                 unidade_selecionada = st.selectbox("Unidade", unidades_unicas, key="u_c_sel_novo")
             with cc2:
@@ -2202,7 +2215,7 @@ else:
         with col_f1:
             data_filtro_dash = st.date_input("Data:", value=datetime.date.today(), format="DD/MM/YYYY", key="d_dash")
         with col_f2:
-            unidades_cadastradas = sorted(list(set([o['unidade'] for o in obras]))) if obras else []
+            unidades_cadastradas = UNIDADES_APROAR.copy()
             unidade_dash = st.selectbox("Unidade:", ["TODAS"] + unidades_cadastradas, key="u_dash")
         with col_f3:
             eng_dash_filtro = st.selectbox("Engenheiro:", ["TODOS"] + ENGENHEIROS, key="eng_dash_f")
@@ -2338,7 +2351,7 @@ else:
                 with col_turno:
                     turno_conv_adm = st.selectbox("Turno:", ["Integral", "Manhã", "Tarde", "Noite"], key="turno_conv_adm")
 
-                unidades_unicas = sorted(list(set([o['unidade'] for o in obras])))
+                unidades_unicas = UNIDADES_APROAR.copy()
                 unidade_selecionada = st.selectbox("Unidade:", unidades_unicas, key="u_adm_sel")
 
                 funcoes_disponiveis = sorted(list(set([c.get('funcao', '') for c in colaboradores if c.get('funcao')])))
@@ -2512,7 +2525,7 @@ else:
 
                 st.markdown(f"**Colaborador:** {colab_corr.get('nome', 'N/A')}")
 
-                unidades_disponiveis = sorted(list(set([o['unidade'] for o in obras])))
+                unidades_disponiveis = UNIDADES_APROAR.copy()
                 idx_unidade = unidades_disponiveis.index(unidade_atual_corr) if unidade_atual_corr in unidades_disponiveis else 0
 
                 c_dest1, c_dest2, c_dest3 = st.columns(3)
@@ -2570,17 +2583,57 @@ else:
                             st.rerun()
 
                 with b_corr2:
-                    confirmar_exclusao = st.checkbox(
-                        "Confirmo a exclusão desta convocação",
-                        key=f"conf_exc_conv_{registro_corr['id']}"
-                    )
-                    if st.button("🗑️ EXCLUIR CONVOCAÇÃO", use_container_width=True, key=f"exc_conv_{registro_corr['id']}"):
-                        if not confirmar_exclusao:
-                            st.warning("Marque a confirmação antes de excluir.")
-                        else:
-                            supabase.table("convocacoes").delete().eq("id", registro_corr['id']).execute()
-                            st.success("✅ Convocação excluída com sucesso.")
-                            st.rerun()
+                    id_corr_atual = registro_corr["id"]
+
+                    if st.button(
+                        "🗑️ EXCLUIR CONVOCAÇÃO",
+                        use_container_width=True,
+                        key=f"exc_conv_{id_corr_atual}"
+                    ):
+                        st.session_state["conv_exclusao_pendente"] = id_corr_atual
+                        st.rerun()
+
+                    if st.session_state.get("conv_exclusao_pendente") == id_corr_atual:
+                        st.warning(
+                            f"⚠️ Excluir a convocação de **{colab_corr.get('nome', 'N/A')}** "
+                            f"em **{data_corr.strftime('%d/%m/%Y')}**? Esta ação não pode ser desfeita."
+                        )
+
+                        conf1, conf2 = st.columns(2)
+
+                        with conf1:
+                            if st.button(
+                                "✅ SIM, EXCLUIR",
+                                type="primary",
+                                use_container_width=True,
+                                key=f"confirma_exc_conv_{id_corr_atual}"
+                            ):
+                                try:
+                                    retorno_exc = (
+                                        supabase.table("convocacoes")
+                                        .delete()
+                                        .eq("id", id_corr_atual)
+                                        .execute()
+                                    )
+
+                                    st.session_state.pop("conv_exclusao_pendente", None)
+                                    st.session_state["msg_corr_admin"] = (
+                                        f"✅ Convocação de {colab_corr.get('nome', 'N/A')} excluída com sucesso."
+                                    )
+                                    st.cache_data.clear()
+                                    st.rerun()
+
+                                except Exception as e:
+                                    st.error(f"Não foi possível excluir a convocação: {e}")
+
+                        with conf2:
+                            if st.button(
+                                "↩️ CANCELAR",
+                                use_container_width=True,
+                                key=f"cancela_exc_conv_{id_corr_atual}"
+                            ):
+                                st.session_state.pop("conv_exclusao_pendente", None)
+                                st.rerun()
 
     # --- MENSAGEM PARA WHATSAPP ---
     elif menu_escolhido == "💬 WHATSAPP":
@@ -3023,7 +3076,7 @@ else:
         with c_ind2:
             d_fim_ind = st.date_input("Fim:", value=datetime.date.today(), format="DD/MM/YYYY", key="d_fim_ind")
         with c_ind3:
-            unidades_list = sorted(list(set([o['unidade'] for o in obras]))) if obras else []
+            unidades_list = UNIDADES_APROAR.copy()
             u_filtro_ind = st.selectbox("Filtrar por Unidade:", ["TODAS AS UNIDADES"] + unidades_list, key="u_filtro_ind")
 
         try:
