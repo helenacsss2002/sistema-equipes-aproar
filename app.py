@@ -3400,91 +3400,651 @@ else:
     # --- 3. APONTAMENTO ---
     elif menu_escolhido == "✅ APONTAMENTO":
         st.markdown("## ✅ APONTAMENTO DIÁRIO DE CAMPO")
+        st.caption(
+            "Preencha os apontamentos pendentes e salve todos de uma vez. "
+            "Os concluídos ficam recolhidos em “Apontamentos feitos”."
+        )
 
-        c_ap1, c_ap2, c_ap3 = st.columns(3)
+        if st.session_state.get("msg_apont_adm_geral"):
+            st.success(st.session_state.pop("msg_apont_adm_geral"))
+
+        if st.session_state.get("msg_apont_adm_edit"):
+            st.success(st.session_state.pop("msg_apont_adm_edit"))
+
+        c_ap1, c_ap2 = st.columns(2)
+
         with c_ap1:
-            engenheiro_apont = st.selectbox("Engenheiro:", ENGENHEIROS, key="eng_apont_adm_main")
+            engenheiro_apont = st.selectbox(
+                "Engenheiro:",
+                ENGENHEIROS,
+                key="eng_apont_adm_main"
+            )
+
         with c_ap2:
-            data_apont = st.date_input("Data do Apontamento:", value=datetime.date.today(), format="DD/MM/YYYY", key="dt_apont_adm_main")
+            data_apont = st.date_input(
+                "Data do Apontamento:",
+                value=datetime.date.today(),
+                format="DD/MM/YYYY",
+                key="dt_apont_adm_main"
+            )
 
         try:
-            convocacoes_hoje = supabase.table("convocacoes").select("*").eq("engenheiro", engenheiro_apont).eq("data", data_apont.isoformat()).execute().data
+            convocacoes_hoje = (
+                supabase.table("convocacoes")
+                .select("*")
+                .eq("engenheiro", engenheiro_apont)
+                .eq("data", data_apont.isoformat())
+                .execute().data or []
+            )
         except Exception:
             convocacoes_hoje = []
 
         if convocacoes_hoje:
             for conv in convocacoes_hoje:
-                conv['dados_obra'] = dict_obras.get(conv['obra_id'], {"unidade": "Desconhecida", "nome": NOME_OBRA_PLACEHOLDER})
+                conv["dados_obra"] = dict_obras.get(
+                    conv["obra_id"],
+                    {
+                        "unidade": "Desconhecida",
+                        "nome": NOME_OBRA_PLACEHOLDER
+                    }
+                )
 
-            unidades_convocadas = sorted(list(set([c['dados_obra']['unidade'] for c in convocacoes_hoje])))
-            with c_ap3:
-                unidade_filtro = st.selectbox("Unidade:", ["TODAS"] + unidades_convocadas, key="filtro_u_apont_adm_main")
+            unidades_convocadas = sorted({
+                c["dados_obra"]["unidade"]
+                for c in convocacoes_hoje
+            })
 
-            convocacoes_render = [
+            unidade_filtro = st.selectbox(
+                "Unidade:",
+                ["TODAS"] + unidades_convocadas,
+                key="filtro_u_apont_adm_main"
+            )
+
+            convocacoes_filtradas = [
                 c for c in convocacoes_hoje
-                if unidade_filtro == "TODAS" or c['dados_obra']['unidade'] == unidade_filtro
+                if (
+                    unidade_filtro == "TODAS"
+                    or c["dados_obra"]["unidade"] == unidade_filtro
+                )
             ]
 
-            if st.button("✅ MARCAR TODOS COMO PRESENTES", key="btn_all_present_adm_main"):
-                for c in convocacoes_render:
-                    supabase.table("convocacoes").update({"status": "Presente (Integral)"}).eq("id", c['id']).execute()
-                st.success("Todos marcados como Presente (Integral)!")
-                st.rerun()
+            def _apontamento_adm_feito(conv):
+                obra = dict_obras.get(conv.get("obra_id"), {})
+                return bool(obra) and not eh_obra_placeholder(obra)
 
-            opcoes_status = ["Presente (Integral)", "Presente (Só Manhã)", "Presente (Só Tarde)", "Saída Antecipada", "Falta", "Atestado", "Extra"]
-            for conv in convocacoes_render:
-                c_id = conv['id']
-                dados_colab = dict_colaboradores.get(conv['colaborador_id'], {"nome": "Desconhecido", "funcao": "-"})
-                nome = dados_colab['nome']
-                funcao = dados_colab['funcao']
-                cor = get_cor_funcao(funcao)
-                status_atual = conv.get("status", "Presente (Integral)")
-                idx = opcoes_status.index(status_atual) if status_atual in opcoes_status else 0
-                turno_atual, obs_livre_atual = decompor_observacao_operacional(conv.get("observacao") or "")
+            pendentes_adm = [
+                c for c in convocacoes_filtradas
+                if not _apontamento_adm_feito(c)
+            ]
 
-                unidade_card = conv['dados_obra'].get('unidade', 'Desconhecida')
-                obras_card = obras_reais_da_unidade(unidade_card)
-                mapa_obras_card = {o['nome']: o['id'] for o in obras_card}
-                opcoes_obras_card = ["— Selecione a Obra/Serviço —"] + list(mapa_obras_card.keys())
+            feitos_adm = [
+                c for c in convocacoes_filtradas
+                if _apontamento_adm_feito(c)
+            ]
 
-                obra_atual = dict_obras.get(conv.get('obra_id'), {})
-                nome_obra_atual = obra_atual.get('nome', '')
-                if nome_obra_atual in mapa_obras_card:
-                    idx_obra = opcoes_obras_card.index(nome_obra_atual)
-                    obra_caption = nome_obra_atual
-                else:
-                    idx_obra = 0
-                    obra_caption = "A definir no apontamento"
+            if convocacoes_filtradas:
+                total_filtrado = len(convocacoes_filtradas)
+                total_feitos = len(feitos_adm)
 
-                with st.container(border=True):
-                    st.markdown(f"**{nome}** &nbsp; {cor} `{funcao}`", unsafe_allow_html=True)
-                    st.caption(f"{unidade_card} • Obra/Serviço: {obra_caption} • Turno: {turno_atual}")
+                st.progress(
+                    total_feitos / max(1, total_filtrado)
+                )
 
-                    with st.form(key=f"form_apont_adm_{c_id}"):
+                st.caption(
+                    f"{total_feitos} feito(s) • "
+                    f"{len(pendentes_adm)} pendente(s)"
+                )
+
+            opcoes_status = [
+                "Presente (Integral)",
+                "Presente (Só Manhã)",
+                "Presente (Só Tarde)",
+                "Saída Antecipada",
+                "Falta",
+                "Atestado",
+                "Extra",
+            ]
+
+            # ======================================================
+            # PENDENTES
+            # ======================================================
+            if pendentes_adm:
+                st.markdown(
+                    f"### Pendentes ({len(pendentes_adm)})"
+                )
+
+                if st.button(
+                    "✅ MARCAR TODOS COMO PRESENTES",
+                    key="btn_all_present_adm_main",
+                    use_container_width=True,
+                ):
+                    for c in pendentes_adm:
+                        st.session_state[
+                            f"status_form_adm_{c['id']}"
+                        ] = "Presente (Integral)"
+                    st.rerun()
+
+                apontamentos_adm_para_salvar = []
+
+                for conv in pendentes_adm:
+                    c_id = conv["id"]
+
+                    dados_colab = dict_colaboradores.get(
+                        conv["colaborador_id"],
+                        {
+                            "nome": "Desconhecido",
+                            "funcao": "-"
+                        }
+                    )
+
+                    nome = dados_colab["nome"]
+                    funcao = dados_colab["funcao"]
+                    cor = get_cor_funcao(funcao)
+
+                    status_atual = conv.get(
+                        "status",
+                        "Presente (Integral)"
+                    )
+
+                    turno_atual, obs_livre_atual = (
+                        decompor_observacao_operacional(
+                            conv.get("observacao") or ""
+                        )
+                    )
+
+                    unidade_card = conv["dados_obra"].get(
+                        "unidade",
+                        "Desconhecida"
+                    )
+
+                    obras_card = obras_reais_da_unidade(
+                        unidade_card
+                    )
+
+                    mapa_obras_card = {
+                        o["nome"]: o["id"]
+                        for o in obras_card
+                    }
+
+                    opcoes_obras_card = [
+                        "— Selecione a Obra/Serviço —"
+                    ] + list(mapa_obras_card.keys())
+
+                    chave_status = f"status_form_adm_{c_id}"
+
+                    if chave_status not in st.session_state:
+                        st.session_state[chave_status] = (
+                            status_atual
+                            if status_atual in opcoes_status
+                            else "Presente (Integral)"
+                        )
+
+                    with st.container(border=True):
+                        st.markdown(
+                            f"**{nome}** &nbsp; {cor} `{funcao}`",
+                            unsafe_allow_html=True
+                        )
+
+                        st.caption(
+                            f"{unidade_card} • "
+                            f"Obra/Serviço: A definir no apontamento • "
+                            f"Turno: {turno_atual}"
+                        )
+
                         fa1, fa2 = st.columns([1, 2])
-                        with fa1:
-                            status_sel = st.selectbox("Status", opcoes_status, index=idx, key=f"status_form_adm_{c_id}")
-                        with fa2:
-                            obra_sel = st.selectbox("Obra / Serviço", opcoes_obras_card, index=idx_obra, key=f"obra_form_adm_{c_id}")
-                        val_extra = st.number_input("Valor extra (R$)", min_value=0.0, value=float(conv.get("valor_extra") or 0.0), step=10.0, key=f"valor_form_adm_{c_id}")
-                        obs_livre = st.text_input("Observação / justificativa", value=obs_livre_atual, key=f"obs_form_adm_{c_id}")
-                        salvar = st.form_submit_button("💾 SALVAR APONTAMENTO", use_container_width=True)
 
-                    if salvar:
-                        if obra_sel not in mapa_obras_card:
-                            st.warning(f"Selecione a Obra/Serviço de {nome} antes de salvar.")
+                        with fa1:
+                            status_sel = st.selectbox(
+                                "Status",
+                                opcoes_status,
+                                key=chave_status
+                            )
+
+                        with fa2:
+                            obra_sel = st.selectbox(
+                                "Obra / Serviço",
+                                opcoes_obras_card,
+                                index=0,
+                                key=f"obra_form_adm_{c_id}"
+                            )
+
+                        val_extra = st.number_input(
+                            "Valor extra (R$)",
+                            min_value=0.0,
+                            value=float(
+                                conv.get("valor_extra") or 0.0
+                            ),
+                            step=10.0,
+                            key=f"valor_form_adm_{c_id}"
+                        )
+
+                        obs_livre = st.text_input(
+                            "Observação / justificativa",
+                            value=obs_livre_atual,
+                            key=f"obs_form_adm_{c_id}"
+                        )
+
+                        apontamentos_adm_para_salvar.append({
+                            "id": c_id,
+                            "nome": nome,
+                            "status": status_sel,
+                            "obra_sel": obra_sel,
+                            "mapa_obras": mapa_obras_card,
+                            "valor_extra": val_extra,
+                            "observacao": obs_livre,
+                            "turno": turno_atual,
+                        })
+
+                st.markdown("---")
+
+                salvar_todos_adm = st.button(
+                    "💾 SALVAR TODOS OS APONTAMENTOS",
+                    type="primary",
+                    use_container_width=True,
+                    key="btn_salvar_todos_apont_adm"
+                )
+
+                st.caption(
+                    "Salva todos os colaboradores pendentes exibidos acima."
+                )
+
+                if salvar_todos_adm:
+                    sem_obra = [
+                        item["nome"]
+                        for item in apontamentos_adm_para_salvar
+                        if (
+                            item["obra_sel"]
+                            not in item["mapa_obras"]
+                        )
+                    ]
+
+                    if sem_obra:
+                        nomes_sem_obra = ", ".join(
+                            sem_obra[:5]
+                        )
+
+                        if len(sem_obra) > 5:
+                            nomes_sem_obra += (
+                                f" e mais "
+                                f"{len(sem_obra) - 5}"
+                            )
+
+                        st.error(
+                            "Selecione a Obra/Serviço "
+                            "antes de salvar para: "
+                            f"{nomes_sem_obra}."
+                        )
+
+                    else:
+                        salvos = 0
+                        erros = []
+
+                        for item in (
+                            apontamentos_adm_para_salvar
+                        ):
+                            try:
+                                nova_obs = (
+                                    montar_observacao_operacional(
+                                        item["turno"],
+                                        item["observacao"]
+                                    )
+                                )
+
+                                (
+                                    supabase
+                                    .table("convocacoes")
+                                    .update({
+                                        "obra_id": (
+                                            item["mapa_obras"][
+                                                item["obra_sel"]
+                                            ]
+                                        ),
+                                        "status": item["status"],
+                                        "valor_extra": (
+                                            item["valor_extra"]
+                                        ),
+                                        "observacao": nova_obs
+                                    })
+                                    .eq("id", item["id"])
+                                    .execute()
+                                )
+
+                                salvos += 1
+
+                            except Exception:
+                                erros.append(
+                                    item["nome"]
+                                )
+
+                        if salvos:
+                            limpar_cache_operacional()
+
+                        if erros:
+                            st.error(
+                                f"{salvos} apontamento(s) "
+                                f"salvo(s), mas "
+                                f"{len(erros)} falharam."
+                            )
+
+                            with st.expander(
+                                "Ver colaboradores com erro"
+                            ):
+                                for nome_erro in erros:
+                                    st.write(
+                                        f"• {nome_erro}"
+                                    )
+
                         else:
-                            nova_obs = montar_observacao_operacional(turno_atual, obs_livre)
-                            supabase.table("convocacoes").update({
-                                "obra_id": mapa_obras_card[obra_sel],
-                                "status": status_sel,
-                                "valor_extra": val_extra,
-                                "observacao": nova_obs
-                            }).eq("id", c_id).execute()
-                            st.success(f"✅ Apontamento de {nome} salvo com sucesso.")
+                            st.session_state[
+                                "msg_apont_adm_geral"
+                            ] = (
+                                f"✅ {salvos} apontamento(s) "
+                                "salvos com sucesso."
+                            )
                             st.rerun()
+
+            elif convocacoes_filtradas:
+                st.success(
+                    "✅ Todos os apontamentos "
+                    "deste filtro já foram feitos."
+                )
+
+            # ======================================================
+            # APONTAMENTOS FEITOS
+            # ======================================================
+            if feitos_adm:
+                editando_adm_id = (
+                    st.session_state.get(
+                        "apont_adm_editando_id"
+                    )
+                )
+
+                with st.expander(
+                    f"✅ Apontamentos feitos "
+                    f"({len(feitos_adm)})",
+                    expanded=(
+                        not pendentes_adm
+                        or editando_adm_id is not None
+                    ),
+                ):
+                    st.caption(
+                        "Use o ✏️ somente se precisar "
+                        "corrigir um apontamento."
+                    )
+
+                    for conv in feitos_adm:
+                        c_id = conv["id"]
+
+                        dados_colab = (
+                            dict_colaboradores.get(
+                                conv["colaborador_id"],
+                                {
+                                    "nome": "Desconhecido",
+                                    "funcao": "-"
+                                }
+                            )
+                        )
+
+                        nome = dados_colab["nome"]
+                        funcao = dados_colab["funcao"]
+
+                        unidade_card = (
+                            conv["dados_obra"].get(
+                                "unidade",
+                                "Desconhecida"
+                            )
+                        )
+
+                        obra_atual = dict_obras.get(
+                            conv.get("obra_id"),
+                            {}
+                        )
+
+                        nome_obra_atual = obra_atual.get(
+                            "nome",
+                            "Não definida"
+                        )
+
+                        status_atual = conv.get(
+                            "status",
+                            "Presente (Integral)"
+                        )
+
+                        turno_atual, obs_livre_atual = (
+                            decompor_observacao_operacional(
+                                conv.get("observacao") or ""
+                            )
+                        )
+
+                        with st.container(border=True):
+                            rc1, rc2 = st.columns([8, 1])
+
+                            with rc1:
+                                st.markdown(
+                                    f"**{nome}** "
+                                    f"<span "
+                                    f"style='color:#64748B'>"
+                                    f"• {funcao}</span>",
+                                    unsafe_allow_html=True
+                                )
+
+                                st.caption(
+                                    f"{unidade_card} • "
+                                    f"{nome_obra_atual} • "
+                                    f"{status_atual}"
+                                )
+
+                            with rc2:
+                                if st.button(
+                                    "✏️",
+                                    key=(
+                                        f"editar_apont_adm_"
+                                        f"{c_id}"
+                                    ),
+                                    help="Editar apontamento",
+                                    use_container_width=True,
+                                ):
+                                    st.session_state[
+                                        "apont_adm_editando_id"
+                                    ] = c_id
+                                    st.rerun()
+
+                            if editando_adm_id == c_id:
+                                st.markdown(
+                                    "**Editar apontamento**"
+                                )
+
+                                obras_card = (
+                                    obras_reais_da_unidade(
+                                        unidade_card
+                                    )
+                                )
+
+                                mapa_obras_edit = {
+                                    o["nome"]: o["id"]
+                                    for o in obras_card
+                                }
+
+                                opcoes_obras_edit = list(
+                                    mapa_obras_edit.keys()
+                                )
+
+                                if (
+                                    nome_obra_atual
+                                    not in mapa_obras_edit
+                                ):
+                                    opcoes_obras_edit = [
+                                        nome_obra_atual
+                                    ] + opcoes_obras_edit
+
+                                    mapa_obras_edit[
+                                        nome_obra_atual
+                                    ] = conv.get("obra_id")
+
+                                idx_status_edit = (
+                                    opcoes_status.index(
+                                        status_atual
+                                    )
+                                    if status_atual
+                                    in opcoes_status
+                                    else 0
+                                )
+
+                                idx_obra_edit = (
+                                    opcoes_obras_edit.index(
+                                        nome_obra_atual
+                                    )
+                                    if nome_obra_atual
+                                    in opcoes_obras_edit
+                                    else 0
+                                )
+
+                                e1, e2 = st.columns([1, 2])
+
+                                with e1:
+                                    status_edit = st.selectbox(
+                                        "Status",
+                                        opcoes_status,
+                                        index=idx_status_edit,
+                                        key=(
+                                            f"edit_status_adm_"
+                                            f"{c_id}"
+                                        )
+                                    )
+
+                                with e2:
+                                    obra_edit = st.selectbox(
+                                        "Obra / Serviço",
+                                        opcoes_obras_edit,
+                                        index=idx_obra_edit,
+                                        key=(
+                                            f"edit_obra_adm_"
+                                            f"{c_id}"
+                                        )
+                                    )
+
+                                ed1, ed2 = st.columns([1, 2])
+
+                                with ed1:
+                                    extra_edit = (
+                                        st.number_input(
+                                            "Valor extra (R$)",
+                                            min_value=0.0,
+                                            value=float(
+                                                conv.get(
+                                                    "valor_extra"
+                                                ) or 0.0
+                                            ),
+                                            step=10.0,
+                                            key=(
+                                                f"edit_extra_adm_"
+                                                f"{c_id}"
+                                            )
+                                        )
+                                    )
+
+                                with ed2:
+                                    obs_edit = st.text_input(
+                                        "Observação / justificativa",
+                                        value=obs_livre_atual,
+                                        key=(
+                                            f"edit_obs_adm_"
+                                            f"{c_id}"
+                                        )
+                                    )
+
+                                be1, be2 = st.columns(2)
+
+                                with be1:
+                                    salvar_edit_adm = st.button(
+                                        "💾 SALVAR ALTERAÇÃO",
+                                        type="primary",
+                                        use_container_width=True,
+                                        key=(
+                                            f"salvar_edit_adm_"
+                                            f"{c_id}"
+                                        )
+                                    )
+
+                                with be2:
+                                    cancelar_edit_adm = (
+                                        st.button(
+                                            "CANCELAR",
+                                            use_container_width=True,
+                                            key=(
+                                                f"cancel_edit_adm_"
+                                                f"{c_id}"
+                                            )
+                                        )
+                                    )
+
+                                if cancelar_edit_adm:
+                                    st.session_state.pop(
+                                        "apont_adm_editando_id",
+                                        None
+                                    )
+                                    st.rerun()
+
+                                if salvar_edit_adm:
+                                    try:
+                                        nova_obs_edit = (
+                                            montar_observacao_operacional(
+                                                turno_atual,
+                                                obs_edit
+                                            )
+                                        )
+
+                                        (
+                                            supabase
+                                            .table("convocacoes")
+                                            .update({
+                                                "obra_id": (
+                                                    mapa_obras_edit[
+                                                        obra_edit
+                                                    ]
+                                                ),
+                                                "status": (
+                                                    status_edit
+                                                ),
+                                                "valor_extra": (
+                                                    extra_edit
+                                                ),
+                                                "observacao": (
+                                                    nova_obs_edit
+                                                )
+                                            })
+                                            .eq("id", c_id)
+                                            .execute()
+                                        )
+
+                                        limpar_cache_operacional()
+
+                                        st.session_state.pop(
+                                            "apont_adm_editando_id",
+                                            None
+                                        )
+
+                                        st.session_state[
+                                            "msg_apont_adm_edit"
+                                        ] = (
+                                            f"✅ Apontamento "
+                                            f"de {nome} atualizado."
+                                        )
+
+                                        st.rerun()
+
+                                    except Exception:
+                                        st.error(
+                                            "Não foi possível "
+                                            f"atualizar o apontamento "
+                                            f"de {nome}."
+                                        )
+
         else:
-            st.warning("Nenhuma equipe convocada para os filtros selecionados.")
+            st.warning(
+                "Nenhuma equipe convocada "
+                "para os filtros selecionados."
+            )
 
     # --- 4. RELATÓRIOS ---
     elif menu_escolhido == "📊 RELATÓRIOS":
