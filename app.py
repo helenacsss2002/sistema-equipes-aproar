@@ -254,17 +254,243 @@ MESES_PT = {
     9: "SETEMBRO", 10: "OUTUBRO", 11: "NOVEMBRO", 12: "DEZEMBRO"
 }
 
-# --- CONEXÃO COM SUPABASE ---
+# --- BANCO DE DADOS: NEON (PREFERENCIAL) OU SUPABASE (FALLBACK) ---
+#
+# Se DATABASE_URL existir nos Secrets, o sistema usa PostgreSQL/Neon.
+# Caso contrário, mantém compatibilidade com o Supabase antigo.
+#
+# O adaptador abaixo imita a pequena parte da API supabase.table(...)
+# que este sistema utiliza. Assim o restante do app não precisa ser reescrito.
+
+class _DBResponse:
+    def __init__(self, data=None):
+        self.data = data if data is not None else []
+
+
+def _identificador_sql(nome):
+    """Valida e protege nomes de tabela/coluna usados internamente pelo app."""
+    nome = str(nome or "").strip()
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", nome):
+        raise ValueError(f"Identificador SQL inválido: {nome}")
+    return f'"{nome}"'
+
+
+class _PostgresQuery:
+    def __init__(self, db, tabela):
+        self.db = db
+        self.tabela = tabela
+        self.operacao = None
+        self.colunas = "*"
+        self.payload = None
+        self.filtros = []
+        self.limite = None
+
+    def select(self, colunas="*"):
+        self.operacao = "select"
+        self.colunas = colunas or "*"
+        return self
+
+    def insert(self, payload):
+        self.operacao = "insert"
+        self.payload = payload
+        return self
+
+    def update(self, payload):
+        self.operacao = "update"
+        self.payload = payload
+        return self
+
+    def delete(self):
+        self.operacao = "delete"
+        return self
+
+    def eq(self, coluna, valor):
+        self.filtros.append(("eq", coluna, valor))
+        return self
+
+    def gte(self, coluna, valor):
+        self.filtros.append(("gte", coluna, valor))
+        return self
+
+    def lte(self, coluna, valor):
+        self.filtros.append(("lte", coluna, valor))
+        return self
+
+    def in_(self, coluna, valores):
+        self.filtros.append(("in", coluna, list(valores or [])))
+        return self
+
+    def limit(self, quantidade):
+        self.limite = int(quantidade)
+        return self
+
+    def _where(self):
+        partes = []
+        params = []
+
+        for operador, coluna, valor in self.filtros:
+            col = _identificador_sql(coluna)
+
+            if operador == "eq":
+                if valor is None:
+                    partes.append(f"{col} IS NULL")
+                else:
+                    partes.append(f"{col} = %s")
+                    params.append(valor)
+
+            elif operador == "gte":
+                partes.append(f"{col} >= %s")
+                params.append(valor)
+
+            elif operador == "lte":
+                partes.append(f"{col} <= %s")
+                params.append(valor)
+
+            elif operador == "in":
+                valores = list(valor or [])
+                if not valores:
+                    partes.append("FALSE")
+                else:
+                    placeholders = ", ".join(["%s"] * len(valores))
+                    partes.append(f"{col} IN ({placeholders})")
+                    params.extend(valores)
+
+        sql = (" WHERE " + " AND ".join(partes)) if partes else ""
+        return sql, params
+
+    def _colunas_select(self):
+        if str(self.colunas).strip() == "*":
+            return "*"
+        nomes = [c.strip() for c in str(self.colunas).split(",") if c.strip()]
+        return ", ".join(_identificador_sql(c) for c in nomes)
+
+    def execute(self):
+        tabela = _identificador_sql(self.tabela)
+        where_sql, where_params = self._where()
+
+        with self.db._connect() as conn:
+            with conn.cursor() as cur:
+                if self.operacao == "select":
+                    sql = f"SELECT {self._colunas_select()} FROM {tabela}{where_sql}"
+                    params = list(where_params)
+                    if self.limite is not None:
+                        sql += " LIMIT %s"
+                        params.append(self.limite)
+
+                    cur.execute(sql, params)
+                    rows = cur.fetchall()
+                    return _DBResponse([dict(r) for r in rows])
+
+                if self.operacao == "insert":
+                    registros = self.payload if isinstance(self.payload, list) else [self.payload]
+                    registros = [r for r in registros if isinstance(r, dict) and r]
+                    if not registros:
+                        return _DBResponse([])
+
+                    resultado = []
+                    for registro in registros:
+                        colunas = list(registro.keys())
+                        cols_sql = ", ".join(_identificador_sql(c) for c in colunas)
+                        placeholders = ", ".join(["%s"] * len(colunas))
+                        valores = [registro[c] for c in colunas]
+
+                        cur.execute(
+                            f"INSERT INTO {tabela} ({cols_sql}) "
+                            f"VALUES ({placeholders}) RETURNING *",
+                            valores,
+                        )
+                        row = cur.fetchone()
+                        if row:
+                            resultado.append(dict(row))
+
+                    conn.commit()
+                    return _DBResponse(resultado)
+
+                if self.operacao == "update":
+                    payload = dict(self.payload or {})
+                    if not payload:
+                        return _DBResponse([])
+
+                    sets = []
+                    params = []
+                    for coluna, valor in payload.items():
+                        sets.append(f"{_identificador_sql(coluna)} = %s")
+                        params.append(valor)
+
+                    sql = (
+                        f"UPDATE {tabela} SET {', '.join(sets)}"
+                        f"{where_sql} RETURNING *"
+                    )
+                    params.extend(where_params)
+                    cur.execute(sql, params)
+                    rows = cur.fetchall()
+                    conn.commit()
+                    return _DBResponse([dict(r) for r in rows])
+
+                if self.operacao == "delete":
+                    sql = f"DELETE FROM {tabela}{where_sql} RETURNING *"
+                    cur.execute(sql, where_params)
+                    rows = cur.fetchall()
+                    conn.commit()
+                    return _DBResponse([dict(r) for r in rows])
+
+                raise RuntimeError("Nenhuma operação de banco foi definida.")
+
+
+class _PostgresCompat:
+    def __init__(self, database_url):
+        self.database_url = str(database_url).strip()
+
+    def _connect(self):
+        try:
+            import psycopg
+            from psycopg.rows import dict_row
+        except ImportError:
+            raise RuntimeError(
+                "O pacote psycopg não está instalado. "
+                "Adicione psycopg[binary]>=3.2 ao requirements.txt."
+            )
+
+        return psycopg.connect(
+            self.database_url,
+            row_factory=dict_row,
+            connect_timeout=12,
+        )
+
+    def table(self, tabela):
+        if tabela not in {"obras", "colaboradores", "convocacoes"}:
+            raise ValueError(f"Tabela não autorizada no adaptador: {tabela}")
+        return _PostgresQuery(self, tabela)
+
+
+def _secret_opcional(nome):
+    try:
+        valor = st.secrets.get(nome, "")
+        return str(valor).strip() if valor else ""
+    except Exception:
+        return ""
+
+
+DATABASE_URL = _secret_opcional("DATABASE_URL")
+DB_BACKEND = "NEON" if DATABASE_URL else "SUPABASE"
+
+
 @st.cache_resource
 def init_connection():
+    if DATABASE_URL:
+        return _PostgresCompat(DATABASE_URL)
+
     url = st.secrets["SUPABASE_URL"]
     key = st.secrets["SUPABASE_KEY"]
     return create_client(url, key)
 
+
 try:
-    supabase: Client = init_connection()
+    # Mantemos o nome "supabase" por compatibilidade com o restante do app.
+    # Quando DATABASE_URL existe, este objeto na verdade aponta para o Neon/PostgreSQL.
+    supabase = init_connection()
 except Exception as e:
-    st.error(f"Erro de credenciais: {e}")
+    st.error(f"Erro ao iniciar o banco de dados: {e}")
     st.stop()
 
 # --- FUNÇÕES DE LIMPEZA E PADRONIZAÇÃO ---
@@ -352,8 +578,11 @@ def to_latin(texto):
 def proximo_dia_util(data_base=None):
     """
     Retorna o dia seguinte à data informada.
-    Convocações podem ocorrer em qualquer dia da semana, inclusive sábado,
-    domingo e feriado. O nome da função foi mantido para compatibilidade.
+    Convocações podem ocorrer em qualquer dia da semana,
+    inclusive sábado, domingo e feriado.
+
+    O nome da função foi mantido para compatibilidade
+    com o restante do sistema.
     """
     data_ref = data_base or datetime.date.today()
     return data_ref + datetime.timedelta(days=1)
@@ -655,13 +884,15 @@ def inserir_convocacao_segura(obra_id, colaborador_id, data_convocacao, engenhei
         return False, "não pôde ser convocado(a); verifique se já existe uma convocação ou se o cadastro está válido"
 
 
-# --- ACESSO RESILIENTE AO SUPABASE ---
+# --- ACESSO RESILIENTE AO BANCO ---
 def _cliente_supabase_para_tentativa(tentativa=0):
     """
-    Usa o cliente normal na primeira tentativa e cria um cliente novo nas
-    tentativas seguintes. Isso evita que uma conexão HTTP quebrada/stale
-    continue sendo reutilizada após uma oscilação de rede.
+    Retorna um cliente novo para retry.
+    O nome da função foi preservado para compatibilidade interna.
     """
+    if DB_BACKEND == "NEON":
+        return _PostgresCompat(DATABASE_URL)
+
     if tentativa == 0:
         return supabase
 
@@ -671,10 +902,6 @@ def _cliente_supabase_para_tentativa(tentativa=0):
 
 
 def _executar_supabase_com_retry(operacao, tentativas=3):
-    """
-    Executa uma operação de leitura no Supabase com novas tentativas.
-    'operacao' recebe o cliente Supabase como argumento.
-    """
     ultimo_erro = None
 
     for tentativa in range(tentativas):
@@ -683,17 +910,29 @@ def _executar_supabase_com_retry(operacao, tentativas=3):
             return operacao(cliente)
         except Exception as e:
             ultimo_erro = e
+            try:
+                st.cache_resource.clear()
+            except Exception:
+                pass
+
             if tentativa < tentativas - 1:
-                time.sleep(1.2 * (tentativa + 1))
+                time.sleep(1.0 * (tentativa + 1))
 
     raise ultimo_erro
 
 
-def _obra_existe_no_supabase(nome_obra, tentativas=2):
-    """Confirma diretamente no banco se uma obra com o mesmo nome já existe."""
+def _listar_obras_resiliente():
     resposta = _executar_supabase_com_retry(
-        lambda sb: (
-            sb.table("obras")
+        lambda db: db.table("obras").select("id,nome,unidade").execute(),
+        tentativas=3
+    )
+    return resposta.data or [], DB_BACKEND.lower()
+
+
+def _obra_existe_no_supabase(nome_obra, tentativas=2):
+    resposta = _executar_supabase_com_retry(
+        lambda db: (
+            db.table("obras")
             .select("id,nome")
             .eq("nome", nome_obra)
             .limit(1)
@@ -705,29 +944,14 @@ def _obra_existe_no_supabase(nome_obra, tentativas=2):
 
 
 def _inserir_obra_resiliente(nome_obra, unidade, tentativas=3):
-    """
-    Insere uma obra sem arriscar duplicação em caso de queda da conexão
-    depois de o servidor já ter recebido o INSERT.
-
-    Retorna:
-      (True, "inserida")   -> nova obra confirmada
-      (True, "existente")  -> já estava no banco
-      (False, "erro")      -> não foi possível confirmar/inserir
-    """
     ultimo_erro = None
 
     for tentativa in range(tentativas):
-        # Antes de cada INSERT, confirma se uma tentativa anterior já gravou.
         try:
-            if _obra_existe_no_supabase(nome_obra, tentativas=2):
+            if _obra_existe_no_supabase(nome_obra, tentativas=1):
                 return True, "existente"
         except Exception as e:
             ultimo_erro = e
-            # Se nem conseguimos confirmar o estado do banco, não inserimos às cegas.
-            if tentativa < tentativas - 1:
-                time.sleep(1.2 * (tentativa + 1))
-                continue
-            break
 
         try:
             cliente = _cliente_supabase_para_tentativa(tentativa)
@@ -744,10 +968,8 @@ def _inserir_obra_resiliente(nome_obra, unidade, tentativas=3):
         except Exception as e:
             ultimo_erro = e
 
-            # O INSERT pode ter chegado ao servidor e apenas a resposta ter caído.
-            # Confirma antes de qualquer nova tentativa para evitar duplicidade.
             try:
-                if _obra_existe_no_supabase(nome_obra, tentativas=2):
+                if _obra_existe_no_supabase(nome_obra, tentativas=1):
                     return True, "inserida"
             except Exception:
                 pass
@@ -755,149 +977,92 @@ def _inserir_obra_resiliente(nome_obra, unidade, tentativas=3):
             if tentativa < tentativas - 1:
                 time.sleep(1.2 * (tentativa + 1))
 
-    # Guarda só um detalhe curto para diagnóstico administrativo, sem jogar traceback na tela.
     try:
-        if ultimo_erro:
-            st.session_state["supabase_ultimo_erro_sync"] = (
-                f"{type(ultimo_erro).__name__}: {str(ultimo_erro)[:220]}"
-            )
+        st.session_state["banco_ultimo_erro_sync"] = (
+            f"{type(ultimo_erro).__name__}: {str(ultimo_erro)[:220]}"
+        )
     except Exception:
         pass
 
     return False, "erro"
 
 
-# --- SINCRONIZAÇÃO COM TRELLO (MÊS VIGENTE OU SELEÇÃO MANUAL) ---
-TRELLO_BOARD_SHORTLINK = "TX8hGvmI"
-TRELLO_BOARD_SLUG = "or%C3%A7amentos"
-
-
-def _ler_secret_trello(*nomes, default=""):
-    """Aceita secrets planos ou uma seção [trello], sem exigir mudança imediata no deploy."""
-    for nome in nomes:
-        try:
-            valor = st.secrets.get(nome, "")
-            if valor:
-                return str(valor).strip()
-        except Exception:
-            pass
-
+def _testar_banco_ativo():
     try:
-        bloco = st.secrets.get("trello", {})
-        for nome in nomes:
-            chaves = [nome, nome.lower()]
-            if nome.startswith("TRELLO_"):
-                chaves.append(nome.replace("TRELLO_", "").lower())
-            for chave in chaves:
-                try:
-                    valor = bloco.get(chave, "")
-                except Exception:
-                    valor = ""
-                if valor:
-                    return str(valor).strip()
-    except Exception:
-        pass
-    return default
+        resposta = _executar_supabase_com_retry(
+            lambda db: db.table("obras").select("id").limit(1).execute(),
+            tentativas=2
+        )
+        return True, f"{DB_BACKEND} OK"
+    except Exception as e:
+        return False, f"{type(e).__name__}: {str(e)[:220]}"
 
 
-def _normalizar_payload_trello(data):
-    if not isinstance(data, dict):
-        return [], []
-    listas = data.get("lists") or []
-    cards = data.get("cards") or []
-    if not isinstance(listas, list):
-        listas = []
-    if not isinstance(cards, list):
-        cards = []
-    return listas, cards
+# --- SINCRONIZAÇÃO COM TRELLO (MÊS VIGENTE OU SELEÇÃO MANUAL) ---
+TRELLO_JSON_URL = "https://trello.com/b/TX8hGvmI.json"
 
 
 @st.cache_data(ttl=120, show_spinner=False)
 def obter_listas_trello():
     """
-    Lê o quadro ORÇAMENTOS de forma resiliente.
-
-    Ordem de tentativa:
-    1) API oficial do Trello, quando TRELLO_API_KEY estiver configurada;
-    2) export JSON público usando a URL completa do quadro;
-    3) export JSON público pelo shortlink antigo.
-
-    O quadro continua público, mas o endpoint .json pode variar/bloquear requisições
-    automáticas. Por isso não dependemos mais de uma única URL.
+    Lê o quadro público exatamente pelo mesmo método usado na Torre de Controle:
+    GET direto no arquivo .json público do Trello, sem API Key, Token ou headers especiais.
     """
-    erros = []
-    shortlink = _ler_secret_trello("TRELLO_BOARD_SHORTLINK", "TRELLO_BOARD_ID", default=TRELLO_BOARD_SHORTLINK)
-    api_key = _ler_secret_trello("TRELLO_API_KEY", "TRELLO_KEY")
-    token = _ler_secret_trello("TRELLO_TOKEN", "TRELLO_API_TOKEN")
-
-    headers = {
-        "User-Agent": "Mozilla/5.0 (compatible; AproarControle/1.0)",
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
-        "Cache-Control": "no-cache",
-    }
-
-    # 1) API oficial - caminho preferencial em produção.
-    if api_key:
-        try:
-            params = {"key": api_key}
-            if token:
-                params["token"] = token
-
-            url_listas = f"https://api.trello.com/1/boards/{shortlink}/lists"
-            params_listas = {**params, "filter": "all", "fields": "id,name,closed"}
-            r_listas = requests.get(url_listas, params=params_listas, headers=headers, timeout=15)
-            r_listas.raise_for_status()
-            listas = r_listas.json()
-
-            url_cards = f"https://api.trello.com/1/boards/{shortlink}/cards"
-            params_cards = {**params, "filter": "all", "fields": "id,name,idList,closed"}
-            r_cards = requests.get(url_cards, params=params_cards, headers=headers, timeout=20)
-            r_cards.raise_for_status()
-            cards = r_cards.json()
-
-            if isinstance(listas, list) and isinstance(cards, list):
-                return listas, cards
-        except Exception as e:
-            erros.append(f"API oficial: {type(e).__name__}: {str(e)[:180]}")
-
-    # 2 e 3) Export público. A URL com slug evita alguns redirects/bloqueios do Trello.
-    urls_publicas = [
-        f"https://trello.com/b/{shortlink}/{TRELLO_BOARD_SLUG}.json",
-        f"https://trello.com/b/{shortlink}.json",
-    ]
-
-    for url in urls_publicas:
-        try:
-            resp = requests.get(url, headers=headers, timeout=20, allow_redirects=True)
-            if resp.status_code == 200:
-                listas, cards = _normalizar_payload_trello(resp.json())
-                # Um quadro pode excepcionalmente estar vazio; basta o payload ter as chaves esperadas.
-                if listas or cards or (isinstance(resp.json(), dict) and ("lists" in resp.json() or "cards" in resp.json())):
-                    return listas, cards
-            erros.append(f"{url}: HTTP {resp.status_code}")
-        except Exception as e:
-            erros.append(f"{url}: {type(e).__name__}: {str(e)[:180]}")
-
-    # O detalhe fica disponível apenas para a interface administrativa, sem derrubar o app.
     try:
-        st.session_state["trello_ultimo_erro"] = " | ".join(erros[-3:])
-    except Exception:
-        pass
-    return [], []
+        resposta = requests.get(
+            TRELLO_JSON_URL,
+            timeout=20
+        )
+        resposta.raise_for_status()
+
+        dados = resposta.json()
+
+        if (
+            not isinstance(dados, dict)
+            or not isinstance(dados.get("cards"), list)
+            or not isinstance(dados.get("lists"), list)
+        ):
+            try:
+                st.session_state["trello_ultimo_erro"] = (
+                    "O Trello respondeu, mas o JSON não contém lists/cards válidos."
+                )
+            except Exception:
+                pass
+            return [], []
+
+        try:
+            st.session_state["trello_ultimo_erro"] = ""
+            st.session_state["trello_fonte"] = TRELLO_JSON_URL
+        except Exception:
+            pass
+
+        return dados.get("lists", []), dados.get("cards", [])
+
+    except Exception as e:
+        try:
+            st.session_state["trello_ultimo_erro"] = (
+                f"{type(e).__name__}: {str(e)[:300]}"
+            )
+        except Exception:
+            pass
+        return [], []
 
 
 def executar_sincronizacao_trello(id_lista_target=None, id_card_target=None):
     """
     Sincroniza cards/listas do Trello com a tabela 'obras'.
 
-    A rotina é protegida contra oscilações temporárias do Supabase:
-    - tenta novamente leituras;
-    - recria o cliente HTTP quando necessário;
-    - confirma existência antes de repetir INSERT;
-    - nunca deixa um ConnectError derrubar a interface do Streamlit.
+    Sincroniza o Trello público com o banco ativo (Neon/PostgreSQL).
+    A leitura do Trello é sempre renovada ao executar uma sincronização.
     """
     try:
+        # O botão de sincronização sempre consulta o Trello ao vivo,
+        # sem reutilizar uma falha/resultado antigo do cache.
+        try:
+            obter_listas_trello.clear()
+        except Exception:
+            pass
+
         lists, cards = obter_listas_trello()
         if not lists and not cards:
             detalhe = ""
@@ -908,7 +1073,7 @@ def executar_sincronizacao_trello(id_lista_target=None, id_card_target=None):
 
             msg = "Não foi possível ler o quadro ORÇAMENTOS do Trello agora."
             if detalhe:
-                msg += " O acesso público falhou e a API oficial não respondeu."
+                msg += f" Detalhe: {detalhe}"
             return False, msg
 
         nome_alvo = ""
@@ -1688,7 +1853,7 @@ if modo_campo:
                                 st.error(f"Não foi possível salvar o apontamento de {nome}. Tente novamente.")
 
     # --------------------------------------------------------------
-    # CONVOCAÇÃO — PRÓXIMO DIA ÚTIL
+    # CONVOCAÇÃO — PRÓXIMO DIA
     # --------------------------------------------------------------
     elif secao_campo == "📋 EQUIPE DE AMANHÃ":
         st.markdown("### 📋 Equipe do próximo dia")
@@ -3017,7 +3182,11 @@ else:
                                 st.error(me)
                 else:
                     st.warning("Trello temporariamente indisponível. O sistema continuará funcionando com as obras já cadastradas.")
-                    st.caption("Se o problema persistir, configure TRELLO_API_KEY/TRELLO_TOKEN nos Secrets do Streamlit para usar a API oficial.")
+                    detalhe_trello = st.session_state.get("trello_ultimo_erro", "")
+                    st.caption("Fonte: https://trello.com/b/TX8hGvmI.json • acesso público, sem API Key/Token.")
+                    if detalhe_trello:
+                        with st.expander("Ver detalhe da conexão com o Trello"):
+                            st.code(detalhe_trello)
 
             st.markdown("#### 🔎 Busca manual para medições retroativas")
             termo_trello = st.text_input(
@@ -3120,21 +3289,146 @@ else:
             )
 
             if arquivo_import is not None:
-                try:
-                    nome_arquivo = arquivo_import.name.lower()
+
+                def _localizar_linha_cabecalho_colaboradores(df_bruto, limite=20):
+                    """
+                    Procura automaticamente a linha de cabeçalho da tabela.
+                    Isso permite importar planilhas que tenham título, total, observações
+                    ou linhas em branco antes de 'Código | Nome | ...'.
+                    """
+                    candidatos_nome = {
+                        "NOME",
+                        "NOME COMPLETO",
+                        "COLABORADOR",
+                        "FUNCIONARIO",
+                        "FUNCIONÁRIO",
+                        "EMPREGADO",
+                    }
+
+                    qtd = min(len(df_bruto), limite)
+
+                    for idx in range(qtd):
+                        valores = []
+
+                        for valor in df_bruto.iloc[idx].tolist():
+                            if pd.isna(valor):
+                                continue
+
+                            txt = normalizar(str(valor))
+                            if txt:
+                                valores.append(txt)
+
+                        # Prioridade: linha que realmente contém uma coluna de nome.
+                        if any(v in candidatos_nome for v in valores):
+                            return idx
+
+                        # Também aceita cabeçalhos descritivos como
+                        # "Nome do colaborador", sem confundir o título
+                        # "COLABORADORES ADMITIDOS / ATIVOS" com cabeçalho.
+                        for v in valores:
+                            tokens = [t for t in re.split(r"[^A-Z0-9]+", v) if t]
+                            if "NOME" in tokens:
+                                return idx
+
+                    return None
+
+
+                def _ler_planilha_colaboradores(arquivo):
+                    """
+                    Lê XLS/XLSX/CSV detectando automaticamente o cabeçalho.
+                    Retorna (dataframe, linha_cabecalho_1_based).
+                    """
+                    nome_arquivo = arquivo.name.lower()
+
                     if nome_arquivo.endswith(".csv"):
+                        arquivo.seek(0)
+
                         try:
-                            df_import = pd.read_csv(arquivo_import, sep=None, engine="python")
+                            bruto = pd.read_csv(
+                                arquivo,
+                                sep=None,
+                                engine="python",
+                                header=None
+                            )
+                            encoding_usado = None
+
                         except UnicodeDecodeError:
-                            arquivo_import.seek(0)
-                            df_import = pd.read_csv(arquivo_import, sep=None, engine="python", encoding="latin-1")
+                            arquivo.seek(0)
+                            bruto = pd.read_csv(
+                                arquivo,
+                                sep=None,
+                                engine="python",
+                                header=None,
+                                encoding="latin-1"
+                            )
+                            encoding_usado = "latin-1"
+
+                        linha_header = _localizar_linha_cabecalho_colaboradores(bruto)
+
+                        arquivo.seek(0)
+
+                        kwargs = {
+                            "sep": None,
+                            "engine": "python",
+                            "header": linha_header if linha_header is not None else 0,
+                        }
+
+                        if encoding_usado:
+                            kwargs["encoding"] = encoding_usado
+
+                        df = pd.read_csv(
+                            arquivo,
+                            **kwargs
+                        )
+
                     else:
-                        df_import = pd.read_excel(arquivo_import)
+                        arquivo.seek(0)
+
+                        # Primeiro lê sem cabeçalho para encontrar onde a tabela começa.
+                        bruto = pd.read_excel(
+                            arquivo,
+                            header=None
+                        )
+
+                        linha_header = _localizar_linha_cabecalho_colaboradores(bruto)
+
+                        arquivo.seek(0)
+
+                        # Se não localizar nada, mantém compatibilidade com planilhas
+                        # convencionais cujo cabeçalho já está na primeira linha.
+                        df = pd.read_excel(
+                            arquivo,
+                            header=linha_header if linha_header is not None else 0
+                        )
+
+                    # Remove linhas e colunas completamente vazias.
+                    df = df.dropna(axis=0, how="all").dropna(axis=1, how="all")
+
+                    return df, (
+                        linha_header + 1
+                        if linha_header is not None
+                        else 1
+                    )
+
+
+                try:
+                    df_import, linha_cabecalho_detectada = _ler_planilha_colaboradores(
+                        arquivo_import
+                    )
+
                 except Exception as e:
                     df_import = pd.DataFrame()
+                    linha_cabecalho_detectada = None
                     st.error(f"Não foi possível ler a planilha: {e}")
 
+
                 if not df_import.empty:
+
+                    if linha_cabecalho_detectada:
+                        st.caption(
+                            f"✅ Cabeçalho da tabela identificado automaticamente na linha "
+                            f"{linha_cabecalho_detectada}."
+                        )
                     df_import.columns = [str(c).strip() for c in df_import.columns]
                     colunas = list(df_import.columns)
 
