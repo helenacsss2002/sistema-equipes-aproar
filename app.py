@@ -606,29 +606,98 @@ def proximo_dia_util(data_base=None):
 
 NOME_OBRA_PLACEHOLDER = "A DEFINIR NO APONTAMENTO"
 
+def nome_obra_placeholder_unidade(unidade):
+    """
+    Gera um nome técnico único por Unidade.
+    Isso evita conflito com o índice UNIQUE de nome da tabela obras no Neon.
+    """
+    unidade_limpa = " ".join(str(unidade or "").strip().split()).upper()
+    return f"{NOME_OBRA_PLACEHOLDER} - {unidade_limpa}"
+
+
 def eh_obra_placeholder(obra):
-    """Identifica a obra temporária usada apenas para guardar a Unidade antes do apontamento."""
+    """
+    Identifica tanto o placeholder legado:
+        A DEFINIR NO APONTAMENTO
+    quanto os novos placeholders por Unidade:
+        A DEFINIR NO APONTAMENTO - UNIFOR
+        A DEFINIR NO APONTAMENTO - FIEC
+        etc.
+    """
     if not obra:
         return False
-    return normalizar(obra.get("nome", "")) == normalizar(NOME_OBRA_PLACEHOLDER)
+
+    nome_norm = normalizar(obra.get("nome", ""))
+    prefixo_norm = normalizar(NOME_OBRA_PLACEHOLDER)
+
+    return nome_norm == prefixo_norm or nome_norm.startswith(prefixo_norm + " - ")
+
 
 def obter_obra_placeholder_unidade(unidade):
-    """Retorna/cria uma obra temporária da Unidade para convocações ainda sem Obra/Serviço definida."""
+    """
+    Retorna/cria a obra técnica da Unidade para convocações ainda sem
+    Obra/Serviço definida.
+
+    Cada Unidade recebe um nome técnico diferente no banco para não violar
+    a restrição UNIQUE de obras.nome.
+    """
+    unidade_limpa = " ".join(str(unidade or "").strip().split()).upper()
+    if not unidade_limpa:
+        return None
+
     try:
-        existentes = supabase.table("obras").select("*").eq("unidade", unidade).execute().data or []
+        # 1) Se já existe qualquer placeholder nessa Unidade, reutiliza.
+        existentes = (
+            supabase.table("obras")
+            .select("*")
+            .eq("unidade", unidade_limpa)
+            .execute().data or []
+        )
+
         for obra in existentes:
             if eh_obra_placeholder(obra):
                 return obra.get("id")
 
-        criado = supabase.table("obras").insert({
-            "unidade": unidade,
-            "nome": NOME_OBRA_PLACEHOLDER
-        }).execute().data or []
+        # 2) Cria um placeholder exclusivo desta Unidade.
+        nome_placeholder = nome_obra_placeholder_unidade(unidade_limpa)
+
+        criado = (
+            supabase.table("obras")
+            .insert({
+                "unidade": unidade_limpa,
+                "nome": nome_placeholder
+            })
+            .execute().data or []
+        )
+
         if criado:
             limpar_cache_operacional()
             return criado[0].get("id")
-    except Exception:
-        return None
+
+    except Exception as e:
+        # Guarda o diagnóstico para o administrativo, mas não derruba o app.
+        try:
+            st.session_state["erro_placeholder_unidade"] = (
+                f"{type(e).__name__}: {str(e)[:300]}"
+            )
+        except Exception:
+            pass
+
+        # 3) Última confirmação: o INSERT pode ter sido concluído e apenas a
+        # resposta ter falhado. Consulta novamente antes de desistir.
+        try:
+            existentes = (
+                supabase.table("obras")
+                .select("*")
+                .eq("unidade", unidade_limpa)
+                .execute().data or []
+            )
+            for obra in existentes:
+                if eh_obra_placeholder(obra):
+                    return obra.get("id")
+        except Exception:
+            pass
+
     return None
 
 def obras_reais_da_unidade(unidade):
@@ -2106,7 +2175,14 @@ if modo_campo:
                 else:
                     obra_id_placeholder = obter_obra_placeholder_unidade(unidade_selecionada)
                     if not obra_id_placeholder:
-                        st.error("Não foi possível preparar a Unidade para a convocação. Tente novamente.")
+                        st.error(
+                            f"Não foi possível preparar a Unidade **{unidade_selecionada}** "
+                            "para a convocação."
+                        )
+                        detalhe_placeholder = st.session_state.get("erro_placeholder_unidade", "")
+                        if detalhe_placeholder:
+                            with st.expander("Diagnóstico técnico"):
+                                st.code(detalhe_placeholder)
                     else:
                         pessoas = []
                         for label_colab in equipe_selecionada:
@@ -2587,7 +2663,7 @@ else:
                     else:
                         obra_id_placeholder = obter_obra_placeholder_unidade(unidade_selecionada)
                         if not obra_id_placeholder:
-                            st.error("Não foi possível preparar a Unidade para a convocação. Tente novamente.")
+                            st.error(f"Não foi possível preparar a Unidade **{unidade_selecionada}** para a convocação.")
                         else:
                             pessoas = []
                             for label_colab in equipe_selecionada:
