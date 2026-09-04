@@ -1889,22 +1889,51 @@ if modo_campo:
             unsafe_allow_html=True,
         )
 
-    secoes_campo = ["🏠 HOJE", "✅ APONTAMENTO", "📋 EQUIPE DE AMANHÃ", "👥 DISPONIBILIDADE"]
-    if st.session_state.get("campo_secao") not in secoes_campo:
-        st.session_state["campo_secao"] = "🏠 HOJE"
+    secoes_principais_campo = ["📌 RESUMO", "👥 CONVOCADOS", "👥 DISPONIBILIDADE"]
+    secoes_ocultas_campo = ["✅ APONTAMENTO", "📋 EQUIPE DE AMANHÃ"]
+    secoes_validas_campo = secoes_principais_campo + secoes_ocultas_campo
 
-    secao_campo = st.radio(
-        "Navegação",
-        secoes_campo,
-        horizontal=True,
-        key="campo_secao",
-        label_visibility="collapsed",
-    )
+    if st.session_state.get("campo_secao") not in secoes_validas_campo:
+        st.session_state["campo_secao"] = "📌 RESUMO"
+
+    secao_campo = st.session_state["campo_secao"]
+
+    nav1, nav2, nav3 = st.columns(3)
+    with nav1:
+        st.button(
+            "📌 RESUMO",
+            use_container_width=True,
+            type="primary" if secao_campo == "📌 RESUMO" else "secondary",
+            on_click=_mudar_secao_campo,
+            args=("📌 RESUMO",),
+            key="btn_nav_resumo_campo",
+        )
+        st.caption("Visão rápida do dia.")
+    with nav2:
+        st.button(
+            "👥 CONVOCADOS",
+            use_container_width=True,
+            type="primary" if secao_campo == "👥 CONVOCADOS" else "secondary",
+            on_click=_mudar_secao_campo,
+            args=("👥 CONVOCADOS",),
+            key="btn_nav_convocados_campo",
+        )
+        st.caption("Quem você convocou.")
+    with nav3:
+        st.button(
+            "👥 DISPONIBILIDADE",
+            use_container_width=True,
+            type="primary" if secao_campo == "👥 DISPONIBILIDADE" else "secondary",
+            on_click=_mudar_secao_campo,
+            args=("👥 DISPONIBILIDADE",),
+            key="btn_nav_disp_campo",
+        )
+        st.caption("Quem pode ser chamado.")
 
     # --------------------------------------------------------------
-    # HOME DO ENGENHEIRO
+    # RESUMO DO ENGENHEIRO
     # --------------------------------------------------------------
-    if secao_campo == "🏠 HOJE":
+    if secao_campo == "📌 RESUMO":
         convocacoes_hoje_campo = _enriquecer_convocacoes_campo(
             _buscar_convocacoes_campo(engenheiro_campo, hoje_campo)
         )
@@ -1918,12 +1947,14 @@ if modo_campo:
         faltas_hoje = sum(1 for c in convocacoes_hoje_campo if str(c.get("status")) == "Falta")
         atestados_hoje = sum(1 for c in convocacoes_hoje_campo if str(c.get("status")) == "Atestado")
 
-        st.markdown("### Sua operação hoje")
-        k1, k2, k3, k4 = st.columns(4)
-        k1.metric("EQUIPE", total_hoje)
-        k2.metric("APONTADOS", apontados_hoje)
-        k3.metric("PENDENTES", pendentes_hoje)
-        k4.metric("FALTAS / ATESTADOS", faltas_hoje + atestados_hoje)
+        st.markdown("### Resumo do dia")
+        k1, k2 = st.columns(2)
+        k1.metric("Equipe", total_hoje)
+        k2.metric("Apontados", apontados_hoje)
+
+        k3, k4 = st.columns(2)
+        k3.metric("Pendentes", pendentes_hoje)
+        k4.metric("Faltas / Atestados", faltas_hoje + atestados_hoje)
 
         if pendentes_hoje:
             st.warning(f"⚠️ Você ainda tem **{pendentes_hoje} apontamento(s)** para concluir hoje.")
@@ -1932,24 +1963,26 @@ if modo_campo:
         else:
             st.info("Nenhuma equipe foi convocada para você hoje.")
 
-        ac1, ac2 = st.columns(2)
-        with ac1:
-            st.button(
-                "✅ CONTINUAR APONTAMENTO",
-                type="primary",
-                use_container_width=True,
-                on_click=_mudar_secao_campo,
-                args=("✅ APONTAMENTO",),
-            )
-        with ac2:
-            st.button(
-                "📋 PLANEJAR EQUIPE DE AMANHÃ",
-                use_container_width=True,
-                on_click=_mudar_secao_campo,
-                args=("📋 EQUIPE DE AMANHÃ",),
-            )
+        st.button(
+            "✅ FAZER APONTAMENTO DE HOJE",
+            type="primary",
+            use_container_width=True,
+            on_click=_mudar_secao_campo,
+            args=("✅ APONTAMENTO",),
+            key="btn_ir_apontamento_resumo_campo",
+        )
+        st.caption("Defina obra/serviço e ajuste presenças.")
 
-        st.markdown("### Amanhã")
+        st.button(
+            "📋 MONTAR EQUIPE DO PRÓXIMO DIA",
+            use_container_width=True,
+            on_click=_mudar_secao_campo,
+            args=("📋 EQUIPE DE AMANHÃ",),
+            key="btn_ir_convocacao_resumo_campo",
+        )
+        st.caption("Escolha unidade, turno e colaboradores.")
+
+        st.markdown("### Próximo dia")
         if convocacoes_amanha_campo:
             unidades_amanha = sorted({str((c.get("dados_obra") or {}).get("unidade") or "-") for c in convocacoes_amanha_campo})
             st.info(
@@ -1966,9 +1999,55 @@ if modo_campo:
             st.caption("Nenhuma convocação sua registrada para o próximo dia.")
 
     # --------------------------------------------------------------
+    # CONVOCADOS PELO ENGENHEIRO
+    # --------------------------------------------------------------
+    elif secao_campo == "👥 CONVOCADOS":
+        convocacoes_hoje_campo = _enriquecer_convocacoes_campo(
+            _buscar_convocacoes_campo(engenheiro_campo, hoje_campo)
+        )
+        convocacoes_amanha_campo = _enriquecer_convocacoes_campo(
+            _buscar_convocacoes_campo(engenheiro_campo, amanha_campo)
+        )
+
+        st.markdown("### 👥 Convocados por você")
+        st.caption("Veja rapidamente quem foi convocado por você hoje e no próximo dia.")
+
+        c1, c2 = st.columns(2)
+        c1.metric("Hoje", len(convocacoes_hoje_campo))
+        c2.metric("Próximo dia", len(convocacoes_amanha_campo))
+
+        st.markdown(f"#### Hoje • {hoje_campo.strftime('%d/%m/%Y')}")
+        if convocacoes_hoje_campo:
+            for conv in convocacoes_hoje_campo:
+                colab = dict_colaboradores.get(conv.get("colaborador_id"), {})
+                unidade = (conv.get("dados_obra") or {}).get("unidade", "-")
+                turno, _ = decompor_observacao_operacional(conv.get("observacao") or "")
+                status = str(conv.get("status") or "Pendente")
+                st.markdown(
+                    f"• **{colab.get('nome', 'Não identificado')}** — {unidade} • {turno} • {status}"
+                )
+        else:
+            st.caption("Nenhuma pessoa convocada por você hoje.")
+
+        st.markdown(f"#### Próximo dia • {amanha_campo.strftime('%d/%m/%Y')}")
+        if convocacoes_amanha_campo:
+            for conv in convocacoes_amanha_campo:
+                colab = dict_colaboradores.get(conv.get("colaborador_id"), {})
+                unidade = (conv.get("dados_obra") or {}).get("unidade", "-")
+                turno, _ = decompor_observacao_operacional(conv.get("observacao") or "")
+                st.markdown(
+                    f"• **{colab.get('nome', 'Não identificado')}** — {unidade} • {turno}"
+                )
+        else:
+            st.caption("Nenhuma pessoa convocada por você para o próximo dia.")
+
+    # --------------------------------------------------------------
     # APONTAMENTO — FOCO EM EXCEÇÕES E PENDÊNCIAS
     # --------------------------------------------------------------
     elif secao_campo == "✅ APONTAMENTO":
+        if st.button("⬅️ Voltar ao resumo", key="voltar_resumo_apont_campo"):
+            _mudar_secao_campo("📌 RESUMO")
+            st.rerun()
         st.markdown("### ✅ Apontamento diário")
         st.caption("Defina a Obra/Serviço e altere somente as exceções. Extra e observação ficam recolhidos para não poluir a tela.")
 
@@ -2105,6 +2184,9 @@ if modo_campo:
     # CONVOCAÇÃO — PRÓXIMO DIA
     # --------------------------------------------------------------
     elif secao_campo == "📋 EQUIPE DE AMANHÃ":
+        if st.button("⬅️ Voltar ao resumo", key="voltar_resumo_conv_campo"):
+            _mudar_secao_campo("📌 RESUMO")
+            st.rerun()
         st.markdown("### 📋 Equipe do próximo dia")
         st.caption("Escolha a Unidade e as pessoas. A Obra/Serviço específica continua sendo definida no apontamento.")
 
