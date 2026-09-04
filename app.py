@@ -2594,9 +2594,32 @@ else:
                         st.rerun()
 
                     if st.session_state.get("conv_exclusao_pendente") == id_corr_atual:
-                        st.warning(
-                            f"⚠️ Excluir a convocação de **{colab_corr.get('nome', 'N/A')}** "
-                            f"em **{data_corr.strftime('%d/%m/%Y')}**? Esta ação não pode ser desfeita."
+                        st.markdown(
+                            f"""
+                            <div style="
+                                background:#F8FAFC;
+                                border:1px solid #CBD5E1;
+                                border-left:4px solid #EF4444;
+                                border-radius:12px;
+                                padding:14px 16px;
+                                margin:8px 0 12px 0;
+                                color:#0F172A;
+                                line-height:1.45;
+                            ">
+                                <div style="font-weight:700; font-size:15px; margin-bottom:4px;">
+                                    Confirmar exclusão
+                                </div>
+                                <div style="font-size:14px;">
+                                    Excluir a convocação de
+                                    <strong>{colab_corr.get('nome', 'N/A')}</strong>
+                                    em <strong>{data_corr.strftime('%d/%m/%Y')}</strong>?
+                                </div>
+                                <div style="font-size:12px; color:#64748B; margin-top:5px;">
+                                    Esta ação não pode ser desfeita.
+                                </div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True
                         )
 
                         conf1, conf2 = st.columns(2)
