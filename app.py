@@ -655,82 +655,24 @@ def inserir_convocacao_segura(obra_id, colaborador_id, data_convocacao, engenhei
 
 
 # --- ACESSO RESILIENTE AO SUPABASE ---
-def _supabase_config():
-    """Retorna URL e chave sem expor os valores na interface."""
-    url = str(st.secrets["SUPABASE_URL"]).strip().rstrip("/")
-    key = str(st.secrets["SUPABASE_KEY"]).strip()
-    return url, key
-
-
 def _cliente_supabase_para_tentativa(tentativa=0):
     """
     Usa o cliente normal na primeira tentativa e cria um cliente novo nas
-    tentativas seguintes. Isso evita reutilizar uma conexão HTTP quebrada.
+    tentativas seguintes. Isso evita que uma conexão HTTP quebrada/stale
+    continue sendo reutilizada após uma oscilação de rede.
     """
     if tentativa == 0:
         return supabase
 
-    url, key = _supabase_config()
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
     return create_client(url, key)
-
-
-def _headers_supabase_rest(prefer=None):
-    """Cabeçalhos para fallback REST direto no PostgREST do Supabase."""
-    _, key = _supabase_config()
-    headers = {
-        "apikey": key,
-        "Authorization": f"Bearer {key}",
-        "Accept": "application/json",
-        "Content-Type": "application/json",
-    }
-    if prefer:
-        headers["Prefer"] = prefer
-    return headers
-
-
-def _supabase_rest_get(tabela, params=None, timeout=15):
-    """GET direto na API REST, sem passar pelo httpx/supabase-py."""
-    url, _ = _supabase_config()
-    resp = requests.get(
-        f"{url}/rest/v1/{tabela}",
-        headers=_headers_supabase_rest(),
-        params=params or {},
-        timeout=timeout,
-    )
-    resp.raise_for_status()
-    return resp.json() if resp.content else []
-
-
-def _supabase_rest_insert(tabela, payload, timeout=15):
-    """INSERT direto na API REST, usado como fallback do cliente Python."""
-    url, _ = _supabase_config()
-    resp = requests.post(
-        f"{url}/rest/v1/{tabela}",
-        headers=_headers_supabase_rest("return=representation"),
-        json=payload,
-        timeout=timeout,
-    )
-    resp.raise_for_status()
-    if not resp.content:
-        return []
-    return resp.json()
-
-
-def _testar_supabase_rest(timeout=10):
-    """
-    Teste simples de conectividade. Não retorna segredo nem URL completa.
-    """
-    try:
-        dados = _supabase_rest_get("obras", params={"select": "id", "limit": "1"}, timeout=timeout)
-        return True, "REST OK"
-    except Exception as e:
-        return False, f"{type(e).__name__}: {str(e)[:220]}"
 
 
 def _executar_supabase_com_retry(operacao, tentativas=3):
     """
-    Executa uma operação via supabase-py com novas tentativas.
-    Este helper continua sendo usado nas leituras gerais.
+    Executa uma operação de leitura no Supabase com novas tentativas.
+    'operacao' recebe o cliente Supabase como argumento.
     """
     ultimo_erro = None
 
@@ -740,117 +682,52 @@ def _executar_supabase_com_retry(operacao, tentativas=3):
             return operacao(cliente)
         except Exception as e:
             ultimo_erro = e
-
-            # Limpa o cliente em cache após falha de conexão para não reciclar
-            # a mesma sessão HTTP quebrada.
-            try:
-                st.cache_resource.clear()
-            except Exception:
-                pass
-
             if tentativa < tentativas - 1:
                 time.sleep(1.2 * (tentativa + 1))
 
     raise ultimo_erro
 
 
-def _listar_obras_resiliente():
-    """
-    Primeiro tenta supabase-py. Se o httpx falhar, tenta REST direto via requests.
-    """
-    erro_cliente = None
-
-    try:
-        resposta = _executar_supabase_com_retry(
-            lambda sb: sb.table("obras").select("id,nome,unidade").execute(),
-            tentativas=2
-        )
-        return resposta.data or [], "cliente"
-    except Exception as e:
-        erro_cliente = e
-
-    try:
-        dados = _supabase_rest_get(
-            "obras",
-            params={"select": "id,nome,unidade"},
-            timeout=20
-        )
-        return dados or [], "rest"
-    except Exception as e_rest:
-        try:
-            st.session_state["supabase_ultimo_erro_sync"] = (
-                f"Cliente: {type(erro_cliente).__name__}: {str(erro_cliente)[:120]} | "
-                f"REST: {type(e_rest).__name__}: {str(e_rest)[:160]}"
-            )
-        except Exception:
-            pass
-        raise e_rest
-
-
 def _obra_existe_no_supabase(nome_obra, tentativas=2):
-    """
-    Confirma diretamente no banco se uma obra com o mesmo nome já existe.
-    Se o cliente Python falhar, usa REST.
-    """
-    erro_cliente = None
-
-    try:
-        resposta = _executar_supabase_com_retry(
-            lambda sb: (
-                sb.table("obras")
-                .select("id,nome")
-                .eq("nome", nome_obra)
-                .limit(1)
-                .execute()
-            ),
-            tentativas=tentativas
-        )
-        return bool(resposta.data or [])
-    except Exception as e:
-        erro_cliente = e
-
-    try:
-        dados = _supabase_rest_get(
-            "obras",
-            params={
-                "select": "id,nome",
-                "nome": f"eq.{nome_obra}",
-                "limit": "1",
-            },
-            timeout=15
-        )
-        return bool(dados)
-    except Exception as e_rest:
-        try:
-            st.session_state["supabase_ultimo_erro_sync"] = (
-                f"Existência - cliente: {type(erro_cliente).__name__}: {str(erro_cliente)[:100]} | "
-                f"REST: {type(e_rest).__name__}: {str(e_rest)[:140]}"
-            )
-        except Exception:
-            pass
-        raise e_rest
+    """Confirma diretamente no banco se uma obra com o mesmo nome já existe."""
+    resposta = _executar_supabase_com_retry(
+        lambda sb: (
+            sb.table("obras")
+            .select("id,nome")
+            .eq("nome", nome_obra)
+            .limit(1)
+            .execute()
+        ),
+        tentativas=tentativas
+    )
+    return bool(resposta.data or [])
 
 
 def _inserir_obra_resiliente(nome_obra, unidade, tentativas=3):
     """
-    Insere uma obra com duas rotas:
-      1) supabase-py;
-      2) fallback REST direto usando requests.
+    Insere uma obra sem arriscar duplicação em caso de queda da conexão
+    depois de o servidor já ter recebido o INSERT.
 
-    Antes de qualquer repetição confirma se a obra já foi gravada, evitando
-    duplicidade quando a resposta do servidor se perde no meio da conexão.
+    Retorna:
+      (True, "inserida")   -> nova obra confirmada
+      (True, "existente")  -> já estava no banco
+      (False, "erro")      -> não foi possível confirmar/inserir
     """
     ultimo_erro = None
 
     for tentativa in range(tentativas):
-        # Confere se já existe antes de inserir.
+        # Antes de cada INSERT, confirma se uma tentativa anterior já gravou.
         try:
-            if _obra_existe_no_supabase(nome_obra, tentativas=1):
+            if _obra_existe_no_supabase(nome_obra, tentativas=2):
                 return True, "existente"
         except Exception as e:
             ultimo_erro = e
+            # Se nem conseguimos confirmar o estado do banco, não inserimos às cegas.
+            if tentativa < tentativas - 1:
+                time.sleep(1.2 * (tentativa + 1))
+                continue
+            break
 
-        # Tenta pelo cliente Python.
         try:
             cliente = _cliente_supabase_para_tentativa(tentativa)
             (
@@ -863,50 +740,26 @@ def _inserir_obra_resiliente(nome_obra, unidade, tentativas=3):
             )
             return True, "inserida"
 
-        except Exception as e_cliente:
-            ultimo_erro = e_cliente
+        except Exception as e:
+            ultimo_erro = e
 
+            # O INSERT pode ter chegado ao servidor e apenas a resposta ter caído.
+            # Confirma antes de qualquer nova tentativa para evitar duplicidade.
             try:
-                st.cache_resource.clear()
-            except Exception:
-                pass
-
-            # Antes do fallback, verifica se o INSERT anterior chegou ao servidor.
-            try:
-                if _obra_existe_no_supabase(nome_obra, tentativas=1):
+                if _obra_existe_no_supabase(nome_obra, tentativas=2):
                     return True, "inserida"
             except Exception:
                 pass
 
-            # Fallback: REST direto, sem httpx.
-            try:
-                _supabase_rest_insert(
-                    "obras",
-                    {
-                        "unidade": unidade,
-                        "nome": nome_obra
-                    },
-                    timeout=20
-                )
-                return True, "inserida"
+            if tentativa < tentativas - 1:
+                time.sleep(1.2 * (tentativa + 1))
 
-            except Exception as e_rest:
-                ultimo_erro = e_rest
-
-                # A resposta REST também pode ter se perdido depois de gravar.
-                try:
-                    if _obra_existe_no_supabase(nome_obra, tentativas=1):
-                        return True, "inserida"
-                except Exception:
-                    pass
-
-        if tentativa < tentativas - 1:
-            time.sleep(1.4 * (tentativa + 1))
-
+    # Guarda só um detalhe curto para diagnóstico administrativo, sem jogar traceback na tela.
     try:
-        st.session_state["supabase_ultimo_erro_sync"] = (
-            f"{type(ultimo_erro).__name__}: {str(ultimo_erro)[:220]}"
-        )
+        if ultimo_erro:
+            st.session_state["supabase_ultimo_erro_sync"] = (
+                f"{type(ultimo_erro).__name__}: {str(ultimo_erro)[:220]}"
+            )
     except Exception:
         pass
 
@@ -1115,12 +968,22 @@ def executar_sincronizacao_trello(id_lista_target=None, id_card_target=None):
         # falha de conexão. Durante uma sincronização isso poderia parecer "banco vazio"
         # e fazer o sistema tentar reinserir todas as obras.
         try:
-            obras_atuais, rota_conexao = _listar_obras_resiliente()
-        except Exception:
+            resposta_obras = _executar_supabase_com_retry(
+                lambda sb: sb.table("obras").select("id,nome,unidade").execute(),
+                tentativas=3
+            )
+            obras_atuais = resposta_obras.data or []
+        except Exception as e:
+            try:
+                st.session_state["supabase_ultimo_erro_sync"] = (
+                    f"{type(e).__name__}: {str(e)[:220]}"
+                )
+            except Exception:
+                pass
+
             return False, (
-                "Não foi possível acessar o banco de dados nem pelo cliente padrão "
-                "nem pela conexão REST de contingência. Nenhuma obra foi alterada. "
-                "Verifique o projeto/credenciais do Supabase e tente novamente."
+                "Não foi possível conectar ao banco de dados agora. "
+                "Nenhuma obra foi alterada. Aguarde alguns segundos e tente sincronizar novamente."
             )
 
         nomes_cadastrados = {
@@ -3122,16 +2985,6 @@ else:
         with st.container(border=True):
             st.markdown("### 🔄 Sincronização com o Trello")
             st.write("Sincronize o mês vigente ou localize manualmente listas e cards de medições anteriores.")
-
-            with st.expander("🩺 Diagnóstico de conexão", expanded=False):
-                if st.button("TESTAR CONEXÃO COM O SUPABASE", key="teste_supabase_config"):
-                    with st.spinner("Testando conexão..."):
-                        ok_rest, detalhe_rest = _testar_supabase_rest()
-                        if ok_rest:
-                            st.success("Supabase acessível pela API REST.")
-                        else:
-                            st.error("O Supabase não respondeu nem pela API REST.")
-                            st.caption(detalhe_rest)
 
             lists_trello, cards_trello = obter_listas_trello()
             mapa_nome_lista = {l.get('id'): l.get('name', 'Lista sem nome') for l in lists_trello}
