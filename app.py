@@ -2730,8 +2730,17 @@ def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
     c1, c2, c3 = st.columns(3)
     with c1:
         if engenheiro_fixo:
-            engenheiro = engenheiro_fixo
-            st.text_input("Engenheiro", value=engenheiro, disabled=True, key=f"{key_prefix}_engfix")
+            # O engenheiro vem do seletor principal do portal. A chave do campo
+            # acompanha o nome para o Streamlit não reaproveitar um valor antigo
+            # (ex.: trocar NETO por JOEL e o campo desabilitado continuar mostrando JOEL).
+            engenheiro = str(engenheiro_fixo)
+            eng_key = re.sub(r"[^A-Za-z0-9_-]+", "_", normalizar(engenheiro)) or "ENG"
+            st.text_input(
+                "Engenheiro",
+                value=engenheiro,
+                disabled=True,
+                key=f"{key_prefix}_engfix_{eng_key}",
+            )
         else:
             engenheiro = st.selectbox("Engenheiro", ENGENHEIROS, key=f"{key_prefix}_eng")
     with c2:
@@ -2783,6 +2792,25 @@ def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
 
     periodos_servico = ["Integral", "Manhã", "Tarde", "Noite", "Outro"]
 
+    # Precisamos enxergar TODAS as convocações do dia, inclusive as feitas por
+    # outros engenheiros. Assim, se uma pessoa já tem Manhã em uma Unidade e
+    # Tarde em outra, cada convocação vira seu próprio apontamento e não faz
+    # sentido oferecer um "2º serviço" dentro de nenhum dos dois registros.
+    try:
+        todas_convs_data = (
+            supabase.table("convocacoes")
+            .select("*")
+            .eq("data", data_apont.isoformat())
+            .execute().data or []
+        )
+    except Exception:
+        todas_convs_data = list(convs)
+
+    convs_por_colaborador = {}
+    for item_conv in todas_convs_data:
+        chave_colab = str(item_conv.get("colaborador_id") or "")
+        convs_por_colaborador.setdefault(chave_colab, []).append(item_conv)
+
     for conv in render:
         c_id = conv.get("id")
         colab = dict_colaboradores.get(conv.get("colaborador_id"), {"nome": "Desconhecido", "funcao": "-"})
@@ -2803,6 +2831,21 @@ def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
         if periodo_principal_atual not in periodos_servico:
             periodo_principal_atual = "Outro"
 
+        mesma_pessoa_no_dia = convs_por_colaborador.get(str(conv.get("colaborador_id") or ""), [])
+        outras_convocacoes_dia = [
+            outra for outra in mesma_pessoa_no_dia
+            if str(outra.get("id")) != str(c_id)
+        ]
+        tem_convocacao_separada_no_dia = bool(outras_convocacoes_dia)
+
+        resumo_outras_alocacoes = []
+        for outra in outras_convocacoes_dia:
+            outra_obra = dict_obras.get(outra.get("obra_id"), {})
+            outra_unidade = str(outra_obra.get("unidade") or "-")
+            outro_turno, _ = decompor_observacao_operacional(outra.get("observacao") or "")
+            outro_eng = str(outra.get("engenheiro") or "-")
+            resumo_outras_alocacoes.append(f"{outro_turno} • {outra_unidade} • {outro_eng}")
+
         with st.container(border=True):
             st.markdown(f"### {colab.get('nome','-')}")
             st.caption(f"{colab.get('funcao','-')} • {unidade} • Convocado: {turno}")
@@ -2821,18 +2864,42 @@ def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
                 idx_pp = periodos_servico.index(periodo_principal_atual)
                 periodo_principal = st.selectbox("Período no serviço principal", periodos_servico, index=idx_pp, key=f"{key_prefix}_periodo_principal_{c_id}")
 
-                st.markdown("**Outro serviço na mesma Unidade (opcional)**")
-                opcoes_adic = ["— Nenhum —"] + list(mapa_obras.keys())
-                adic_atual = adicionais_atuais[0]["servico"] if adicionais_atuais else "— Nenhum —"
-                idx_adic = opcoes_adic.index(adic_atual) if adic_atual in opcoes_adic else 0
-                s1, s2 = st.columns([1.7, 1])
-                with s1:
-                    segundo_servico = st.selectbox("2º serviço", opcoes_adic, index=idx_adic, key=f"{key_prefix}_seg_serv_{c_id}")
-                with s2:
-                    periodo_adic_atual = adicionais_atuais[0].get("periodo", "Tarde") if adicionais_atuais else "Tarde"
-                    if periodo_adic_atual not in periodos_servico:
-                        periodo_adic_atual = "Outro"
-                    segundo_periodo = st.selectbox("Período do 2º serviço", periodos_servico, index=periodos_servico.index(periodo_adic_atual), key=f"{key_prefix}_seg_periodo_{c_id}")
+                # O 2º serviço só aparece quando esta é a ÚNICA convocação da
+                # pessoa no dia. Se já existe outra convocação (ex.: Manhã em
+                # Maracanaú e Tarde em FIEC), cada turno/unidade deve ser
+                # apontado no seu próprio registro.
+                segundo_servico = "— Nenhum —"
+                segundo_periodo = "Tarde"
+                if not tem_convocacao_separada_no_dia:
+                    st.markdown("**Outro serviço na mesma Unidade (opcional)**")
+                    opcoes_adic = ["— Nenhum —"] + list(mapa_obras.keys())
+                    adic_atual = adicionais_atuais[0]["servico"] if adicionais_atuais else "— Nenhum —"
+                    idx_adic = opcoes_adic.index(adic_atual) if adic_atual in opcoes_adic else 0
+                    s1, s2 = st.columns([1.7, 1])
+                    with s1:
+                        segundo_servico = st.selectbox(
+                            "2º serviço",
+                            opcoes_adic,
+                            index=idx_adic,
+                            key=f"{key_prefix}_seg_serv_{c_id}",
+                        )
+                    with s2:
+                        periodo_adic_atual = adicionais_atuais[0].get("periodo", "Tarde") if adicionais_atuais else "Tarde"
+                        if periodo_adic_atual not in periodos_servico:
+                            periodo_adic_atual = "Outro"
+                        segundo_periodo = st.selectbox(
+                            "Período do 2º serviço",
+                            periodos_servico,
+                            index=periodos_servico.index(periodo_adic_atual),
+                            key=f"{key_prefix}_seg_periodo_{c_id}",
+                        )
+                else:
+                    detalhe_aloc = " | ".join(resumo_outras_alocacoes)
+                    st.caption(
+                        "Este colaborador já possui outra convocação neste dia. "
+                        "Cada turno/unidade será apontado separadamente."
+                        + (f" Outra alocação: {detalhe_aloc}." if detalhe_aloc else "")
+                    )
 
                 d1, d2 = st.columns([1, 2])
                 with d1:
@@ -2856,7 +2923,10 @@ def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
                     st.warning("O 2º serviço deve ser diferente do serviço principal.")
                 else:
                     adicionais = []
-                    if segundo_servico in mapa_obras:
+                    # Se já há outra convocação separada no mesmo dia, limpamos
+                    # qualquer 2º serviço antigo desse registro para não duplicar
+                    # a informação entre os dois apontamentos.
+                    if (not tem_convocacao_separada_no_dia) and segundo_servico in mapa_obras:
                         adicionais.append({"servico": segundo_servico, "periodo": segundo_periodo})
                     meta = registrar_metadata_apontamento(
                         conv,
