@@ -254,17 +254,536 @@ MESES_PT = {
     9: "SETEMBRO", 10: "OUTUBRO", 11: "NOVEMBRO", 12: "DEZEMBRO"
 }
 
-# --- CONEXÃO COM SUPABASE ---
+# --- BANCO DE DADOS NEON / POSTGRESQL ---
+# Mantemos o nome "supabase" no restante do sistema
+# para não precisar reescrever todas as telas.
+
+class _DBResponse:
+    def __init__(self, data=None):
+        self.data = data if data is not None else []
+
+
+def _identificador_sql(nome):
+    nome = str(nome or "").strip()
+
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", nome):
+        raise ValueError(f"Identificador SQL inválido: {nome}")
+
+    return f'"{nome}"'
+
+
+class _PostgresQuery:
+
+    def __init__(self, db, tabela):
+        self.db = db
+        self.tabela = tabela
+
+        self.operacao = None
+        self.colunas = "*"
+        self.payload = None
+
+        self.filtros = []
+        self.limite = None
+
+
+    def select(self, colunas="*"):
+        self.operacao = "select"
+        self.colunas = colunas or "*"
+        return self
+
+
+    def insert(self, payload):
+        self.operacao = "insert"
+        self.payload = payload
+        return self
+
+
+    def update(self, payload):
+        self.operacao = "update"
+        self.payload = payload
+        return self
+
+
+    def delete(self):
+        self.operacao = "delete"
+        return self
+
+
+    def eq(self, coluna, valor):
+        self.filtros.append(("eq", coluna, valor))
+        return self
+
+
+    def gte(self, coluna, valor):
+        self.filtros.append(("gte", coluna, valor))
+        return self
+
+
+    def lte(self, coluna, valor):
+        self.filtros.append(("lte", coluna, valor))
+        return self
+
+
+    def in_(self, coluna, valores):
+        self.filtros.append(("in", coluna, list(valores or [])))
+        return self
+
+
+    def limit(self, quantidade):
+        self.limite = int(quantidade)
+        return self
+
+
+    def _where(self):
+
+        partes = []
+        parametros = []
+
+        for operador, coluna, valor in self.filtros:
+
+            coluna_sql = _identificador_sql(coluna)
+
+            if operador == "eq":
+
+                if valor is None:
+                    partes.append(f"{coluna_sql} IS NULL")
+
+                else:
+                    partes.append(f"{coluna_sql} = %s")
+                    parametros.append(valor)
+
+
+            elif operador == "gte":
+
+                partes.append(
+                    f"{coluna_sql} >= %s"
+                )
+
+                parametros.append(valor)
+
+
+            elif operador == "lte":
+
+                partes.append(
+                    f"{coluna_sql} <= %s"
+                )
+
+                parametros.append(valor)
+
+
+            elif operador == "in":
+
+                valores = list(valor or [])
+
+                if not valores:
+
+                    partes.append("FALSE")
+
+                else:
+
+                    placeholders = ", ".join(
+                        ["%s"] * len(valores)
+                    )
+
+                    partes.append(
+                        f"{coluna_sql} IN ({placeholders})"
+                    )
+
+                    parametros.extend(valores)
+
+
+        if partes:
+
+            return (
+                " WHERE " + " AND ".join(partes),
+                parametros
+            )
+
+        return "", parametros
+
+
+    def _colunas_select(self):
+
+        if str(self.colunas).strip() == "*":
+            return "*"
+
+        nomes = [
+            c.strip()
+            for c in str(self.colunas).split(",")
+            if c.strip()
+        ]
+
+        return ", ".join(
+            _identificador_sql(c)
+            for c in nomes
+        )
+
+
+    def execute(self):
+
+        tabela_sql = _identificador_sql(
+            self.tabela
+        )
+
+        where_sql, where_params = self._where()
+
+
+        with self.db._connect() as conn:
+
+            with conn.cursor() as cur:
+
+
+                # =========================
+                # SELECT
+                # =========================
+
+                if self.operacao == "select":
+
+                    sql = (
+                        f"SELECT {self._colunas_select()} "
+                        f"FROM {tabela_sql}"
+                        f"{where_sql}"
+                    )
+
+                    parametros = list(where_params)
+
+                    if self.limite is not None:
+
+                        sql += " LIMIT %s"
+
+                        parametros.append(
+                            self.limite
+                        )
+
+
+                    cur.execute(
+                        sql,
+                        parametros
+                    )
+
+                    registros = cur.fetchall()
+
+                    return _DBResponse(
+                        [
+                            dict(r)
+                            for r in registros
+                        ]
+                    )
+
+
+                # =========================
+                # INSERT
+                # =========================
+
+                if self.operacao == "insert":
+
+                    registros = (
+                        self.payload
+                        if isinstance(
+                            self.payload,
+                            list
+                        )
+                        else [self.payload]
+                    )
+
+                    registros = [
+                        r
+                        for r in registros
+                        if isinstance(r, dict)
+                        and r
+                    ]
+
+
+                    if not registros:
+                        return _DBResponse([])
+
+
+                    resultado = []
+
+
+                    for registro in registros:
+
+                        colunas = list(
+                            registro.keys()
+                        )
+
+                        colunas_sql = ", ".join(
+                            _identificador_sql(c)
+                            for c in colunas
+                        )
+
+                        placeholders = ", ".join(
+                            ["%s"] * len(colunas)
+                        )
+
+                        valores = [
+                            registro[c]
+                            for c in colunas
+                        ]
+
+
+                        sql = (
+                            f"INSERT INTO {tabela_sql} "
+                            f"({colunas_sql}) "
+                            f"VALUES ({placeholders}) "
+                            f"RETURNING *"
+                        )
+
+
+                        cur.execute(
+                            sql,
+                            valores
+                        )
+
+
+                        linha = cur.fetchone()
+
+                        if linha:
+
+                            resultado.append(
+                                dict(linha)
+                            )
+
+
+                    conn.commit()
+
+                    return _DBResponse(
+                        resultado
+                    )
+
+
+                # =========================
+                # UPDATE
+                # =========================
+
+                if self.operacao == "update":
+
+                    payload = dict(
+                        self.payload or {}
+                    )
+
+                    if not payload:
+                        return _DBResponse([])
+
+
+                    sets = []
+                    parametros = []
+
+
+                    for coluna, valor in payload.items():
+
+                        sets.append(
+                            f"{_identificador_sql(coluna)} = %s"
+                        )
+
+                        parametros.append(
+                            valor
+                        )
+
+
+                    sql = (
+                        f"UPDATE {tabela_sql} "
+                        f"SET {', '.join(sets)}"
+                        f"{where_sql} "
+                        f"RETURNING *"
+                    )
+
+
+                    parametros.extend(
+                        where_params
+                    )
+
+
+                    cur.execute(
+                        sql,
+                        parametros
+                    )
+
+
+                    registros = cur.fetchall()
+
+                    conn.commit()
+
+
+                    return _DBResponse(
+                        [
+                            dict(r)
+                            for r in registros
+                        ]
+                    )
+
+
+                # =========================
+                # DELETE
+                # =========================
+
+                if self.operacao == "delete":
+
+                    sql = (
+                        f"DELETE FROM {tabela_sql}"
+                        f"{where_sql} "
+                        f"RETURNING *"
+                    )
+
+
+                    cur.execute(
+                        sql,
+                        where_params
+                    )
+
+
+                    registros = cur.fetchall()
+
+                    conn.commit()
+
+
+                    return _DBResponse(
+                        [
+                            dict(r)
+                            for r in registros
+                        ]
+                    )
+
+
+                raise RuntimeError(
+                    "Nenhuma operação foi definida."
+                )
+
+
+class _PostgresCompat:
+
+    def __init__(self, database_url):
+
+        self.database_url = str(
+            database_url
+        ).strip()
+
+
+    def _connect(self):
+
+        try:
+
+            import psycopg
+
+            from psycopg.rows import dict_row
+
+
+        except ImportError:
+
+            raise RuntimeError(
+                "O pacote psycopg não está instalado. "
+                "Adicione psycopg[binary]>=3.2 "
+                "ao requirements.txt."
+            )
+
+
+        return psycopg.connect(
+
+            self.database_url,
+
+            row_factory=dict_row,
+
+            connect_timeout=15
+        )
+
+
+    def table(self, tabela):
+
+        tabelas_permitidas = {
+            "obras",
+            "colaboradores",
+            "convocacoes"
+        }
+
+
+        if tabela not in tabelas_permitidas:
+
+            raise ValueError(
+                f"Tabela não autorizada: {tabela}"
+            )
+
+
+        return _PostgresQuery(
+            self,
+            tabela
+        )
+
+
+def _ler_database_url():
+
+    try:
+
+        valor = st.secrets.get(
+            "DATABASE_URL",
+            ""
+        )
+
+        if valor:
+
+            return str(valor).strip()
+
+    except Exception:
+
+        pass
+
+
+    return ""
+
+
+DATABASE_URL = _ler_database_url()
+
+
+if not DATABASE_URL:
+
+    st.error(
+        "DATABASE_URL não foi encontrada nos Secrets do Streamlit."
+    )
+
+    st.info(
+        "Abra Manage app → Settings → Secrets "
+        "e adicione a connection string do Neon."
+    )
+
+    st.stop()
+
+
 @st.cache_resource
 def init_connection():
-    url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_KEY"]
-    return create_client(url, key)
+
+    return _PostgresCompat(
+        DATABASE_URL
+    )
+
 
 try:
-    supabase: Client = init_connection()
+
+    # O restante do sistema continuará usando
+    # supabase.table(...), mas agora o banco é o Neon.
+
+    supabase = init_connection()
+
+
+    # Teste real de conexão
+
+    teste = (
+        supabase
+        .table("obras")
+        .select("id")
+        .limit(1)
+        .execute()
+    )
+
+
 except Exception as e:
-    st.error(f"Erro de credenciais: {e}")
+
+    st.error(
+        "Não foi possível conectar ao banco Neon."
+    )
+
+    st.caption(
+        f"{type(e).__name__}: {e}"
+    )
+
     st.stop()
 
 # --- FUNÇÕES DE LIMPEZA E PADRONIZAÇÃO ---
