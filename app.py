@@ -8,6 +8,7 @@ import unicodedata
 import re
 import os
 import io
+import time
 import requests
 import openpyxl
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
@@ -652,6 +653,119 @@ def inserir_convocacao_segura(obra_id, colaborador_id, data_convocacao, engenhei
         # O erro do PostgREST deixa de derrubar a tela inteira; a operação daquele nome é isolada.
         return False, "não pôde ser convocado(a); verifique se já existe uma convocação ou se o cadastro está válido"
 
+
+# --- ACESSO RESILIENTE AO SUPABASE ---
+def _cliente_supabase_para_tentativa(tentativa=0):
+    """
+    Usa o cliente normal na primeira tentativa e cria um cliente novo nas
+    tentativas seguintes. Isso evita que uma conexão HTTP quebrada/stale
+    continue sendo reutilizada após uma oscilação de rede.
+    """
+    if tentativa == 0:
+        return supabase
+
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
+
+
+def _executar_supabase_com_retry(operacao, tentativas=3):
+    """
+    Executa uma operação de leitura no Supabase com novas tentativas.
+    'operacao' recebe o cliente Supabase como argumento.
+    """
+    ultimo_erro = None
+
+    for tentativa in range(tentativas):
+        try:
+            cliente = _cliente_supabase_para_tentativa(tentativa)
+            return operacao(cliente)
+        except Exception as e:
+            ultimo_erro = e
+            if tentativa < tentativas - 1:
+                time.sleep(1.2 * (tentativa + 1))
+
+    raise ultimo_erro
+
+
+def _obra_existe_no_supabase(nome_obra, tentativas=2):
+    """Confirma diretamente no banco se uma obra com o mesmo nome já existe."""
+    resposta = _executar_supabase_com_retry(
+        lambda sb: (
+            sb.table("obras")
+            .select("id,nome")
+            .eq("nome", nome_obra)
+            .limit(1)
+            .execute()
+        ),
+        tentativas=tentativas
+    )
+    return bool(resposta.data or [])
+
+
+def _inserir_obra_resiliente(nome_obra, unidade, tentativas=3):
+    """
+    Insere uma obra sem arriscar duplicação em caso de queda da conexão
+    depois de o servidor já ter recebido o INSERT.
+
+    Retorna:
+      (True, "inserida")   -> nova obra confirmada
+      (True, "existente")  -> já estava no banco
+      (False, "erro")      -> não foi possível confirmar/inserir
+    """
+    ultimo_erro = None
+
+    for tentativa in range(tentativas):
+        # Antes de cada INSERT, confirma se uma tentativa anterior já gravou.
+        try:
+            if _obra_existe_no_supabase(nome_obra, tentativas=2):
+                return True, "existente"
+        except Exception as e:
+            ultimo_erro = e
+            # Se nem conseguimos confirmar o estado do banco, não inserimos às cegas.
+            if tentativa < tentativas - 1:
+                time.sleep(1.2 * (tentativa + 1))
+                continue
+            break
+
+        try:
+            cliente = _cliente_supabase_para_tentativa(tentativa)
+            (
+                cliente.table("obras")
+                .insert({
+                    "unidade": unidade,
+                    "nome": nome_obra
+                })
+                .execute()
+            )
+            return True, "inserida"
+
+        except Exception as e:
+            ultimo_erro = e
+
+            # O INSERT pode ter chegado ao servidor e apenas a resposta ter caído.
+            # Confirma antes de qualquer nova tentativa para evitar duplicidade.
+            try:
+                if _obra_existe_no_supabase(nome_obra, tentativas=2):
+                    return True, "inserida"
+            except Exception:
+                pass
+
+            if tentativa < tentativas - 1:
+                time.sleep(1.2 * (tentativa + 1))
+
+    # Guarda só um detalhe curto para diagnóstico administrativo, sem jogar traceback na tela.
+    try:
+        if ultimo_erro:
+            st.session_state["supabase_ultimo_erro_sync"] = (
+                f"{type(ultimo_erro).__name__}: {str(ultimo_erro)[:220]}"
+            )
+    except Exception:
+        pass
+
+    return False, "erro"
+
+
 # --- SINCRONIZAÇÃO COM TRELLO (MÊS VIGENTE OU SELEÇÃO MANUAL) ---
 TRELLO_BOARD_SHORTLINK = "TX8hGvmI"
 TRELLO_BOARD_SLUG = "or%C3%A7amentos"
@@ -773,81 +887,178 @@ def obter_listas_trello():
 
 
 def executar_sincronizacao_trello(id_lista_target=None, id_card_target=None):
-    lists, cards = obter_listas_trello()
-    if not lists and not cards:
-        detalhe = ""
+    """
+    Sincroniza cards/listas do Trello com a tabela 'obras'.
+
+    A rotina é protegida contra oscilações temporárias do Supabase:
+    - tenta novamente leituras;
+    - recria o cliente HTTP quando necessário;
+    - confirma existência antes de repetir INSERT;
+    - nunca deixa um ConnectError derrubar a interface do Streamlit.
+    """
+    try:
+        lists, cards = obter_listas_trello()
+        if not lists and not cards:
+            detalhe = ""
+            try:
+                detalhe = st.session_state.get("trello_ultimo_erro", "")
+            except Exception:
+                pass
+
+            msg = "Não foi possível ler o quadro ORÇAMENTOS do Trello agora."
+            if detalhe:
+                msg += " O acesso público falhou e a API oficial não respondeu."
+            return False, msg
+
+        nome_alvo = ""
+        cards_execucao = []
+
+        # Busca manual de um card específico (útil para medições retroativas)
+        if id_card_target:
+            card_alvo = next((c for c in cards if c.get("id") == id_card_target), None)
+            if not card_alvo:
+                return False, "Card selecionado não foi encontrado no Trello."
+
+            cards_execucao = [card_alvo]
+            nome_alvo = f"Card: {card_alvo.get('name', 'Sem nome')}"
+
+        else:
+            id_lista_execucao = id_lista_target
+            nome_lista_alvo = ""
+
+            # Sem seleção manual: procura primeiro a medição do mês vigente.
+            if not id_lista_execucao:
+                hoje = datetime.date.today()
+                mes_vigente = MESES_PT.get(hoje.month, "")
+                ano_vigente = str(hoje.year)
+                termo_busca = f"MEDICAO {mes_vigente} {ano_vigente}"
+
+                lista_mes = next(
+                    (lst for lst in lists if termo_busca in normalizar(lst.get("name", ""))),
+                    None
+                )
+                lista_fallback = next(
+                    (lst for lst in lists if "EM EXECUCAO" in normalizar(lst.get("name", ""))),
+                    None
+                )
+                lista_alvo = lista_mes or lista_fallback
+
+                if lista_alvo:
+                    id_lista_execucao = lista_alvo.get("id")
+                    nome_lista_alvo = lista_alvo.get("name", "")
+            else:
+                lista_alvo = next(
+                    (lst for lst in lists if lst.get("id") == id_lista_execucao),
+                    None
+                )
+                if lista_alvo:
+                    nome_lista_alvo = lista_alvo.get("name", "")
+
+            if not id_lista_execucao:
+                return False, "Nenhuma lista do mês vigente ou de execução foi encontrada no Trello."
+
+            cards_execucao = [
+                c for c in cards
+                if c.get("idList") == id_lista_execucao and not c.get("closed", False)
+            ]
+            nome_alvo = f"Lista: {nome_lista_alvo}"
+
+        # IMPORTANTE:
+        # Não usamos buscar_obras() aqui, pois essa função geral retorna [] quando há
+        # falha de conexão. Durante uma sincronização isso poderia parecer "banco vazio"
+        # e fazer o sistema tentar reinserir todas as obras.
         try:
-            detalhe = st.session_state.get("trello_ultimo_erro", "")
+            resposta_obras = _executar_supabase_com_retry(
+                lambda sb: sb.table("obras").select("id,nome,unidade").execute(),
+                tentativas=3
+            )
+            obras_atuais = resposta_obras.data or []
+        except Exception as e:
+            try:
+                st.session_state["supabase_ultimo_erro_sync"] = (
+                    f"{type(e).__name__}: {str(e)[:220]}"
+                )
+            except Exception:
+                pass
+
+            return False, (
+                "Não foi possível conectar ao banco de dados agora. "
+                "Nenhuma obra foi alterada. Aguarde alguns segundos e tente sincronizar novamente."
+            )
+
+        nomes_cadastrados = {
+            normalizar(o.get("nome", ""))
+            for o in obras_atuais
+            if o.get("nome")
+        }
+
+        novas_inseridas = 0
+        ja_existentes = 0
+        falhas = []
+
+        for card in cards_execucao:
+            nome_card = str(card.get("name", "") or "").strip()
+            if not nome_card:
+                continue
+
+            nome_norm = normalizar(nome_card)
+            unidade_card = identificar_unidade(nome_card)
+
+            if nome_norm in nomes_cadastrados:
+                ja_existentes += 1
+                continue
+
+            ok, situacao = _inserir_obra_resiliente(
+                nome_obra=nome_card,
+                unidade=unidade_card,
+                tentativas=3
+            )
+
+            if not ok:
+                falhas.append(nome_card)
+                continue
+
+            nomes_cadastrados.add(nome_norm)
+
+            if situacao == "inserida":
+                novas_inseridas += 1
+            else:
+                # Pode ter sido criada em uma tentativa anterior cuja resposta se perdeu,
+                # ou já existir no banco apesar do snapshot inicial.
+                ja_existentes += 1
+
+        st.cache_data.clear()
+
+        if falhas:
+            return False, (
+                f"Sincronização de {nome_alvo} concluída parcialmente: "
+                f"{novas_inseridas} nova(s) obra(s) adicionada(s), "
+                f"{ja_existentes} já existente(s) e "
+                f"{len(falhas)} item(ns) não puderam ser confirmados no banco. "
+                "Tente sincronizar novamente em alguns segundos."
+            )
+
+        return True, (
+            f"Sincronização de {nome_alvo} concluída: "
+            f"{novas_inseridas} nova(s) obra(s) adicionada(s) e "
+            f"{ja_existentes} já existente(s)."
+        )
+
+    except Exception as e:
+        # Última barreira: nenhum erro da sincronização deve abrir o traceback vermelho.
+        try:
+            st.session_state["supabase_ultimo_erro_sync"] = (
+                f"{type(e).__name__}: {str(e)[:220]}"
+            )
         except Exception:
             pass
-        msg = "Não foi possível ler o quadro ORÇAMENTOS do Trello agora."
-        if detalhe:
-            msg += " O acesso público falhou e a API oficial não respondeu."
-        return False, msg
 
-    nome_alvo = ""
-    cards_execucao = []
+        return False, (
+            "Não foi possível concluir a sincronização agora. "
+            "O sistema continua funcionando com os dados já cadastrados. "
+            "Aguarde alguns segundos e tente novamente."
+        )
 
-    # Busca manual de um card específico (útil para medições retroativas)
-    if id_card_target:
-        card_alvo = next((c for c in cards if c.get('id') == id_card_target), None)
-        if not card_alvo:
-            return False, "Card selecionado não foi encontrado no Trello."
-        cards_execucao = [card_alvo]
-        nome_alvo = f"Card: {card_alvo.get('name', 'Sem nome')}"
-
-    else:
-        id_lista_execucao = id_lista_target
-        nome_lista_alvo = ""
-
-        # Sem seleção manual: procura primeiro a medição do mês vigente.
-        if not id_lista_execucao:
-            hoje = datetime.date.today()
-            mes_vigente = MESES_PT.get(hoje.month, "")
-            ano_vigente = str(hoje.year)
-            termo_busca = f"MEDICAO {mes_vigente} {ano_vigente}"
-
-            # Prioriza a lista específica do mês e usa "EM EXECUÇÃO" apenas como fallback.
-            lista_mes = next((lst for lst in lists if termo_busca in normalizar(lst.get('name', ''))), None)
-            lista_fallback = next((lst for lst in lists if "EM EXECUCAO" in normalizar(lst.get('name', ''))), None)
-            lista_alvo = lista_mes or lista_fallback
-            if lista_alvo:
-                id_lista_execucao = lista_alvo.get('id')
-                nome_lista_alvo = lista_alvo.get('name', '')
-        else:
-            lista_alvo = next((lst for lst in lists if lst.get('id') == id_lista_execucao), None)
-            if lista_alvo:
-                nome_lista_alvo = lista_alvo.get('name', '')
-
-        if not id_lista_execucao:
-            return False, "Nenhuma lista do mês vigente ou de execução foi encontrada no Trello."
-
-        cards_execucao = [c for c in cards if c.get('idList') == id_lista_execucao and not c.get('closed', False)]
-        nome_alvo = f"Lista: {nome_lista_alvo}"
-
-    obras_atuais = buscar_obras()
-    nomes_cadastrados = {normalizar(o['nome']) for o in obras_atuais}
-
-    novas_inseridas = 0
-    ja_existentes = 0
-    for card in cards_execucao:
-        nome_card = card.get('name', '').strip()
-        if not nome_card:
-            continue
-
-        unidade_card = identificar_unidade(nome_card)
-        if normalizar(nome_card) not in nomes_cadastrados:
-            supabase.table("obras").insert({
-                "unidade": unidade_card,
-                "nome": nome_card
-            }).execute()
-            novas_inseridas += 1
-            nomes_cadastrados.add(normalizar(nome_card))
-        else:
-            ja_existentes += 1
-
-    st.cache_data.clear()
-    return True, f"Sincronização de {nome_alvo} concluída: {novas_inseridas} nova(s) obra(s) adicionada(s) e {ja_existentes} já existente(s)."
 
 # --- BUSCA DE DADOS COM CACHE ---
 @st.cache_data(ttl=30)
