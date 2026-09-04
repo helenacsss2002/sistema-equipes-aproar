@@ -493,6 +493,23 @@ except Exception as e:
     st.error(f"Erro ao iniciar o banco de dados: {e}")
     st.stop()
 
+
+# --- LIMPEZA SELETIVA DE CACHE ---
+def limpar_cache_operacional():
+    """
+    Atualiza apenas os caches do banco local.
+    Não limpa o cache do Trello: isso evita uma nova chamada desnecessária
+    ao quadro público após cada inclusão, exclusão ou sincronização.
+    """
+    for nome_funcao in ("buscar_obras", "buscar_colaboradores"):
+        funcao = globals().get(nome_funcao)
+        if funcao is not None and hasattr(funcao, "clear"):
+            try:
+                funcao.clear()
+            except Exception:
+                pass
+
+
 # --- FUNÇÕES DE LIMPEZA E PADRONIZAÇÃO ---
 def identificar_unidade(nome_card):
     if not nome_card: return "GERAL"
@@ -608,7 +625,7 @@ def obter_obra_placeholder_unidade(unidade):
             "nome": NOME_OBRA_PLACEHOLDER
         }).execute().data or []
         if criado:
-            st.cache_data.clear()
+            limpar_cache_operacional()
             return criado[0].get("id")
     except Exception:
         return None
@@ -773,7 +790,7 @@ def criar_ou_obter_colaborador_manual(nome, tipo, funcao_livre="", avulso=False)
         }).execute().data or []
 
         if criado:
-            st.cache_data.clear()
+            limpar_cache_operacional()
             return criado[0].get("id"), criado[0], "Novo colaborador cadastrado."
         return None, None, "O cadastro não retornou um identificador."
     except Exception:
@@ -1002,53 +1019,202 @@ def _testar_banco_ativo():
 TRELLO_JSON_URL = "https://trello.com/b/TX8hGvmI.json"
 
 
-@st.cache_data(ttl=120, show_spinner=False)
+def _garantir_tabela_snapshot_trello():
+    """
+    Cria uma tabela minúscula no Neon para guardar a última leitura válida
+    do quadro público. Isso permite o sistema continuar sincronizando mesmo
+    se o Trello estiver temporariamente lento/fora do ar.
+    """
+    if DB_BACKEND != "NEON" or not hasattr(supabase, "_connect"):
+        return False
+
+    try:
+        with supabase._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS trello_snapshot (
+                        snapshot_id INTEGER PRIMARY KEY,
+                        listas JSONB NOT NULL,
+                        cards JSONB NOT NULL,
+                        atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """
+                )
+                conn.commit()
+        return True
+    except Exception:
+        return False
+
+
+def _salvar_snapshot_trello(listas, cards):
+    if not _garantir_tabela_snapshot_trello():
+        return
+
+    try:
+        with supabase._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO trello_snapshot
+                        (snapshot_id, listas, cards, atualizado_em)
+                    VALUES
+                        (1, %s::jsonb, %s::jsonb, NOW())
+                    ON CONFLICT (snapshot_id)
+                    DO UPDATE SET
+                        listas = EXCLUDED.listas,
+                        cards = EXCLUDED.cards,
+                        atualizado_em = NOW()
+                    """,
+                    (
+                        json.dumps(listas, ensure_ascii=False),
+                        json.dumps(cards, ensure_ascii=False),
+                    )
+                )
+                conn.commit()
+    except Exception:
+        pass
+
+
+def _carregar_snapshot_trello():
+    if not _garantir_tabela_snapshot_trello():
+        return [], [], None
+
+    try:
+        with supabase._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT listas, cards, atualizado_em
+                    FROM trello_snapshot
+                    WHERE snapshot_id = 1
+                    LIMIT 1
+                    """
+                )
+                linha = cur.fetchone()
+
+        if not linha:
+            return [], [], None
+
+        if isinstance(linha, dict):
+            listas = linha.get("listas") or []
+            cards = linha.get("cards") or []
+            atualizado_em = linha.get("atualizado_em")
+        else:
+            listas, cards, atualizado_em = linha
+
+        if isinstance(listas, list) and isinstance(cards, list):
+            return listas, cards, atualizado_em
+
+    except Exception:
+        pass
+
+    return [], [], None
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _baixar_trello_publico():
+    """
+    Leitura pública do mesmo .json usado pela Torre de Controle.
+    Sem API Key, Token ou autenticação.
+    Faz uma segunda tentativa somente quando necessário.
+    """
+    ultimo_erro = None
+
+    for tentativa in range(2):
+        try:
+            # Timeout separado: conexão rápida, mas tolerância maior para leitura
+            # do JSON completo quando o Trello estiver mais lento.
+            timeout_leitura = 35 if tentativa == 0 else 65
+
+            resposta = requests.get(
+                TRELLO_JSON_URL,
+                timeout=(8, timeout_leitura)
+            )
+            resposta.raise_for_status()
+
+            dados = resposta.json()
+
+            if (
+                not isinstance(dados, dict)
+                or not isinstance(dados.get("cards"), list)
+                or not isinstance(dados.get("lists"), list)
+            ):
+                raise ValueError(
+                    "O JSON público respondeu sem as listas/cards esperados."
+                )
+
+            return dados.get("lists", []), dados.get("cards", [])
+
+        except Exception as e:
+            ultimo_erro = e
+
+            if tentativa == 0:
+                time.sleep(1.2)
+
+    raise ultimo_erro
+
+
 def obter_listas_trello():
     """
-    Lê o quadro público exatamente pelo mesmo método usado na Torre de Controle:
-    GET direto no arquivo .json público do Trello, sem API Key, Token ou headers especiais.
+    Ordem de prioridade:
+      1. Trello público ao vivo / cache de 5 minutos;
+      2. última leitura válida da sessão;
+      3. último snapshot persistido no Neon.
+
+    O sistema não fica inutilizável por um timeout momentâneo do Trello.
     """
     try:
-        resposta = requests.get(
-            TRELLO_JSON_URL,
-            timeout=20
-        )
-        resposta.raise_for_status()
+        listas, cards = _baixar_trello_publico()
 
-        dados = resposta.json()
-
-        if (
-            not isinstance(dados, dict)
-            or not isinstance(dados.get("cards"), list)
-            or not isinstance(dados.get("lists"), list)
-        ):
-            try:
-                st.session_state["trello_ultimo_erro"] = (
-                    "O Trello respondeu, mas o JSON não contém lists/cards válidos."
-                )
-            except Exception:
-                pass
-            return [], []
-
-        try:
+        if isinstance(listas, list) and isinstance(cards, list):
+            st.session_state["trello_snapshot_sessao"] = {
+                "listas": listas,
+                "cards": cards,
+            }
             st.session_state["trello_ultimo_erro"] = ""
-            st.session_state["trello_fonte"] = TRELLO_JSON_URL
-        except Exception:
-            pass
+            st.session_state["trello_fonte"] = "Trello público"
+            st.session_state["trello_usando_snapshot"] = False
 
-        return dados.get("lists", []), dados.get("cards", [])
+            # Persistência de contingência; falha silenciosa não afeta o app.
+            _salvar_snapshot_trello(listas, cards)
+
+            return listas, cards
 
     except Exception as e:
-        try:
-            st.session_state["trello_ultimo_erro"] = (
-                f"{type(e).__name__}: {str(e)[:300]}"
-            )
-        except Exception:
-            pass
-        return [], []
+        st.session_state["trello_ultimo_erro"] = (
+            f"{type(e).__name__}: {str(e)[:300]}"
+        )
+
+    # Fallback 1: última leitura desta sessão
+    snapshot_sessao = st.session_state.get("trello_snapshot_sessao") or {}
+    listas_sessao = snapshot_sessao.get("listas") or []
+    cards_sessao = snapshot_sessao.get("cards") or []
+
+    if listas_sessao or cards_sessao:
+        st.session_state["trello_fonte"] = "Última leitura válida"
+        st.session_state["trello_usando_snapshot"] = True
+        return listas_sessao, cards_sessao
+
+    # Fallback 2: snapshot persistente do Neon
+    listas_db, cards_db, atualizado_em = _carregar_snapshot_trello()
+
+    if listas_db or cards_db:
+        st.session_state["trello_snapshot_sessao"] = {
+            "listas": listas_db,
+            "cards": cards_db,
+        }
+        st.session_state["trello_fonte"] = "Última leitura salva"
+        st.session_state["trello_usando_snapshot"] = True
+        st.session_state["trello_snapshot_data"] = atualizado_em
+        return listas_db, cards_db
+
+    st.session_state["trello_fonte"] = ""
+    st.session_state["trello_usando_snapshot"] = False
+    return [], []
 
 
-def executar_sincronizacao_trello(id_lista_target=None, id_card_target=None):
+def executar_sincronizacao_trello(id_lista_target=None, id_card_target=None, listas_precarregadas=None, cards_precarregados=None):
     """
     Sincroniza cards/listas do Trello com a tabela 'obras'.
 
@@ -1056,14 +1222,14 @@ def executar_sincronizacao_trello(id_lista_target=None, id_card_target=None):
     A leitura do Trello é sempre renovada ao executar uma sincronização.
     """
     try:
-        # O botão de sincronização sempre consulta o Trello ao vivo,
-        # sem reutilizar uma falha/resultado antigo do cache.
-        try:
-            obter_listas_trello.clear()
-        except Exception:
-            pass
-
-        lists, cards = obter_listas_trello()
+        # A tela de Configurações já leu o Trello para montar os dropdowns.
+        # Reutilizamos exatamente esse payload no clique do botão, evitando
+        # uma segunda requisição que era a causa do ReadTimeout.
+        if listas_precarregadas is not None and cards_precarregados is not None:
+            lists = list(listas_precarregadas)
+            cards = list(cards_precarregados)
+        else:
+            lists, cards = obter_listas_trello()
         if not lists and not cards:
             detalhe = ""
             try:
@@ -1071,9 +1237,10 @@ def executar_sincronizacao_trello(id_lista_target=None, id_card_target=None):
             except Exception:
                 pass
 
-            msg = "Não foi possível ler o quadro ORÇAMENTOS do Trello agora."
-            if detalhe:
-                msg += f" Detalhe: {detalhe}"
+            msg = (
+                "Não foi possível obter uma leitura válida do quadro ORÇAMENTOS agora. "
+                "O restante do sistema continua funcionando normalmente."
+            )
             return False, msg
 
         nome_alvo = ""
@@ -1193,7 +1360,7 @@ def executar_sincronizacao_trello(id_lista_target=None, id_card_target=None):
                 # ou já existir no banco apesar do snapshot inicial.
                 ja_existentes += 1
 
-        st.cache_data.clear()
+        limpar_cache_operacional()
 
         if falhas:
             return False, (
@@ -1860,7 +2027,7 @@ if modo_campo:
                                     "observacao": nova_obs,
                                 }).eq("id", c_id).execute()
                                 st.toast(f"Apontamento de {nome} salvo.", icon="✅")
-                                st.cache_data.clear()
+                                limpar_cache_operacional()
                                 st.rerun()
                             except Exception:
                                 st.error(f"Não foi possível salvar o apontamento de {nome}. Tente novamente.")
@@ -1975,7 +2142,7 @@ if modo_campo:
                                 avisos.append(f"{nome_pessoa}: {motivo}.")
 
                         if sucessos:
-                            st.cache_data.clear()
+                            limpar_cache_operacional()
                             st.success(
                                 f"✅ {sucessos} colaborador(es) convocado(s) para {unidade_selecionada} "
                                 f"em {data_conv_auto.strftime('%d/%m/%Y')} • Turno {turno_conv_campo}."
@@ -2465,7 +2632,7 @@ else:
                                     avisos.append(f"{nome_pessoa}: {motivo}.")
 
                             if sucessos:
-                                st.cache_data.clear()
+                                limpar_cache_operacional()
                                 st.success(
                                     f"✅ {sucessos} colaborador(es) convocado(s) para {unidade_selecionada} "
                                     f"em {data_conv_auto.strftime('%d/%m/%Y')} • Turno {turno_conv_adm}."
@@ -2643,7 +2810,7 @@ else:
                                     st.session_state["msg_corr_admin"] = (
                                         f"✅ Convocação de {colab_corr.get('nome', 'N/A')} excluída com sucesso."
                                     )
-                                    st.cache_data.clear()
+                                    limpar_cache_operacional()
                                     st.rerun()
 
                                 except Exception as e:
@@ -3231,11 +3398,17 @@ else:
             lists_trello, cards_trello = obter_listas_trello()
             mapa_nome_lista = {l.get('id'): l.get('name', 'Lista sem nome') for l in lists_trello}
 
+            if st.session_state.get("trello_usando_snapshot"):
+                st.info(
+                    "ℹ️ O Trello está demorando a responder. "
+                    "Estou usando a última leitura válida salva para manter o sistema operacional."
+                )
+
             c_tr1, c_tr2 = st.columns(2)
             with c_tr1:
                 if st.button("🚀 SINCRONIZAR MÊS VIGENTE (AUTOMÁTICO)", type="primary"):
                     with st.spinner("Sincronizando mês vigente..."):
-                        sucesso, me = executar_sincronizacao_trello()
+                        sucesso, me = executar_sincronizacao_trello(listas_precarregadas=lists_trello, cards_precarregados=cards_trello)
                         if sucesso:
                             st.success(me)
                             st.rerun()
@@ -3250,18 +3423,21 @@ else:
                     if st.button("🔄 SINCRONIZAR LISTA SELECIONADA"):
                         id_sel = mapa_listas[lista_manual_sel]
                         with st.spinner(f"Sincronizando {lista_manual_sel}..."):
-                            sucesso, me = executar_sincronizacao_trello(id_lista_target=id_sel)
+                            sucesso, me = executar_sincronizacao_trello(id_lista_target=id_sel, listas_precarregadas=lists_trello, cards_precarregados=cards_trello)
                             if sucesso:
                                 st.success(me)
                                 st.rerun()
                             else:
                                 st.error(me)
                 else:
-                    st.warning("Trello temporariamente indisponível. O sistema continuará funcionando com as obras já cadastradas.")
+                    st.warning(
+                        "Trello temporariamente indisponível e ainda não há uma leitura anterior salva. "
+                        "As obras já cadastradas continuam disponíveis normalmente."
+                    )
                     detalhe_trello = st.session_state.get("trello_ultimo_erro", "")
-                    st.caption("Fonte: https://trello.com/b/TX8hGvmI.json • acesso público, sem API Key/Token.")
+                    st.caption("Quadro público • sem API Key ou Token.")
                     if detalhe_trello:
-                        with st.expander("Ver detalhe da conexão com o Trello"):
+                        with st.expander("Diagnóstico técnico"):
                             st.code(detalhe_trello)
 
             st.markdown("#### 🔎 Busca manual para medições retroativas")
@@ -3293,9 +3469,9 @@ else:
                     if st.button("➕ SINCRONIZAR RESULTADO DA BUSCA", type="primary", use_container_width=True):
                         with st.spinner("Sincronizando resultado selecionado..."):
                             if tipo_resultado == "lista":
-                                sucesso, me = executar_sincronizacao_trello(id_lista_target=id_resultado)
+                                sucesso, me = executar_sincronizacao_trello(id_lista_target=id_resultado, listas_precarregadas=lists_trello, cards_precarregados=cards_trello)
                             else:
-                                sucesso, me = executar_sincronizacao_trello(id_card_target=id_resultado)
+                                sucesso, me = executar_sincronizacao_trello(id_card_target=id_resultado, listas_precarregadas=lists_trello, cards_precarregados=cards_trello)
                             if sucesso:
                                 st.success(me)
                                 st.rerun()
@@ -3316,7 +3492,7 @@ else:
                 if submit_obra:
                     if nome_obra and unidade_obra:
                         supabase.table("obras").insert({"nome": nome_obra, "unidade": unidade_obra.upper()}).execute()
-                        st.cache_data.clear()
+                        limpar_cache_operacional()
                         st.success("Obra cadastrada com sucesso!")
                         st.rerun()
                     else:
@@ -3340,7 +3516,7 @@ else:
                                 "funcao": funcao_salva,
                                 "valor_diaria": diaria_colab
                             }).execute()
-                            st.cache_data.clear()
+                            limpar_cache_operacional()
                             st.success("Colaborador cadastrado com sucesso!")
                             st.rerun()
                         except Exception:
@@ -3677,7 +3853,7 @@ else:
                                     except Exception:
                                         erros.append(reg["nome"])
 
-                                st.cache_data.clear()
+                                limpar_cache_operacional()
                                 mensagem = f"Importação concluída: {novos} novo(s) e {atualizados} atualizado(s)."
                                 if erros:
                                     mensagem += f" Não foi possível importar {len(erros)} registro(s)."
