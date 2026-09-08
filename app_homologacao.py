@@ -886,6 +886,28 @@ def render_diagnostico_sistema():
     else:
         st.error("Banco indisponível no momento.")
 
+    if AMBIENTE_APP == "homologacao":
+        st.caption("Teste técnico exclusivo da homologação")
+        if st.button("🧪 GERAR ERRO CONTROLADO", key="btn_erro_controlado_homologacao"):
+            try:
+                raise RuntimeError("Erro controlado de homologação para validar o registro técnico.")
+            except Exception as e:
+                codigo = registrar_erro_sistema(
+                    "diagnostico",
+                    "erro_controlado",
+                    e,
+                    usuario="HOMOLOGACAO",
+                    contexto={"origem": "botao_diagnostico", "controlado": True},
+                )
+                st.session_state["_erro_controlado_codigo"] = codigo
+                st.rerun()
+
+        if st.session_state.get("_erro_controlado_codigo"):
+            st.info(
+                "Erro controlado registrado com sucesso. Código: "
+                + st.session_state["_erro_controlado_codigo"]
+            )
+
     if _tabela_erros_disponivel():
         try:
             with supabase._connect() as conn:
