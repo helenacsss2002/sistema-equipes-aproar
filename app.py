@@ -9,12 +9,15 @@ import re
 import os
 import io
 import time
+import traceback
+import uuid
 import requests
 import openpyxl
 from zoneinfo import ZoneInfo
 import hmac
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 
+# --- APROAR | FASE 1 DE PRODUÇÃO (migração não destrutiva) ---
 # --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR (CLARO / AZUL) ---
 st.set_page_config(page_title="APROAR - Controle de Presenças", page_icon="👷", layout="wide")
 
@@ -460,7 +463,12 @@ class _PostgresCompat:
         )
 
     def table(self, tabela):
-        if tabela not in {"obras", "colaboradores", "convocacoes"}:
+        tabelas_autorizadas = {
+            "obras", "colaboradores", "convocacoes",
+            "indisponibilidades", "conflitos_convocacao", "apontamentos",
+            "servicos_apontamento", "auditoria", "erros_sistema",
+        }
+        if tabela not in tabelas_autorizadas:
             raise ValueError(f"Tabela não autorizada no adaptador: {tabela}")
         return _PostgresQuery(self, tabela)
 
@@ -727,6 +735,451 @@ def agora_aproar():
     if TZ_APROAR is not None:
         return datetime.datetime.now(TZ_APROAR)
     return datetime.datetime.now()
+
+
+# ============================================================
+# FASE 1 DE PRODUÇÃO — ESTRUTURA NOVA EM PARALELO
+# ============================================================
+# As tabelas estruturadas são ativadas somente quando a migração SQL já foi
+# aplicada no Neon. Enquanto isso, o app continua lendo/gravar pelo modelo
+# legado, sem interromper a operação.
+TABELAS_PRODUCAO = {
+    "indisponibilidades",
+    "conflitos_convocacao",
+    "apontamentos",
+    "servicos_apontamento",
+    "auditoria",
+}
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def schema_producao_disponivel():
+    if DB_BACKEND != "NEON" or not hasattr(supabase, "_connect"):
+        return False
+    try:
+        with supabase._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT
+                        COUNT(*) FILTER (WHERE table_name IN (
+                            'indisponibilidades','conflitos_convocacao','apontamentos',
+                            'servicos_apontamento','auditoria'
+                        )) AS qtd_tabelas,
+                        EXISTS (
+                            SELECT 1
+                            FROM information_schema.columns
+                            WHERE table_schema = 'public'
+                              AND table_name = 'convocacoes'
+                              AND column_name = 'turno'
+                        ) AS tem_turno
+                    FROM information_schema.tables
+                    WHERE table_schema = 'public'
+                """)
+                row = cur.fetchone()
+                if isinstance(row, dict):
+                    return int(row.get("qtd_tabelas") or 0) >= 5 and bool(row.get("tem_turno"))
+                return bool(row and int(row[0] or 0) >= 5 and row[1])
+    except Exception:
+        return False
+
+
+def _json_db(valor):
+    try:
+        return json.dumps(valor, ensure_ascii=False, default=str)
+    except Exception:
+        return json.dumps(str(valor), ensure_ascii=False)
+
+
+def registrar_auditoria_prod(entidade, entidade_id, acao, usuario=None, antes=None, depois=None, contexto=None):
+    """Auditoria silenciosa: nunca derruba a operação principal."""
+    if not schema_producao_disponivel():
+        return False
+    try:
+        with supabase._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO auditoria
+                        (entidade, entidade_id, acao, usuario, antes, depois, contexto)
+                    VALUES (%s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb)
+                    """,
+                    (
+                        str(entidade), str(entidade_id or ""), str(acao),
+                        str(usuario or ""),
+                        _json_db(antes) if antes is not None else None,
+                        _json_db(depois) if depois is not None else None,
+                        _json_db(contexto or {}),
+                    ),
+                )
+                conn.commit()
+        return True
+    except Exception:
+        return False
+
+
+# ============================================================
+# ESTABILIDADE / OBSERVABILIDADE
+# ============================================================
+AMBIENTE_APP = (_secret_opcional("AMBIENTE") or "producao").strip().lower()
+
+
+def _tabela_erros_disponivel():
+    if DB_BACKEND != "NEON" or not hasattr(supabase, "_connect"):
+        return False
+    try:
+        with supabase._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT to_regclass('public.erros_sistema') AS tabela")
+                row = cur.fetchone()
+                if isinstance(row, dict):
+                    return bool(row.get("tabela"))
+                return bool(row and row[0])
+    except Exception:
+        return False
+
+
+def registrar_erro_sistema(modulo, acao, erro, usuario=None, contexto=None):
+    """Registra erro técnico e devolve um código curto para suporte."""
+    agora = agora_aproar() if "agora_aproar" in globals() else datetime.datetime.now()
+    codigo = f"AP-{agora.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:5].upper()}"
+    try:
+        if _tabela_erros_disponivel():
+            with supabase._connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO erros_sistema
+                            (codigo, ambiente, modulo, acao, tipo_erro, mensagem, detalhes, usuario, contexto)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)
+                        """,
+                        (
+                            codigo, AMBIENTE_APP, str(modulo or ""), str(acao or ""),
+                            type(erro).__name__, str(erro)[:1200],
+                            traceback.format_exc()[-8000:], str(usuario or ""),
+                            _json_db(contexto or {}),
+                        ),
+                    )
+                    conn.commit()
+    except Exception:
+        pass
+    return codigo
+
+
+def exibir_erro_amigavel(modulo, acao, erro, mensagem="Não foi possível concluir esta operação.", usuario=None, contexto=None):
+    codigo = registrar_erro_sistema(modulo, acao, erro, usuario=usuario, contexto=contexto)
+    st.error(f"{mensagem} Nenhum dado adicional deve ser alterado. Código: {codigo}")
+    return codigo
+
+
+def render_diagnostico_sistema():
+    st.markdown("### 🩺 Diagnóstico do sistema")
+    d1, d2, d3 = st.columns(3)
+    d1.metric("AMBIENTE", AMBIENTE_APP.upper())
+    d2.metric("BANCO", DB_BACKEND)
+    d3.metric("ESTRUTURA NOVA", "ATIVA" if schema_producao_disponivel() else "INCOMPLETA")
+
+    banco_ok, banco_msg = _testar_banco_ativo() if "_testar_banco_ativo" in globals() else (True, "OK")
+    if banco_ok:
+        st.success(f"Banco acessível: {banco_msg}")
+    else:
+        st.error("Banco indisponível no momento.")
+
+    if _tabela_erros_disponivel():
+        try:
+            with supabase._connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT codigo, criado_em, modulo, acao, tipo_erro, usuario, resolvido
+                        FROM erros_sistema
+                        ORDER BY criado_em DESC
+                        LIMIT 20
+                        """
+                    )
+                    rows = cur.fetchall() or []
+            if rows:
+                st.caption("Últimos erros técnicos registrados")
+                st.dataframe(pd.DataFrame([dict(r) for r in rows]), use_container_width=True, hide_index=True)
+            else:
+                st.info("Nenhum erro técnico registrado ainda.")
+        except Exception:
+            st.info("A tabela de erros existe, mas não foi possível consultar o histórico agora.")
+    else:
+        st.warning("Execute a migração da etapa de estabilidade para ativar o registro de erros.")
+
+
+def registrar_conflito_estruturado(registro_existente, engenheiro_tentativa, turno_tentativa, unidade_tentativa=""):
+    if not schema_producao_disponivel():
+        return False
+    try:
+        obra_original = dict_obras.get(registro_existente.get("obra_id"), {}) if "dict_obras" in globals() else {}
+        colab = obter_colaborador_por_id(registro_existente.get("colaborador_id")) if "obter_colaborador_por_id" in globals() else {}
+        turno_original = turno_da_convocacao(registro_existente) if "turno_da_convocacao" in globals() else "Integral"
+        with supabase._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO conflitos_convocacao (
+                        colaborador_id, colaborador_nome_snapshot, data,
+                        convocacao_existente_id, engenheiro_original, turno_original,
+                        unidade_original, engenheiro_tentativa, turno_tentativa,
+                        unidade_tentativa, contexto
+                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)
+                    ON CONFLICT DO NOTHING
+                    """,
+                    (
+                        str(registro_existente.get("colaborador_id") or ""),
+                        str((colab or {}).get("nome") or ""),
+                        str(registro_existente.get("data") or ""),
+                        str(registro_existente.get("id") or ""),
+                        str(registro_existente.get("engenheiro") or "N/A"),
+                        str(turno_original),
+                        str(obra_original.get("unidade") or ""),
+                        str(engenheiro_tentativa or "N/A"),
+                        str(turno_tentativa or "Integral"),
+                        str(unidade_tentativa or ""),
+                        _json_db({"origem": "app_streamlit"}),
+                    ),
+                )
+                conn.commit()
+        registrar_auditoria_prod(
+            "convocacao", registro_existente.get("id"), "CONFLITO_CONVOCACAO",
+            usuario=engenheiro_tentativa,
+            contexto={
+                "engenheiro_original": registro_existente.get("engenheiro"),
+                "turno_original": turno_original,
+                "turno_tentativa": turno_tentativa,
+                "data": registro_existente.get("data"),
+            },
+        )
+        return True
+    except Exception:
+        return False
+
+
+def resolver_conflitos_estruturados(convocacao_id, resolvido_por="PAULO"):
+    if not schema_producao_disponivel():
+        return False
+    try:
+        with supabase._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE conflitos_convocacao
+                    SET resolvido = TRUE, resolvido_em = NOW(), resolvido_por = %s
+                    WHERE convocacao_existente_id = %s AND resolvido = FALSE
+                    """,
+                    (str(resolvido_por), str(convocacao_id or "")),
+                )
+                conn.commit()
+        return True
+    except Exception:
+        return False
+
+
+def listar_indisponibilidades_estruturadas():
+    if not schema_producao_disponivel():
+        return None
+    try:
+        with supabase._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT id, colaborador_id, colaborador_nome_snapshot, motivo,
+                           inicio, fim, observacao, criado_em, criado_por
+                    FROM indisponibilidades
+                    WHERE ativo = TRUE
+                    ORDER BY inicio DESC, fim DESC
+                """)
+                rows = cur.fetchall() or []
+        saida = []
+        for row in rows:
+            r = dict(row) if isinstance(row, dict) else {
+                "id": row[0], "colaborador_id": row[1], "colaborador_nome_snapshot": row[2],
+                "motivo": row[3], "inicio": row[4], "fim": row[5], "observacao": row[6],
+                "criado_em": row[7], "criado_por": row[8],
+            }
+            saida.append({
+                "id": r.get("id"),
+                "colaborador_id": str(r.get("colaborador_id") or ""),
+                "colaborador_nome": str(r.get("colaborador_nome_snapshot") or ""),
+                "motivo": r.get("motivo"),
+                "inicio": r.get("inicio").isoformat() if hasattr(r.get("inicio"), "isoformat") else str(r.get("inicio") or ""),
+                "fim": r.get("fim").isoformat() if hasattr(r.get("fim"), "isoformat") else str(r.get("fim") or ""),
+                "observacao": r.get("observacao") or "",
+                "criado_em": str(r.get("criado_em") or ""),
+                "_origem": "producao",
+            })
+        return saida
+    except Exception:
+        return None
+
+
+def migrar_indisponibilidades_legadas_para_producao():
+    """Copia uma vez os registros técnicos antigos sem apagar a origem."""
+    if not schema_producao_disponivel() or "obras_todas" not in globals():
+        return 0
+    migradas = 0
+    try:
+        with supabase._connect() as conn:
+            with conn.cursor() as cur:
+                for obra in obras_todas:
+                    if not eh_registro_indisponibilidade(obra):
+                        continue
+                    dados = decodificar_indisponibilidade(obra)
+                    if not dados:
+                        continue
+                    cur.execute(
+                        """
+                        INSERT INTO indisponibilidades (
+                            colaborador_id, colaborador_nome_snapshot, motivo, inicio, fim,
+                            observacao, criado_em, legacy_origem_id
+                        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                        ON CONFLICT (legacy_origem_id) DO NOTHING
+                        """,
+                        (
+                            str(dados.get("colaborador_id") or ""),
+                            str(dados.get("colaborador_nome") or ""),
+                            str(dados.get("motivo") or "Outro"),
+                            str(dados.get("inicio") or ""),
+                            str(dados.get("fim") or ""),
+                            str(dados.get("observacao") or ""),
+                            dados.get("criado_em") or agora_aproar().isoformat(),
+                            str(obra.get("id") or ""),
+                        ),
+                    )
+                    migradas += max(0, cur.rowcount or 0)
+                conn.commit()
+    except Exception:
+        return 0
+    return migradas
+
+
+def salvar_indisponibilidade_estruturada(colaborador_id, motivo, inicio, fim, observacao="", criado_por="PAULO"):
+    if not schema_producao_disponivel():
+        return None
+    colab = obter_colaborador_por_id(colaborador_id) if "obter_colaborador_por_id" in globals() else {}
+    try:
+        with supabase._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO indisponibilidades
+                        (colaborador_id, colaborador_nome_snapshot, motivo, inicio, fim,
+                         observacao, criado_por)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s)
+                    RETURNING id
+                    """,
+                    (
+                        str(colaborador_id), str((colab or {}).get("nome") or ""),
+                        str(motivo), inicio, fim, str(observacao or ""), str(criado_por),
+                    ),
+                )
+                row = cur.fetchone()
+                conn.commit()
+        novo_id = row.get("id") if isinstance(row, dict) else (row[0] if row else None)
+        registrar_auditoria_prod(
+            "indisponibilidade", novo_id, "CRIAR", criado_por,
+            depois={"colaborador_id": str(colaborador_id), "motivo": motivo, "inicio": inicio, "fim": fim},
+        )
+        return True
+    except Exception:
+        return False
+
+
+def excluir_indisponibilidade_estruturada(registro_id, usuario="PAULO"):
+    if not schema_producao_disponivel():
+        return None
+    try:
+        with supabase._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE indisponibilidades SET ativo = FALSE WHERE id = %s RETURNING *", (registro_id,))
+                row = cur.fetchone()
+                conn.commit()
+        registrar_auditoria_prod("indisponibilidade", registro_id, "DESATIVAR", usuario, antes=dict(row) if isinstance(row, dict) else None)
+        return True
+    except Exception:
+        return False
+
+
+def salvar_apontamento_estruturado(
+    convocacao, data_servico, engenheiro, status, valor_extra, observacao_livre,
+    obra_principal_id, periodo_principal, servicos_adicionais=None,
+):
+    """Dual-write do apontamento nas tabelas novas, mantendo a convocação legada intacta."""
+    if not schema_producao_disponivel():
+        return False
+    try:
+        conv_id = str(convocacao.get("id") or "")
+        colab_id = str(convocacao.get("colaborador_id") or "")
+        retroativo = bool(agora_aproar().date() > data_servico)
+        obra_principal = dict_obras.get(obra_principal_id, {}) if "dict_obras" in globals() else {}
+        with supabase._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO apontamentos (
+                        convocacao_id, data_servico, colaborador_id, engenheiro, status,
+                        valor_extra, observacao, apontado_em, apontado_por, retroativo, atualizado_em
+                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,NOW(),%s,%s,NOW())
+                    ON CONFLICT (convocacao_id) DO UPDATE SET
+                        data_servico = EXCLUDED.data_servico,
+                        colaborador_id = EXCLUDED.colaborador_id,
+                        engenheiro = EXCLUDED.engenheiro,
+                        status = EXCLUDED.status,
+                        valor_extra = EXCLUDED.valor_extra,
+                        observacao = EXCLUDED.observacao,
+                        apontado_por = EXCLUDED.apontado_por,
+                        retroativo = EXCLUDED.retroativo,
+                        atualizado_em = NOW()
+                    """,
+                    (
+                        conv_id, data_servico, colab_id, str(engenheiro), str(status),
+                        float(valor_extra or 0), str(observacao_livre or ""), str(engenheiro), retroativo,
+                    ),
+                )
+
+                cur.execute("DELETE FROM servicos_apontamento WHERE convocacao_id = %s", (conv_id,))
+                cur.execute(
+                    """
+                    INSERT INTO servicos_apontamento
+                        (convocacao_id, obra_id, obra_nome_snapshot, unidade_snapshot, periodo, principal)
+                    VALUES (%s,%s,%s,%s,%s,TRUE)
+                    """,
+                    (
+                        conv_id, str(obra_principal_id or ""), str(obra_principal.get("nome") or ""),
+                        str(obra_principal.get("unidade") or ""), str(periodo_principal or ""),
+                    ),
+                )
+                for item in servicos_adicionais or []:
+                    nome = str(item.get("servico") or "").strip() if isinstance(item, dict) else str(item or "").strip()
+                    if not nome:
+                        continue
+                    periodo = str(item.get("periodo") or "") if isinstance(item, dict) else ""
+                    obra = next((o for o in (obras if "obras" in globals() else []) if normalizar(o.get("nome")) == normalizar(nome)), {})
+                    cur.execute(
+                        """
+                        INSERT INTO servicos_apontamento
+                            (convocacao_id, obra_id, obra_nome_snapshot, unidade_snapshot, periodo, principal)
+                        VALUES (%s,%s,%s,%s,%s,FALSE)
+                        """,
+                        (
+                            conv_id, str(obra.get("id") or ""), nome,
+                            str(obra.get("unidade") or obra_principal.get("unidade") or ""), periodo,
+                        ),
+                    )
+                conn.commit()
+
+        registrar_auditoria_prod(
+            "apontamento", conv_id, "SALVAR", engenheiro,
+            depois={
+                "data_servico": data_servico, "status": status, "valor_extra": valor_extra,
+                "obra_principal_id": str(obra_principal_id), "periodo_principal": periodo_principal,
+                "servicos_adicionais": servicos_adicionais or [], "retroativo": retroativo,
+            },
+        )
+        return True
+    except Exception:
+        return False
 
 
 def separar_observacao_metadata(observacao):
@@ -1125,9 +1578,12 @@ def normalizar_turno_convocacao(turno):
 
 
 def turno_da_convocacao(registro):
-    """Lê o turno salvo na observação da convocação."""
+    """Prefere a coluna de produção e mantém compatibilidade com a observação legada."""
+    turno_coluna = str((registro or {}).get("turno") or "").strip()
+    if turno_coluna:
+        return normalizar_turno_convocacao(turno_coluna)
     try:
-        turno, _ = decompor_observacao_operacional(registro.get("observacao") or "")
+        turno, _ = decompor_observacao_operacional((registro or {}).get("observacao") or "")
     except Exception:
         turno = "Integral"
     return normalizar_turno_convocacao(turno)
@@ -1255,6 +1711,13 @@ def registrar_conflito_convocacao(
         })
         meta["conflitos_convocacao"] = conflitos[-30:]
         meta["tem_conflito_pendente"] = True
+        # Fase 1: também grava em tabela própria quando a estrutura nova está ativa.
+        registrar_conflito_estruturado(
+            registro_existente,
+            engenheiro_tentativa,
+            normalizar_turno_convocacao(turno_tentativa),
+            unidade_tentativa or "",
+        )
         turno, livre = decompor_observacao_operacional(obs_atual)
         nova_obs = montar_observacao_operacional(turno, livre, meta)
         supabase.table("convocacoes").update({"observacao": nova_obs}).eq("id", registro_existente.get("id")).execute()
@@ -1280,6 +1743,8 @@ def resolver_conflitos_convocacao(registro):
         supabase.table("convocacoes").update({
             "observacao": montar_observacao_operacional(turno, livre, meta)
         }).eq("id", registro.get("id")).execute()
+        resolver_conflitos_estruturados(registro.get("id"), "PAULO")
+        registrar_auditoria_prod("convocacao", registro.get("id"), "RESOLVER_CONFLITO", "PAULO")
         limpar_cache_operacional()
         return True
     except Exception:
@@ -1385,7 +1850,7 @@ def inserir_convocacao_segura(obra_id, colaborador_id, data_convocacao, engenhei
     }
 
     try:
-        supabase.table("convocacoes").insert({
+        payload_conv = {
             "obra_id": obra_id,
             "colaborador_id": colaborador_id,
             "data": data_convocacao.isoformat(),
@@ -1393,7 +1858,22 @@ def inserir_convocacao_segura(obra_id, colaborador_id, data_convocacao, engenhei
             "status": "Presente (Integral)",
             "valor_extra": 0,
             "observacao": montar_observacao_operacional(turno_tentativa, "", meta)
-        }).execute()
+        }
+        if schema_producao_disponivel():
+            payload_conv.update({
+                "turno": turno_tentativa,
+                "criado_em": agora.isoformat(),
+                "criado_por": str(engenheiro),
+            })
+        retorno_conv = supabase.table("convocacoes").insert(payload_conv).execute().data or []
+        novo_id = (retorno_conv[0].get("id") if retorno_conv else "")
+        registrar_auditoria_prod(
+            "convocacao", novo_id, "CRIAR", engenheiro,
+            depois={
+                "colaborador_id": str(colaborador_id), "data": data_convocacao,
+                "turno": turno_tentativa, "obra_id": str(obra_id),
+            },
+        )
         limpar_cache_operacional()
         return True, f"convocado(a) com sucesso no turno {turno_tentativa}"
 
@@ -1949,10 +2429,17 @@ def decodificar_indisponibilidade(obra):
 
 
 def listar_indisponibilidades():
+    if schema_producao_disponivel():
+        migrar_indisponibilidades_legadas_para_producao()
+        estruturadas = listar_indisponibilidades_estruturadas()
+        if estruturadas is not None:
+            return estruturadas
+
     saida = []
     for item in obras_todas:
         dados = decodificar_indisponibilidade(item)
         if dados:
+            dados["_origem"] = "legado"
             saida.append(dados)
     return saida
 
@@ -1993,6 +2480,17 @@ def obter_indisponibilidade_colaborador(colaborador_id, data_ref):
 def salvar_indisponibilidade(colaborador_id, motivo, inicio, fim, observacao=""):
     if fim < inicio:
         return False, "A data final não pode ser anterior à data inicial."
+
+    if schema_producao_disponivel():
+        ok = salvar_indisponibilidade_estruturada(
+            colaborador_id, motivo, inicio, fim, observacao, criado_por="PAULO"
+        )
+        if ok:
+            limpar_cache_operacional()
+            return True, "Indisponibilidade registrada."
+        if ok is False:
+            return False, "Não foi possível registrar a indisponibilidade na estrutura de produção."
+
     colab_ref = obter_colaborador_por_id(colaborador_id)
     dados = {
         "colaborador_id": str(colaborador_id),
@@ -2015,6 +2513,11 @@ def salvar_indisponibilidade(colaborador_id, motivo, inicio, fim, observacao="")
 
 
 def excluir_indisponibilidade(registro_id):
+    if schema_producao_disponivel():
+        ok = excluir_indisponibilidade_estruturada(registro_id, "PAULO")
+        if ok is not None:
+            limpar_cache_operacional()
+            return bool(ok)
     try:
         supabase.table("obras").delete().eq("id", registro_id).execute()
         limpar_cache_operacional()
@@ -2937,12 +3440,24 @@ def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
                     )
                     nova_obs = montar_observacao_operacional(turno, obs_nova, meta)
                     try:
+                        valor_extra_final = float(val_extra) if status_eh_presenca(status_sel) else 0.0
                         supabase.table("convocacoes").update({
                             "obra_id": mapa_obras[obra_sel],
                             "status": status_sel,
-                            "valor_extra": float(val_extra) if status_eh_presenca(status_sel) else 0.0,
+                            "valor_extra": valor_extra_final,
                             "observacao": nova_obs,
                         }).eq("id", c_id).execute()
+                        salvar_apontamento_estruturado(
+                            conv,
+                            data_apont,
+                            engenheiro,
+                            status_sel,
+                            valor_extra_final,
+                            obs_nova,
+                            mapa_obras[obra_sel],
+                            periodo_principal,
+                            adicionais,
+                        )
                         limpar_cache_operacional()
                         st.success(f"Apontamento de {colab.get('nome','-')} salvo.")
                         st.rerun()
@@ -4409,7 +4924,7 @@ else:
                                     st.rerun()
 
                                 except Exception as e:
-                                    st.error(f"Não foi possível excluir a convocação: {e}")
+                                    exibir_erro_amigavel("convocacao", "excluir", e, "Não foi possível excluir a convocação.")
 
                         with conf2:
                             if st.button(
@@ -4449,7 +4964,7 @@ else:
             )
         except Exception as e:
             convocacoes_wpp = []
-            st.error(f"Não foi possível carregar as convocações: {e}")
+            exibir_erro_amigavel("convocacao", "carregar_whatsapp", e, "Não foi possível carregar as convocações.")
 
         agrupado_wpp = organizar_convocacoes_whatsapp(convocacoes_wpp, mostrar_funcao=mostrar_funcao_wpp)
         unidades_com_divisao = list(agrupado_wpp.keys())
@@ -4641,7 +5156,7 @@ else:
                             mime="application/pdf"
                         )
                 except Exception as e:
-                    st.error(f"Erro ao gerar PDF: {e}")
+                    exibir_erro_amigavel("relatorios", "gerar_pdf", e, "Não foi possível gerar o PDF.")
 
         with col_btn2:
             if st.button("📊 Gerar Excel (Abas por Dia + Cores por Engenheiro)", use_container_width=True):
@@ -4774,7 +5289,7 @@ else:
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                         )
                 except Exception as e:
-                    st.error(f"Erro ao gerar Excel: {e}")
+                    exibir_erro_amigavel("relatorios", "gerar_excel", e, "Não foi possível gerar o Excel.")
 
     # --- 5. INDICADORES ---
     elif menu_escolhido == "📈 INDICADORES":
@@ -4791,6 +5306,17 @@ else:
     # --- 7. CONFIGURAÇÕES E SINCRONIZAÇÃO TRELLO ---
     elif menu_escolhido == "⚙️ CONFIGURAÇÕES":
         st.markdown("## ⚙️ CONFIGURAÇÕES E GERENCIAMENTO")
+        with st.expander("🩺 Diagnóstico e saúde do sistema", expanded=False):
+            render_diagnostico_sistema()
+
+        if DB_BACKEND == "NEON":
+            if schema_producao_disponivel():
+                st.success("🟢 Estrutura de produção ativa: auditoria, conflitos, indisponibilidades e apontamentos estruturados.")
+            else:
+                st.warning(
+                    "🟡 Estrutura de produção ainda não foi aplicada no Neon. "
+                    "O sistema continua em compatibilidade legada até a migração SQL ser executada."
+                )
         
         # Sincronização Dinâmica Trello (mês vigente, lista manual ou busca de card/lista)
         with st.container(border=True):
@@ -5073,7 +5599,7 @@ else:
                 except Exception as e:
                     df_import = pd.DataFrame()
                     linha_cabecalho_detectada = None
-                    st.error(f"Não foi possível ler a planilha: {e}")
+                    exibir_erro_amigavel("colaboradores", "ler_planilha", e, "Não foi possível ler a planilha enviada.")
 
 
                 if not df_import.empty:
@@ -5262,7 +5788,7 @@ else:
                                 st.session_state["msg_import_colab"] = mensagem
                                 st.rerun()
                             except Exception as e:
-                                st.error(f"Erro durante a importação: {e}")
+                                exibir_erro_amigavel("colaboradores", "importar", e, "Não foi possível concluir a importação.")
                     else:
                         st.warning("A planilha não possui colaboradores válidos para importar.")
                 elif arquivo_import is not None:
@@ -5279,4 +5805,4 @@ else:
                     st.success(f"Todas as convocações do dia {data_limpeza.strftime('%d/%m/%Y')} foram removidas com sucesso!")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Erro ao limpar dados: {e}")
+                    exibir_erro_amigavel("administracao", "limpar_dados", e, "Não foi possível concluir a limpeza dos dados.")
