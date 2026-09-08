@@ -9,6 +9,8 @@ import re
 import os
 import io
 import time
+import traceback
+import uuid
 import requests
 import openpyxl
 from zoneinfo import ZoneInfo
@@ -17,15 +19,9 @@ from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 
 # --- APROAR | FASE 1 DE PRODUÇÃO (migração não destrutiva) ---
 # --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR (CLARO / AZUL) ---
-st.set_page_config(page_title="APROAR - HOMOLOGAÇÃO", page_icon="🧪", layout="wide")
+st.set_page_config(page_title="APROAR - Controle de Presenças", page_icon="👷", layout="wide")
 
-# --- AMBIENTE DE HOMOLOGAÇÃO ---
-AMBIENTE_APROAR = "HOMOLOGACAO"
-st.markdown("""
-<div style="background:#FEF3C7;border:1px solid #F59E0B;color:#92400E;padding:10px 14px;border-radius:10px;margin:0 0 14px 0;font-weight:700;text-align:center;">
-🧪 AMBIENTE DE HOMOLOGAÇÃO — dados de teste. Não usar como sistema oficial.
-</div>
-""", unsafe_allow_html=True)
+st.warning("🧪 AMBIENTE DE HOMOLOGAÇÃO — dados de teste. Não usar como sistema oficial.")
 
 # Paleta principal. Se a identidade visual mudar, basta alterar o azul aqui e no CSS abaixo.
 AZUL_APROAR = "#2563EB"
@@ -472,7 +468,7 @@ class _PostgresCompat:
         tabelas_autorizadas = {
             "obras", "colaboradores", "convocacoes",
             "indisponibilidades", "conflitos_convocacao", "apontamentos",
-            "servicos_apontamento", "auditoria",
+            "servicos_apontamento", "auditoria", "erros_sistema",
         }
         if tabela not in tabelas_autorizadas:
             raise ValueError(f"Tabela não autorizada no adaptador: {tabela}")
@@ -821,6 +817,97 @@ def registrar_auditoria_prod(entidade, entidade_id, acao, usuario=None, antes=No
         return True
     except Exception:
         return False
+
+
+# ============================================================
+# ESTABILIDADE / OBSERVABILIDADE
+# ============================================================
+AMBIENTE_APP = (_secret_opcional("AMBIENTE") or "homologacao").strip().lower()
+
+
+def _tabela_erros_disponivel():
+    if DB_BACKEND != "NEON" or not hasattr(supabase, "_connect"):
+        return False
+    try:
+        with supabase._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT to_regclass('public.erros_sistema') AS tabela")
+                row = cur.fetchone()
+                if isinstance(row, dict):
+                    return bool(row.get("tabela"))
+                return bool(row and row[0])
+    except Exception:
+        return False
+
+
+def registrar_erro_sistema(modulo, acao, erro, usuario=None, contexto=None):
+    """Registra erro técnico e devolve um código curto para suporte."""
+    agora = agora_aproar() if "agora_aproar" in globals() else datetime.datetime.now()
+    codigo = f"AP-{agora.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:5].upper()}"
+    try:
+        if _tabela_erros_disponivel():
+            with supabase._connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        INSERT INTO erros_sistema
+                            (codigo, ambiente, modulo, acao, tipo_erro, mensagem, detalhes, usuario, contexto)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)
+                        """,
+                        (
+                            codigo, AMBIENTE_APP, str(modulo or ""), str(acao or ""),
+                            type(erro).__name__, str(erro)[:1200],
+                            traceback.format_exc()[-8000:], str(usuario or ""),
+                            _json_db(contexto or {}),
+                        ),
+                    )
+                    conn.commit()
+    except Exception:
+        pass
+    return codigo
+
+
+def exibir_erro_amigavel(modulo, acao, erro, mensagem="Não foi possível concluir esta operação.", usuario=None, contexto=None):
+    codigo = registrar_erro_sistema(modulo, acao, erro, usuario=usuario, contexto=contexto)
+    st.error(f"{mensagem} Nenhum dado adicional deve ser alterado. Código: {codigo}")
+    return codigo
+
+
+def render_diagnostico_sistema():
+    st.markdown("### 🩺 Diagnóstico do sistema")
+    d1, d2, d3 = st.columns(3)
+    d1.metric("AMBIENTE", AMBIENTE_APP.upper())
+    d2.metric("BANCO", DB_BACKEND)
+    d3.metric("ESTRUTURA NOVA", "ATIVA" if schema_producao_disponivel() else "INCOMPLETA")
+
+    banco_ok, banco_msg = _testar_banco_ativo() if "_testar_banco_ativo" in globals() else (True, "OK")
+    if banco_ok:
+        st.success(f"Banco acessível: {banco_msg}")
+    else:
+        st.error("Banco indisponível no momento.")
+
+    if _tabela_erros_disponivel():
+        try:
+            with supabase._connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT codigo, criado_em, modulo, acao, tipo_erro, usuario, resolvido
+                        FROM erros_sistema
+                        ORDER BY criado_em DESC
+                        LIMIT 20
+                        """
+                    )
+                    rows = cur.fetchall() or []
+            if rows:
+                st.caption("Últimos erros técnicos registrados")
+                st.dataframe(pd.DataFrame([dict(r) for r in rows]), use_container_width=True, hide_index=True)
+            else:
+                st.info("Nenhum erro técnico registrado ainda.")
+        except Exception:
+            st.info("A tabela de erros existe, mas não foi possível consultar o histórico agora.")
+    else:
+        st.warning("Execute a migração da etapa de estabilidade para ativar o registro de erros.")
 
 
 def registrar_conflito_estruturado(registro_existente, engenheiro_tentativa, turno_tentativa, unidade_tentativa=""):
@@ -4839,7 +4926,7 @@ else:
                                     st.rerun()
 
                                 except Exception as e:
-                                    st.error(f"Não foi possível excluir a convocação: {e}")
+                                    exibir_erro_amigavel("convocacao", "excluir", e, "Não foi possível excluir a convocação.")
 
                         with conf2:
                             if st.button(
@@ -4879,7 +4966,7 @@ else:
             )
         except Exception as e:
             convocacoes_wpp = []
-            st.error(f"Não foi possível carregar as convocações: {e}")
+            exibir_erro_amigavel("convocacao", "carregar_whatsapp", e, "Não foi possível carregar as convocações.")
 
         agrupado_wpp = organizar_convocacoes_whatsapp(convocacoes_wpp, mostrar_funcao=mostrar_funcao_wpp)
         unidades_com_divisao = list(agrupado_wpp.keys())
@@ -5071,7 +5158,7 @@ else:
                             mime="application/pdf"
                         )
                 except Exception as e:
-                    st.error(f"Erro ao gerar PDF: {e}")
+                    exibir_erro_amigavel("relatorios", "gerar_pdf", e, "Não foi possível gerar o PDF.")
 
         with col_btn2:
             if st.button("📊 Gerar Excel (Abas por Dia + Cores por Engenheiro)", use_container_width=True):
@@ -5204,7 +5291,7 @@ else:
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                         )
                 except Exception as e:
-                    st.error(f"Erro ao gerar Excel: {e}")
+                    exibir_erro_amigavel("relatorios", "gerar_excel", e, "Não foi possível gerar o Excel.")
 
     # --- 5. INDICADORES ---
     elif menu_escolhido == "📈 INDICADORES":
@@ -5221,6 +5308,9 @@ else:
     # --- 7. CONFIGURAÇÕES E SINCRONIZAÇÃO TRELLO ---
     elif menu_escolhido == "⚙️ CONFIGURAÇÕES":
         st.markdown("## ⚙️ CONFIGURAÇÕES E GERENCIAMENTO")
+        with st.expander("🩺 Diagnóstico e saúde do sistema", expanded=False):
+            render_diagnostico_sistema()
+
         if DB_BACKEND == "NEON":
             if schema_producao_disponivel():
                 st.success("🟢 Estrutura de produção ativa: auditoria, conflitos, indisponibilidades e apontamentos estruturados.")
@@ -5511,7 +5601,7 @@ else:
                 except Exception as e:
                     df_import = pd.DataFrame()
                     linha_cabecalho_detectada = None
-                    st.error(f"Não foi possível ler a planilha: {e}")
+                    exibir_erro_amigavel("colaboradores", "ler_planilha", e, "Não foi possível ler a planilha enviada.")
 
 
                 if not df_import.empty:
@@ -5700,7 +5790,7 @@ else:
                                 st.session_state["msg_import_colab"] = mensagem
                                 st.rerun()
                             except Exception as e:
-                                st.error(f"Erro durante a importação: {e}")
+                                exibir_erro_amigavel("colaboradores", "importar", e, "Não foi possível concluir a importação.")
                     else:
                         st.warning("A planilha não possui colaboradores válidos para importar.")
                 elif arquivo_import is not None:
@@ -5717,4 +5807,4 @@ else:
                     st.success(f"Todas as convocações do dia {data_limpeza.strftime('%d/%m/%Y')} foram removidas com sucesso!")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Erro ao limpar dados: {e}")
+                    exibir_erro_amigavel("administracao", "limpar_dados", e, "Não foi possível concluir a limpeza dos dados.")
