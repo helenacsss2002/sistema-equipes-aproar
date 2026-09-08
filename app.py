@@ -253,6 +253,309 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+
+# --- UI APROAR | OPÇÃO 4 — MINIMALISTA, REALISTA E FUNCIONAL ---
+st.markdown("""
+<style>
+/* Base */
+:root {
+    --ui-navy: #0B1B34;
+    --ui-navy-2: #102442;
+    --ui-blue: #2563EB;
+    --ui-blue-hover: #1D4ED8;
+    --ui-blue-soft: #EFF6FF;
+    --ui-bg: #F8FAFC;
+    --ui-card: #FFFFFF;
+    --ui-text: #10213D;
+    --ui-muted: #6B7C93;
+    --ui-border: #DCE5F0;
+    --ui-green: #10B981;
+    --ui-orange: #F59E0B;
+    --ui-red: #F43F5E;
+    --ui-purple: #7C3AED;
+}
+
+html, body, [data-testid="stAppViewContainer"], .stApp, [data-testid="stMain"] {
+    background: var(--ui-bg) !important;
+    color: var(--ui-text) !important;
+}
+main .block-container {
+    max-width: 1500px !important;
+    padding-top: 1.15rem !important;
+    padding-left: 2rem !important;
+    padding-right: 2rem !important;
+    padding-bottom: 2rem !important;
+}
+
+/* Tipografia mais próxima de um produto real */
+html, body, p, label, input, textarea, button, .stMarkdown, .stCaption {
+    font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif !important;
+}
+h1, h2, h3, h4, h5, h6 { letter-spacing: -0.02em !important; }
+
+/* Sidebar */
+section[data-testid="stSidebar"] {
+    background: var(--ui-navy) !important;
+    border-right: 1px solid #18304F !important;
+    width: 230px !important;
+    min-width: 230px !important;
+}
+section[data-testid="stSidebar"] > div:first-child {
+    padding: 16px 14px 18px 14px !important;
+}
+section[data-testid="stSidebar"] [data-testid="stImage"] {
+    max-width: 170px !important;
+    margin: 0 auto 2px auto !important;
+}
+.aproar-sidebar-subtitle {
+    text-align: center;
+    color: #9FB0C7 !important;
+    font-size: 11px;
+    letter-spacing: .9px;
+    margin: -3px 0 18px 0;
+    font-weight: 600;
+}
+.aproar-sidebar-section {
+    color: #7890AE !important;
+    font-size: 9px !important;
+    letter-spacing: 1.25px !important;
+    font-weight: 700 !important;
+    margin: 18px 8px 7px 8px !important;
+    text-transform: uppercase;
+}
+section[data-testid="stSidebar"] .stButton { margin: 0 !important; }
+section[data-testid="stSidebar"] .stButton > button {
+    min-height: 39px !important;
+    width: 100% !important;
+    justify-content: flex-start !important;
+    padding: 0 12px !important;
+    margin: 2px 0 !important;
+    border-radius: 8px !important;
+    border: 1px solid transparent !important;
+    background: transparent !important;
+    color: #D7E1EE !important;
+    font-weight: 500 !important;
+    box-shadow: none !important;
+    transform: none !important;
+}
+section[data-testid="stSidebar"] .stButton > button * { color: #D7E1EE !important; }
+section[data-testid="stSidebar"] .stButton > button:hover {
+    background: #142A49 !important;
+    border-color: #203A5C !important;
+    color: #FFFFFF !important;
+}
+section[data-testid="stSidebar"] [data-testid="stBaseButton-primary"],
+section[data-testid="stSidebar"] .stButton > button[kind="primary"] {
+    background: var(--ui-blue) !important;
+    border-color: var(--ui-blue) !important;
+    color: #FFFFFF !important;
+    font-weight: 600 !important;
+}
+section[data-testid="stSidebar"] [data-testid="stBaseButton-primary"] * { color: #FFFFFF !important; }
+section[data-testid="stSidebar"] hr { border-color: #28415F !important; margin: 14px 0 !important; }
+section[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p {
+    color: #8FA3BD !important;
+    font-size: 11px !important;
+}
+
+/* Botões do conteúdo: secundário branco, primário azul */
+main .stButton > button,
+main .stDownloadButton > button {
+    min-height: 40px !important;
+    background: #FFFFFF !important;
+    color: #24466F !important;
+    border: 1px solid var(--ui-border) !important;
+    border-radius: 8px !important;
+    font-weight: 600 !important;
+    box-shadow: none !important;
+    transform: none !important;
+}
+main .stButton > button:hover,
+main .stDownloadButton > button:hover {
+    background: #F7FAFE !important;
+    border-color: #B8C8DD !important;
+    color: #173A65 !important;
+    transform: none !important;
+}
+main [data-testid="stBaseButton-primary"],
+main .stButton > button[kind="primary"],
+main [data-testid="stFormSubmitButton"] > button {
+    background: var(--ui-blue) !important;
+    color: #FFFFFF !important;
+    border-color: var(--ui-blue) !important;
+}
+main [data-testid="stBaseButton-primary"] *,
+main .stButton > button[kind="primary"] *,
+main [data-testid="stFormSubmitButton"] > button * { color: #FFFFFF !important; }
+main [data-testid="stBaseButton-primary"]:hover,
+main .stButton > button[kind="primary"]:hover,
+main [data-testid="stFormSubmitButton"] > button:hover {
+    background: var(--ui-blue-hover) !important;
+    border-color: var(--ui-blue-hover) !important;
+}
+
+/* Inputs */
+div[data-baseweb="select"] > div,
+div[data-baseweb="base-input"] > div,
+div[data-baseweb="input"] > div,
+[data-baseweb="textarea"] > div,
+div[role="combobox"] {
+    min-height: 42px !important;
+    border: 1px solid var(--ui-border) !important;
+    border-radius: 8px !important;
+    background: #FFFFFF !important;
+    box-shadow: none !important;
+}
+
+/* Containers nativos */
+[data-testid="stVerticalBlockBorderWrapper"] > div,
+[data-testid="stExpander"] {
+    border-color: var(--ui-border) !important;
+    border-radius: 10px !important;
+    box-shadow: none !important;
+    background: #FFFFFF !important;
+}
+[data-testid="stDataFrame"], [data-testid="stDataEditor"] {
+    border: 1px solid var(--ui-border) !important;
+    border-radius: 9px !important;
+    overflow: hidden !important;
+    box-shadow: none !important;
+}
+
+/* Cabeçalho da home */
+.aproar-page-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    margin: 2px 0 18px 0;
+}
+.aproar-page-title-wrap { display: flex; align-items: center; gap: 14px; }
+.aproar-page-icon {
+    width: 48px; height: 48px;
+    border-radius: 11px;
+    display: flex; align-items: center; justify-content: center;
+    background: #EEF5FF;
+    color: var(--ui-blue);
+    font-size: 24px;
+    flex: 0 0 auto;
+}
+.aproar-page-title { font-size: 31px; line-height: 1.05; font-weight: 750; color: var(--ui-text); margin: 0; }
+.aproar-page-subtitle { color: #7B8CA4; margin-top: 5px; font-size: 14px; }
+.aproar-date-card {
+    border: 1px solid #E4EAF2;
+    background: #F7FAFF;
+    border-radius: 10px;
+    padding: 11px 15px;
+    min-width: 280px;
+    color: #24466F;
+    font-size: 13px;
+}
+.aproar-date-card strong { color: #17385F; font-size: 13px; }
+.aproar-date-card span { color: #7C8DA5; font-size: 12px; }
+
+/* Métricas */
+.aproar-metric-grid {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 12px;
+    margin: 16px 0 16px 0;
+}
+.aproar-metric {
+    background: #FFFFFF;
+    border: 1px solid var(--ui-border);
+    border-radius: 10px;
+    min-height: 116px;
+    padding: 17px 17px;
+    display: flex;
+    align-items: flex-start;
+    gap: 13px;
+}
+.aproar-metric-icon {
+    width: 42px; height: 42px;
+    border-radius: 9px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px;
+    flex: 0 0 auto;
+}
+.aproar-icon-blue { background:#EDF5FF; color:#1670F8; }
+.aproar-icon-green { background:#EAF9F2; color:#10A76F; }
+.aproar-icon-orange { background:#FFF5E3; color:#E78B00; }
+.aproar-icon-red { background:#FFF0F3; color:#E62E50; }
+.aproar-icon-purple { background:#F4EDFF; color:#7432D6; }
+.aproar-metric-label { color:#40536D; font-size:11px; font-weight:700; text-transform:uppercase; margin-top:1px; }
+.aproar-metric-value { color:#091A33; font-size:29px; line-height:1; font-weight:760; margin:6px 0 6px 0; }
+.aproar-metric-note { color:#7D8EA5; font-size:11px; line-height:1.25; }
+.aproar-note-green { color:#0E9F6E; font-weight:700; }
+.aproar-note-orange { color:#D77B00; font-weight:700; }
+.aproar-note-red { color:#DC3454; font-weight:700; }
+
+/* Painéis centrais */
+.aproar-panel {
+    border: 1px solid var(--ui-border);
+    border-radius: 10px;
+    background: #FFFFFF;
+    padding: 16px;
+    min-height: 100%;
+}
+.aproar-panel.attention { background: #FFFCF5; border-color: #F1E6CB; }
+.aproar-panel-head { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; margin-bottom:12px; }
+.aproar-panel-title { display:flex; gap:11px; align-items:center; }
+.aproar-panel-title .iconbox {
+    width: 40px; height: 40px; border-radius: 9px;
+    display:flex; align-items:center; justify-content:center; font-size:19px;
+}
+.aproar-panel-title h3 { margin:0; color:#10213D; font-size:18px; font-weight:720; }
+.aproar-panel-title p { margin:2px 0 0 0; color:#8090A7 !important; font-size:12px; }
+.aproar-chip { border-radius:999px; padding:7px 12px; font-size:11px; font-weight:650; white-space:nowrap; }
+.aproar-chip-orange { background:#FFF2D8; color:#C96D00; }
+.aproar-chip-red { background:#FFE9EE; color:#D72B4C; }
+.aproar-list-item {
+    display:flex; align-items:center; justify-content:space-between; gap:12px;
+    background:#FFFFFF; border:1px solid #E6EBF2; border-radius:9px;
+    padding:12px 13px; margin-top:9px;
+}
+.aproar-list-left { display:flex; align-items:center; gap:11px; min-width:0; }
+.aproar-mini-icon {
+    width:34px; height:34px; border-radius:8px; display:flex; align-items:center; justify-content:center; flex:0 0 auto;
+    background:#F4F7FB; color:#56708F; font-size:15px;
+}
+.aproar-list-text strong { color:#142744; font-size:13px; font-weight:680; }
+.aproar-list-text div { color:#71849D; font-size:11px; margin-top:2px; }
+.aproar-chevron { color:#5E7898; font-size:18px; }
+.aproar-conflict-item {
+    background:#F9FBFE; border:1px solid #E5EBF3; border-radius:9px; padding:11px 12px; margin-top:8px;
+    display:flex; justify-content:space-between; gap:10px; align-items:center;
+}
+.aproar-conflict-main { min-width:0; }
+.aproar-conflict-type { color:#3D5574; font-size:10px; font-weight:750; text-transform:uppercase; }
+.aproar-conflict-name { color:#1B3456; font-size:12px; font-weight:650; margin-top:2px; }
+.aproar-conflict-detail { color:#7B8DA5; font-size:10px; margin-top:2px; }
+.aproar-conflict-time { color:#E23B58; font-size:11px; font-weight:700; white-space:nowrap; }
+
+.aproar-quick-title { display:flex; align-items:center; gap:11px; margin:15px 0 8px 0; }
+.aproar-quick-icon { width:38px; height:38px; border-radius:9px; display:flex; align-items:center; justify-content:center; background:#EDF5FF; color:#2563EB; font-size:20px; }
+.aproar-quick-title h3 { margin:0; font-size:18px; color:#142744; }
+.aproar-quick-title p { margin:1px 0 0 0; color:#7E90A8 !important; font-size:11px; }
+
+/* Alertas da homologação menos chamativos */
+[data-testid="stAlert"] { border-radius:9px !important; box-shadow:none !important; }
+
+@media (max-width: 1150px) {
+    .aproar-metric-grid { grid-template-columns: repeat(2, minmax(0,1fr)); }
+    .aproar-date-card { display:none; }
+}
+@media (max-width: 760px) {
+    main .block-container { padding-left:.85rem !important; padding-right:.85rem !important; }
+    .aproar-page-title { font-size:25px; }
+    .aproar-page-icon { width:42px; height:42px; }
+    .aproar-metric-grid { grid-template-columns: 1fr; gap:8px; }
+    .aproar-metric { min-height:94px; padding:13px; }
+    .aproar-page-head { margin-bottom:12px; }
+}
+</style>
+""", unsafe_allow_html=True)
+
 # --- MESES EM PORTUGUÊS ---
 MESES_PT = {
     1: "JANEIRO", 2: "FEVEREIRO", 3: "MARÇO", 4: "ABRIL",
@@ -4534,103 +4837,267 @@ else:
 
     with st.sidebar:
         if os.path.exists("logo.png"):
-            st.image("logo.png", use_container_width=True)
+            st.image("logo.png", width=170)
         else:
-            st.markdown("<h2 style='text-align: center; color: #FFFFFF; letter-spacing: 2px;'>APROAR</h2>", unsafe_allow_html=True)
+            st.markdown("<h2 style='text-align:center;color:#fff;margin:0;'>APROAR</h2>", unsafe_allow_html=True)
 
-        st.markdown("<p style='text-align: center; font-size: 10px; color: #94A3B8; letter-spacing: 1.5px; margin-top: -5px; margin-bottom: 16px; font-weight: 700;'>GESTÃO DE EQUIPES</p>", unsafe_allow_html=True)
+        st.markdown("<div class='aproar-sidebar-subtitle'>GESTÃO DE EQUIPES</div>", unsafe_allow_html=True)
 
-        st.button("🏠 INÍCIO", key="btn_nav_inicio", use_container_width=True, on_click=_ir_menu_admin, args=("🏠 INÍCIO",))
+        def _nav_admin(label, destino, key):
+            ativo = st.session_state.get("menu_ativo") == destino
+            st.button(
+                label,
+                key=key,
+                type="primary" if ativo else "secondary",
+                use_container_width=True,
+                on_click=_ir_menu_admin,
+                args=(destino,),
+            )
 
-        st.markdown("<div class='aproar-sidebar-section'>🛠 OPERAÇÃO</div>", unsafe_allow_html=True)
-        for item in ["📋 CONVOCAÇÃO", "🚨 CONFLITOS", "✅ APONTAMENTO", "💬 WHATSAPP", "👥 DISPONIBILIDADE", "🚫 INDISPONIBILIDADE"]:
-            st.button(item, key=f"btn_nav_{item}_novo", use_container_width=True, on_click=_ir_menu_admin, args=(item,))
+        _nav_admin("⌂  Início", "🏠 INÍCIO", "btn_nav_inicio_ui4")
 
-        st.markdown("<div class='aproar-sidebar-section'>📊 ANÁLISE E FECHAMENTO</div>", unsafe_allow_html=True)
-        for item in ["🎛️ DASHBOARD", "📊 RELATÓRIOS", "📈 INDICADORES"]:
-            st.button(item, key=f"btn_nav_{item}_novo", use_container_width=True, on_click=_ir_menu_admin, args=(item,))
+        st.markdown("<div class='aproar-sidebar-section'>OPERAÇÃO</div>", unsafe_allow_html=True)
+        _nav_admin("▣  Convocação", "📋 CONVOCAÇÃO", "btn_nav_conv_ui4")
+        _nav_admin("△  Conflitos", "🚨 CONFLITOS", "btn_nav_conf_ui4")
+        _nav_admin("✓  Apontamento", "✅ APONTAMENTO", "btn_nav_apon_ui4")
+        _nav_admin("◉  WhatsApp", "💬 WHATSAPP", "btn_nav_wpp_ui4")
+        _nav_admin("♟  Disponibilidade", "👥 DISPONIBILIDADE", "btn_nav_disp_ui4")
+        _nav_admin("⊘  Indisponibilidade", "🚫 INDISPONIBILIDADE", "btn_nav_indisp_ui4")
 
-        st.markdown("<div class='aproar-sidebar-section'>⚙ SISTEMA</div>", unsafe_allow_html=True)
-        st.button("⚙️ CONFIGURAÇÕES", key="btn_nav_config_novo", use_container_width=True, on_click=_ir_menu_admin, args=("⚙️ CONFIGURAÇÕES",))
+        st.markdown("<div class='aproar-sidebar-section'>ANÁLISE E FECHAMENTO</div>", unsafe_allow_html=True)
+        _nav_admin("▦  Dashboard", "🎛️ DASHBOARD", "btn_nav_dash_ui4")
+        _nav_admin("▥  Relatórios", "📊 RELATÓRIOS", "btn_nav_rel_ui4")
+        _nav_admin("⌁  Indicadores", "📈 INDICADORES", "btn_nav_ind_ui4")
 
-        st.markdown("---")
-        st.caption("✏️ Modo edição liberado")
-        if st.button("🔒 BLOQUEAR EDIÇÃO", key="bloquear_edicao_sidebar", use_container_width=True):
+        st.markdown("<div class='aproar-sidebar-section'>SISTEMA</div>", unsafe_allow_html=True)
+        _nav_admin("⚙  Configurações", "⚙️ CONFIGURAÇÕES", "btn_nav_cfg_ui4")
+
+        st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
+        st.caption("Modo de edição ativo")
+        if st.button("Bloquear edição", key="bloquear_edicao_sidebar_ui4", use_container_width=True):
             st.session_state["edicao_liberada"] = False
             st.rerun()
-        st.caption("APROAR Engenharia © 2026")
 
     menu_escolhido = st.session_state.menu_ativo
 
-    # --- HOME ADMINISTRATIVA: O QUE PRECISA DE ATENÇÃO ---
+    # --- HOME ADMINISTRATIVA — INTERFACE MINIMALISTA / AÇÃO DO DIA ---
     if menu_escolhido == "🏠 INÍCIO":
-        st.markdown("## 🏠 Visão do dia")
-        st.caption("A tela inicial mostra primeiro o que ainda precisa ser resolvido. As consultas detalhadas continuam nos módulos do menu.")
+        import html as _html
 
-        hoje_admin = datetime.date.today()
-        amanha_admin = proximo_dia_util(hoje_admin)
-        # Uma única ida ao banco para hoje + amanhã. O resultado é reaproveitado
-        # por alguns segundos entre reruns do Streamlit.
-        conv_home_admin = _buscar_convocacoes_intervalo(hoje_admin, amanha_admin)
-        hoje_iso = hoje_admin.isoformat()
-        amanha_iso = amanha_admin.isoformat()
-        conv_hoje_admin = [c for c in conv_home_admin if str(c.get("data") or "") == hoje_iso]
-        conv_amanha_admin = [c for c in conv_home_admin if str(c.get("data") or "") == amanha_iso]
+        hoje_real = datetime.date.today()
+        dias_semana = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado", "Domingo"]
+        meses_nome = ["", "janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"]
+        data_extenso = f"{dias_semana[hoje_real.weekday()]}, {hoje_real.day:02d} de {meses_nome[hoje_real.month]} de {hoje_real.year}"
 
-        pendentes_admin = []
-        for conv in conv_hoje_admin:
+        st.markdown(
+            f"""
+            <div class="aproar-page-head">
+                <div class="aproar-page-title-wrap">
+                    <div class="aproar-page-icon">⌂</div>
+                    <div>
+                        <div class="aproar-page-title">Visão do dia</div>
+                        <div class="aproar-page-subtitle">Acompanhe a situação da equipe e resolva o que precisa de atenção.</div>
+                    </div>
+                </div>
+                <div class="aproar-date-card">📅 &nbsp;<strong>{data_extenso}</strong><br><span>Bom dia, Administrador.</span></div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        unidades_home = sorted({str(o.get("unidade") or "").strip() for o in obras if str(o.get("unidade") or "").strip()})
+        with st.container(border=True):
+            f1, f2, f3, f4 = st.columns([1.0, 1.15, 1.15, 0.58], vertical_alignment="bottom")
+            with f1:
+                data_home = st.date_input("Data", value=hoje_real, format="DD/MM/YYYY", key="ui4_home_data")
+            with f2:
+                unidade_home = st.selectbox("Unidade", ["Todas"] + unidades_home, key="ui4_home_unidade")
+            with f3:
+                engenheiro_home = st.selectbox("Engenheiro", ["Todos"] + ENGENHEIROS, key="ui4_home_engenheiro")
+            with f4:
+                st.button("Atualizar", type="primary", use_container_width=True, key="ui4_home_atualizar")
+
+        amanha_home = proximo_dia_util(data_home)
+        registros_periodo = _buscar_convocacoes_intervalo(data_home, amanha_home)
+        data_iso = data_home.isoformat()
+        amanha_iso = amanha_home.isoformat()
+
+        def _filtrar_home(registros, data_alvo=None):
+            saida = []
+            for c in registros or []:
+                if data_alvo and str(c.get("data") or "") != data_alvo:
+                    continue
+                if engenheiro_home != "Todos" and str(c.get("engenheiro") or "") != engenheiro_home:
+                    continue
+                if unidade_home != "Todas":
+                    obra_c = dict_obras.get(c.get("obra_id"), {})
+                    if str(obra_c.get("unidade") or "") != unidade_home:
+                        continue
+                saida.append(c)
+            return saida
+
+        conv_dia = _filtrar_home(registros_periodo, data_iso)
+        conv_amanha = _filtrar_home(registros_periodo, amanha_iso)
+
+        pendentes = []
+        for conv in conv_dia:
             obra_conv = dict_obras.get(conv.get("obra_id"), {})
             if not obra_conv or eh_obra_placeholder(obra_conv):
-                pendentes_admin.append(conv)
+                pendentes.append(conv)
 
-        total_hoje_admin = len(conv_hoje_admin)
-        apontados_admin = max(0, total_hoje_admin - len(pendentes_admin))
-        faltas_admin = sum(1 for c in conv_hoje_admin if normalizar_status_operacional(c.get("status")) == "Falta")
-        atestados_admin = sum(1 for c in conv_hoje_admin if normalizar_status_operacional(c.get("status")) == "Atestado")
+        total = len(conv_dia)
+        apontados = max(0, total - len(pendentes))
+        faltas = sum(1 for c in conv_dia if normalizar_status_operacional(c.get("status")) == "Falta")
+        atestados = sum(1 for c in conv_dia if normalizar_status_operacional(c.get("status")) == "Atestado")
+        pct_apontado = round((apontados / total * 100), 0) if total else 0
+        pct_pendente = round((len(pendentes) / total * 100), 0) if total else 0
 
-        a1, a2, a3, a4, a5 = st.columns(5)
-        a1.metric("EQUIPE HOJE", total_hoje_admin)
-        a2.metric("APONTADOS", apontados_admin)
-        a3.metric("PENDENTES", len(pendentes_admin))
-        a4.metric("FALTAS / ATESTADOS", faltas_admin + atestados_admin)
-        a5.metric("CONVOCADOS AMANHÃ", len(conv_amanha_admin))
-
-        st.markdown("### ⚠️ Precisa de atenção")
-        if pendentes_admin:
-            resumo_pend = {}
-            for conv in pendentes_admin:
-                eng = str(conv.get("engenheiro") or "NÃO INFORMADO")
-                resumo_pend[eng] = resumo_pend.get(eng, 0) + 1
-            df_pend = pd.DataFrame([
-                {"Engenheiro": eng, "Apontamentos pendentes": qtd}
-                for eng, qtd in sorted(resumo_pend.items(), key=lambda x: (-x[1], x[0]))
-            ])
-            st.warning(f"Existem **{len(pendentes_admin)} colaborador(es)** de hoje ainda sem Obra/Serviço definida.")
-            st.dataframe(df_pend, use_container_width=True, hide_index=True)
-        elif total_hoje_admin:
-            st.success("✅ Não há apontamentos pendentes de hoje.")
+        # Comparação simples com o dia útil anterior, usando o mesmo filtro.
+        dia_anterior = data_home - datetime.timedelta(days=1)
+        while dia_anterior.weekday() >= 5:
+            dia_anterior -= datetime.timedelta(days=1)
+        conv_anterior_raw = _buscar_convocacoes_intervalo(dia_anterior, dia_anterior)
+        conv_anterior = _filtrar_home(conv_anterior_raw, dia_anterior.isoformat())
+        delta_total = total - len(conv_anterior)
+        if len(conv_anterior):
+            pct_delta = round((delta_total / len(conv_anterior)) * 100)
+            nota_total = f"{'+' if pct_delta > 0 else ''}{pct_delta}% vs. dia útil anterior"
+            classe_total = "aproar-note-green" if pct_delta >= 0 else "aproar-note-red"
         else:
-            st.info("Nenhuma convocação registrada para hoje.")
+            nota_total = "registros no dia"
+            classe_total = ""
 
+        st.markdown(
+            f"""
+            <div class="aproar-metric-grid">
+                <div class="aproar-metric">
+                    <div class="aproar-metric-icon aproar-icon-blue">♟</div>
+                    <div><div class="aproar-metric-label">Equipe hoje</div><div class="aproar-metric-value">{total}</div><div class="aproar-metric-note {classe_total}">{nota_total}</div></div>
+                </div>
+                <div class="aproar-metric">
+                    <div class="aproar-metric-icon aproar-icon-green">✓</div>
+                    <div><div class="aproar-metric-label">Apontados</div><div class="aproar-metric-value">{apontados}</div><div class="aproar-metric-note aproar-note-green">{int(pct_apontado)}% da equipe</div></div>
+                </div>
+                <div class="aproar-metric">
+                    <div class="aproar-metric-icon aproar-icon-orange">◷</div>
+                    <div><div class="aproar-metric-label">Pendentes</div><div class="aproar-metric-value">{len(pendentes)}</div><div class="aproar-metric-note aproar-note-orange">{int(pct_pendente)}% da equipe</div></div>
+                </div>
+                <div class="aproar-metric">
+                    <div class="aproar-metric-icon aproar-icon-red">!</div>
+                    <div><div class="aproar-metric-label">Faltas / atestados</div><div class="aproar-metric-value">{faltas + atestados}</div><div class="aproar-metric-note">{faltas} falta(s) • {atestados} atestado(s)</div></div>
+                </div>
+                <div class="aproar-metric">
+                    <div class="aproar-metric-icon aproar-icon-purple">▣</div>
+                    <div><div class="aproar-metric-label">Convocados amanhã</div><div class="aproar-metric-value">{len(conv_amanha)}</div><div class="aproar-metric-note">{amanha_home.strftime('%d/%m/%Y')}</div></div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
-        # Fila persistente de conflitos para o Paulo/Admin
         conflitos_pendentes = listar_conflitos_convocacao_pendentes(90)
-        if conflitos_pendentes:
-            qtd_conflitos = sum(len(p) for _, p in conflitos_pendentes)
-            st.markdown("### 🚨 PAULO — conflitos de convocação")
-            st.error(
-                f"Há **{qtd_conflitos} conflito(s) pendente(s)**: dois supervisores tentaram convocar "
-                "o mesmo colaborador em turnos que se sobrepõem. A segunda convocação foi bloqueada."
+        conflitos_flat = []
+        for reg, itens in conflitos_pendentes:
+            for item in itens:
+                conflitos_flat.append((reg, item))
+        conflitos_flat.sort(key=lambda x: str((x[1] or {}).get("em") or ""), reverse=True)
+        qtd_conflitos = len(conflitos_flat)
+
+        c_attention, c_conflicts = st.columns([1.35, 1.0], gap="medium")
+        with c_attention:
+            itens_atencao = []
+            if qtd_conflitos:
+                itens_atencao.append(("♟", f"{qtd_conflitos} conflito(s) de convocação", "Há tentativas de convocação em turnos que se sobrepõem."))
+            if pendentes:
+                itens_atencao.append(("◷", f"{len(pendentes)} apontamento(s) pendente(s)", "Há colaboradores ainda sem Obra/Serviço definida no dia selecionado."))
+            if not itens_atencao:
+                itens_atencao.append(("✓", "Nenhuma pendência operacional", "Não há itens que exijam ação imediata para este filtro."))
+
+            itens_html = "".join(
+                f"""
+                <div class="aproar-list-item">
+                    <div class="aproar-list-left"><div class="aproar-mini-icon">{icone}</div>
+                    <div class="aproar-list-text"><strong>{_html.escape(titulo)}</strong><div>{_html.escape(desc)}</div></div></div>
+                    <div class="aproar-chevron">›</div>
+                </div>
+                """ for icone, titulo, desc in itens_atencao
             )
-            if st.button("ABRIR FILA DE CONFLITOS", type="primary", key="abrir_conflitos_home"):
+            st.markdown(
+                f"""
+                <div class="aproar-panel attention">
+                    <div class="aproar-panel-head">
+                        <div class="aproar-panel-title"><div class="iconbox aproar-icon-orange">!</div><div><h3>Precisa de atenção</h3><p>Itens que precisam da sua ação hoje.</p></div></div>
+                        <div class="aproar-chip aproar-chip-orange">{max(0, len(itens_atencao) if (qtd_conflitos or pendentes) else 0)} pendência(s)</div>
+                    </div>
+                    {itens_html}
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            if pendentes:
+                if st.button("Abrir apontamentos pendentes", key="ui4_abrir_apont", use_container_width=True):
+                    _ir_menu_admin("✅ APONTAMENTO")
+                    st.rerun()
+
+        with c_conflicts:
+            conflitos_cards = []
+            for reg, item in conflitos_flat[:2]:
+                nome = str(item.get("colaborador_nome") or dict_colaboradores.get(reg.get("colaborador_id"), {}).get("nome") or "Colaborador")
+                turno_original = str(item.get("turno_original") or turno_da_convocacao(reg))
+                turno_tentativa = str(item.get("turno_tentativa") or "")
+                eng_original = str(item.get("engenheiro_original") or reg.get("engenheiro") or "")
+                eng_tent = str(item.get("tentativa_por") or "")
+                hora = ""
+                try:
+                    dt = datetime.datetime.fromisoformat(str(item.get("em") or "").replace("Z", "+00:00"))
+                    hora = dt.astimezone(ZoneInfo("America/Fortaleza")).strftime("%H:%M")
+                except Exception:
+                    hora = ""
+                conflitos_cards.append(
+                    f"""
+                    <div class="aproar-conflict-item">
+                        <div class="aproar-conflict-main">
+                            <div class="aproar-conflict-type">Mesmo colaborador em turnos sobrepostos</div>
+                            <div class="aproar-conflict-name">{_html.escape(nome)}</div>
+                            <div class="aproar-conflict-detail">{_html.escape(eng_original)} · { _html.escape(turno_original) } × { _html.escape(eng_tent) } · { _html.escape(turno_tentativa) }</div>
+                        </div>
+                        <div class="aproar-conflict-time">{_html.escape(hora)}</div>
+                    </div>
+                    """
+                )
+            if not conflitos_cards:
+                conflitos_cards.append(
+                    '<div class="aproar-list-item"><div class="aproar-list-left"><div class="aproar-mini-icon">✓</div><div class="aproar-list-text"><strong>Nenhum conflito pendente</strong><div>A fila do Paulo está limpa.</div></div></div></div>'
+                )
+
+            st.markdown(
+                f"""
+                <div class="aproar-panel">
+                    <div class="aproar-panel-head">
+                        <div class="aproar-panel-title"><div class="iconbox aproar-icon-red">△</div><div><h3>Conflitos pendentes</h3><p>Convocações que precisam de resolução.</p></div></div>
+                        <div class="aproar-chip aproar-chip-red">{qtd_conflitos} conflito(s)</div>
+                    </div>
+                    {''.join(conflitos_cards)}
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+            if st.button("Ver todos os conflitos →", key="ui4_ver_conflitos", use_container_width=True):
                 _ir_menu_admin("🚨 CONFLITOS")
                 st.rerun()
 
-        st.markdown("### Ações rápidas")
-        q1, q2, q3 = st.columns(3)
-        q1.button("✅ FECHAR APONTAMENTOS", type="primary", use_container_width=True, on_click=_ir_menu_admin, args=("✅ APONTAMENTO",))
-        q2.button("📋 PLANEJAR AMANHÃ", use_container_width=True, on_click=_ir_menu_admin, args=("📋 CONVOCAÇÃO",))
-        q3.button("📊 VER RELATÓRIOS", use_container_width=True, on_click=_ir_menu_admin, args=("📊 RELATÓRIOS",))
+        st.markdown(
+            """
+            <div class="aproar-quick-title"><div class="aproar-quick-icon">ϟ</div><div><h3>Ações rápidas</h3><p>Acesse as principais funcionalidades do sistema.</p></div></div>
+            """,
+            unsafe_allow_html=True,
+        )
+        q1, q2, q3, q4 = st.columns(4)
+        q1.button("Nova convocação", type="primary", use_container_width=True, on_click=_ir_menu_admin, args=("📋 CONVOCAÇÃO",), key="ui4_quick_conv")
+        q2.button("Fechar apontamentos", use_container_width=True, on_click=_ir_menu_admin, args=("✅ APONTAMENTO",), key="ui4_quick_apon")
+        q3.button("Planejar amanhã", use_container_width=True, on_click=_ir_menu_admin, args=("📋 CONVOCAÇÃO",), key="ui4_quick_amanha")
+        q4.button("Ver indicadores", use_container_width=True, on_click=_ir_menu_admin, args=("📈 INDICADORES",), key="ui4_quick_ind")
+
 
     # --- CONFLITOS DE CONVOCAÇÃO / PAULO ---
     elif menu_escolhido == "🚨 CONFLITOS":
