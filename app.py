@@ -21,6 +21,7 @@ from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 # --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR (CLARO / AZUL) ---
 st.set_page_config(page_title="APROAR - Controle de Presenças", page_icon="👷", layout="wide")
 
+st.warning("🧪 AMBIENTE DE HOMOLOGAÇÃO — dados de teste. Não usar como sistema oficial.")
 
 # Paleta principal. Se a identidade visual mudar, basta alterar o azul aqui e no CSS abaixo.
 AZUL_APROAR = "#2563EB"
@@ -281,7 +282,7 @@ html, body, [data-testid="stAppViewContainer"], .stApp, [data-testid="stMain"] {
 }
 main .block-container {
     max-width: 1500px !important;
-    padding-top: 1.15rem !important;
+    padding-top: 4.25rem !important;
     padding-left: 2rem !important;
     padding-right: 2rem !important;
     padding-bottom: 2rem !important;
@@ -297,8 +298,8 @@ h1, h2, h3, h4, h5, h6 { letter-spacing: -0.02em !important; }
 section[data-testid="stSidebar"] {
     background: var(--ui-navy) !important;
     border-right: 1px solid #18304F !important;
-    width: 230px !important;
-    min-width: 230px !important;
+    width: 250px !important;
+    min-width: 250px !important;
 }
 section[data-testid="stSidebar"] > div:first-child {
     padding: 16px 14px 18px 14px !important;
@@ -405,6 +406,12 @@ div[role="combobox"] {
     border-radius: 8px !important;
     background: #FFFFFF !important;
     box-shadow: none !important;
+}
+[data-testid="stDateInput"] input,
+[data-testid="stTextInput"] input,
+[data-testid="stNumberInput"] input {
+    background: #FFFFFF !important;
+    color: var(--ui-text) !important;
 }
 
 /* Containers nativos */
@@ -546,7 +553,7 @@ div[role="combobox"] {
     .aproar-date-card { display:none; }
 }
 @media (max-width: 760px) {
-    main .block-container { padding-left:.85rem !important; padding-right:.85rem !important; }
+    main .block-container { padding-top:3.6rem !important; padding-left:.85rem !important; padding-right:.85rem !important; }
     .aproar-page-title { font-size:25px; }
     .aproar-page-icon { width:42px; height:42px; }
     .aproar-metric-grid { grid-template-columns: 1fr; gap:8px; }
@@ -1240,7 +1247,7 @@ def render_historico_auditoria():
 # ============================================================
 # ESTABILIDADE / OBSERVABILIDADE
 # ============================================================
-AMBIENTE_APP = (_secret_opcional("AMBIENTE") or "producao").strip().lower()
+AMBIENTE_APP = (_secret_opcional("AMBIENTE") or "homologacao").strip().lower()
 
 
 def _tabela_erros_disponivel():
@@ -1304,6 +1311,27 @@ def render_diagnostico_sistema():
     else:
         st.error("Banco indisponível no momento.")
 
+    if AMBIENTE_APP == "homologacao":
+        st.caption("Teste técnico exclusivo da homologação")
+        if st.button("🧪 GERAR ERRO CONTROLADO", key="btn_erro_controlado_homologacao"):
+            try:
+                raise RuntimeError("Erro controlado de homologação para validar o registro técnico.")
+            except Exception as e:
+                codigo = registrar_erro_sistema(
+                    "diagnostico",
+                    "erro_controlado",
+                    e,
+                    usuario="HOMOLOGACAO",
+                    contexto={"origem": "botao_diagnostico", "controlado": True},
+                )
+                st.session_state["_erro_controlado_codigo"] = codigo
+                st.rerun()
+
+        if st.session_state.get("_erro_controlado_codigo"):
+            st.info(
+                "Erro controlado registrado com sucesso. Código: "
+                + st.session_state["_erro_controlado_codigo"]
+            )
 
     if _tabela_erros_disponivel():
         try:
@@ -5054,16 +5082,14 @@ else:
                 except Exception:
                     hora = ""
                 conflitos_cards.append(
-                    f"""
-                    <div class="aproar-conflict-item">
-                        <div class="aproar-conflict-main">
-                            <div class="aproar-conflict-type">Mesmo colaborador em turnos sobrepostos</div>
-                            <div class="aproar-conflict-name">{_html.escape(nome)}</div>
-                            <div class="aproar-conflict-detail">{_html.escape(eng_original)} · { _html.escape(turno_original) } × { _html.escape(eng_tent) } · { _html.escape(turno_tentativa) }</div>
-                        </div>
-                        <div class="aproar-conflict-time">{_html.escape(hora)}</div>
-                    </div>
-                    """
+                    '<div class="aproar-conflict-item">'
+                    '<div class="aproar-conflict-main">'
+                    '<div class="aproar-conflict-type">Mesmo colaborador em turnos sobrepostos</div>'
+                    f'<div class="aproar-conflict-name">{_html.escape(nome)}</div>'
+                    f'<div class="aproar-conflict-detail">{_html.escape(eng_original)} · {_html.escape(turno_original)} × {_html.escape(eng_tent)} · {_html.escape(turno_tentativa)}</div>'
+                    '</div>'
+                    f'<div class="aproar-conflict-time">{_html.escape(hora)}</div>'
+                    '</div>'
                 )
             if not conflitos_cards:
                 conflitos_cards.append(
