@@ -522,7 +522,10 @@ def limpar_cache_operacional():
     Não limpa o cache do Trello: isso evita uma nova chamada desnecessária
     ao quadro público após cada inclusão, exclusão ou sincronização.
     """
-    for nome_funcao in ("buscar_obras", "buscar_colaboradores"):
+    for nome_funcao in (
+        "buscar_obras", "buscar_colaboradores",
+        "_buscar_convocacoes_intervalo",
+    ):
         funcao = globals().get(nome_funcao)
         if funcao is not None and hasattr(funcao, "clear"):
             try:
@@ -2812,6 +2815,7 @@ OPCOES_STATUS_PRESENCA = [
 ]
 
 
+@st.cache_data(ttl=20, show_spinner=False)
 def _buscar_convocacoes_intervalo(data_inicio, data_fim, engenheiro=None):
     try:
         q = supabase.table("convocacoes").select("*").gte("data", data_inicio.isoformat()).lte("data", data_fim.isoformat())
@@ -3692,16 +3696,8 @@ def listar_ciclos_financeiros(qtd=26):
 
 def carregar_dados_financeiro(data_inicio, data_fim):
     """Busca convocações do período e prepara extras e faltas/atestados sem expor Obra/Serviço."""
-    try:
-        registros = (
-            supabase.table("convocacoes")
-            .select("*")
-            .gte("data", data_inicio.isoformat())
-            .lte("data", data_fim.isoformat())
-            .execute().data or []
-        )
-    except Exception:
-        registros = []
+    # Reutiliza o cache curto compartilhado com Dashboard/Relatórios/Indicadores.
+    registros = _buscar_convocacoes_intervalo(data_inicio, data_fim)
 
     extras = []
     ausencias = []
@@ -4595,14 +4591,13 @@ else:
 
         hoje_admin = datetime.date.today()
         amanha_admin = proximo_dia_util(hoje_admin)
-        try:
-            conv_hoje_admin = supabase.table("convocacoes").select("*").eq("data", hoje_admin.isoformat()).execute().data or []
-        except Exception:
-            conv_hoje_admin = []
-        try:
-            conv_amanha_admin = supabase.table("convocacoes").select("*").eq("data", amanha_admin.isoformat()).execute().data or []
-        except Exception:
-            conv_amanha_admin = []
+        # Uma única ida ao banco para hoje + amanhã. O resultado é reaproveitado
+        # por alguns segundos entre reruns do Streamlit.
+        conv_home_admin = _buscar_convocacoes_intervalo(hoje_admin, amanha_admin)
+        hoje_iso = hoje_admin.isoformat()
+        amanha_iso = amanha_admin.isoformat()
+        conv_hoje_admin = [c for c in conv_home_admin if str(c.get("data") or "") == hoje_iso]
+        conv_amanha_admin = [c for c in conv_home_admin if str(c.get("data") or "") == amanha_iso]
 
         pendentes_admin = []
         for conv in conv_hoje_admin:
@@ -5222,14 +5217,15 @@ else:
             obras_rel_lista = sorted(list(set([o['nome'] for o in obras]))) if obras else []
             obra_relatorio = st.selectbox("Filtro por Obra:", ["TODAS AS OBRAS"] + obras_rel_lista, key="obra_rel")
 
-        query_rel = supabase.table("convocacoes").select("*").gte("data", data_inicio_rel.isoformat()).lte("data", data_fim_rel.isoformat())
-        if eng_relatorio != "TODOS OS ENGENHEIROS":
-            query_rel = query_rel.eq("engenheiro", eng_relatorio)
+        eng_rel_filtro = None if eng_relatorio == "TODOS OS ENGENHEIROS" else eng_relatorio
         obra_id_filtro = None
         if obra_relatorio != "TODAS AS OBRAS":
             obra_id_filtro = next((o['id'] for o in obras if o['nome'] == obra_relatorio), None)
 
-        dados_relatorio = query_rel.execute().data if data_inicio_rel <= data_fim_rel else []
+        dados_relatorio = (
+            _buscar_convocacoes_intervalo(data_inicio_rel, data_fim_rel, eng_rel_filtro)
+            if data_inicio_rel <= data_fim_rel else []
+        )
         if obra_relatorio != "TODAS AS OBRAS" and obra_id_filtro:
             dados_relatorio = [
                 row for row in dados_relatorio
