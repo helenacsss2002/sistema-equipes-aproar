@@ -21,6 +21,7 @@ from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 # --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR (CLARO / AZUL) ---
 st.set_page_config(page_title="APROAR - Controle de Presenças", page_icon="👷", layout="wide")
 
+
 # Paleta principal. Se a identidade visual mudar, basta alterar o azul aqui e no CSS abaixo.
 AZUL_APROAR = "#2563EB"
 AZUL_APROAR_ESCURO = "#1D4ED8"
@@ -520,7 +521,10 @@ def limpar_cache_operacional():
     Não limpa o cache do Trello: isso evita uma nova chamada desnecessária
     ao quadro público após cada inclusão, exclusão ou sincronização.
     """
-    for nome_funcao in ("buscar_obras", "buscar_colaboradores"):
+    for nome_funcao in (
+        "buscar_obras", "buscar_colaboradores",
+        "_buscar_convocacoes_intervalo",
+    ):
         funcao = globals().get(nome_funcao)
         if funcao is not None and hasattr(funcao, "clear"):
             try:
@@ -817,6 +821,119 @@ def registrar_auditoria_prod(entidade, entidade_id, acao, usuario=None, antes=No
         return False
 
 
+def _auditoria_texto_json(valor):
+    if valor in (None, "", {}, []):
+        return ""
+    try:
+        if isinstance(valor, str):
+            try:
+                valor = json.loads(valor)
+            except Exception:
+                return valor
+        return json.dumps(valor, ensure_ascii=False, default=str)
+    except Exception:
+        return str(valor)
+
+
+def render_historico_auditoria():
+    """Consulta somente leitura do histórico operacional gravado no Neon."""
+    st.markdown("### 🧾 Histórico de auditoria")
+    st.caption("Mostra alterações operacionais importantes: quem executou, o que mudou e quando.")
+
+    if DB_BACKEND != "NEON" or not schema_producao_disponivel() or not hasattr(supabase, "_connect"):
+        st.info("Histórico estruturado disponível somente com a estrutura Neon ativa.")
+        return
+
+    try:
+        with supabase._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, entidade, entidade_id, acao, usuario, ocorrido_em, antes, depois, contexto
+                    FROM auditoria
+                    ORDER BY ocorrido_em DESC
+                    LIMIT 500
+                    """
+                )
+                rows = cur.fetchall() or []
+    except Exception as e:
+        exibir_erro_amigavel("auditoria", "consultar", e, "Não foi possível consultar o histórico de auditoria.")
+        return
+
+    registros = [dict(r) if isinstance(r, dict) else {
+        "id": r[0], "entidade": r[1], "entidade_id": r[2], "acao": r[3], "usuario": r[4],
+        "ocorrido_em": r[5], "antes": r[6], "depois": r[7], "contexto": r[8]
+    } for r in rows]
+
+    if not registros:
+        st.info("Nenhuma ação auditada registrada ainda.")
+        return
+
+    df = pd.DataFrame(registros)
+    df["usuario"] = df["usuario"].fillna("").replace("", "NÃO INFORMADO")
+    df["entidade"] = df["entidade"].fillna("").replace("", "NÃO INFORMADO")
+    df["acao"] = df["acao"].fillna("").replace("", "NÃO INFORMADA")
+
+    try:
+        datas = pd.to_datetime(df["ocorrido_em"], utc=True, errors="coerce")
+        df["data_local"] = datas.dt.tz_convert(TZ_APROAR).dt.date
+        df["Data/Hora"] = datas.dt.tz_convert(TZ_APROAR).dt.strftime("%d/%m/%Y %H:%M:%S")
+    except Exception:
+        df["data_local"] = None
+        df["Data/Hora"] = df["ocorrido_em"].astype(str)
+
+    f1, f2, f3, f4 = st.columns(4)
+    with f1:
+        usuarios = ["TODOS"] + sorted([x for x in df["usuario"].dropna().astype(str).unique().tolist() if x])
+        usuario_sel = st.selectbox("Usuário", usuarios, key="audit_usuario")
+    with f2:
+        entidades = ["TODAS"] + sorted([x for x in df["entidade"].dropna().astype(str).unique().tolist() if x])
+        entidade_sel = st.selectbox("Entidade", entidades, key="audit_entidade")
+    with f3:
+        acoes = ["TODAS"] + sorted([x for x in df["acao"].dropna().astype(str).unique().tolist() if x])
+        acao_sel = st.selectbox("Ação", acoes, key="audit_acao")
+    with f4:
+        periodo_sel = st.selectbox("Período", ["Hoje", "7 dias", "30 dias", "Tudo"], index=1, key="audit_periodo")
+
+    filtrado = df.copy()
+    if usuario_sel != "TODOS":
+        filtrado = filtrado[filtrado["usuario"].astype(str) == usuario_sel]
+    if entidade_sel != "TODAS":
+        filtrado = filtrado[filtrado["entidade"].astype(str) == entidade_sel]
+    if acao_sel != "TODAS":
+        filtrado = filtrado[filtrado["acao"].astype(str) == acao_sel]
+
+    hoje_local = agora_aproar().date()
+    dias = {"Hoje": 0, "7 dias": 6, "30 dias": 29}.get(periodo_sel)
+    if dias is not None and "data_local" in filtrado.columns:
+        inicio = hoje_local - datetime.timedelta(days=dias)
+        filtrado = filtrado[filtrado["data_local"].apply(lambda d: bool(d and inicio <= d <= hoje_local))]
+
+    st.caption(f"{len(filtrado)} registro(s) exibido(s) • últimos 500 eventos disponíveis nesta consulta")
+    if filtrado.empty:
+        st.info("Nenhum registro encontrado com esses filtros.")
+        return
+
+    exib = filtrado[["id", "Data/Hora", "usuario", "acao", "entidade", "entidade_id"]].copy()
+    exib.columns = ["ID", "Data/Hora", "Usuário", "Ação", "Entidade", "ID do registro"]
+    st.dataframe(exib, use_container_width=True, hide_index=True)
+
+    opcoes = []
+    mapa = {}
+    for _, row in filtrado.head(100).iterrows():
+        label = f"#{row['id']} • {row['Data/Hora']} • {row['usuario']} • {row['acao']} • {row['entidade']}"
+        opcoes.append(label)
+        mapa[label] = row
+
+    if opcoes:
+        detalhe_sel = st.selectbox("Ver detalhes de um registro", opcoes, key="audit_detalhe")
+        row = mapa[detalhe_sel]
+        d1, d2, d3 = st.columns(3)
+        d1.write(f"**Antes**\n\n{_auditoria_texto_json(row.get('antes')) or '—'}")
+        d2.write(f"**Depois**\n\n{_auditoria_texto_json(row.get('depois')) or '—'}")
+        d3.write(f"**Contexto**\n\n{_auditoria_texto_json(row.get('contexto')) or '—'}")
+
+
 # ============================================================
 # ESTABILIDADE / OBSERVABILIDADE
 # ============================================================
@@ -883,6 +1000,7 @@ def render_diagnostico_sistema():
         st.success(f"Banco acessível: {banco_msg}")
     else:
         st.error("Banco indisponível no momento.")
+
 
     if _tabela_erros_disponivel():
         try:
@@ -2675,6 +2793,7 @@ OPCOES_STATUS_PRESENCA = [
 ]
 
 
+@st.cache_data(ttl=20, show_spinner=False)
 def _buscar_convocacoes_intervalo(data_inicio, data_fim, engenheiro=None):
     try:
         q = supabase.table("convocacoes").select("*").gte("data", data_inicio.isoformat()).lte("data", data_fim.isoformat())
@@ -3555,16 +3674,8 @@ def listar_ciclos_financeiros(qtd=26):
 
 def carregar_dados_financeiro(data_inicio, data_fim):
     """Busca convocações do período e prepara extras e faltas/atestados sem expor Obra/Serviço."""
-    try:
-        registros = (
-            supabase.table("convocacoes")
-            .select("*")
-            .gte("data", data_inicio.isoformat())
-            .lte("data", data_fim.isoformat())
-            .execute().data or []
-        )
-    except Exception:
-        registros = []
+    # Reutiliza o cache curto compartilhado com Dashboard/Relatórios/Indicadores.
+    registros = _buscar_convocacoes_intervalo(data_inicio, data_fim)
 
     extras = []
     ausencias = []
@@ -4458,14 +4569,13 @@ else:
 
         hoje_admin = datetime.date.today()
         amanha_admin = proximo_dia_util(hoje_admin)
-        try:
-            conv_hoje_admin = supabase.table("convocacoes").select("*").eq("data", hoje_admin.isoformat()).execute().data or []
-        except Exception:
-            conv_hoje_admin = []
-        try:
-            conv_amanha_admin = supabase.table("convocacoes").select("*").eq("data", amanha_admin.isoformat()).execute().data or []
-        except Exception:
-            conv_amanha_admin = []
+        # Uma única ida ao banco para hoje + amanhã. O resultado é reaproveitado
+        # por alguns segundos entre reruns do Streamlit.
+        conv_home_admin = _buscar_convocacoes_intervalo(hoje_admin, amanha_admin)
+        hoje_iso = hoje_admin.isoformat()
+        amanha_iso = amanha_admin.isoformat()
+        conv_hoje_admin = [c for c in conv_home_admin if str(c.get("data") or "") == hoje_iso]
+        conv_amanha_admin = [c for c in conv_home_admin if str(c.get("data") or "") == amanha_iso]
 
         pendentes_admin = []
         for conv in conv_hoje_admin:
@@ -4852,10 +4962,21 @@ else:
                         if not nova_obra_id:
                             st.error("Não foi possível definir a Unidade/Obra de destino.")
                         else:
+                            antes_realocacao = dict(registro_corr)
+                            depois_realocacao = dict(antes_realocacao)
+                            depois_realocacao.update({
+                                "obra_id": nova_obra_id,
+                                "engenheiro": novo_eng_corr
+                            })
                             supabase.table("convocacoes").update({
                                 "obra_id": nova_obra_id,
                                 "engenheiro": novo_eng_corr
                             }).eq("id", registro_corr['id']).execute()
+                            registrar_auditoria_prod(
+                                "convocacao", registro_corr['id'], "REALOCAÇÃO_ADMIN", "ADMIN",
+                                antes=antes_realocacao, depois=depois_realocacao,
+                                contexto={"origem": "correcao_administrativa"}
+                            )
                             st.success("✅ Colaborador realocado com sucesso.")
                             st.rerun()
 
@@ -4909,11 +5030,20 @@ else:
                                 key=f"confirma_exc_conv_{id_corr_atual}"
                             ):
                                 try:
+                                    antes_exclusao = dict(registro_corr)
                                     retorno_exc = (
                                         supabase.table("convocacoes")
                                         .delete()
                                         .eq("id", id_corr_atual)
                                         .execute()
+                                    )
+                                    registrar_auditoria_prod(
+                                        "convocacao", id_corr_atual, "EXCLUIR_ADMIN", "ADMIN",
+                                        antes=antes_exclusao,
+                                        contexto={
+                                            "origem": "correcao_administrativa",
+                                            "colaborador_nome": colab_corr.get('nome', 'N/A')
+                                        }
                                     )
 
                                     st.session_state.pop("conv_exclusao_pendente", None)
@@ -5065,14 +5195,15 @@ else:
             obras_rel_lista = sorted(list(set([o['nome'] for o in obras]))) if obras else []
             obra_relatorio = st.selectbox("Filtro por Obra:", ["TODAS AS OBRAS"] + obras_rel_lista, key="obra_rel")
 
-        query_rel = supabase.table("convocacoes").select("*").gte("data", data_inicio_rel.isoformat()).lte("data", data_fim_rel.isoformat())
-        if eng_relatorio != "TODOS OS ENGENHEIROS":
-            query_rel = query_rel.eq("engenheiro", eng_relatorio)
+        eng_rel_filtro = None if eng_relatorio == "TODOS OS ENGENHEIROS" else eng_relatorio
         obra_id_filtro = None
         if obra_relatorio != "TODAS AS OBRAS":
             obra_id_filtro = next((o['id'] for o in obras if o['nome'] == obra_relatorio), None)
 
-        dados_relatorio = query_rel.execute().data if data_inicio_rel <= data_fim_rel else []
+        dados_relatorio = (
+            _buscar_convocacoes_intervalo(data_inicio_rel, data_fim_rel, eng_rel_filtro)
+            if data_inicio_rel <= data_fim_rel else []
+        )
         if obra_relatorio != "TODAS AS OBRAS" and obra_id_filtro:
             dados_relatorio = [
                 row for row in dados_relatorio
@@ -5317,6 +5448,9 @@ else:
                     "🟡 Estrutura de produção ainda não foi aplicada no Neon. "
                     "O sistema continua em compatibilidade legada até a migração SQL ser executada."
                 )
+
+        with st.expander("🧾 Histórico de auditoria", expanded=False):
+            render_historico_auditoria()
         
         # Sincronização Dinâmica Trello (mês vigente, lista manual ou busca de card/lista)
         with st.container(border=True):
@@ -5785,6 +5919,15 @@ else:
                                 mensagem = f"Importação concluída: {novos} novo(s) e {atualizados} atualizado(s)."
                                 if erros:
                                     mensagem += f" Não foi possível importar {len(erros)} registro(s)."
+                                registrar_auditoria_prod(
+                                    "colaboradores", "", "IMPORTAR_PLANILHA", "ADMIN",
+                                    depois={
+                                        "novos": novos,
+                                        "atualizados": atualizados,
+                                        "erros": len(erros)
+                                    },
+                                    contexto={"nomes_com_erro": erros[:50]}
+                                )
                                 st.session_state["msg_import_colab"] = mensagem
                                 st.rerun()
                             except Exception as e:
@@ -5801,7 +5944,22 @@ else:
             data_limpeza = st.date_input("Selecionar data para limpeza de convocações:", value=datetime.date.today(), format="DD/MM/YYYY")
             if st.button("🗑️ EXCLUIR CONVOCAÇÕES DESTA DATA", type="primary"):
                 try:
+                    registros_limpeza = (
+                        supabase.table("convocacoes").select("*")
+                        .eq("data", data_limpeza.isoformat()).execute().data or []
+                    )
                     supabase.table("convocacoes").delete().eq("data", data_limpeza.isoformat()).execute()
+                    registrar_auditoria_prod(
+                        "convocacao", "", "EXCLUIR_EM_LOTE_ADMIN", "ADMIN",
+                        antes={
+                            "quantidade": len(registros_limpeza),
+                            "ids": [str(r.get("id")) for r in registros_limpeza[:200]]
+                        },
+                        contexto={
+                            "data": data_limpeza.isoformat(),
+                            "origem": "limpeza_administrativa"
+                        }
+                    )
                     st.success(f"Todas as convocações do dia {data_limpeza.strftime('%d/%m/%Y')} foram removidas com sucesso!")
                     st.rerun()
                 except Exception as e:
