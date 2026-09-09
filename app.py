@@ -1237,6 +1237,242 @@ div[class*="st-key-ap2_quick_conv"] button:hover{
 """, unsafe_allow_html=True)
 
 
+
+
+# --- APROAR DESIGN SYSTEM V3 | PÁGINAS INTERNAS + TABELAS -------------------
+st.markdown("""
+<style>
+/* Variáveis com fallback: acompanham Light / Dark / System quando o Streamlit
+   expõe o tema, mas continuam consistentes com a identidade APROAR. */
+:root{
+    --ap3-bg:var(--st-background-color, var(--background-color, #F5F7FA));
+    --ap3-surface:var(--st-secondary-background-color, var(--secondary-background-color, #FFFFFF));
+    --ap3-text:var(--st-text-color, var(--text-color, #172033));
+    --ap3-primary:var(--st-primary-color, var(--primary-color, #245FE5));
+    --ap3-muted:color-mix(in srgb, var(--ap3-text) 58%, transparent);
+    --ap3-border:color-mix(in srgb, var(--ap3-text) 14%, transparent);
+    --ap3-border-soft:color-mix(in srgb, var(--ap3-text) 9%, transparent);
+}
+
+/* Cabeçalho padrão das páginas internas */
+.ap3-page-head{
+    display:flex;
+    justify-content:space-between;
+    align-items:flex-end;
+    gap:22px;
+    margin:2px 0 20px;
+    padding-bottom:15px;
+    border-bottom:1px solid var(--ap3-border-soft);
+}
+.ap3-page-kicker{
+    font-size:9px;
+    text-transform:uppercase;
+    letter-spacing:1.2px;
+    font-weight:750;
+    color:var(--ap3-primary);
+    margin-bottom:6px;
+}
+.ap3-page-title{
+    font-size:28px;
+    line-height:1.05;
+    font-weight:760;
+    letter-spacing:-.025em;
+    color:var(--ap3-text);
+}
+.ap3-page-sub{
+    font-size:12px;
+    line-height:1.45;
+    color:var(--ap3-muted);
+    margin-top:6px;
+    max-width:760px;
+}
+.ap3-page-side{
+    font-size:10px;
+    color:var(--ap3-muted);
+    white-space:nowrap;
+}
+
+/* Títulos de seção sem excesso de emoji/decoracão */
+.ap3-section{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    margin:20px 0 9px;
+}
+.ap3-section-title{
+    font-size:14px;
+    font-weight:700;
+    color:var(--ap3-text);
+}
+.ap3-section-sub{
+    font-size:10px;
+    color:var(--ap3-muted);
+    margin-top:2px;
+}
+
+/* Tabs com aparência de software, não de formulário Streamlit */
+[data-testid="stTabs"] [data-baseweb="tab-list"]{
+    gap:22px !important;
+    border-bottom:1px solid var(--ap3-border-soft) !important;
+    margin-bottom:13px !important;
+}
+[data-testid="stTabs"] [data-baseweb="tab"]{
+    height:39px !important;
+    padding:0 2px !important;
+    background:transparent !important;
+    border-radius:0 !important;
+    color:var(--ap3-muted) !important;
+    font-size:12px !important;
+    font-weight:600 !important;
+}
+[data-testid="stTabs"] [aria-selected="true"]{
+    color:var(--ap3-primary) !important;
+}
+[data-testid="stTabs"] [data-baseweb="tab-highlight"]{
+    background:var(--ap3-primary) !important;
+    height:2px !important;
+}
+
+/* Campos mais compactos e consistentes */
+main label p{
+    font-size:10px !important;
+    font-weight:650 !important;
+    color:var(--ap3-muted) !important;
+}
+main div[data-baseweb="select"] > div,
+main div[data-baseweb="base-input"] > div,
+main div[data-baseweb="input"] > div,
+main [data-baseweb="textarea"] > div,
+main div[role="combobox"]{
+    min-height:39px !important;
+    border-radius:7px !important;
+    border:1px solid var(--ap3-border) !important;
+    background:var(--ap3-surface) !important;
+    box-shadow:none !important;
+}
+main input, main textarea{
+    color:var(--ap3-text) !important;
+}
+
+/* Containers e expanders */
+main [data-testid="stVerticalBlockBorderWrapper"] > div{
+    border:1px solid var(--ap3-border-soft) !important;
+    border-radius:9px !important;
+    background:var(--ap3-surface) !important;
+    box-shadow:none !important;
+}
+main [data-testid="stExpander"]{
+    border:1px solid var(--ap3-border-soft) !important;
+    border-radius:9px !important;
+    background:var(--ap3-surface) !important;
+    box-shadow:none !important;
+}
+main [data-testid="stExpander"] summary{
+    font-size:12px !important;
+    font-weight:650 !important;
+}
+
+/* Métricas nativas */
+[data-testid="stMetric"]{
+    background:var(--ap3-surface) !important;
+    border:1px solid var(--ap3-border-soft) !important;
+    border-radius:9px !important;
+    padding:13px 15px !important;
+}
+[data-testid="stMetricLabel"] p{
+    font-size:9px !important;
+    text-transform:uppercase !important;
+    letter-spacing:.45px !important;
+    font-weight:700 !important;
+    color:var(--ap3-muted) !important;
+}
+[data-testid="stMetricValue"]{
+    font-size:24px !important;
+    font-weight:720 !important;
+    color:var(--ap3-text) !important;
+}
+
+/* -------------------- TABELAS BONITINHAS -------------------- */
+[data-testid="stDataFrame"],
+[data-testid="stDataEditor"]{
+    border:1px solid var(--ap3-border) !important;
+    border-radius:10px !important;
+    overflow:hidden !important;
+    background:var(--ap3-surface) !important;
+    box-shadow:0 1px 2px rgba(15,23,42,.035) !important;
+}
+[data-testid="stDataFrame"] > div,
+[data-testid="stDataEditor"] > div{
+    border-radius:10px !important;
+    background:var(--ap3-surface) !important;
+}
+
+/* Cabeçalhos / células quando a versão do Glide expõe os roles no DOM */
+[data-testid="stDataFrame"] [role="columnheader"],
+[data-testid="stDataEditor"] [role="columnheader"]{
+    background:color-mix(in srgb, var(--ap3-text) 5%, var(--ap3-surface)) !important;
+    color:var(--ap3-text) !important;
+    font-size:10px !important;
+    font-weight:700 !important;
+    border-bottom:1px solid var(--ap3-border) !important;
+}
+[data-testid="stDataFrame"] [role="gridcell"],
+[data-testid="stDataEditor"] [role="gridcell"]{
+    color:var(--ap3-text) !important;
+    font-size:11px !important;
+    border-color:var(--ap3-border-soft) !important;
+}
+
+/* Toolbar da tabela fica discreta */
+[data-testid="stDataFrame"] button,
+[data-testid="stDataEditor"] button{
+    border-radius:6px !important;
+    box-shadow:none !important;
+}
+
+/* Botões da área principal */
+main .stButton > button,
+main .stDownloadButton > button{
+    min-height:38px !important;
+    border-radius:7px !important;
+    font-size:11px !important;
+    font-weight:620 !important;
+    box-shadow:none !important;
+}
+main [data-testid="stBaseButton-primary"],
+main .stButton > button[kind="primary"],
+main [data-testid="stFormSubmitButton"] > button{
+    background:var(--ap3-primary) !important;
+    border-color:var(--ap3-primary) !important;
+    color:#FFF !important;
+}
+
+/* Alertas menos "cartazes" */
+[data-testid="stAlert"]{
+    border-radius:8px !important;
+    box-shadow:none !important;
+    font-size:11px !important;
+}
+
+/* Gráficos ficam dentro do mesmo ritmo visual */
+[data-testid="stVegaLiteChart"],
+[data-testid="stArrowVegaLiteChart"]{
+    background:var(--ap3-surface) !important;
+    border:1px solid var(--ap3-border-soft) !important;
+    border-radius:9px !important;
+    padding:8px !important;
+}
+
+@media(max-width:760px){
+    .ap3-page-head{align-items:flex-start;flex-direction:column;gap:8px;}
+    .ap3-page-title{font-size:24px;}
+    .ap3-page-side{display:none;}
+}
+</style>
+""", unsafe_allow_html=True)
+
+
 # --- MESES EM PORTUGUÊS ---
 MESES_PT = {
     1: "JANEIRO", 2: "FEVEREIRO", 3: "MARÇO", 4: "ABRIL",
@@ -1900,7 +2136,7 @@ def render_historico_auditoria():
 
     exib = filtrado[["id", "Data/Hora", "usuario", "acao", "entidade", "entidade_id"]].copy()
     exib.columns = ["ID", "Data/Hora", "Usuário", "Ação", "Entidade", "ID do registro"]
-    st.dataframe(exib, use_container_width=True, hide_index=True)
+    tabela_aproar(exib, key="tbl_auditoria")
 
     opcoes = []
     mapa = {}
@@ -2000,7 +2236,7 @@ def render_diagnostico_sistema():
                     rows = cur.fetchall() or []
             if rows:
                 st.caption("Últimos erros técnicos registrados")
-                st.dataframe(pd.DataFrame([dict(r) for r in rows]), use_container_width=True, hide_index=True)
+                tabela_aproar(pd.DataFrame([dict(r) for r in rows]), key="tbl_erros")
             else:
                 st.info("Nenhum erro técnico registrado ainda.")
         except Exception:
@@ -3651,21 +3887,13 @@ UNIDADES_APROAR = [
 
 # --- FUNÇÃO AUXILIAR PARA RENDERIZAR A ABA DE DISPONIBILIDADE ---
 def render_aba_disponibilidade(key_suffix=""):
-    st.markdown(
-        """
-        <div class="aproar-inner-head">
-            <div class="aproar-inner-icon"><span class="material-symbols-rounded">groups</span></div>
-            <div>
-                <div class="aproar-inner-title">Disponibilidade da equipe</div>
-                <div class="aproar-inner-subtitle">Veja rapidamente quem está ocupado, indisponível ou livre por turno.</div>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
+    cabecalho_pagina_aproar(
+        "Disponibilidade da equipe",
+        "Veja quem está ocupado, indisponível ou livre por turno antes de montar a equipe.",
+        categoria="OPERAÇÃO",
     )
     st.caption(
-        "A disponibilidade considera o turno. Quem está convocado de manhã pode continuar disponível à tarde, "
-        "desde que não esteja integral ou indisponível."
+        "Quem está convocado de manhã pode continuar disponível à tarde, desde que não esteja integral ou indisponível."
     )
 
     cdata, cturno = st.columns(2)
@@ -3807,6 +4035,98 @@ def render_aba_disponibilidade(key_suffix=""):
 
 
 # --- COMPONENTES COMPARTILHADOS: APONTAMENTO, DASHBOARD, RELATÓRIO E AUDITORIA ---
+
+# --- COMPONENTES VISUAIS PADRONIZADOS V3 ------------------------------------
+def cabecalho_pagina_aproar(titulo, subtitulo="", categoria="GESTÃO DE EQUIPES", lateral=""):
+    """Cabeçalho visual padrão das páginas administrativas."""
+    import html as _ap_html
+    titulo_h = _ap_html.escape(str(titulo or ""))
+    subtitulo_h = _ap_html.escape(str(subtitulo or ""))
+    categoria_h = _ap_html.escape(str(categoria or ""))
+    lateral_h = _ap_html.escape(str(lateral or ""))
+    st.markdown(
+        f"""
+        <div class="ap3-page-head">
+            <div>
+                <div class="ap3-page-kicker">{categoria_h}</div>
+                <div class="ap3-page-title">{titulo_h}</div>
+                <div class="ap3-page-sub">{subtitulo_h}</div>
+            </div>
+            <div class="ap3-page-side">{lateral_h}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def titulo_secao_aproar(titulo, subtitulo=""):
+    import html as _ap_html
+    st.markdown(
+        f"""
+        <div class="ap3-section">
+            <div>
+                <div class="ap3-section-title">{_ap_html.escape(str(titulo or ""))}</div>
+                <div class="ap3-section-sub">{_ap_html.escape(str(subtitulo or ""))}</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def tabela_aproar(df, key=None, altura_max=520, ocultar_indice=True):
+    """
+    Exibe DataFrames com altura proporcional, formatação de moeda/percentual
+    e o padrão visual único da plataforma.
+    """
+    if df is None:
+        df = pd.DataFrame()
+    if not isinstance(df, pd.DataFrame):
+        df = pd.DataFrame(df)
+
+    config = {}
+    for coluna in df.columns:
+        nome = str(coluna)
+        serie = df[coluna]
+        eh_numerica = pd.api.types.is_numeric_dtype(serie)
+
+        if eh_numerica and (
+            "(R$)" in nome
+            or nome.lower().startswith(("custo", "diária", "diaria", "extra", "impacto"))
+            or "valor" in nome.lower()
+        ):
+            try:
+                config[coluna] = st.column_config.NumberColumn(nome, format="R$ %.2f")
+            except Exception:
+                pass
+        elif eh_numerica and ("%" in nome or "taxa" in nome.lower()):
+            try:
+                config[coluna] = st.column_config.NumberColumn(nome, format="%.1f%%")
+            except Exception:
+                pass
+
+    # Evita tabelas minúsculas e também aquelas que ocupam a tela inteira.
+    linhas = max(1, len(df))
+    altura = min(int(altura_max), max(122, 40 * min(linhas + 1, 13)))
+
+    kwargs = dict(
+        use_container_width=True,
+        hide_index=ocultar_indice,
+        height=altura,
+    )
+    if key:
+        kwargs["key"] = key
+    if config:
+        kwargs["column_config"] = config
+
+    try:
+        st.dataframe(df, row_height=36, **kwargs)
+    except TypeError:
+        # Compatibilidade com versões do Streamlit sem row_height/key em dataframe.
+        kwargs.pop("key", None)
+        st.dataframe(df, **kwargs)
+
+
 OPCOES_STATUS_PRESENCA = [
     "Presente (Integral)", "Presente (Só Manhã)", "Presente (Só Tarde)",
     "Saída Antecipada", "Falta", "Atestado"
@@ -4008,17 +4328,10 @@ def gerar_excel_indicador_prazos(df_resumo, df_eventos, inicio, fim):
 
 
 def render_dashboard_consulta(key_prefix="dash", engenheiro_fixo=None):
-    st.markdown(
-        """
-        <div class="aproar-inner-head">
-            <div class="aproar-inner-icon"><span class="material-symbols-rounded">dashboard</span></div>
-            <div>
-                <div class="aproar-inner-title">Dashboard</div>
-                <div class="aproar-inner-subtitle">Resumo de presença, custos e registros da equipe no período selecionado.</div>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
+    cabecalho_pagina_aproar(
+        "Dashboard",
+        "Presença, custos e distribuição da equipe no período selecionado.",
+        categoria="ANÁLISE E FECHAMENTO",
     )
 
     st.markdown('<div class="aproar-filter-shell">', unsafe_allow_html=True)
@@ -4082,30 +4395,30 @@ def render_dashboard_consulta(key_prefix="dash", engenheiro_fixo=None):
 
     df = pd.DataFrame(processados)
 
-    st.markdown("### Custos consolidados")
+    titulo_secao_aproar("Custos consolidados", "Distribuição do custo por unidade e por engenheiro.")
     g1, g2 = st.columns(2)
     with g1:
-        st.markdown("#### Por Unidade")
+        st.markdown("**Por unidade**")
         por_unidade = (
             df.groupby("Unidade", dropna=False)["Custo (R$)"]
             .sum().reset_index().sort_values("Custo (R$)", ascending=False)
         )
-        st.dataframe(por_unidade, use_container_width=True, hide_index=True)
+        tabela_aproar(por_unidade, key=f"{key_prefix}_tbl_unidade", altura_max=360)
         if not por_unidade.empty:
             st.bar_chart(por_unidade.set_index("Unidade")["Custo (R$)"], use_container_width=True)
     with g2:
-        st.markdown("#### Por Engenheiro")
+        st.markdown("**Por engenheiro**")
         por_eng = (
             df.groupby("Engenheiro", dropna=False)["Custo (R$)"]
             .sum().reset_index().sort_values("Custo (R$)", ascending=False)
         )
-        st.dataframe(por_eng, use_container_width=True, hide_index=True)
+        tabela_aproar(por_eng, key=f"{key_prefix}_tbl_eng", altura_max=360)
         if not por_eng.empty:
             st.bar_chart(por_eng.set_index("Engenheiro")["Custo (R$)"], use_container_width=True)
 
-    st.markdown("### Detalhamento")
+    titulo_secao_aproar("Detalhamento", "Registros que compõem os totais acima.")
     cols = ["Data", "Engenheiro", "Unidade", "Serviço(s)", "Colaborador", "Status", "Diária (R$)", "Extra (R$)", "Custo (R$)"]
-    st.dataframe(df[cols], use_container_width=True, hide_index=True)
+    tabela_aproar(df[cols], key=f"{key_prefix}_tbl_detalhe")
 
     # Excel sob demanda: antes era montado em todo rerun, mesmo sem download.
     assinatura = f"{tipo}|{inicio}|{fim}|{unidade}|{engenheiro}|{len(df)}|{float(df['Custo (R$)'].sum()):.2f}"
@@ -4132,7 +4445,11 @@ def render_dashboard_consulta(key_prefix="dash", engenheiro_fixo=None):
         )
 
 def render_relatorio_visualizador(key_prefix="rel_view", engenheiro_fixo=None):
-    st.markdown("## 📊 Relatórios")
+    cabecalho_pagina_aproar(
+        "Relatórios",
+        "Consulte os registros da equipe e exporte os dados necessários para conferência.",
+        categoria="ANÁLISE E FECHAMENTO",
+    )
     c1, c2, c3 = st.columns(3)
     with c1:
         inicio = st.date_input("Início", value=agora_aproar().date().replace(day=1), format="DD/MM/YYYY", key=f"{key_prefix}_ini")
@@ -4160,7 +4477,7 @@ def render_relatorio_visualizador(key_prefix="rel_view", engenheiro_fixo=None):
     e1.metric("CUSTO TOTAL", formatar_reais(total))
     e2.metric("PESSOAS/DIA", len(df))
     e3.metric("DIAS COM REGISTRO", df["Data"].nunique())
-    st.dataframe(df[["Data", "Unidade", "Serviço(s)", "Colaborador", "Status", "Diária (R$)", "Extra (R$)", "Custo (R$)"]], use_container_width=True, hide_index=True)
+    tabela_aproar(df[["Data", "Unidade", "Serviço(s)", "Colaborador", "Status", "Diária (R$)", "Extra (R$)", "Custo (R$)"]], key=f"{key_prefix}_tbl_relatorio")
     st.download_button(
         "📥 BAIXAR RELATÓRIO EXCEL",
         data=_gerar_excel_dataframe(df, "APROAR - RELATÓRIO DE APONTAMENTOS"),
@@ -4172,7 +4489,11 @@ def render_relatorio_visualizador(key_prefix="rel_view", engenheiro_fixo=None):
 
 
 def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostrar_absenteismo=True):
-    st.markdown("## 📈 Indicadores")
+    cabecalho_pagina_aproar(
+        "Indicadores",
+        "Acompanhe prazos, ausências e comportamento operacional das equipes.",
+        categoria="ANÁLISE E FECHAMENTO",
+    )
     c1, c2, c3 = st.columns(3)
     with c1:
         inicio = st.date_input("Início", value=agora_aproar().date() - datetime.timedelta(days=30), format="DD/MM/YYYY", key=f"{key_prefix}_ini")
@@ -4262,14 +4583,14 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
         linhas.append(d)
     df_prazos = pd.DataFrame(linhas).sort_values("Engenheiro")
 
-    st.markdown("### ⏱️ Cumprimento por engenheiro")
+    titulo_secao_aproar("Cumprimento por engenheiro", "Convocações e apontamentos realizados dentro e fora do prazo.")
     st.caption("Convocação atrasada = feita após 16h para o próximo dia útil. Apontamento atrasado = salvo em dia posterior ao serviço. Os dois atrasos são medidos separadamente.")
-    st.dataframe(df_prazos, use_container_width=True, hide_index=True)
+    tabela_aproar(df_prazos, key=f"{key_prefix}_tbl_prazos")
 
     # Detalhamento clicável/selecionável das datas que geraram atraso.
     df_eventos = pd.DataFrame(eventos_prazo)
     if not df_eventos.empty:
-        st.markdown("#### 🔎 Ver datas e ocorrências")
+        st.markdown("**Ver datas e ocorrências**")
         op_eng = sorted(df_eventos["Engenheiro"].dropna().astype(str).unique().tolist())
         eng_det = engenheiro_fixo or st.selectbox("Engenheiro para detalhar", op_eng, key=f"{key_prefix}_eng_detalhe")
         somente_atrasos = st.checkbox("Mostrar somente atrasos", value=True, key=f"{key_prefix}_somente_atrasos")
@@ -4279,7 +4600,7 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
         if det.empty:
             st.success("Nenhuma ocorrência atrasada para este engenheiro no período.")
         else:
-            st.dataframe(det.sort_values(["Data do serviço", "Tipo"], ascending=[False, True]), use_container_width=True, hide_index=True)
+            tabela_aproar(det.sort_values(["Data do serviço", "Tipo"], ascending=[False, True]), key=f"{key_prefix}_tbl_ocorrencias")
 
     st.download_button(
         "📥 BAIXAR INDICADOR DE PRAZOS",
@@ -4302,7 +4623,7 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
     impacto_financeiro = float(df.loc[mask_ausencia, "valor_diaria"].sum())
 
     st.markdown("---")
-    st.markdown("### 👥 Absenteísmo")
+    titulo_secao_aproar("Absenteísmo", "Faltas, atestados e impacto por colaborador, dia e unidade.")
     m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("CONVOCAÇÕES", total_conv)
     m2.metric("FALTAS", total_faltas)
@@ -4313,7 +4634,7 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
 
     r1, r2 = st.columns(2)
     with r1:
-        st.markdown("#### Colaboradores com mais faltas")
+        st.markdown("**Colaboradores com mais faltas**")
         df_faltas = df[df["status"] == "Falta"]
         if df_faltas.empty:
             st.info("Nenhuma falta registrada no período.")
@@ -4323,10 +4644,10 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
                 .sort_values(["Faltas", "colaborador"], ascending=[False, True]).reset_index(drop=True)
             )
             ranking.insert(0, "Posição", range(1, len(ranking) + 1))
-            st.dataframe(ranking, use_container_width=True, hide_index=True)
+            tabela_aproar(ranking, key=f"{key_prefix}_tbl_ranking", altura_max=380)
 
     with r2:
-        st.markdown("#### Ausências por dia da semana")
+        st.markdown("**Ausências por dia da semana**")
         dias_ordem = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado", "Domingo"]
         mapa_dias = {0: "Segunda", 1: "Terça", 2: "Quarta", 3: "Quinta", 4: "Sexta", 5: "Sábado", 6: "Domingo"}
         df_aus = df[mask_ausencia].copy()
@@ -4341,7 +4662,7 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
                     resumo_semana[coluna] = 0
             st.bar_chart(resumo_semana[["Falta", "Atestado"]], use_container_width=True)
 
-    st.markdown("#### Detalhamento por Unidade")
+    st.markdown("**Detalhamento por unidade**")
     resumo_unidades = []
     for und in sorted(df["unidade"].unique()):
         df_u = df[df["unidade"] == und]
@@ -4360,7 +4681,7 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
             "Taxa Absenteísmo (%)": round(taxa_u, 1),
             "Impacto Estimado (R$)": round(impacto_u, 2),
         })
-    st.dataframe(pd.DataFrame(resumo_unidades).sort_values("Taxa Absenteísmo (%)", ascending=False), use_container_width=True, hide_index=True)
+    tabela_aproar(pd.DataFrame(resumo_unidades).sort_values("Taxa Absenteísmo (%)", ascending=False), key=f"{key_prefix}_tbl_abs_unidades")
 
 
 def incluir_colaborador_direto_apontamento(colaborador_id, engenheiro, data_servico, obra_id, turno="Integral"):
@@ -4405,7 +4726,11 @@ def incluir_colaborador_direto_apontamento(colaborador_id, engenheiro, data_serv
 
 
 def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
-    st.markdown("## ✅ Apontamento diário")
+    cabecalho_pagina_aproar(
+        "Apontamento",
+        "Registre presença, ausência, extras e serviços executados pela equipe.",
+        categoria="OPERAÇÃO",
+    )
     st.caption("Presença e extra são independentes. O mesmo colaborador pode atuar em mais de um serviço da mesma Unidade sem duplicar convocação nem diária.")
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -4643,7 +4968,11 @@ def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
 
 
 def render_indisponibilidades_admin():
-    st.markdown("## 🚫 Indisponibilidade")
+    cabecalho_pagina_aproar(
+        "Indisponibilidade",
+        "Registre férias, atestados, afastamentos e outros períodos em que o colaborador não pode ser convocado.",
+        categoria="OPERAÇÃO",
+    )
     st.caption("Controle manual do Paulo para férias, atestados e afastamentos. Pessoas indisponíveis ficam bloqueadas na convocação.")
     if not colaboradores:
         st.info("Nenhum colaborador cadastrado.")
@@ -4663,7 +4992,7 @@ def render_indisponibilidades_admin():
         if ok:
             st.rerun()
 
-    st.markdown("### Registros")
+    titulo_secao_aproar("Registros ativos", "Períodos de indisponibilidade cadastrados.")
     registros = listar_indisponibilidades()
     registros.sort(key=lambda x: (x.get("inicio", ""), x.get("fim", "")), reverse=True)
     if not registros:
@@ -5507,7 +5836,7 @@ elif modo_financeiro:
             resumo_view = resumo_fin.copy()
             resumo_view["Total Extra"] = resumo_view["Total Extra (R$)"].apply(formatar_reais)
             resumo_view = resumo_view.drop(columns=["Total Extra (R$)"])
-            st.dataframe(resumo_view, use_container_width=True, hide_index=True)
+            tabela_aproar(resumo_view, key="tbl_fin_resumo")
 
             st.markdown("### Detalhamento por dia")
             detalhe_extra_view = pd.DataFrame(extras_fin)[[
@@ -5515,7 +5844,7 @@ elif modo_financeiro:
             ]].copy()
             detalhe_extra_view["Valor Extra"] = detalhe_extra_view["Valor Extra (R$)"].apply(formatar_reais)
             detalhe_extra_view = detalhe_extra_view.drop(columns=["Valor Extra (R$)"])
-            st.dataframe(detalhe_extra_view, use_container_width=True, hide_index=True)
+            tabela_aproar(detalhe_extra_view, key="tbl_fin_detalhe")
 
     with tab_fin_aus:
         fa1, fa2, fa3 = st.columns(3)
@@ -5529,7 +5858,7 @@ elif modo_financeiro:
             df_aus_fin = pd.DataFrame(ausencias_fin)[[
                 "Data", "Colaborador", "Função", "Unidade", "Status", "Engenheiro"
             ]]
-            st.dataframe(df_aus_fin, use_container_width=True, hide_index=True)
+            tabela_aproar(df_aus_fin, key="tbl_fin_ausencias")
 
             st.markdown("### Resumo nominal")
             resumo_aus_fin = (
@@ -5543,7 +5872,7 @@ elif modo_financeiro:
             )
             resumo_aus_fin["Total"] = resumo_aus_fin["Faltas"] + resumo_aus_fin["Atestados"]
             resumo_aus_fin = resumo_aus_fin.sort_values(by=["Total", "Colaborador"], ascending=[False, True])
-            st.dataframe(resumo_aus_fin, use_container_width=True, hide_index=True)
+            tabela_aproar(resumo_aus_fin, key="tbl_fin_aus_resumo")
 
     with tab_fin_rel:
         st.markdown("### Relatório do ciclo")
@@ -5854,7 +6183,11 @@ else:
 
     # --- CONFLITOS DE CONVOCAÇÃO / PAULO ---
     elif menu_escolhido == "🚨 CONFLITOS":
-        st.markdown("## 🚨 Conflitos de convocação")
+        cabecalho_pagina_aproar(
+            "Conflitos de convocação",
+            "Confira tentativas bloqueadas por sobreposição de turnos e marque as situações já resolvidas.",
+            categoria="OPERAÇÃO",
+        )
         st.caption(
             "Fila para conferência do Paulo. Só entra aqui quando dois supervisores tentam convocar "
             "a mesma pessoa em turnos que se sobrepõem. Manhã + Tarde, por exemplo, é permitido."
@@ -5909,7 +6242,11 @@ else:
 
     # --- 2. CONVOCAÇÃO ---
     elif menu_escolhido == "📋 CONVOCAÇÃO":
-        st.markdown("## 📋 CONVOCAÇÃO E GERENCIAMENTO DE EQUIPE")
+        cabecalho_pagina_aproar(
+            "Convocação",
+            "Monte a equipe do próximo dia e faça correções administrativas quando necessário.",
+            categoria="OPERAÇÃO",
+        )
         tab_nova_conv, tab_corrigir_conv = st.tabs(["➕ Nova Convocação", "✏️ Correção / Exclusão Administrativa"])
 
         with tab_nova_conv:
@@ -6287,7 +6624,11 @@ else:
 
     # --- MENSAGEM PARA WHATSAPP ---
     elif menu_escolhido == "💬 WHATSAPP":
-        st.markdown("## 💬 MENSAGEM DE CONVOCAÇÃO PARA WHATSAPP")
+        cabecalho_pagina_aproar(
+            "WhatsApp",
+            "Gere a mensagem de convocação já organizada para copiar e enviar aos grupos.",
+            categoria="OPERAÇÃO",
+        )
         st.write("Gere a divisão de equipes no padrão do grupo de Colaboradores e copie a mensagem pronta.")
 
         c_wpp1, c_wpp2 = st.columns([1, 1])
@@ -6382,7 +6723,11 @@ else:
 
     # --- 4. RELATÓRIOS ---
     elif menu_escolhido == "📊 RELATÓRIOS":
-        st.markdown("## 📊 RELATÓRIO DE CUSTOS E FECHAMENTO")
+        cabecalho_pagina_aproar(
+            "Relatórios",
+            "Fechamento de custos, apontamentos e exportações por período.",
+            categoria="ANÁLISE E FECHAMENTO",
+        )
         
         # Filtro de Periodicidade
         c_p1, c_p2, c_p3 = st.columns(3)
@@ -6656,7 +7001,11 @@ else:
 
     # --- 7. CONFIGURAÇÕES E SINCRONIZAÇÃO TRELLO ---
     elif menu_escolhido == "⚙️ CONFIGURAÇÕES":
-        st.markdown("## ⚙️ CONFIGURAÇÕES E GERENCIAMENTO")
+        cabecalho_pagina_aproar(
+            "Configurações",
+            "Cadastros, sincronização, auditoria e manutenção da plataforma.",
+            categoria="SISTEMA",
+        )
         with st.expander("🩺 Diagnóstico e saúde do sistema", expanded=False):
             render_diagnostico_sistema()
 
@@ -6674,7 +7023,7 @@ else:
         
         # Sincronização Dinâmica Trello (mês vigente, lista manual ou busca de card/lista)
         with st.container(border=True):
-            st.markdown("### 🔄 Sincronização com o Trello")
+            st.markdown("**Sincronização com o Trello**")
             st.write("Sincronize o mês vigente ou localize manualmente listas e cards de medições anteriores.")
 
             lists_trello, cards_trello = obter_listas_trello()
@@ -6766,7 +7115,7 @@ else:
         tab_cad_obra, tab_cad_colab, tab_import_colab, tab_limpeza = st.tabs(["🏗️ Obras", "👷 Colaboradores", "📤 Importar Colaboradores", "🗑️ Limpeza de Dados"])
         
         with tab_cad_obra:
-            st.markdown("### Cadastrar Nova Obra")
+            st.markdown("**Cadastrar nova obra**")
             with st.form("form_cad_obra"):
                 nome_obra = st.text_input("Nome da Obra (Ex: 1863, 1383...):")
                 unidade_obra = st.text_input("Unidade (Ex: CENTRO, MUSEU, FIEC...):")
@@ -6781,7 +7130,7 @@ else:
                         st.warning("Preencha todos os campos.")
 
         with tab_cad_colab:
-            st.markdown("### Cadastrar Novo Colaborador")
+            st.markdown("**Cadastrar novo colaborador**")
             with st.form("form_cad_colab"):
                 nome_colab = st.text_input("Nome Completo:")
                 tipo_colab = st.selectbox("Categoria da diária:", ["Profissional", "Ajudante"], key="tipo_cad_colab")
@@ -6807,7 +7156,7 @@ else:
                         st.warning("Informe o nome do colaborador.")
 
         with tab_import_colab:
-            st.markdown("### 📤 Importar Planilha de Colaboradores")
+            st.markdown("**Importar planilha de colaboradores**")
             st.write(
                 "Envie uma planilha para adicionar novos colaboradores ou atualizar cadastros existentes. "
                 "A conferência é feita pelo nome e nenhum colaborador ausente da planilha será excluído."
@@ -7096,7 +7445,7 @@ else:
                             f"{len(registros_import)} colaborador(es) pronto(s) para importar. "
                             + (f"{linhas_invalidas} linha(s) sem nome foram ignoradas." if linhas_invalidas else "")
                         )
-                        st.dataframe(preview_import, use_container_width=True, hide_index=True)
+                        tabela_aproar(preview_import, key="tbl_import_preview", altura_max=360)
 
                         if st.button(
                             "📤 IMPORTAR / ATUALIZAR COLABORADORES",
@@ -7158,7 +7507,7 @@ else:
                     st.warning("A planilha está vazia ou não pôde ser interpretada.")
 
         with tab_limpeza:
-            st.markdown("### 🗑️ Limpeza e Manutenção de Registros")
+            st.markdown("**Limpeza e manutenção de registros**")
             st.write("Use esta seção para remover registros incorretos ou limpar dados antigos de convocações/apontamentos.")
             
             data_limpeza = st.date_input("Selecionar data para limpeza de convocações:", value=datetime.date.today(), format="DD/MM/YYYY")
