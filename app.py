@@ -21,8 +21,6 @@ from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 # --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR (CLARO / AZUL) ---
 st.set_page_config(page_title="APROAR - Gestão de Equipes", page_icon="👷", layout="wide")
 
-# Ambiente visual de homologação
-AMBIENTE_APROAR = "HOMOLOGACAO"
 
 # Paleta principal. Se a identidade visual mudar, basta alterar o azul aqui e no CSS abaixo.
 AZUL_APROAR = "#2563EB"
@@ -829,22 +827,6 @@ section[data-testid="stSidebar"] div[class*="st-key-bloquear_edicao_sidebar_ui4"
     background:transparent !important;
 }
 
-/* Barra pequena exclusiva da homologação. */
-.ap-env-banner{
-    display:flex; align-items:center; gap:8px;
-    width:max-content;
-    max-width:100%;
-    color:#826419;
-    font-size:11px;
-    font-weight:600;
-    background:#FFFBEA;
-    border:1px solid #F3E8B3;
-    border-radius:6px;
-    padding:6px 9px;
-    margin:0 0 18px 0;
-}
-.ap-env-dot{width:7px;height:7px;background:#D7A522;border-radius:999px;display:inline-block;}
-
 /* HOME --------------------------------------------------------------------- */
 .ap-home-head{
     display:flex;
@@ -1541,9 +1523,6 @@ section[data-testid="stSidebar"] .stButton > button{
 }
 
 /* Home */
-.ap-env-banner{
-    margin:0 0 10px 0 !important;
-}
 .ap-home-head{
     margin:0 0 12px !important;
 }
@@ -1836,14 +1815,6 @@ section[data-testid="stSidebar"] div[class*="st-key-bloquear_edicao_sidebar_ui4"
     font-size:13.5px !important;
 }
 
-/* Homologação mais discreta */
-.ap-env-banner{
-    border-radius:5px !important;
-    padding:5px 8px !important;
-    font-size:9.5px !important;
-    box-shadow:none !important;
-}
-
 /* ==========================================================================
    FILTROS / FORMULÁRIOS
    ========================================================================== */
@@ -2108,6 +2079,140 @@ div[class*="st-key-rel_gerar_excel_v42"] button:hover{
     main .block-container{
         padding-top:3.9rem !important;
     }
+}
+</style>
+""")
+
+
+
+
+# --- APROAR V4.3 | BOTÕES + AÇÕES DE LIMPEZA -------------------------------
+st.html("""
+<style>
+/* Item ativo da sidebar: azul mais sóbrio e borda discreta. */
+section[data-testid="stSidebar"] [data-testid="stBaseButton-primary"],
+section[data-testid="stSidebar"] .stButton > button[kind="primary"]{
+    background:#235ED5 !important;
+    border:1px solid #3470E6 !important;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.08) !important;
+    border-radius:8px !important;
+}
+section[data-testid="stSidebar"] [data-testid="stBaseButton-primary"]:hover,
+section[data-testid="stSidebar"] .stButton > button[kind="primary"]:hover{
+    background:#1E54C3 !important;
+    border-color:#2F68D9 !important;
+}
+
+/* Bloquear edição vira uma ação de sistema mais discreta. */
+section[data-testid="stSidebar"] div[class*="st-key-bloquear_edicao_sidebar_ui4"] button{
+    height:35px !important;
+    min-height:35px !important;
+    background:transparent !important;
+    border:1px solid #294563 !important;
+    color:#B9C7D8 !important;
+    border-radius:7px !important;
+    font-size:10.5px !important;
+}
+section[data-testid="stSidebar"] div[class*="st-key-bloquear_edicao_sidebar_ui4"] button:hover{
+    background:#122944 !important;
+    color:#FFFFFF !important;
+}
+
+/* Botão de limpeza por data = secundário. */
+div[class*="st-key-btn_limpar_data_v43"] button{
+    background:var(
+        --st-secondary-background-color,
+        var(--secondary-background-color,#FFFFFF)
+    ) !important;
+    color:var(
+        --st-text-color,
+        var(--text-color,#29384D)
+    ) !important;
+    border:1px solid color-mix(
+        in srgb,
+        var(--st-text-color,var(--text-color,#29384D)) 17%,
+        transparent
+    ) !important;
+}
+div[class*="st-key-btn_limpar_data_v43"] button *{
+    color:inherit !important;
+}
+
+/* Ação destrutiva só fica vermelha quando está realmente habilitada. */
+div[class*="st-key-btn_limpar_todos_testes_v43"] button:not(:disabled){
+    background:#C93D4F !important;
+    border-color:#C93D4F !important;
+    color:#FFFFFF !important;
+    font-weight:680 !important;
+}
+div[class*="st-key-btn_limpar_todos_testes_v43"] button:not(:disabled) *{
+    color:#FFFFFF !important;
+}
+div[class*="st-key-btn_limpar_todos_testes_v43"] button:not(:disabled):hover{
+    background:#B83243 !important;
+    border-color:#B83243 !important;
+}
+div[class*="st-key-btn_limpar_todos_testes_v43"] button:disabled{
+    opacity:.46 !important;
+    cursor:not-allowed !important;
+}
+
+/* Botões secundários da área principal acompanham Light / Dark / System. */
+main .stButton > button[kind="secondary"]{
+    background:var(
+        --st-secondary-background-color,
+        var(--secondary-background-color,#FFFFFF)
+    ) !important;
+    color:var(
+        --st-text-color,
+        var(--text-color,#29384D)
+    ) !important;
+    border-color:color-mix(
+        in srgb,
+        var(--st-text-color,var(--text-color,#29384D)) 15%,
+        transparent
+    ) !important;
+}
+main .stButton > button[kind="secondary"] *{
+    color:inherit !important;
+}
+main .stButton > button[kind="secondary"]:hover{
+    border-color:color-mix(
+        in srgb,
+        var(--st-primary-color,var(--primary-color,#245FD6)) 40%,
+        transparent
+    ) !important;
+}
+</style>
+""")
+
+
+
+
+# --- APROAR PRODUÇÃO | AJUSTE DE AÇÃO DE LIMPEZA ----------------------------
+st.html("""
+<style>
+div[class*="st-key-btn_limpar_data_prod_v1"] button{
+    background:var(
+        --st-secondary-background-color,
+        var(--secondary-background-color,#FFFFFF)
+    ) !important;
+    color:var(
+        --st-text-color,
+        var(--text-color,#29384D)
+    ) !important;
+    border:1px solid color-mix(
+        in srgb,
+        var(--st-text-color,var(--text-color,#29384D)) 17%,
+        transparent
+    ) !important;
+}
+div[class*="st-key-btn_limpar_data_prod_v1"] button *{
+    color:inherit !important;
+}
+div[class*="st-key-btn_limpar_data_prod_v1"] button:hover{
+    border-color:#C93D4F !important;
+    color:#B83243 !important;
 }
 </style>
 """)
@@ -6644,11 +6749,6 @@ else:
         data_extenso = f"{dias_semana[hoje_real.weekday()]}, {hoje_real.day:02d} de {meses_nome[hoje_real.month]} de {hoje_real.year}"
 
         st.markdown(
-            '<div class="ap-env-banner"><span class="ap-env-dot"></span>Homologação · dados de teste</div>',
-            unsafe_allow_html=True,
-        )
-
-        st.markdown(
             f"""
             <div class="ap-home-head">
                 <div>
@@ -8182,28 +8282,111 @@ else:
 
         with tab_limpeza:
             st.markdown("**Limpeza e manutenção de registros**")
-            st.write("Use esta seção para remover registros incorretos ou limpar dados antigos de convocações/apontamentos.")
-            
-            data_limpeza = st.date_input("Selecionar data para limpeza de convocações:", value=datetime.date.today(), format="DD/MM/YYYY")
-            if st.button("🗑️ EXCLUIR CONVOCAÇÕES DESTA DATA", type="primary"):
-                try:
-                    registros_limpeza = (
-                        supabase.table("convocacoes").select("*")
-                        .eq("data", data_limpeza.isoformat()).execute().data or []
+            st.caption(
+                "Use esta área apenas para corrigir registros operacionais incorretos. "
+                "A exclusão é permanente."
+            )
+
+            with st.container(border=True):
+                st.markdown("**Excluir convocações de uma data**")
+                st.caption(
+                    "Remove as convocações da data selecionada. "
+                    "Use somente quando houver necessidade de correção administrativa."
+                )
+
+                c_limpa_data, c_limpa_btn = st.columns(
+                    [1.45, .55],
+                    vertical_alignment="bottom",
+                )
+
+                with c_limpa_data:
+                    data_limpeza = st.date_input(
+                        "Data",
+                        value=datetime.date.today(),
+                        format="DD/MM/YYYY",
+                        key="data_limpeza_prod_v1",
                     )
-                    supabase.table("convocacoes").delete().eq("data", data_limpeza.isoformat()).execute()
-                    registrar_auditoria_prod(
-                        "convocacao", "", "EXCLUIR_EM_LOTE_ADMIN", "ADMIN",
-                        antes={
-                            "quantidade": len(registros_limpeza),
-                            "ids": [str(r.get("id")) for r in registros_limpeza[:200]]
-                        },
-                        contexto={
-                            "data": data_limpeza.isoformat(),
-                            "origem": "limpeza_administrativa"
-                        }
+
+                with c_limpa_btn:
+                    limpar_data = st.button(
+                        "Excluir esta data",
+                        use_container_width=True,
+                        key="btn_limpar_data_prod_v1",
                     )
-                    st.success(f"Todas as convocações do dia {data_limpeza.strftime('%d/%m/%Y')} foram removidas com sucesso!")
-                    st.rerun()
-                except Exception as e:
-                    exibir_erro_amigavel("administracao", "limpar_dados", e, "Não foi possível concluir a limpeza dos dados.")
+
+                confirmar_exclusao_data = st.checkbox(
+                    "Confirmo que desejo excluir as convocações desta data.",
+                    key="confirmar_limpeza_data_prod_v1",
+                )
+
+                if limpar_data:
+                    if not confirmar_exclusao_data:
+                        st.warning(
+                            "Marque a confirmação antes de excluir os registros."
+                        )
+                    else:
+                        try:
+                            registros_limpeza = (
+                                supabase.table("convocacoes")
+                                .select("*")
+                                .eq("data", data_limpeza.isoformat())
+                                .execute()
+                                .data or []
+                            )
+
+                            if not registros_limpeza:
+                                st.info(
+                                    f"Não há convocações em {data_limpeza.strftime('%d/%m/%Y')}."
+                                )
+                            else:
+                                supabase.table("convocacoes").delete().eq(
+                                    "data",
+                                    data_limpeza.isoformat(),
+                                ).execute()
+
+                                registrar_auditoria_prod(
+                                    "convocacao",
+                                    "",
+                                    "EXCLUIR_EM_LOTE_ADMIN",
+                                    "ADMIN",
+                                    antes={
+                                        "quantidade": len(registros_limpeza),
+                                        "ids": [
+                                            str(r.get("id"))
+                                            for r in registros_limpeza[:200]
+                                        ],
+                                    },
+                                    contexto={
+                                        "data": data_limpeza.isoformat(),
+                                        "origem": "limpeza_administrativa_producao",
+                                    },
+                                )
+
+                                try:
+                                    limpar_cache_operacional()
+                                except Exception:
+                                    pass
+
+                                try:
+                                    _buscar_convocacoes_intervalo.clear()
+                                except Exception:
+                                    pass
+
+                                st.session_state["msg_limpeza_prod_v1"] = (
+                                    f"{len(registros_limpeza)} convocação(ões) de "
+                                    f"{data_limpeza.strftime('%d/%m/%Y')} removida(s)."
+                                )
+                                st.rerun()
+
+                        except Exception as e:
+                            exibir_erro_amigavel(
+                                "administracao",
+                                "limpar_dados_producao",
+                                e,
+                                "Não foi possível concluir a exclusão dos registros.",
+                            )
+
+            if st.session_state.get("msg_limpeza_prod_v1"):
+                st.success(
+                    st.session_state.pop("msg_limpeza_prod_v1")
+                )
