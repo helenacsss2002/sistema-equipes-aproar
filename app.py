@@ -1016,6 +1016,7 @@ st.markdown("""
 <style>
 /* Corrige texto invisível/colapsado dos botões de ações rápidas e dá acabamento consistente. */
 div[class*="st-key-ap2_quick_conv"] button,
+div[class*="st-key-ap2_quick_conv"] button,
 div[class*="st-key-ap2_quick_apon"] button,
 div[class*="st-key-ap2_quick_disp"] button,
 div[class*="st-key-ap2_quick_ind"] button{
@@ -1026,6 +1027,7 @@ div[class*="st-key-ap2_quick_ind"] button{
     overflow:visible !important;
 }
 
+div[class*="st-key-ap2_quick_conv"] button *,
 div[class*="st-key-ap2_quick_conv"] button *,
 div[class*="st-key-ap2_quick_apon"] button *,
 div[class*="st-key-ap2_quick_disp"] button *,
@@ -1127,6 +1129,7 @@ div[class*="st-key-ap2_quick_ind"] button *{
 }
 
 /* Hover também acompanha o tema, sem virar um retângulo branco no escuro. */
+div[class*="st-key-ap2_quick_conv"] button:hover,
 div[class*="st-key-ap2_quick_apon"] button:hover,
 div[class*="st-key-ap2_quick_disp"] button:hover,
 div[class*="st-key-ap2_quick_ind"] button:hover{
@@ -1142,27 +1145,11 @@ div[class*="st-key-ap2_quick_ind"] button:hover{
     ) !important;
 }
 
-/* Ação principal usa a cor primária do tema, mantendo a hierarquia. */
-div[class*="st-key-ap2_quick_conv"] button{
-    background:var(
-        --st-primary-color,
-        var(--primary-color, #245FE5)
-    ) !important;
-    border-color:var(
-        --st-primary-color,
-        var(--primary-color, #245FE5)
-    ) !important;
-    color:#FFFFFF !important;
-}
-div[class*="st-key-ap2_quick_conv"] button *{
-    color:#FFFFFF !important;
-}
-div[class*="st-key-ap2_quick_conv"] button:hover{
-    filter:brightness(.94);
-}
+
 
 /* Fallback para navegadores/versões que não exponham as variáveis do tema. */
 @media (prefers-color-scheme: dark){
+    div[class*="st-key-ap2_quick_conv"] button,
     div[class*="st-key-ap2_quick_apon"] button,
     div[class*="st-key-ap2_quick_disp"] button,
     div[class*="st-key-ap2_quick_ind"] button{
@@ -5794,7 +5781,7 @@ else:
         st.markdown('<div class="ap-quick-head">Ações rápidas</div>', unsafe_allow_html=True)
         with st.container(key="ap2_quick"):
             q1, q2, q3, q4 = st.columns(4)
-            q1.button("Nova convocação", type="primary", use_container_width=True, on_click=_ir_menu_admin, args=("📋 CONVOCAÇÃO",), key="ap2_quick_conv")
+            q1.button("Nova convocação", use_container_width=True, on_click=_ir_menu_admin, args=("📋 CONVOCAÇÃO",), key="ap2_quick_conv")
             q2.button("Apontamentos", use_container_width=True, on_click=_ir_menu_admin, args=("✅ APONTAMENTO",), key="ap2_quick_apon")
             q3.button("Disponibilidade", use_container_width=True, on_click=_ir_menu_admin, args=("👥 DISPONIBILIDADE",), key="ap2_quick_disp")
             q4.button("Indicadores", use_container_width=True, on_click=_ir_menu_admin, args=("📈 INDICADORES",), key="ap2_quick_ind")
