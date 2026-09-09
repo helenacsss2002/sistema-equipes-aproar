@@ -4448,44 +4448,65 @@ UNIDADES_APROAR = [
     "SEBRAE",
 ]
 
-# --- FUNÇÃO AUXILIAR PARA RENDERIZAR A ABA DE DISPONIBILIDADE ---
+# --- DISPONIBILIDADE — V4.1 (carregamento leve e robusto) -------------------
+@st.cache_data(ttl=45, show_spinner=False)
+def _carregar_indisponibilidades_disponibilidade():
+    """
+    Leitura leve para a página de disponibilidade.
+    Evita executar a migração legada toda vez que a aba é aberta.
+    """
+    try:
+        if schema_producao_disponivel():
+            estruturadas = listar_indisponibilidades_estruturadas()
+            if estruturadas is not None:
+                return estruturadas
+    except Exception:
+        pass
+
+    saida = []
+    try:
+        for item in obras_todas:
+            dados = decodificar_indisponibilidade(item)
+            if dados:
+                dados["_origem"] = "legado"
+                saida.append(dados)
+    except Exception:
+        pass
+    return saida
+
+
 def render_aba_disponibilidade(key_suffix=""):
     cabecalho_pagina_aproar(
         "Disponibilidade da equipe",
-        "Veja quem está ocupado, indisponível ou livre por turno antes de montar a equipe.",
+        "Veja rapidamente quem pode ser convocado no turno selecionado.",
         categoria="OPERAÇÃO",
     )
-    st.caption(
-        "Quem está convocado de manhã pode continuar disponível à tarde, desde que não esteja integral ou indisponível."
-    )
 
-    cdata, cturno = st.columns(2)
-    with cdata:
+    f1, f2 = st.columns([1, 1])
+    with f1:
         data_disp = st.date_input(
-            "Data de referência:",
+            "Data de referência",
             value=proximo_dia_util(agora_aproar().date()),
             format="DD/MM/YYYY",
             key=f"data_disp_{key_suffix}",
         )
-    with cturno:
+    with f2:
         turno_disp = st.selectbox(
-            "Turno para consultar:",
+            "Turno",
             ["Integral", "Manhã", "Tarde", "Noite"],
             key=f"turno_disp_{key_suffix}",
         )
 
+    # Convocações: usa a consulta operacional cacheada que já é usada
+    # pelo restante do sistema, evitando uma consulta exclusiva mais lenta.
     try:
-        convs_disp = (
-            supabase.table("convocacoes")
-            .select("*")
-            .eq("data", data_disp.isoformat())
-            .execute().data or []
-        )
+        convs_disp = _buscar_convocacoes_intervalo(data_disp, data_disp) or []
     except Exception:
         convs_disp = []
 
-    # Busca as indisponibilidades uma única vez para evitar lentidão / tela "sumindo".
-    indisponibilidades = listar_indisponibilidades() or []
+    # Indisponibilidades: consulta direta/cacheada, sem migração na abertura.
+    indisponibilidades = _carregar_indisponibilidades_disponibilidade() or []
+
     indisponiveis_map = {}
     for item in indisponibilidades:
         alvo = str(item.get("colaborador_id") or "").strip()
@@ -4501,100 +4522,109 @@ def render_aba_disponibilidade(key_suffix=""):
 
     por_colaborador = {}
     for conv in convs_disp:
-        por_colaborador.setdefault(str(conv.get("colaborador_id")), []).append(conv)
+        cid = str(conv.get("colaborador_id") or "").strip()
+        if cid:
+            por_colaborador.setdefault(cid, []).append(conv)
 
-    funcoes = sorted({str(c.get("funcao") or "INDEFINIDA") for c in colaboradores})
-    if not funcoes:
+    linhas = []
+    ocupados = 0
+    indisponiveis_qtd = 0
+    disponiveis = 0
+
+    for colab in colaboradores:
+        cid = str(colab.get("id") or "").strip()
+        nome = str(colab.get("nome") or "-").strip()
+        funcao = str(colab.get("funcao") or "INDEFINIDA").strip()
+
+        if cid in indisponiveis_map:
+            ind = indisponiveis_map[cid]
+            indisponiveis_qtd += 1
+            linhas.append({
+                "Colaborador": nome,
+                "Função": funcao,
+                "Situação": "Indisponível",
+                "Alocação": "-",
+                "Observação": f"{ind.get('motivo','Indisponível')} • {ind.get('inicio','')} a {ind.get('fim','')}",
+            })
+            continue
+
+        alocacoes = por_colaborador.get(cid, [])
+        sobrepostas = [
+            conv for conv in alocacoes
+            if turnos_se_sobrepoem(turno_da_convocacao(conv), turno_disp)
+        ]
+
+        if sobrepostas:
+            ocupados += 1
+            detalhes = []
+            for conv in sobrepostas:
+                obra = dict_obras.get(conv.get("obra_id"), {})
+                detalhes.append(
+                    f"{turno_da_convocacao(conv)} • {obra.get('unidade','-')} • {conv.get('engenheiro','-')}"
+                )
+            linhas.append({
+                "Colaborador": nome,
+                "Função": funcao,
+                "Situação": "Ocupado",
+                "Alocação": " | ".join(detalhes),
+                "Observação": "",
+            })
+        else:
+            disponiveis += 1
+            outras = []
+            for conv in alocacoes:
+                obra = dict_obras.get(conv.get("obra_id"), {})
+                outras.append(
+                    f"{turno_da_convocacao(conv)} • {obra.get('unidade','-')}"
+                )
+            linhas.append({
+                "Colaborador": nome,
+                "Função": funcao,
+                "Situação": "Disponível",
+                "Alocação": "Outro turno: " + " | ".join(outras) if outras else "-",
+                "Observação": "",
+            })
+
+    total = ocupados + indisponiveis_qtd + disponiveis
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Disponíveis", disponiveis)
+    m2.metric("Ocupados", ocupados)
+    m3.metric("Indisponíveis", indisponiveis_qtd)
+    m4.metric("Total analisado", total)
+
+    st.caption(
+        f"{data_disp.strftime('%d/%m/%Y')} • turno {turno_disp}. "
+        "Integral bloqueia os demais turnos; manhã, tarde e noite só conflitam quando houver sobreposição."
+    )
+
+    if not linhas:
         st.info("Nenhum colaborador cadastrado.")
         return
 
-    resumo_ocupados = 0
-    resumo_indisponiveis = 0
-    resumo_disponiveis = 0
-    blocos = []
+    df_disp = pd.DataFrame(linhas)
 
-    for func in funcoes:
-        colabs_func = [c for c in colaboradores if str(c.get("funcao") or "INDEFINIDA") == func]
-        ocupados, indisponiveis, disponiveis = [], [], []
+    ordem_status = {"Disponível": 0, "Ocupado": 1, "Indisponível": 2}
+    df_disp["_ordem"] = df_disp["Situação"].map(ordem_status).fillna(9)
+    df_disp = df_disp.sort_values(
+        ["_ordem", "Função", "Colaborador"],
+        ascending=[True, True, True],
+    ).drop(columns=["_ordem"])
 
-        for colab in colabs_func:
-            cid = str(colab.get("id") or "")
-            if cid in indisponiveis_map:
-                indisponiveis.append(colab)
-                continue
-
-            alocacoes = por_colaborador.get(cid, [])
-            sobrepostas = [
-                conv for conv in alocacoes
-                if turnos_se_sobrepoem(turno_da_convocacao(conv), turno_disp)
-            ]
-
-            if sobrepostas:
-                ocupados.append((colab, sobrepostas, alocacoes))
-            else:
-                disponiveis.append((colab, alocacoes))
-
-        resumo_ocupados += len(ocupados)
-        resumo_indisponiveis += len(indisponiveis)
-        resumo_disponiveis += len(disponiveis)
-        blocos.append((func, ocupados, indisponiveis, disponiveis))
-
-    st.markdown(
-        f"""
-        <div class="aproar-dash-metrics" style="margin-top:10px;">
-            <div class="aproar-dash-card"><div class="aproar-dash-label">Turno analisado</div><div class="aproar-dash-value" style="font-size:24px">{turno_disp}</div><div class="aproar-dash-note">{data_disp.strftime('%d/%m/%Y')}</div></div>
-            <div class="aproar-dash-card"><div class="aproar-dash-label">Ocupados</div><div class="aproar-dash-value">{resumo_ocupados}</div><div class="aproar-dash-note">já alocados neste turno</div></div>
-            <div class="aproar-dash-card"><div class="aproar-dash-label">Indisponíveis</div><div class="aproar-dash-value">{resumo_indisponiveis}</div><div class="aproar-dash-note">férias, atestado, afastamento</div></div>
-            <div class="aproar-dash-card"><div class="aproar-dash-label">Disponíveis</div><div class="aproar-dash-value">{resumo_disponiveis}</div><div class="aproar-dash-note">podem ser convocados</div></div>
-            <div class="aproar-dash-card"><div class="aproar-dash-label">Total analisado</div><div class="aproar-dash-value">{resumo_ocupados + resumo_indisponiveis + resumo_disponiveis}</div><div class="aproar-dash-note">colaborador(es)</div></div>
-        </div>
-        """,
-        unsafe_allow_html=True,
+    # Filtro opcional por situação sem nova consulta ao banco.
+    situacoes = st.multiselect(
+        "Mostrar",
+        ["Disponível", "Ocupado", "Indisponível"],
+        default=["Disponível", "Ocupado", "Indisponível"],
+        key=f"filtro_situacao_disp_{key_suffix}",
     )
+    if situacoes:
+        df_disp = df_disp[df_disp["Situação"].isin(situacoes)]
 
-    for func, ocupados, indisponiveis, disponiveis in blocos:
-        with st.container(border=True):
-            st.markdown(f"#### {func.upper()}")
-            c1, c2, c3 = st.columns(3)
-
-            with c1:
-                st.markdown(f"**🔵 OCUPADOS EM {turno_disp.upper()} ({len(ocupados)})**")
-                for colab, sobrepostas, _ in ocupados:
-                    st.markdown(f"• **{colab.get('nome','-')}**")
-                    for conv in sobrepostas:
-                        ob = dict_obras.get(conv.get("obra_id"), {})
-                        turno_existente = turno_da_convocacao(conv)
-                        st.caption(
-                            f"{turno_existente} • {ob.get('unidade','-')} • Eng. {conv.get('engenheiro','-')}"
-                        )
-                if not ocupados:
-                    st.caption("Nenhum.")
-
-            with c2:
-                st.markdown(f"**🔴 INDISPONÍVEIS ({len(indisponiveis)})**")
-                for colab in indisponiveis:
-                    ind = indisponiveis_map.get(str(colab.get("id") or ""), {})
-                    st.markdown(f"• **{colab.get('nome','-')}**")
-                    st.caption(
-                        f"{ind.get('motivo','Indisponível')} • {ind.get('inicio','')} a {ind.get('fim','')}"
-                    )
-                if not indisponiveis:
-                    st.caption("Nenhum.")
-
-            with c3:
-                st.markdown(f"**🟢 DISPONÍVEIS EM {turno_disp.upper()} ({len(disponiveis)})**")
-                for colab, outras_alocacoes in disponiveis:
-                    st.markdown(f"• **{colab.get('nome','-')}**")
-                    if outras_alocacoes:
-                        detalhes = []
-                        for conv in outras_alocacoes:
-                            ob = dict_obras.get(conv.get("obra_id"), {})
-                            detalhes.append(
-                                f"{turno_da_convocacao(conv)}: {ob.get('unidade','-')} (Eng. {conv.get('engenheiro','-')})"
-                            )
-                        st.caption("Já alocado em outro turno: " + " • ".join(detalhes))
-                if not disponiveis:
-                    st.caption("Nenhum.")
+    tabela_aproar(
+        df_disp,
+        key=f"tbl_disponibilidade_{key_suffix}",
+        altura_max=620,
+    )
 
 
 # --- COMPONENTES COMPARTILHADOS: APONTAMENTO, DASHBOARD, RELATÓRIO E AUDITORIA ---
@@ -7559,7 +7589,11 @@ else:
         render_indisponibilidades_admin()
 
     # --- 6. DISPONIBILIDADE ---
-    elif menu_escolhido in {"👥 DISPONIBILIDADE", "DISPONIBILIDADE", "👥 DISPONIBILIDADE DA EQUIPE"}:
+    elif str(menu_escolhido).strip().upper() in {
+        "👥 DISPONIBILIDADE",
+        "DISPONIBILIDADE",
+        "👥 DISPONIBILIDADE DA EQUIPE",
+    }:
         render_aba_disponibilidade("admin")
 
     # --- 7. CONFIGURAÇÕES E SINCRONIZAÇÃO TRELLO ---
