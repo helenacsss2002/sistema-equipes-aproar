@@ -21,6 +21,9 @@ from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 # --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR (CLARO / AZUL) ---
 st.set_page_config(page_title="APROAR - Gestão de Equipes", page_icon="👷", layout="wide")
 
+# Ambiente visual de homologação
+AMBIENTE_APROAR = "HOMOLOGACAO"
+
 # Paleta principal. Se a identidade visual mudar, basta alterar o azul aqui e no CSS abaixo.
 AZUL_APROAR = "#2563EB"
 AZUL_APROAR_ESCURO = "#1D4ED8"
@@ -704,6 +707,307 @@ section[data-testid="stSidebar"] div[class*="st-key-btn_nav_ind_ui4"] { --nav-ic
 section[data-testid="stSidebar"] div[class*="st-key-btn_nav_cfg_ui4"] { --nav-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Ccircle%20cx%3D%2212%22%20cy%3D%2212%22%20r%3D%223%22%2F%3E%3Cpath%20d%3D%22M19.4%2015a1.65%201.65%200%200%200%20.33%201.82l.06.06-2.83%202.83-.06-.06A1.65%201.65%200%200%200%2015%2019.4a1.65%201.65%200%200%200-1%20.6%201.65%201.65%200%200%200-.4%201.08V21h-4v-.08A1.65%201.65%200%200%200%208.6%2019.4a1.65%201.65%200%200%200-1.82.33l-.06.06-2.83-2.83.06-.06A1.65%201.65%200%200%200%204.6%2015a1.65%201.65%200%200%200-.6-1%201.65%201.65%200%200%200-1.08-.4H3v-4h.08A1.65%201.65%200%200%200%204.6%208.6a1.65%201.65%200%200%200-.33-1.82l-.06-.06%202.83-2.83.06.06A1.65%201.65%200%200%200%209%204.6a1.65%201.65%200%200%200%201-.6%201.65%201.65%200%200%200%20.4-1.08V3h4v.08A1.65%201.65%200%200%200%2015.4%204.6a1.65%201.65%200%200%200%201.82-.33l.06-.06%202.83%202.83-.06.06A1.65%201.65%200%200%200%2019.4%209c.18.36.27.76.27%201.16s-.09.8-.27%201.16Z%22%2F%3E%3C%2Fsvg%3E"); }
 </style>
 """, unsafe_allow_html=True)
+
+
+
+# --- APROAR REDESIGN V2 | BASE + SIDEBAR + HOME -------------------------------
+st.markdown("""
+<style>
+:root{
+    --r2-bg:#F5F7FA;
+    --r2-surface:#FFFFFF;
+    --r2-navy:#0A1830;
+    --r2-navy-hover:#132947;
+    --r2-blue:#245FE5;
+    --r2-blue-hover:#1D4ED8;
+    --r2-text:#142033;
+    --r2-muted:#748197;
+    --r2-border:#E4E9F0;
+    --r2-border-strong:#D8DFE9;
+    --r2-green:#15966B;
+    --r2-amber:#C87A12;
+    --r2-red:#D6455D;
+}
+
+/* Tira o máximo possível da aparência padrão do Streamlit. */
+#MainMenu, footer { visibility:hidden !important; }
+[data-testid="stToolbar"] { display:none !important; }
+[data-testid="stDecoration"] { display:none !important; }
+[data-testid="stHeader"]{
+    background:rgba(245,247,250,.96) !important;
+    border-bottom:0 !important;
+    height:46px !important;
+}
+
+html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"]{
+    background:var(--r2-bg) !important;
+    color:var(--r2-text) !important;
+}
+main .block-container{
+    max-width:1420px !important;
+    padding:3.55rem 2.2rem 2.5rem !important;
+}
+
+/* Tipografia: menos "template", mais software interno real. */
+html,body,p,label,input,textarea,button,.stMarkdown,.stCaption,
+[data-testid="stMetricValue"],[data-testid="stMetricLabel"]{
+    font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif !important;
+}
+h1,h2,h3,h4,h5,h6{ color:var(--r2-text) !important; letter-spacing:-.025em !important; }
+
+/* SIDEBAR ------------------------------------------------------------------ */
+section[data-testid="stSidebar"]{
+    width:212px !important;
+    min-width:212px !important;
+    background:var(--r2-navy) !important;
+    border-right:1px solid #142B4A !important;
+}
+section[data-testid="stSidebar"] > div:first-child{
+    padding:16px 12px 14px !important;
+}
+section[data-testid="stSidebar"] [data-testid="stImage"]{
+    max-width:146px !important;
+    margin:7px auto 0 !important;
+}
+.aproar-sidebar-subtitle{
+    color:#8093AD !important;
+    font-size:9px !important;
+    letter-spacing:1.5px !important;
+    margin:4px 8px 16px !important;
+    text-align:center !important;
+    font-weight:700 !important;
+}
+.aproar-sidebar-section{
+    color:#68809F !important;
+    font-size:8px !important;
+    letter-spacing:1.25px !important;
+    margin:17px 9px 6px !important;
+    font-weight:750 !important;
+}
+section[data-testid="stSidebar"] .stButton{ margin:0 !important; }
+section[data-testid="stSidebar"] .stButton > button{
+    min-height:38px !important;
+    height:38px !important;
+    margin:1px 0 !important;
+    border-radius:7px !important;
+    border:0 !important;
+    background:transparent !important;
+    color:#C9D4E2 !important;
+    font-size:13px !important;
+    font-weight:520 !important;
+    padding-left:42px !important;
+    box-shadow:none !important;
+}
+section[data-testid="stSidebar"] .stButton > button:hover{
+    background:var(--r2-navy-hover) !important;
+    color:#FFFFFF !important;
+}
+section[data-testid="stSidebar"] [data-testid="stBaseButton-primary"],
+section[data-testid="stSidebar"] .stButton > button[kind="primary"]{
+    background:var(--r2-blue) !important;
+    color:#FFFFFF !important;
+    font-weight:600 !important;
+}
+section[data-testid="stSidebar"] .stButton > button::before{
+    left:14px !important;
+    width:17px !important;
+    height:17px !important;
+    -webkit-mask-size:17px 17px !important;
+    mask-size:17px 17px !important;
+    opacity:.92 !important;
+}
+section[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p{
+    color:#70839D !important;
+    font-size:10px !important;
+}
+section[data-testid="stSidebar"] div[class*="st-key-bloquear_edicao_sidebar_ui4"] button{
+    min-height:31px !important;
+    height:31px !important;
+    padding-left:8px !important;
+    color:#8295AE !important;
+    font-size:11px !important;
+    background:transparent !important;
+}
+
+/* Barra pequena exclusiva da homologação. */
+.ap-env-banner{
+    display:flex; align-items:center; gap:8px;
+    width:max-content;
+    max-width:100%;
+    color:#826419;
+    font-size:11px;
+    font-weight:600;
+    background:#FFFBEA;
+    border:1px solid #F3E8B3;
+    border-radius:6px;
+    padding:6px 9px;
+    margin:0 0 18px 0;
+}
+.ap-env-dot{width:7px;height:7px;background:#D7A522;border-radius:999px;display:inline-block;}
+
+/* HOME --------------------------------------------------------------------- */
+.ap-home-head{
+    display:flex;
+    align-items:flex-end;
+    justify-content:space-between;
+    gap:24px;
+    margin:2px 0 19px;
+}
+.ap-home-title{font-size:30px;line-height:1.02;font-weight:750;color:var(--r2-text);}
+.ap-home-sub{font-size:13px;color:var(--r2-muted);margin-top:6px;}
+.ap-home-date{text-align:right;font-size:12px;color:#5F6F84;font-weight:600;}
+.ap-home-date span{display:block;color:#97A3B3;font-size:11px;font-weight:450;margin-top:3px;}
+
+/* Filtros compactos: uma barra, sem "caixa gigante". */
+div[class*="st-key-ap2_filters"] [data-testid="stVerticalBlockBorderWrapper"] > div{
+    background:var(--r2-surface) !important;
+    border:1px solid var(--r2-border) !important;
+    border-radius:9px !important;
+    padding:10px 12px 8px !important;
+}
+div[class*="st-key-ap2_filters"] label p{
+    font-size:10px !important;
+    font-weight:650 !important;
+    color:#66758A !important;
+    margin-bottom:3px !important;
+}
+div[class*="st-key-ap2_filters"] div[data-baseweb="select"] > div,
+div[class*="st-key-ap2_filters"] div[data-baseweb="base-input"] > div,
+div[class*="st-key-ap2_filters"] div[data-baseweb="input"] > div{
+    min-height:37px !important;
+    height:37px !important;
+    border:0 !important;
+    border-radius:6px !important;
+    background:#F7F9FC !important;
+}
+div[class*="st-key-ap2_filters"] .stButton > button{
+    height:37px !important;
+    min-height:37px !important;
+    border-radius:6px !important;
+    font-size:12px !important;
+}
+
+/* Linha de indicadores: discreta, branca, quase sem decoração. */
+.ap-kpi-strip{
+    display:grid;
+    grid-template-columns:repeat(5,minmax(0,1fr));
+    background:var(--r2-surface);
+    border:1px solid var(--r2-border);
+    border-radius:10px;
+    margin:14px 0 16px;
+    overflow:hidden;
+}
+.ap-kpi{
+    position:relative;
+    padding:16px 18px 15px;
+    min-height:94px;
+    border-right:1px solid var(--r2-border);
+}
+.ap-kpi:last-child{border-right:0;}
+.ap-kpi-label{font-size:10px;text-transform:uppercase;letter-spacing:.35px;color:#69798F;font-weight:700;}
+.ap-kpi-row{display:flex;align-items:baseline;gap:7px;margin-top:8px;}
+.ap-kpi-value{font-size:27px;line-height:1;font-weight:730;color:#142033;}
+.ap-kpi-badge{font-size:10px;font-weight:650;color:#76879D;}
+.ap-kpi-note{font-size:10px;color:#9AA6B6;margin-top:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.ap-kpi.ok .ap-kpi-value{color:#177E61;}
+.ap-kpi.warn .ap-kpi-value{color:#B66B13;}
+.ap-kpi.danger .ap-kpi-value{color:#C44459;}
+
+/* Conteúdo de ação: cards brancos e acentos laterais, sem fundos pastel grandes. */
+.ap-action-grid{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(320px,.9fr);gap:14px;align-items:start;}
+.ap-card{
+    background:var(--r2-surface);
+    border:1px solid var(--r2-border);
+    border-radius:10px;
+    padding:16px;
+}
+.ap-card-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;}
+.ap-card-title{font-size:15px;font-weight:700;color:#1A283B;}
+.ap-card-sub{font-size:11px;color:#8A97A9;margin-top:3px;}
+.ap-pill{font-size:10px;font-weight:650;color:#5E6B7B;background:#F2F4F7;border-radius:999px;padding:5px 9px;white-space:nowrap;}
+.ap-pill.red{background:#FFF0F2;color:#C34458;}
+.ap-pill.amber{background:#FFF6E9;color:#B66F15;}
+
+.ap-task-list{display:flex;flex-direction:column;gap:7px;}
+.ap-task{
+    display:flex;align-items:center;justify-content:space-between;gap:14px;
+    padding:11px 12px;
+    border:1px solid #E9EDF3;
+    border-left:3px solid #D6DEE8;
+    border-radius:7px;
+    background:#FFFFFF;
+}
+.ap-task.amber{border-left-color:#D4932F;}
+.ap-task.red{border-left-color:#D45568;}
+.ap-task.green{border-left-color:#37A17B;}
+.ap-task strong{display:block;font-size:12px;color:#25354A;font-weight:650;}
+.ap-task span{display:block;font-size:10px;color:#8A97A9;margin-top:2px;}
+.ap-task-count{font-size:11px;font-weight:700;color:#5C6D83;white-space:nowrap;}
+
+.ap-conflict-list{display:flex;flex-direction:column;gap:7px;}
+.ap-conflict{
+    padding:11px 12px;
+    border:1px solid #E8EDF3;
+    border-radius:7px;
+    background:#FFFFFF;
+}
+.ap-conflict-top{display:flex;justify-content:space-between;gap:10px;align-items:center;}
+.ap-conflict-name{font-size:12px;font-weight:670;color:#26364C;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.ap-conflict-time{font-size:10px;color:#C34B5E;font-weight:650;}
+.ap-conflict-detail{font-size:10px;color:#8B98AA;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+
+/* Ações rápidas pequenas, sem cards chamativos. */
+.ap-quick-head{font-size:13px;font-weight:700;color:#314258;margin:17px 0 8px;}
+div[class*="st-key-ap2_quick"] .stButton > button{
+    min-height:36px !important;
+    height:36px !important;
+    font-size:11px !important;
+    font-weight:600 !important;
+    border:1px solid var(--r2-border) !important;
+    background:#FFFFFF !important;
+    color:#3E526C !important;
+    border-radius:7px !important;
+    box-shadow:none !important;
+}
+div[class*="st-key-ap2_quick"] .stButton > button:hover{
+    border-color:#BFCBDC !important;
+    background:#F9FAFC !important;
+}
+div[class*="st-key-ap2_quick"] [data-testid="stBaseButton-primary"]{
+    background:var(--r2-blue) !important;
+    color:#FFFFFF !important;
+    border-color:var(--r2-blue) !important;
+}
+
+/* Componentes gerais mais secos. */
+[data-testid="stVerticalBlockBorderWrapper"] > div,
+[data-testid="stExpander"]{
+    border-color:var(--r2-border) !important;
+    box-shadow:none !important;
+}
+[data-testid="stAlert"]{border-radius:8px !important;box-shadow:none !important;}
+[data-testid="stDataFrame"],[data-testid="stDataEditor"]{border-color:var(--r2-border) !important;box-shadow:none !important;}
+main .stButton > button, main .stDownloadButton > button{
+    box-shadow:none !important;
+    border-radius:7px !important;
+}
+
+@media(max-width:1100px){
+    .ap-kpi-strip{grid-template-columns:repeat(2,minmax(0,1fr));}
+    .ap-kpi{border-bottom:1px solid var(--r2-border);}
+    .ap-action-grid{grid-template-columns:1fr;}
+}
+@media(max-width:760px){
+    section[data-testid="stSidebar"]{width:208px !important;min-width:208px !important;}
+    main .block-container{padding:3.4rem .9rem 2rem !important;}
+    .ap-home-title{font-size:25px;}
+    .ap-home-date{display:none;}
+    .ap-kpi-strip{grid-template-columns:1fr;}
+    .ap-kpi{border-right:0;border-bottom:1px solid var(--r2-border);}
+}
+</style>
+""", unsafe_allow_html=True)
+
 
 # --- MESES EM PORTUGUÊS ---
 MESES_PT = {
@@ -5103,7 +5407,7 @@ else:
 
     menu_escolhido = st.session_state.menu_ativo
 
-    # --- HOME ADMINISTRATIVA — INTERFACE MINIMALISTA / AÇÃO DO DIA ---
+    # --- HOME ADMINISTRATIVA — REDESIGN V2 ---
     if menu_escolhido == "🏠 INÍCIO":
         import html as _html
 
@@ -5113,32 +5417,34 @@ else:
         data_extenso = f"{dias_semana[hoje_real.weekday()]}, {hoje_real.day:02d} de {meses_nome[hoje_real.month]} de {hoje_real.year}"
 
         st.markdown(
+            '<div class="ap-env-banner"><span class="ap-env-dot"></span>Homologação · dados de teste</div>',
+            unsafe_allow_html=True,
+        )
+
+        st.markdown(
             f"""
-            <div class="aproar-page-head">
-                <div class="aproar-page-title-wrap">
-                    <div class="aproar-page-icon"><span class="material-symbols-rounded">home</span></div>
-                    <div>
-                        <div class="aproar-page-title">Visão do dia</div>
-                        <div class="aproar-page-subtitle">Acompanhe a situação da equipe e resolva o que precisa de atenção.</div>
-                    </div>
+            <div class="ap-home-head">
+                <div>
+                    <div class="ap-home-title">Visão do dia</div>
+                    <div class="ap-home-sub">O que precisa de atenção e como está a equipe hoje.</div>
                 </div>
-                <div class="aproar-date-card">📅 &nbsp;<strong>{data_extenso}</strong><br><span>Bom dia, Administrador.</span></div>
+                <div class="ap-home-date">{data_extenso}<span>Atualizado conforme os filtros abaixo</span></div>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
         unidades_home = sorted({str(o.get("unidade") or "").strip() for o in obras if str(o.get("unidade") or "").strip()})
-        with st.container(border=True):
-            f1, f2, f3, f4 = st.columns([1.0, 1.15, 1.15, 0.58], vertical_alignment="bottom")
+        with st.container(border=True, key="ap2_filters"):
+            f1, f2, f3, f4 = st.columns([1.0, 1.1, 1.1, .55], vertical_alignment="bottom")
             with f1:
-                data_home = st.date_input("Data", value=hoje_real, format="DD/MM/YYYY", key="ui4_home_data")
+                data_home = st.date_input("Data", value=hoje_real, format="DD/MM/YYYY", key="ap2_home_data")
             with f2:
-                unidade_home = st.selectbox("Unidade", ["Todas"] + unidades_home, key="ui4_home_unidade")
+                unidade_home = st.selectbox("Unidade", ["Todas"] + unidades_home, key="ap2_home_unidade")
             with f3:
-                engenheiro_home = st.selectbox("Engenheiro", ["Todos"] + ENGENHEIROS, key="ui4_home_engenheiro")
+                engenheiro_home = st.selectbox("Engenheiro", ["Todos"] + ENGENHEIROS, key="ap2_home_engenheiro")
             with f4:
-                if st.button("Atualizar", type="primary", icon=":material/refresh:", use_container_width=True, key="ui4_home_atualizar"):
+                if st.button("Atualizar", type="primary", use_container_width=True, key="ap2_home_atualizar"):
                     try:
                         _buscar_convocacoes_intervalo.clear()
                     except Exception:
@@ -5180,43 +5486,48 @@ else:
         pct_apontado = round((apontados / total * 100), 0) if total else 0
         pct_pendente = round((len(pendentes) / total * 100), 0) if total else 0
 
-        # Comparação simples com o dia útil anterior, usando o mesmo filtro.
         dia_anterior = data_home - datetime.timedelta(days=1)
         while dia_anterior.weekday() >= 5:
             dia_anterior -= datetime.timedelta(days=1)
         conv_anterior_raw = _buscar_convocacoes_intervalo(dia_anterior, dia_anterior)
         conv_anterior = _filtrar_home(conv_anterior_raw, dia_anterior.isoformat())
-        delta_total = total - len(conv_anterior)
         if len(conv_anterior):
-            pct_delta = round((delta_total / len(conv_anterior)) * 100)
+            pct_delta = round(((total - len(conv_anterior)) / len(conv_anterior)) * 100)
             nota_total = f"{'+' if pct_delta > 0 else ''}{pct_delta}% vs. dia útil anterior"
-            classe_total = "aproar-note-green" if pct_delta >= 0 else "aproar-note-red"
         else:
             nota_total = "registros no dia"
-            classe_total = ""
+
+        status_faltas = "danger" if (faltas + atestados) > 0 else ""
+        status_pend = "warn" if pendentes else ""
+        status_apont = "ok" if total and pct_apontado >= 90 else ""
 
         st.markdown(
             f"""
-            <div class="aproar-metric-grid">
-                <div class="aproar-metric">
-                    <div class="aproar-metric-icon aproar-icon-blue">♟</div>
-                    <div><div class="aproar-metric-label">Equipe hoje</div><div class="aproar-metric-value">{total}</div><div class="aproar-metric-note {classe_total}">{nota_total}</div></div>
+            <div class="ap-kpi-strip">
+                <div class="ap-kpi">
+                    <div class="ap-kpi-label">Equipe hoje</div>
+                    <div class="ap-kpi-row"><div class="ap-kpi-value">{total}</div></div>
+                    <div class="ap-kpi-note">{_html.escape(nota_total)}</div>
                 </div>
-                <div class="aproar-metric">
-                    <div class="aproar-metric-icon aproar-icon-green">✓</div>
-                    <div><div class="aproar-metric-label">Apontados</div><div class="aproar-metric-value">{apontados}</div><div class="aproar-metric-note aproar-note-green">{int(pct_apontado)}% da equipe</div></div>
+                <div class="ap-kpi {status_apont}">
+                    <div class="ap-kpi-label">Apontados</div>
+                    <div class="ap-kpi-row"><div class="ap-kpi-value">{apontados}</div><div class="ap-kpi-badge">{int(pct_apontado)}%</div></div>
+                    <div class="ap-kpi-note">da equipe selecionada</div>
                 </div>
-                <div class="aproar-metric">
-                    <div class="aproar-metric-icon aproar-icon-orange">◷</div>
-                    <div><div class="aproar-metric-label">Pendentes</div><div class="aproar-metric-value">{len(pendentes)}</div><div class="aproar-metric-note aproar-note-orange">{int(pct_pendente)}% da equipe</div></div>
+                <div class="ap-kpi {status_pend}">
+                    <div class="ap-kpi-label">Pendentes</div>
+                    <div class="ap-kpi-row"><div class="ap-kpi-value">{len(pendentes)}</div><div class="ap-kpi-badge">{int(pct_pendente)}%</div></div>
+                    <div class="ap-kpi-note">apontamento(s) a concluir</div>
                 </div>
-                <div class="aproar-metric">
-                    <div class="aproar-metric-icon aproar-icon-red">!</div>
-                    <div><div class="aproar-metric-label">Faltas / atestados</div><div class="aproar-metric-value">{faltas + atestados}</div><div class="aproar-metric-note">{faltas} falta(s) • {atestados} atestado(s)</div></div>
+                <div class="ap-kpi {status_faltas}">
+                    <div class="ap-kpi-label">Faltas / atestados</div>
+                    <div class="ap-kpi-row"><div class="ap-kpi-value">{faltas + atestados}</div></div>
+                    <div class="ap-kpi-note">{faltas} falta(s) · {atestados} atestado(s)</div>
                 </div>
-                <div class="aproar-metric">
-                    <div class="aproar-metric-icon aproar-icon-purple">▣</div>
-                    <div><div class="aproar-metric-label">Convocados amanhã</div><div class="aproar-metric-value">{len(conv_amanha)}</div><div class="aproar-metric-note">{amanha_home.strftime('%d/%m/%Y')}</div></div>
+                <div class="ap-kpi">
+                    <div class="ap-kpi-label">Convocados amanhã</div>
+                    <div class="ap-kpi-row"><div class="ap-kpi-value">{len(conv_amanha)}</div></div>
+                    <div class="ap-kpi-note">{amanha_home.strftime('%d/%m/%Y')}</div>
                 </div>
             </div>
             """,
@@ -5231,99 +5542,87 @@ else:
         conflitos_flat.sort(key=lambda x: str((x[1] or {}).get("em") or ""), reverse=True)
         qtd_conflitos = len(conflitos_flat)
 
-        c_attention, c_conflicts = st.columns([1.35, 1.0], gap="medium")
-        with c_attention:
-            itens_atencao = []
-            if qtd_conflitos:
-                itens_atencao.append(("♟", f"{qtd_conflitos} conflito(s) de convocação", "Há tentativas de convocação em turnos que se sobrepõem."))
-            if pendentes:
-                itens_atencao.append(("◷", f"{len(pendentes)} apontamento(s) pendente(s)", "Há colaboradores ainda sem Obra/Serviço definida no dia selecionado."))
-            if not itens_atencao:
-                itens_atencao.append(("✓", "Nenhuma pendência operacional", "Não há itens que exijam ação imediata para este filtro."))
-
-            itens_html = "".join(
-                f"""
-                <div class="aproar-list-item">
-                    <div class="aproar-list-left"><div class="aproar-mini-icon">{icone}</div>
-                    <div class="aproar-list-text"><strong>{_html.escape(titulo)}</strong><div>{_html.escape(desc)}</div></div></div>
-                    <div class="aproar-chevron">›</div>
-                </div>
-                """ for icone, titulo, desc in itens_atencao
+        tarefas_html = []
+        if pendentes:
+            tarefas_html.append(
+                f'<div class="ap-task amber"><div><strong>{len(pendentes)} apontamento(s) pendente(s)</strong>'
+                '<span>Há colaboradores ainda sem Obra/Serviço definida no dia selecionado.</span></div>'
+                f'<div class="ap-task-count">{len(pendentes)}</div></div>'
             )
-            st.markdown(
-                f"""
-                <div class="aproar-panel attention">
-                    <div class="aproar-panel-head">
-                        <div class="aproar-panel-title"><div class="iconbox aproar-icon-orange">!</div><div><h3>Precisa de atenção</h3><p>Itens que precisam da sua ação hoje.</p></div></div>
-                        <div class="aproar-chip aproar-chip-orange">{max(0, len(itens_atencao) if (qtd_conflitos or pendentes) else 0)} pendência(s)</div>
-                    </div>
-                    {itens_html}
-                </div>
-                """,
-                unsafe_allow_html=True,
+        if qtd_conflitos:
+            tarefas_html.append(
+                f'<div class="ap-task red"><div><strong>{qtd_conflitos} conflito(s) de convocação</strong>'
+                '<span>Tentativas de convocação em turnos que se sobrepõem.</span></div>'
+                f'<div class="ap-task-count">{qtd_conflitos}</div></div>'
             )
-            if pendentes:
-                if st.button("Abrir apontamentos pendentes", key="ui4_abrir_apont", use_container_width=True):
-                    _ir_menu_admin("✅ APONTAMENTO")
-                    st.rerun()
-
-        with c_conflicts:
-            conflitos_cards = []
-            for reg, item in conflitos_flat[:2]:
-                nome = str(item.get("colaborador_nome") or dict_colaboradores.get(reg.get("colaborador_id"), {}).get("nome") or "Colaborador")
-                turno_original = str(item.get("turno_original") or turno_da_convocacao(reg))
-                turno_tentativa = str(item.get("turno_tentativa") or "")
-                eng_original = str(item.get("engenheiro_original") or reg.get("engenheiro") or "")
-                eng_tent = str(item.get("tentativa_por") or "")
-                hora = ""
-                try:
-                    dt = datetime.datetime.fromisoformat(str(item.get("em") or "").replace("Z", "+00:00"))
-                    hora = dt.astimezone(ZoneInfo("America/Fortaleza")).strftime("%H:%M")
-                except Exception:
-                    hora = ""
-                conflitos_cards.append(
-                    '<div class="aproar-conflict-item">'
-                    '<div class="aproar-conflict-main">'
-                    '<div class="aproar-conflict-type">Mesmo colaborador em turnos sobrepostos</div>'
-                    f'<div class="aproar-conflict-name">{_html.escape(nome)}</div>'
-                    f'<div class="aproar-conflict-detail">{_html.escape(eng_original)} · {_html.escape(turno_original)} × {_html.escape(eng_tent)} · {_html.escape(turno_tentativa)}</div>'
-                    '</div>'
-                    f'<div class="aproar-conflict-time">{_html.escape(hora)}</div>'
-                    '</div>'
-                )
-            if not conflitos_cards:
-                conflitos_cards.append(
-                    '<div class="aproar-list-item"><div class="aproar-list-left"><div class="aproar-mini-icon">✓</div><div class="aproar-list-text"><strong>Nenhum conflito pendente</strong><div>A fila do Paulo está limpa.</div></div></div></div>'
-                )
-
-            st.markdown(
-                f"""
-                <div class="aproar-panel">
-                    <div class="aproar-panel-head">
-                        <div class="aproar-panel-title"><div class="iconbox aproar-icon-red">△</div><div><h3>Conflitos pendentes</h3><p>Convocações que precisam de resolução.</p></div></div>
-                        <div class="aproar-chip aproar-chip-red">{qtd_conflitos} conflito(s)</div>
-                    </div>
-                    {''.join(conflitos_cards)}
-                </div>
-                """,
-                unsafe_allow_html=True,
+        if faltas or atestados:
+            tarefas_html.append(
+                f'<div class="ap-task red"><div><strong>{faltas + atestados} ausência(s) registrada(s)</strong>'
+                f'<span>{faltas} falta(s) · {atestados} atestado(s).</span></div>'
+                f'<div class="ap-task-count">{faltas + atestados}</div></div>'
             )
-            if st.button("Ver todos os conflitos →", key="ui4_ver_conflitos", use_container_width=True):
-                _ir_menu_admin("🚨 CONFLITOS")
-                st.rerun()
+        if not tarefas_html:
+            tarefas_html.append(
+                '<div class="ap-task green"><div><strong>Nenhuma pendência imediata</strong>'
+                '<span>O filtro selecionado não apresenta itens que exijam ação agora.</span></div>'
+                '<div class="ap-task-count">OK</div></div>'
+            )
+
+        conflitos_html = []
+        for reg, item in conflitos_flat[:3]:
+            nome = str(item.get("colaborador_nome") or dict_colaboradores.get(reg.get("colaborador_id"), {}).get("nome") or "Colaborador")
+            turno_original = str(item.get("turno_original") or turno_da_convocacao(reg))
+            turno_tentativa = str(item.get("turno_tentativa") or "")
+            eng_original = str(item.get("engenheiro_original") or reg.get("engenheiro") or "")
+            eng_tent = str(item.get("tentativa_por") or "")
+            hora = ""
+            try:
+                dt = datetime.datetime.fromisoformat(str(item.get("em") or "").replace("Z", "+00:00"))
+                hora = dt.astimezone(ZoneInfo("America/Fortaleza")).strftime("%H:%M")
+            except Exception:
+                pass
+            conflitos_html.append(
+                '<div class="ap-conflict"><div class="ap-conflict-top">'
+                f'<div class="ap-conflict-name">{_html.escape(nome)}</div>'
+                f'<div class="ap-conflict-time">{_html.escape(hora)}</div></div>'
+                f'<div class="ap-conflict-detail">{_html.escape(eng_original)} · {_html.escape(turno_original)} × {_html.escape(eng_tent)} · {_html.escape(turno_tentativa)}</div>'
+                '</div>'
+            )
+        if not conflitos_html:
+            conflitos_html.append(
+                '<div class="ap-task green"><div><strong>Nenhum conflito pendente</strong>'
+                '<span>A fila de conflitos está limpa.</span></div><div class="ap-task-count">OK</div></div>'
+            )
 
         st.markdown(
-            """
-            <div class="aproar-quick-title"><div class="aproar-quick-icon">ϟ</div><div><h3>Ações rápidas</h3><p>Acesse as principais funcionalidades do sistema.</p></div></div>
+            f"""
+            <div class="ap-action-grid">
+                <div class="ap-card">
+                    <div class="ap-card-head">
+                        <div><div class="ap-card-title">Precisa de atenção</div><div class="ap-card-sub">Itens que podem exigir alguma ação hoje.</div></div>
+                        <div class="ap-pill amber">{len(tarefas_html)} item(ns)</div>
+                    </div>
+                    <div class="ap-task-list">{''.join(tarefas_html)}</div>
+                </div>
+                <div class="ap-card">
+                    <div class="ap-card-head">
+                        <div><div class="ap-card-title">Conflitos</div><div class="ap-card-sub">Últimas tentativas bloqueadas.</div></div>
+                        <div class="ap-pill red">{qtd_conflitos}</div>
+                    </div>
+                    <div class="ap-conflict-list">{''.join(conflitos_html)}</div>
+                </div>
+            </div>
             """,
             unsafe_allow_html=True,
         )
-        q1, q2, q3, q4 = st.columns(4)
-        q1.button("Nova convocação", type="primary", use_container_width=True, on_click=_ir_menu_admin, args=("📋 CONVOCAÇÃO",), key="ui4_quick_conv")
-        q2.button("Fechar apontamentos", use_container_width=True, on_click=_ir_menu_admin, args=("✅ APONTAMENTO",), key="ui4_quick_apon")
-        q3.button("Planejar amanhã", use_container_width=True, on_click=_ir_menu_admin, args=("📋 CONVOCAÇÃO",), key="ui4_quick_amanha")
-        q4.button("Ver indicadores", use_container_width=True, on_click=_ir_menu_admin, args=("📈 INDICADORES",), key="ui4_quick_ind")
 
+        st.markdown('<div class="ap-quick-head">Ações rápidas</div>', unsafe_allow_html=True)
+        with st.container(key="ap2_quick"):
+            q1, q2, q3, q4 = st.columns(4)
+            q1.button("Nova convocação", type="primary", use_container_width=True, on_click=_ir_menu_admin, args=("📋 CONVOCAÇÃO",), key="ap2_quick_conv")
+            q2.button("Apontamentos", use_container_width=True, on_click=_ir_menu_admin, args=("✅ APONTAMENTO",), key="ap2_quick_apon")
+            q3.button("Disponibilidade", use_container_width=True, on_click=_ir_menu_admin, args=("👥 DISPONIBILIDADE",), key="ap2_quick_disp")
+            q4.button("Indicadores", use_container_width=True, on_click=_ir_menu_admin, args=("📈 INDICADORES",), key="ap2_quick_ind")
 
     # --- CONFLITOS DE CONVOCAÇÃO / PAULO ---
     elif menu_escolhido == "🚨 CONFLITOS":
