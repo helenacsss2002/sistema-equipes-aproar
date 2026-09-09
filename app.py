@@ -28,7 +28,7 @@ AMBIENTE_APROAR = "HOMOLOGACAO"
 AZUL_APROAR = "#2563EB"
 AZUL_APROAR_ESCURO = "#1D4ED8"
 
-st.markdown("""
+st.html("""
     <style>
     :root {
         --aproar-blue: #2563EB;
@@ -253,11 +253,11 @@ st.markdown("""
 
     hr { border-color: var(--aproar-border) !important; }
     </style>
-""", unsafe_allow_html=True)
+""")
 
 
 # --- UI APROAR | OPÇÃO 4 — MINIMALISTA, REALISTA E FUNCIONAL ---
-st.markdown("""
+st.html("""
 <style>
 /* Base */
 :root {
@@ -562,12 +562,12 @@ div[role="combobox"] {
     .aproar-page-head { margin-bottom:12px; }
 }
 </style>
-""", unsafe_allow_html=True)
+""")
 
 
 
 # --- PATCH VISUAL V2: SIDEBAR + PÁGINAS ANALÍTICAS ---
-st.markdown("""
+st.html("""
 <style>
 section[data-testid="stSidebar"] .stButton > button {
     gap: 7px !important;
@@ -652,12 +652,12 @@ section[data-testid="stSidebar"] > div:first-child {
     .aproar-dash-metrics { grid-template-columns:1fr; }
 }
 </style>
-""", unsafe_allow_html=True)
+""")
 
 
 
 # --- SIDEBAR V3: ÍCONES SVG CONSISTENTES (SEM MATERIAL ICONS) ---
-st.markdown("""
+st.html("""
 <style>
 /* Não dependemos mais da fonte de ícones do Streamlit para o menu. */
 section[data-testid="stSidebar"] .stButton > button {
@@ -706,12 +706,12 @@ section[data-testid="stSidebar"] div[class*="st-key-btn_nav_rel_ui4"] { --nav-ic
 section[data-testid="stSidebar"] div[class*="st-key-btn_nav_ind_ui4"] { --nav-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m3%2017%205-5%204%204%208-9%22%2F%3E%3Cpath%20d%3D%22M15%207h5v5%22%2F%3E%3C%2Fsvg%3E"); }
 section[data-testid="stSidebar"] div[class*="st-key-btn_nav_cfg_ui4"] { --nav-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Ccircle%20cx%3D%2212%22%20cy%3D%2212%22%20r%3D%223%22%2F%3E%3Cpath%20d%3D%22M19.4%2015a1.65%201.65%200%200%200%20.33%201.82l.06.06-2.83%202.83-.06-.06A1.65%201.65%200%200%200%2015%2019.4a1.65%201.65%200%200%200-1%20.6%201.65%201.65%200%200%200-.4%201.08V21h-4v-.08A1.65%201.65%200%200%200%208.6%2019.4a1.65%201.65%200%200%200-1.82.33l-.06.06-2.83-2.83.06-.06A1.65%201.65%200%200%200%204.6%2015a1.65%201.65%200%200%200-.6-1%201.65%201.65%200%200%200-1.08-.4H3v-4h.08A1.65%201.65%200%200%200%204.6%208.6a1.65%201.65%200%200%200-.33-1.82l-.06-.06%202.83-2.83.06.06A1.65%201.65%200%200%200%209%204.6a1.65%201.65%200%200%200%201-.6%201.65%201.65%200%200%200%20.4-1.08V3h4v.08A1.65%201.65%200%200%200%2015.4%204.6a1.65%201.65%200%200%200%201.82-.33l.06-.06%202.83%202.83-.06.06A1.65%201.65%200%200%200%2019.4%209c.18.36.27.76.27%201.16s-.09.8-.27%201.16Z%22%2F%3E%3C%2Fsvg%3E"); }
 </style>
-""", unsafe_allow_html=True)
+""")
 
 
 
 # --- APROAR REDESIGN V2 | BASE + SIDEBAR + HOME -------------------------------
-st.markdown("""
+st.html("""
 <style>
 :root{
     --r2-bg:#F5F7FA;
@@ -1006,13 +1006,13 @@ main .stButton > button, main .stDownloadButton > button{
     .ap-kpi{border-right:0;border-bottom:1px solid var(--r2-border);}
 }
 </style>
-""", unsafe_allow_html=True)
+""")
 
 
 
 
 # --- PATCH REDESIGN V2.1 | BOTÕES DE AÇÕES RÁPIDAS ---------------------------
-st.markdown("""
+st.html("""
 <style>
 /* Corrige texto invisível/colapsado dos botões de ações rápidas e dá acabamento consistente. */
 div[class*="st-key-ap2_quick_conv"] button,
@@ -1091,7 +1091,7 @@ div[class*="st-key-ap2_quick_ind"] button::before{
     div[class*="st-key-ap2_quick"]{ max-width:980px; }
 }
 </style>
-""", unsafe_allow_html=True)
+""")
 
 
 
@@ -1099,7 +1099,7 @@ div[class*="st-key-ap2_quick_ind"] button::before{
 # --- PATCH REDESIGN V2.2 | AÇÕES RÁPIDAS ADAPTATIVAS AO TEMA -----------------
 # Usa as variáveis de tema do próprio Streamlit. Assim os botões acompanham
 # tema claro, escuro e a opção "System" sem manter fundo branco fixo.
-st.markdown("""
+st.html("""
 <style>
 .ap-quick-head{
     color:var(--st-text-color, var(--text-color, #314258)) !important;
@@ -1172,13 +1172,13 @@ div[class*="st-key-ap2_quick_ind"] button:hover{
     }
 }
 </style>
-""", unsafe_allow_html=True)
+""")
 
 
 
 
 # --- PATCH V2.4 | CORREÇÃO DEFINITIVA DO BOTÃO NOVA CONVOCAÇÃO --------------
-st.markdown("""
+st.html("""
 <style>
 div[class*="st-key-ap2_quick_conv"] button{
     background:var(
@@ -1234,13 +1234,13 @@ div[class*="st-key-ap2_quick_conv"] button:hover{
     }
 }
 </style>
-""", unsafe_allow_html=True)
+""")
 
 
 
 
 # --- APROAR DESIGN SYSTEM V3 | PÁGINAS INTERNAS + TABELAS -------------------
-st.markdown("""
+st.html("""
 <style>
 /* Variáveis com fallback: acompanham Light / Dark / System quando o Streamlit
    expõe o tema, mas continuam consistentes com a identidade APROAR. */
@@ -1470,7 +1470,174 @@ main [data-testid="stFormSubmitButton"] > button{
     .ap3-page-side{display:none;}
 }
 </style>
-""", unsafe_allow_html=True)
+""")
+
+
+
+
+# --- APROAR V3.1 | CORREÇÃO GLOBAL DE ESPAÇAMENTO ---------------------------
+st.html("""
+<style>
+/* O conteúdo começa perto do topo, sem a faixa vazia que aparecia antes. */
+[data-testid="stMainBlockContainer"],
+main .block-container{
+    padding-top:1.45rem !important;
+    padding-bottom:1.6rem !important;
+}
+
+/* Sidebar também começa no topo de forma natural. */
+[data-testid="stSidebarContent"]{
+    padding-top:.8rem !important;
+    padding-bottom:.8rem !important;
+}
+section[data-testid="stSidebar"]{
+    padding-top:0 !important;
+}
+section[data-testid="stSidebar"] > div:first-child{
+    padding-top:.75rem !important;
+}
+
+/* Os elementos invisíveis de estilo não devem reservar altura em versões
+   do Streamlit que ainda criem um container ao redor deles. */
+[data-testid="stElementContainer"]:has(style),
+.element-container:has(style){
+    display:none !important;
+    height:0 !important;
+    min-height:0 !important;
+    margin:0 !important;
+    padding:0 !important;
+}
+
+/* Ritmo vertical geral: compacto, mas sem deixar formulário apertado. */
+[data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"]{
+    gap:.8rem !important;
+}
+main [data-testid="stForm"] [data-testid="stVerticalBlock"],
+main [data-testid="stExpander"] [data-testid="stVerticalBlock"],
+main [data-testid="stVerticalBlockBorderWrapper"] [data-testid="stVerticalBlock"]{
+    gap:.65rem !important;
+}
+main [data-testid="stHorizontalBlock"]{
+    gap:.75rem !important;
+}
+
+/* Sidebar: remove o ar excessivo entre logo, grupos e opções. */
+[data-testid="stSidebarContent"] [data-testid="stVerticalBlock"]{
+    gap:.15rem !important;
+}
+section[data-testid="stSidebar"] [data-testid="stImage"]{
+    margin:0 auto 0 !important;
+}
+.aproar-sidebar-subtitle{
+    margin:1px 8px 10px !important;
+}
+.aproar-sidebar-section{
+    margin:11px 9px 4px !important;
+}
+section[data-testid="stSidebar"] .stButton > button{
+    margin:0 !important;
+    min-height:36px !important;
+    height:36px !important;
+}
+
+/* Home */
+.ap-env-banner{
+    margin:0 0 10px 0 !important;
+}
+.ap-home-head{
+    margin:0 0 12px !important;
+}
+.ap-home-sub{
+    margin-top:4px !important;
+}
+div[class*="st-key-ap2_filters"] [data-testid="stVerticalBlockBorderWrapper"] > div{
+    padding:8px 11px 7px !important;
+}
+.ap-kpi-strip{
+    margin:10px 0 12px !important;
+}
+.ap-kpi{
+    min-height:84px !important;
+    padding:13px 16px 12px !important;
+}
+.ap-kpi-row{
+    margin-top:6px !important;
+}
+.ap-kpi-note{
+    margin-top:6px !important;
+}
+.ap-action-grid{
+    gap:12px !important;
+}
+.ap-card{
+    padding:14px !important;
+}
+.ap-card-head{
+    margin-bottom:9px !important;
+}
+.ap-quick-head{
+    margin:12px 0 6px !important;
+}
+
+/* Páginas internas */
+.ap3-page-head{
+    margin:0 0 12px !important;
+    padding-bottom:10px !important;
+}
+.ap3-page-kicker{
+    margin-bottom:4px !important;
+}
+.ap3-page-sub{
+    margin-top:4px !important;
+}
+.ap3-section{
+    margin:14px 0 7px !important;
+}
+[data-testid="stTabs"] [data-baseweb="tab-list"]{
+    margin-bottom:8px !important;
+}
+
+/* Métricas e caixas ocupam menos altura sem perder legibilidade. */
+[data-testid="stMetric"]{
+    padding:11px 13px !important;
+}
+[data-testid="stMetricValue"]{
+    font-size:22px !important;
+}
+main [data-testid="stVerticalBlockBorderWrapper"] > div{
+    padding-top:.7rem;
+    padding-bottom:.7rem;
+}
+
+/* Campos e botões ligeiramente mais baixos. */
+main div[data-baseweb="select"] > div,
+main div[data-baseweb="base-input"] > div,
+main div[data-baseweb="input"] > div,
+main div[role="combobox"]{
+    min-height:37px !important;
+}
+main .stButton > button,
+main .stDownloadButton > button{
+    min-height:36px !important;
+}
+
+/* Espaços artificiais criados com divs vazias antigas. */
+main div[style*="height:18px"],
+main div[style*="height:20px"],
+main div[style*="height:24px"]{
+    height:8px !important;
+}
+
+@media(max-width:900px){
+    [data-testid="stMainBlockContainer"],
+    main .block-container{
+        padding-top:1rem !important;
+        padding-left:1rem !important;
+        padding-right:1rem !important;
+    }
+}
+</style>
+""")
 
 
 # --- MESES EM PORTUGUÊS ---
