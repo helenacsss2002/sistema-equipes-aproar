@@ -563,6 +563,108 @@ div[role="combobox"] {
 </style>
 """, unsafe_allow_html=True)
 
+
+
+# --- PATCH VISUAL V2: SIDEBAR + PÁGINAS ANALÍTICAS ---
+st.markdown("""
+<style>
+/* Material Symbols da navegação: mantém a fonte correta e proporções do mockup */
+section[data-testid="stSidebar"] [data-testid="stIconMaterial"] {
+    font-family: "Material Symbols Rounded" !important;
+    font-size: 19px !important;
+    font-weight: 400 !important;
+    color: #C7D5E7 !important;
+    margin-right: 7px !important;
+}
+section[data-testid="stSidebar"] [data-testid="stBaseButton-primary"] [data-testid="stIconMaterial"] {
+    color: #FFFFFF !important;
+}
+section[data-testid="stSidebar"] .stButton > button {
+    gap: 7px !important;
+    min-height: 42px !important;
+    font-size: 14px !important;
+}
+section[data-testid="stSidebar"] .stButton > button p {
+    margin: 0 !important;
+    font-size: 14px !important;
+}
+
+/* A sidebar não deve parecer um menu flutuante gigante em telas baixas */
+section[data-testid="stSidebar"] > div:first-child {
+    padding-bottom: 12px !important;
+}
+
+/* Cabeçalho padrão das páginas internas */
+.aproar-inner-head {
+    display:flex;
+    align-items:center;
+    gap:12px;
+    margin: 0 0 18px 0;
+}
+.aproar-inner-icon {
+    width:44px;
+    height:44px;
+    border-radius:10px;
+    background:#EEF5FF;
+    color:#2563EB;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    flex:0 0 auto;
+}
+.aproar-inner-icon .material-symbols-rounded {
+    font-family:"Material Symbols Rounded" !important;
+    font-size:23px;
+}
+.aproar-inner-title { margin:0; font-size:28px; line-height:1.05; color:#10213D; font-weight:760; }
+.aproar-inner-subtitle { margin-top:4px; font-size:13px; color:#8292A8; }
+
+/* Métricas do dashboard no mesmo sistema visual da home */
+.aproar-dash-metrics {
+    display:grid;
+    grid-template-columns:repeat(5,minmax(0,1fr));
+    gap:12px;
+    margin:14px 0 10px 0;
+}
+.aproar-dash-card {
+    min-height:105px;
+    padding:15px 16px;
+    border:1px solid #DCE5F0;
+    border-radius:10px;
+    background:#FFFFFF;
+}
+.aproar-dash-label { font-size:10px; color:#53677F; font-weight:750; text-transform:uppercase; }
+.aproar-dash-value { font-size:28px; line-height:1; color:#0C1C34; font-weight:760; margin:8px 0 5px; }
+.aproar-dash-note { font-size:11px; color:#8393A8; }
+.aproar-empty-card {
+    border:1px solid #D9E6F5;
+    background:#F4F8FE;
+    border-radius:10px;
+    padding:15px 17px;
+    color:#35618F;
+    font-size:13px;
+    margin-top:12px;
+}
+
+/* O formulário analítico fica compacto e alinhado */
+.aproar-filter-shell {
+    border:1px solid #DCE5F0;
+    background:#FFFFFF;
+    border-radius:10px;
+    padding:4px 10px 2px 10px;
+    margin-bottom:12px;
+}
+
+@media (max-width: 1050px) {
+    .aproar-dash-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@media (max-width: 700px) {
+    .aproar-dash-metrics { grid-template-columns:1fr; }
+}
+</style>
+""", unsafe_allow_html=True)
+
+
 # --- MESES EM PORTUGUÊS ---
 MESES_PT = {
     1: "JANEIRO", 2: "FEVEREIRO", 3: "MARÇO", 4: "ABRIL",
@@ -2838,12 +2940,12 @@ def executar_sincronizacao_trello(id_lista_target=None, id_card_target=None, lis
 
 
 # --- BUSCA DE DADOS COM CACHE ---
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=180, show_spinner=False)
 def buscar_obras():
     try: return supabase.table("obras").select("*").execute().data
     except Exception: return []
 
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=180, show_spinner=False)
 def buscar_colaboradores():
     try: 
         res = supabase.table("colaboradores").select("*").execute().data
@@ -3124,7 +3226,7 @@ OPCOES_STATUS_PRESENCA = [
 ]
 
 
-@st.cache_data(ttl=20, show_spinner=False)
+@st.cache_data(ttl=45, show_spinner=False)
 def _buscar_convocacoes_intervalo(data_inicio, data_fim, engenheiro=None):
     try:
         q = supabase.table("convocacoes").select("*").gte("data", data_inicio.isoformat()).lte("data", data_fim.isoformat())
@@ -3319,8 +3421,20 @@ def gerar_excel_indicador_prazos(df_resumo, df_eventos, inicio, fim):
 
 
 def render_dashboard_consulta(key_prefix="dash", engenheiro_fixo=None):
-    st.markdown("## 🎛️ Dashboard")
-    st.caption("Extra é valor adicional de quem esteve presente: entra no custo e não é contado como um status separado.")
+    st.markdown(
+        """
+        <div class="aproar-inner-head">
+            <div class="aproar-inner-icon"><span class="material-symbols-rounded">dashboard</span></div>
+            <div>
+                <div class="aproar-inner-title">Dashboard</div>
+                <div class="aproar-inner-subtitle">Resumo de presença, custos e registros da equipe no período selecionado.</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown('<div class="aproar-filter-shell">', unsafe_allow_html=True)
     c1, c2, c3, c4 = st.columns(4)
     with c1:
         tipo = st.selectbox("Período", ["Diário", "Semanal", "Mensal"], key=f"{key_prefix}_tipo")
@@ -3336,6 +3450,7 @@ def render_dashboard_consulta(key_prefix="dash", engenheiro_fixo=None):
             st.text_input("Engenheiro", value=engenheiro_fixo, disabled=True, key=f"{key_prefix}_engfix")
         else:
             engenheiro = st.selectbox("Engenheiro", ["TODOS"] + ENGENHEIROS, key=f"{key_prefix}_eng")
+    st.markdown('</div>', unsafe_allow_html=True)
 
     registros = _buscar_convocacoes_intervalo(inicio, fim, None if engenheiro == "TODOS" else engenheiro)
     processados = []
@@ -3353,24 +3468,34 @@ def render_dashboard_consulta(key_prefix="dash", engenheiro_fixo=None):
     total_extra = sum(float(x["Extra (R$)"]) for x in processados)
     taxa_presenca = (presentes / total * 100) if total else 0.0
 
-    m1, m2, m3, m4, m5 = st.columns(5)
-    m1.metric("CONVOCADOS / REGISTROS", total)
-    m2.metric("PRESENTES", presentes)
-    m3.metric("FALTAS", faltas)
-    m4.metric("ATESTADOS", atestados)
-    m5.metric("CUSTO TOTAL", formatar_reais(custo))
+    st.markdown(
+        f"""
+        <div class="aproar-dash-metrics">
+            <div class="aproar-dash-card"><div class="aproar-dash-label">Convocados / registros</div><div class="aproar-dash-value">{total}</div><div class="aproar-dash-note">no período</div></div>
+            <div class="aproar-dash-card"><div class="aproar-dash-label">Presentes</div><div class="aproar-dash-value">{presentes}</div><div class="aproar-dash-note">{taxa_presenca:.1f}% de presença</div></div>
+            <div class="aproar-dash-card"><div class="aproar-dash-label">Faltas</div><div class="aproar-dash-value">{faltas}</div><div class="aproar-dash-note">registro(s)</div></div>
+            <div class="aproar-dash-card"><div class="aproar-dash-label">Atestados</div><div class="aproar-dash-value">{atestados}</div><div class="aproar-dash-note">registro(s)</div></div>
+            <div class="aproar-dash-card"><div class="aproar-dash-label">Custo total</div><div class="aproar-dash-value" style="font-size:24px">{formatar_reais(custo)}</div><div class="aproar-dash-note">Extras: {formatar_reais(total_extra)}</div></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
     st.caption(
         f"Período: {inicio.strftime('%d/%m/%Y')} a {fim.strftime('%d/%m/%Y')} • "
-        f"Presença: {taxa_presenca:.1f}% • Extras incluídas no custo: {formatar_reais(total_extra)}"
+        f"Presença: {taxa_presenca:.1f}% • Extras já incluídas no custo"
     )
 
     if not processados:
-        st.info("Nenhum registro encontrado para os filtros selecionados.")
+        st.markdown(
+            '<div class="aproar-empty-card">Nenhum registro encontrado para os filtros selecionados.</div>',
+            unsafe_allow_html=True,
+        )
         return
 
     df = pd.DataFrame(processados)
 
-    st.markdown("### 💰 Custos consolidados")
+    st.markdown("### Custos consolidados")
     g1, g2 = st.columns(2)
     with g1:
         st.markdown("#### Por Unidade")
@@ -3391,18 +3516,33 @@ def render_dashboard_consulta(key_prefix="dash", engenheiro_fixo=None):
         if not por_eng.empty:
             st.bar_chart(por_eng.set_index("Engenheiro")["Custo (R$)"], use_container_width=True)
 
-    st.markdown("### 📋 Detalhamento")
+    st.markdown("### Detalhamento")
     cols = ["Data", "Engenheiro", "Unidade", "Serviço(s)", "Colaborador", "Status", "Diária (R$)", "Extra (R$)", "Custo (R$)"]
     st.dataframe(df[cols], use_container_width=True, hide_index=True)
-    st.download_button(
-        "📥 BAIXAR DASHBOARD EM EXCEL",
-        data=gerar_excel_dashboard_consolidado(df, tipo, inicio, fim),
-        file_name=f"dashboard_{tipo.lower()}_{inicio.isoformat()}_a_{fim.isoformat()}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
-        key=f"{key_prefix}_download",
-    )
 
+    # Excel sob demanda: antes era montado em todo rerun, mesmo sem download.
+    assinatura = f"{tipo}|{inicio}|{fim}|{unidade}|{engenheiro}|{len(df)}|{float(df['Custo (R$)'].sum()):.2f}"
+    chave_assinatura = f"{key_prefix}_excel_assinatura"
+    chave_bytes = f"{key_prefix}_excel_bytes"
+    if st.session_state.get(chave_assinatura) != assinatura:
+        st.session_state.pop(chave_bytes, None)
+        st.session_state[chave_assinatura] = assinatura
+
+    if chave_bytes not in st.session_state:
+        if st.button("Preparar Excel", icon=":material/download:", key=f"{key_prefix}_preparar_excel"):
+            with st.spinner("Preparando arquivo..."):
+                st.session_state[chave_bytes] = gerar_excel_dashboard_consolidado(df, tipo, inicio, fim)
+            st.rerun()
+    else:
+        st.download_button(
+            "Baixar Dashboard em Excel",
+            data=st.session_state[chave_bytes],
+            file_name=f"dashboard_{tipo.lower()}_{inicio.isoformat()}_a_{fim.isoformat()}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            icon=":material/download:",
+            use_container_width=True,
+            key=f"{key_prefix}_download",
+        )
 
 def render_relatorio_visualizador(key_prefix="rel_view", engenheiro_fixo=None):
     st.markdown("## 📊 Relatórios")
@@ -4871,34 +5011,35 @@ else:
 
         st.markdown("<div class='aproar-sidebar-subtitle'>GESTÃO DE EQUIPES</div>", unsafe_allow_html=True)
 
-        def _nav_admin(label, destino, key):
+        def _nav_admin(label, destino, key, icon):
             ativo = st.session_state.get("menu_ativo") == destino
             st.button(
                 label,
                 key=key,
                 type="primary" if ativo else "secondary",
+                icon=icon,
                 use_container_width=True,
                 on_click=_ir_menu_admin,
                 args=(destino,),
             )
 
-        _nav_admin("⌂  Início", "🏠 INÍCIO", "btn_nav_inicio_ui4")
+        _nav_admin("Início", "🏠 INÍCIO", "btn_nav_inicio_ui4", ":material/home:")
 
         st.markdown("<div class='aproar-sidebar-section'>OPERAÇÃO</div>", unsafe_allow_html=True)
-        _nav_admin("▣  Convocação", "📋 CONVOCAÇÃO", "btn_nav_conv_ui4")
-        _nav_admin("△  Conflitos", "🚨 CONFLITOS", "btn_nav_conf_ui4")
-        _nav_admin("✓  Apontamento", "✅ APONTAMENTO", "btn_nav_apon_ui4")
-        _nav_admin("◉  WhatsApp", "💬 WHATSAPP", "btn_nav_wpp_ui4")
-        _nav_admin("♟  Disponibilidade", "👥 DISPONIBILIDADE", "btn_nav_disp_ui4")
-        _nav_admin("⊘  Indisponibilidade", "🚫 INDISPONIBILIDADE", "btn_nav_indisp_ui4")
+        _nav_admin("Convocação", "📋 CONVOCAÇÃO", "btn_nav_conv_ui4", ":material/event_note:")
+        _nav_admin("Conflitos", "🚨 CONFLITOS", "btn_nav_conf_ui4", ":material/warning:")
+        _nav_admin("Apontamento", "✅ APONTAMENTO", "btn_nav_apon_ui4", ":material/task_alt:")
+        _nav_admin("WhatsApp", "💬 WHATSAPP", "btn_nav_wpp_ui4", ":material/chat:")
+        _nav_admin("Disponibilidade", "👥 DISPONIBILIDADE", "btn_nav_disp_ui4", ":material/groups:")
+        _nav_admin("Indisponibilidade", "🚫 INDISPONIBILIDADE", "btn_nav_indisp_ui4", ":material/block:")
 
         st.markdown("<div class='aproar-sidebar-section'>ANÁLISE E FECHAMENTO</div>", unsafe_allow_html=True)
-        _nav_admin("▦  Dashboard", "🎛️ DASHBOARD", "btn_nav_dash_ui4")
-        _nav_admin("▥  Relatórios", "📊 RELATÓRIOS", "btn_nav_rel_ui4")
-        _nav_admin("⌁  Indicadores", "📈 INDICADORES", "btn_nav_ind_ui4")
+        _nav_admin("Dashboard", "🎛️ DASHBOARD", "btn_nav_dash_ui4", ":material/dashboard:")
+        _nav_admin("Relatórios", "📊 RELATÓRIOS", "btn_nav_rel_ui4", ":material/bar_chart:")
+        _nav_admin("Indicadores", "📈 INDICADORES", "btn_nav_ind_ui4", ":material/monitoring:")
 
         st.markdown("<div class='aproar-sidebar-section'>SISTEMA</div>", unsafe_allow_html=True)
-        _nav_admin("⚙  Configurações", "⚙️ CONFIGURAÇÕES", "btn_nav_cfg_ui4")
+        _nav_admin("Configurações", "⚙️ CONFIGURAÇÕES", "btn_nav_cfg_ui4", ":material/settings:")
 
         st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
         st.caption("Modo de edição ativo")
@@ -4943,7 +5084,12 @@ else:
             with f3:
                 engenheiro_home = st.selectbox("Engenheiro", ["Todos"] + ENGENHEIROS, key="ui4_home_engenheiro")
             with f4:
-                st.button("Atualizar", type="primary", use_container_width=True, key="ui4_home_atualizar")
+                if st.button("Atualizar", type="primary", icon=":material/refresh:", use_container_width=True, key="ui4_home_atualizar"):
+                    try:
+                        _buscar_convocacoes_intervalo.clear()
+                    except Exception:
+                        pass
+                    st.rerun()
 
         amanha_home = proximo_dia_util(data_home)
         registros_periodo = _buscar_convocacoes_intervalo(data_home, amanha_home)
