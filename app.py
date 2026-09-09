@@ -19,9 +19,7 @@ from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 
 # --- APROAR | FASE 1 DE PRODUÇÃO (migração não destrutiva) ---
 # --- CONFIGURAÇÕES DA PÁGINA & TEMA APROAR (CLARO / AZUL) ---
-st.set_page_config(page_title="APROAR - Controle de Presenças", page_icon="👷", layout="wide")
-
-st.warning("🧪 AMBIENTE DE HOMOLOGAÇÃO — dados de teste. Não usar como sistema oficial.")
+st.set_page_config(page_title="APROAR - Gestão de Equipes", page_icon="👷", layout="wide")
 
 # Paleta principal. Se a identidade visual mudar, basta alterar o azul aqui e no CSS abaixo.
 AZUL_APROAR = "#2563EB"
@@ -545,7 +543,7 @@ div[role="combobox"] {
 .aproar-quick-title h3 { margin:0; font-size:18px; color:#142744; }
 .aproar-quick-title p { margin:1px 0 0 0; color:#7E90A8 !important; font-size:11px; }
 
-/* Alertas da homologação menos chamativos */
+/* Alertas do sistema */
 [data-testid="stAlert"] { border-radius:9px !important; box-shadow:none !important; }
 
 @media (max-width: 1150px) {
@@ -570,14 +568,15 @@ st.markdown("""
 <style>
 /* Material Symbols da navegação: mantém a fonte correta e proporções do mockup */
 section[data-testid="stSidebar"] [data-testid="stIconMaterial"] {
-    font-family: "Material Symbols Rounded" !important;
-    font-size: 19px !important;
-    font-weight: 400 !important;
-    color: #C7D5E7 !important;
-    margin-right: 7px !important;
+    font-family: "Material Symbols Outlined", "Material Symbols Rounded" !important;
+    font-size: 20px !important;
+    color: #D8E2F1 !important;
+    margin-right: 8px !important;
+    font-variation-settings: "FILL" 0, "wght" 300, "GRAD" 0, "opsz" 24 !important;
 }
 section[data-testid="stSidebar"] [data-testid="stBaseButton-primary"] [data-testid="stIconMaterial"] {
     color: #FFFFFF !important;
+    font-variation-settings: "FILL" 1, "wght" 500, "GRAD" 0, "opsz" 24 !important;
 }
 section[data-testid="stSidebar"] .stButton > button {
     gap: 7px !important;
@@ -1349,7 +1348,7 @@ def render_historico_auditoria():
 # ============================================================
 # ESTABILIDADE / OBSERVABILIDADE
 # ============================================================
-AMBIENTE_APP = (_secret_opcional("AMBIENTE") or "homologacao").strip().lower()
+AMBIENTE_APP = (_secret_opcional("AMBIENTE") or "producao").strip().lower()
 
 
 def _tabela_erros_disponivel():
@@ -1412,28 +1411,6 @@ def render_diagnostico_sistema():
         st.success(f"Banco acessível: {banco_msg}")
     else:
         st.error("Banco indisponível no momento.")
-
-    if AMBIENTE_APP == "homologacao":
-        st.caption("Teste técnico exclusivo da homologação")
-        if st.button("🧪 GERAR ERRO CONTROLADO", key="btn_erro_controlado_homologacao"):
-            try:
-                raise RuntimeError("Erro controlado de homologação para validar o registro técnico.")
-            except Exception as e:
-                codigo = registrar_erro_sistema(
-                    "diagnostico",
-                    "erro_controlado",
-                    e,
-                    usuario="HOMOLOGACAO",
-                    contexto={"origem": "botao_diagnostico", "controlado": True},
-                )
-                st.session_state["_erro_controlado_codigo"] = codigo
-                st.rerun()
-
-        if st.session_state.get("_erro_controlado_codigo"):
-            st.info(
-                "Erro controlado registrado com sucesso. Código: "
-                + st.session_state["_erro_controlado_codigo"]
-            )
 
     if _tabela_erros_disponivel():
         try:
@@ -3101,10 +3078,21 @@ UNIDADES_APROAR = [
 
 # --- FUNÇÃO AUXILIAR PARA RENDERIZAR A ABA DE DISPONIBILIDADE ---
 def render_aba_disponibilidade(key_suffix=""):
-    st.markdown("### 👥 Disponibilidade da equipe")
+    st.markdown(
+        """
+        <div class="aproar-inner-head">
+            <div class="aproar-inner-icon"><span class="material-symbols-rounded">groups</span></div>
+            <div>
+                <div class="aproar-inner-title">Disponibilidade da equipe</div>
+                <div class="aproar-inner-subtitle">Veja rapidamente quem está ocupado, indisponível ou livre por turno.</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     st.caption(
-        "A disponibilidade agora considera o turno. Quem está convocado de manhã pode continuar "
-        "disponível à tarde, desde que não esteja integral ou indisponível."
+        "A disponibilidade considera o turno. Quem está convocado de manhã pode continuar disponível à tarde, "
+        "desde que não esteja integral ou indisponível."
     )
 
     cdata, cturno = st.columns(2)
@@ -3132,30 +3120,41 @@ def render_aba_disponibilidade(key_suffix=""):
     except Exception:
         convs_disp = []
 
+    # Busca as indisponibilidades uma única vez para evitar lentidão / tela "sumindo".
+    indisponibilidades = listar_indisponibilidades() or []
+    indisponiveis_map = {}
+    for item in indisponibilidades:
+        alvo = str(item.get("colaborador_id") or "").strip()
+        if not alvo:
+            continue
+        try:
+            ini = datetime.date.fromisoformat(str(item.get("inicio")))
+            fim = datetime.date.fromisoformat(str(item.get("fim")))
+        except Exception:
+            continue
+        if ini <= data_disp <= fim:
+            indisponiveis_map[alvo] = item
+
     por_colaborador = {}
     for conv in convs_disp:
         por_colaborador.setdefault(str(conv.get("colaborador_id")), []).append(conv)
-
-    indisponiveis_map = {}
-    for c in colaboradores:
-        ind = obter_indisponibilidade_colaborador(c.get("id"), data_disp)
-        if ind:
-            indisponiveis_map[str(c.get("id"))] = ind
 
     funcoes = sorted({str(c.get("funcao") or "INDEFINIDA") for c in colaboradores})
     if not funcoes:
         st.info("Nenhum colaborador cadastrado.")
         return
 
+    resumo_ocupados = 0
+    resumo_indisponiveis = 0
+    resumo_disponiveis = 0
+    blocos = []
+
     for func in funcoes:
         colabs_func = [c for c in colaboradores if str(c.get("funcao") or "INDEFINIDA") == func]
-
-        ocupados = []
-        indisponiveis = []
-        disponiveis = []
+        ocupados, indisponiveis, disponiveis = [], [], []
 
         for colab in colabs_func:
-            cid = str(colab.get("id"))
+            cid = str(colab.get("id") or "")
             if cid in indisponiveis_map:
                 indisponiveis.append(colab)
                 continue
@@ -3171,6 +3170,25 @@ def render_aba_disponibilidade(key_suffix=""):
             else:
                 disponiveis.append((colab, alocacoes))
 
+        resumo_ocupados += len(ocupados)
+        resumo_indisponiveis += len(indisponiveis)
+        resumo_disponiveis += len(disponiveis)
+        blocos.append((func, ocupados, indisponiveis, disponiveis))
+
+    st.markdown(
+        f"""
+        <div class="aproar-dash-metrics" style="margin-top:10px;">
+            <div class="aproar-dash-card"><div class="aproar-dash-label">Turno analisado</div><div class="aproar-dash-value" style="font-size:24px">{turno_disp}</div><div class="aproar-dash-note">{data_disp.strftime('%d/%m/%Y')}</div></div>
+            <div class="aproar-dash-card"><div class="aproar-dash-label">Ocupados</div><div class="aproar-dash-value">{resumo_ocupados}</div><div class="aproar-dash-note">já alocados neste turno</div></div>
+            <div class="aproar-dash-card"><div class="aproar-dash-label">Indisponíveis</div><div class="aproar-dash-value">{resumo_indisponiveis}</div><div class="aproar-dash-note">férias, atestado, afastamento</div></div>
+            <div class="aproar-dash-card"><div class="aproar-dash-label">Disponíveis</div><div class="aproar-dash-value">{resumo_disponiveis}</div><div class="aproar-dash-note">podem ser convocados</div></div>
+            <div class="aproar-dash-card"><div class="aproar-dash-label">Total analisado</div><div class="aproar-dash-value">{resumo_ocupados + resumo_indisponiveis + resumo_disponiveis}</div><div class="aproar-dash-note">colaborador(es)</div></div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    for func, ocupados, indisponiveis, disponiveis in blocos:
         with st.container(border=True):
             st.markdown(f"#### {func.upper()}")
             c1, c2, c3 = st.columns(3)
@@ -3183,8 +3201,7 @@ def render_aba_disponibilidade(key_suffix=""):
                         ob = dict_obras.get(conv.get("obra_id"), {})
                         turno_existente = turno_da_convocacao(conv)
                         st.caption(
-                            f"{turno_existente} • {ob.get('unidade','-')} • "
-                            f"Eng. {conv.get('engenheiro','-')}"
+                            f"{turno_existente} • {ob.get('unidade','-')} • Eng. {conv.get('engenheiro','-')}"
                         )
                 if not ocupados:
                     st.caption("Nenhum.")
@@ -3192,11 +3209,10 @@ def render_aba_disponibilidade(key_suffix=""):
             with c2:
                 st.markdown(f"**🔴 INDISPONÍVEIS ({len(indisponiveis)})**")
                 for colab in indisponiveis:
-                    ind = indisponiveis_map.get(str(colab.get("id")), {})
+                    ind = indisponiveis_map.get(str(colab.get("id") or ""), {})
                     st.markdown(f"• **{colab.get('nome','-')}**")
                     st.caption(
-                        f"{ind.get('motivo','Indisponível')} • "
-                        f"{ind.get('inicio','')} a {ind.get('fim','')}"
+                        f"{ind.get('motivo','Indisponível')} • {ind.get('inicio','')} a {ind.get('fim','')}"
                     )
                 if not indisponiveis:
                     st.caption("Nenhum.")
@@ -3205,14 +3221,12 @@ def render_aba_disponibilidade(key_suffix=""):
                 st.markdown(f"**🟢 DISPONÍVEIS EM {turno_disp.upper()} ({len(disponiveis)})**")
                 for colab, outras_alocacoes in disponiveis:
                     st.markdown(f"• **{colab.get('nome','-')}**")
-                    # Mostra ocupações em outros turnos, sem tratar como conflito.
                     if outras_alocacoes:
                         detalhes = []
                         for conv in outras_alocacoes:
                             ob = dict_obras.get(conv.get("obra_id"), {})
                             detalhes.append(
-                                f"{turno_da_convocacao(conv)}: {ob.get('unidade','-')} "
-                                f"(Eng. {conv.get('engenheiro','-')})"
+                                f"{turno_da_convocacao(conv)}: {ob.get('unidade','-')} (Eng. {conv.get('engenheiro','-')})"
                             )
                         st.caption("Já alocado em outro turno: " + " • ".join(detalhes))
                 if not disponiveis:
@@ -5026,17 +5040,17 @@ else:
         _nav_admin("Início", "🏠 INÍCIO", "btn_nav_inicio_ui4", ":material/home:")
 
         st.markdown("<div class='aproar-sidebar-section'>OPERAÇÃO</div>", unsafe_allow_html=True)
-        _nav_admin("Convocação", "📋 CONVOCAÇÃO", "btn_nav_conv_ui4", ":material/event_note:")
-        _nav_admin("Conflitos", "🚨 CONFLITOS", "btn_nav_conf_ui4", ":material/warning:")
-        _nav_admin("Apontamento", "✅ APONTAMENTO", "btn_nav_apon_ui4", ":material/task_alt:")
-        _nav_admin("WhatsApp", "💬 WHATSAPP", "btn_nav_wpp_ui4", ":material/chat:")
+        _nav_admin("Convocação", "📋 CONVOCAÇÃO", "btn_nav_conv_ui4", ":material/description:")
+        _nav_admin("Conflitos", "🚨 CONFLITOS", "btn_nav_conf_ui4", ":material/warning_amber:")
+        _nav_admin("Apontamento", "✅ APONTAMENTO", "btn_nav_apon_ui4", ":material/check_box:")
+        _nav_admin("WhatsApp", "💬 WHATSAPP", "btn_nav_wpp_ui4", ":material/forum:")
         _nav_admin("Disponibilidade", "👥 DISPONIBILIDADE", "btn_nav_disp_ui4", ":material/groups:")
         _nav_admin("Indisponibilidade", "🚫 INDISPONIBILIDADE", "btn_nav_indisp_ui4", ":material/block:")
 
         st.markdown("<div class='aproar-sidebar-section'>ANÁLISE E FECHAMENTO</div>", unsafe_allow_html=True)
-        _nav_admin("Dashboard", "🎛️ DASHBOARD", "btn_nav_dash_ui4", ":material/dashboard:")
+        _nav_admin("Dashboard", "🎛️ DASHBOARD", "btn_nav_dash_ui4", ":material/space_dashboard:")
         _nav_admin("Relatórios", "📊 RELATÓRIOS", "btn_nav_rel_ui4", ":material/bar_chart:")
-        _nav_admin("Indicadores", "📈 INDICADORES", "btn_nav_ind_ui4", ":material/monitoring:")
+        _nav_admin("Indicadores", "📈 INDICADORES", "btn_nav_ind_ui4", ":material/show_chart:")
 
         st.markdown("<div class='aproar-sidebar-section'>SISTEMA</div>", unsafe_allow_html=True)
         _nav_admin("Configurações", "⚙️ CONFIGURAÇÕES", "btn_nav_cfg_ui4", ":material/settings:")
@@ -5062,7 +5076,7 @@ else:
             f"""
             <div class="aproar-page-head">
                 <div class="aproar-page-title-wrap">
-                    <div class="aproar-page-icon">⌂</div>
+                    <div class="aproar-page-icon"><span class="material-symbols-rounded">home</span></div>
                     <div>
                         <div class="aproar-page-title">Visão do dia</div>
                         <div class="aproar-page-subtitle">Acompanhe a situação da equipe e resolva o que precisa de atenção.</div>
@@ -6070,7 +6084,7 @@ else:
         render_indisponibilidades_admin()
 
     # --- 6. DISPONIBILIDADE ---
-    elif menu_escolhido == "👥 DISPONIBILIDADE":
+    elif menu_escolhido in {"👥 DISPONIBILIDADE", "DISPONIBILIDADE", "👥 DISPONIBILIDADE DA EQUIPE"}:
         render_aba_disponibilidade("admin")
 
     # --- 7. CONFIGURAÇÕES E SINCRONIZAÇÃO TRELLO ---
