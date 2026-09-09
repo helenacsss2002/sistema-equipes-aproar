@@ -1009,6 +1009,87 @@ main .stButton > button, main .stDownloadButton > button{
 """, unsafe_allow_html=True)
 
 
+
+
+# --- PATCH REDESIGN V2.1 | BOTÕES DE AÇÕES RÁPIDAS ---------------------------
+st.markdown("""
+<style>
+/* Corrige texto invisível/colapsado dos botões de ações rápidas e dá acabamento consistente. */
+div[class*="st-key-ap2_quick_conv"] button,
+div[class*="st-key-ap2_quick_apon"] button,
+div[class*="st-key-ap2_quick_disp"] button,
+div[class*="st-key-ap2_quick_ind"] button{
+    position:relative !important;
+    justify-content:flex-start !important;
+    padding:0 12px 0 38px !important;
+    gap:0 !important;
+    overflow:visible !important;
+}
+
+div[class*="st-key-ap2_quick_conv"] button *,
+div[class*="st-key-ap2_quick_apon"] button *,
+div[class*="st-key-ap2_quick_disp"] button *,
+div[class*="st-key-ap2_quick_ind"] button *{
+    display:inline !important;
+    visibility:visible !important;
+    opacity:1 !important;
+    font-size:12px !important;
+    line-height:1 !important;
+    white-space:nowrap !important;
+}
+
+div[class*="st-key-ap2_quick_conv"] button *{ color:#FFFFFF !important; }
+div[class*="st-key-ap2_quick_apon"] button *,
+div[class*="st-key-ap2_quick_disp"] button *,
+div[class*="st-key-ap2_quick_ind"] button *{ color:#35485F !important; }
+
+/* Ícones SVG pequenos no mesmo estilo da sidebar. */
+div[class*="st-key-ap2_quick_conv"] button::before,
+div[class*="st-key-ap2_quick_apon"] button::before,
+div[class*="st-key-ap2_quick_disp"] button::before,
+div[class*="st-key-ap2_quick_ind"] button::before{
+    content:"";
+    position:absolute;
+    left:13px;
+    top:50%;
+    transform:translateY(-50%);
+    width:15px;
+    height:15px;
+    background-color:currentColor;
+    -webkit-mask-repeat:no-repeat;
+    mask-repeat:no-repeat;
+    -webkit-mask-position:center;
+    mask-position:center;
+    -webkit-mask-size:15px 15px;
+    mask-size:15px 15px;
+    opacity:.9;
+}
+
+div[class*="st-key-ap2_quick_conv"] button::before{
+    -webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M12 5v14M5 12h14'/%3E%3C/svg%3E");
+    mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='M12 5v14M5 12h14'/%3E%3C/svg%3E");
+}
+div[class*="st-key-ap2_quick_apon"] button::before{
+    -webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='3'/%3E%3Cpath d='m8 12 3 3 5-6'/%3E%3C/svg%3E");
+    mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='3'/%3E%3Cpath d='m8 12 3 3 5-6'/%3E%3C/svg%3E");
+}
+div[class*="st-key-ap2_quick_disp"] button::before{
+    -webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2'/%3E%3Ccircle cx='9' cy='7' r='4'/%3E%3Cpath d='M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75'/%3E%3C/svg%3E");
+    mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2'/%3E%3Ccircle cx='9' cy='7' r='4'/%3E%3Cpath d='M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75'/%3E%3C/svg%3E");
+}
+div[class*="st-key-ap2_quick_ind"] button::before{
+    -webkit-mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m3 17 5-5 4 4 8-9'/%3E%3Cpath d='M15 7h5v5'/%3E%3C/svg%3E");
+    mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m3 17 5-5 4 4 8-9'/%3E%3Cpath d='M15 7h5v5'/%3E%3C/svg%3E");
+}
+
+/* Mais equilíbrio horizontal na faixa dos filtros e ações em telas grandes. */
+@media(min-width:1200px){
+    div[class*="st-key-ap2_quick"]{ max-width:980px; }
+}
+</style>
+""", unsafe_allow_html=True)
+
+
 # --- MESES EM PORTUGUÊS ---
 MESES_PT = {
     1: "JANEIRO", 2: "FEVEREIRO", 3: "MARÇO", 4: "ABRIL",
