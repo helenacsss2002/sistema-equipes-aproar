@@ -6189,23 +6189,520 @@ if modo_visualizador:
         render_indicadores_cumprimento("view_ind")
 
 elif modo_campo:
-    # ==========================================
-    # PORTAL DO ENGENHEIRO — FLUXO OPERACIONAL SIMPLIFICADO
-    # ==========================================
-    st.markdown("## 👷 Portal do Engenheiro")
-    st.caption("Planeje a equipe de amanhã, faça o apontamento de hoje e consulte disponibilidade sem sair desta tela.")
+    # =====================================================================
+    # PORTAL DO ENGENHEIRO — MOBILE FIRST / MENOS CLIQUES
+    # =====================================================================
+    import html as _html
+
+    st.html("""
+    <style>
+    /* Portal de campo: uma única coluna, sem sidebar e sem chrome do Streamlit. */
+    [data-testid="stSidebar"],
+    [data-testid="collapsedControl"],
+    [data-testid="stToolbar"],
+    [data-testid="stDecoration"],
+    #MainMenu,
+    footer{
+        display:none !important;
+    }
+
+    [data-testid="stHeader"]{
+        display:none !important;
+        height:0 !important;
+    }
+
+    html, body, .stApp,
+    [data-testid="stAppViewContainer"],
+    [data-testid="stMain"]{
+        background:var(
+            --st-background-color,
+            var(--background-color,#F5F7FA)
+        ) !important;
+    }
+
+    [data-testid="stMainBlockContainer"],
+    main .block-container{
+        max-width:760px !important;
+        padding:.75rem .78rem 5.5rem !important;
+        margin:0 auto !important;
+    }
+
+    [data-testid="stMainBlockContainer"] > [data-testid="stVerticalBlock"]{
+        gap:.65rem !important;
+    }
+
+    /* Cabeçalho do portal */
+    .engm-head{
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:12px;
+        margin:2px 0 5px;
+    }
+
+    .engm-brand{
+        min-width:0;
+    }
+
+    .engm-kicker{
+        font-size:9px;
+        line-height:1;
+        letter-spacing:1.15px;
+        font-weight:780;
+        color:var(
+            --st-primary-color,
+            var(--primary-color,#245FD6)
+        );
+        text-transform:uppercase;
+        margin-bottom:5px;
+    }
+
+    .engm-title{
+        font-size:24px;
+        line-height:1.08;
+        font-weight:760;
+        letter-spacing:-.025em;
+        color:var(
+            --st-text-color,
+            var(--text-color,#172235)
+        );
+    }
+
+    .engm-date{
+        flex:0 0 auto;
+        font-size:10px;
+        color:color-mix(
+            in srgb,
+            var(--st-text-color,var(--text-color,#172235)) 55%,
+            transparent
+        );
+        text-align:right;
+        line-height:1.35;
+    }
+
+    /* Seletor do engenheiro */
+    div[class*="st-key-engenheiro_campo_mobile"]{
+        margin-bottom:2px !important;
+    }
+
+    div[class*="st-key-engenheiro_campo_mobile"] label p{
+        font-size:9px !important;
+        text-transform:uppercase !important;
+        letter-spacing:.7px !important;
+        font-weight:740 !important;
+    }
+
+    div[class*="st-key-engenheiro_campo_mobile"] div[data-baseweb="select"] > div{
+        min-height:44px !important;
+        border-radius:9px !important;
+        font-size:14px !important;
+        font-weight:630 !important;
+    }
+
+    /* Navegação em 3 áreas: Hoje / Amanhã / Disponibilidade */
+    div[class*="st-key-eng_mobile_nav"]{
+        position:sticky !important;
+        top:0 !important;
+        z-index:90 !important;
+        padding:5px 0 7px !important;
+        background:var(
+            --st-background-color,
+            var(--background-color,#F5F7FA)
+        ) !important;
+    }
+
+    div[class*="st-key-eng_mobile_nav"] [role="radiogroup"]{
+        display:grid !important;
+        grid-template-columns:repeat(3,minmax(0,1fr)) !important;
+        gap:5px !important;
+        background:color-mix(
+            in srgb,
+            var(--st-text-color,var(--text-color,#172235)) 5%,
+            var(--st-background-color,var(--background-color,#F5F7FA))
+        ) !important;
+        border:1px solid color-mix(
+            in srgb,
+            var(--st-text-color,var(--text-color,#172235)) 10%,
+            transparent
+        ) !important;
+        padding:4px !important;
+        border-radius:10px !important;
+    }
+
+    div[class*="st-key-eng_mobile_nav"] [role="radio"]{
+        min-height:39px !important;
+        border-radius:7px !important;
+        justify-content:center !important;
+        padding:0 5px !important;
+        margin:0 !important;
+        color:color-mix(
+            in srgb,
+            var(--st-text-color,var(--text-color,#172235)) 65%,
+            transparent
+        ) !important;
+        font-size:11px !important;
+        font-weight:650 !important;
+    }
+
+    div[class*="st-key-eng_mobile_nav"] [role="radio"] > div:first-child{
+        display:none !important;
+    }
+
+    div[class*="st-key-eng_mobile_nav"] [aria-checked="true"]{
+        background:var(
+            --st-secondary-background-color,
+            var(--secondary-background-color,#FFFFFF)
+        ) !important;
+        color:var(
+            --st-primary-color,
+            var(--primary-color,#245FD6)
+        ) !important;
+        box-shadow:0 1px 3px rgba(15,23,42,.08) !important;
+    }
+
+    /* Resumo compacto */
+    .engm-summary{
+        display:grid;
+        grid-template-columns:repeat(3,minmax(0,1fr));
+        border:1px solid color-mix(
+            in srgb,
+            var(--st-text-color,var(--text-color,#172235)) 11%,
+            transparent
+        );
+        border-radius:10px;
+        overflow:hidden;
+        background:var(
+            --st-secondary-background-color,
+            var(--secondary-background-color,#FFFFFF)
+        );
+        margin:4px 0 3px;
+    }
+
+    .engm-summary-item{
+        padding:12px 11px 11px;
+        min-width:0;
+        border-right:1px solid color-mix(
+            in srgb,
+            var(--st-text-color,var(--text-color,#172235)) 9%,
+            transparent
+        );
+    }
+
+    .engm-summary-item:last-child{
+        border-right:0;
+    }
+
+    .engm-summary-label{
+        font-size:8px;
+        letter-spacing:.45px;
+        text-transform:uppercase;
+        font-weight:730;
+        color:color-mix(
+            in srgb,
+            var(--st-text-color,var(--text-color,#172235)) 52%,
+            transparent
+        );
+        white-space:nowrap;
+        overflow:hidden;
+        text-overflow:ellipsis;
+    }
+
+    .engm-summary-value{
+        margin-top:5px;
+        font-size:23px;
+        line-height:1;
+        font-weight:760;
+        color:var(
+            --st-text-color,
+            var(--text-color,#172235)
+        );
+    }
+
+    .engm-summary-note{
+        margin-top:5px;
+        font-size:8.5px;
+        color:color-mix(
+            in srgb,
+            var(--st-text-color,var(--text-color,#172235)) 42%,
+            transparent
+        );
+        white-space:nowrap;
+        overflow:hidden;
+        text-overflow:ellipsis;
+    }
+
+    .engm-summary-item.warn .engm-summary-value{
+        color:#B86B16;
+    }
+
+    .engm-summary-item.danger .engm-summary-value{
+        color:#C54053;
+    }
+
+    .engm-section-title{
+        font-size:15px;
+        line-height:1.2;
+        font-weight:720;
+        color:var(
+            --st-text-color,
+            var(--text-color,#172235)
+        );
+        margin:9px 0 1px;
+    }
+
+    .engm-section-sub{
+        font-size:10px;
+        line-height:1.35;
+        color:color-mix(
+            in srgb,
+            var(--st-text-color,var(--text-color,#172235)) 50%,
+            transparent
+        );
+        margin-bottom:5px;
+    }
+
+    /* Cards dos colaboradores */
+    .engm-person-head{
+        display:flex;
+        align-items:flex-start;
+        justify-content:space-between;
+        gap:10px;
+        margin-bottom:3px;
+    }
+
+    .engm-person-name{
+        font-size:13px;
+        line-height:1.2;
+        font-weight:700;
+        color:var(
+            --st-text-color,
+            var(--text-color,#172235)
+        );
+    }
+
+    .engm-person-meta{
+        margin-top:3px;
+        font-size:9.5px;
+        line-height:1.3;
+        color:color-mix(
+            in srgb,
+            var(--st-text-color,var(--text-color,#172235)) 50%,
+            transparent
+        );
+    }
+
+    .engm-chip{
+        flex:0 0 auto;
+        max-width:115px;
+        padding:4px 7px;
+        border-radius:999px;
+        font-size:8.5px;
+        line-height:1.1;
+        font-weight:680;
+        overflow:hidden;
+        text-overflow:ellipsis;
+        white-space:nowrap;
+        color:var(
+            --st-primary-color,
+            var(--primary-color,#245FD6)
+        );
+        background:color-mix(
+            in srgb,
+            var(--st-primary-color,var(--primary-color,#245FD6)) 9%,
+            transparent
+        );
+    }
+
+    /* Containers do portal: menos espaço, bons alvos de toque */
+    main [data-testid="stVerticalBlockBorderWrapper"] > div{
+        border-radius:10px !important;
+        padding:.72rem .78rem !important;
+        border-color:color-mix(
+            in srgb,
+            var(--st-text-color,var(--text-color,#172235)) 10%,
+            transparent
+        ) !important;
+        box-shadow:none !important;
+    }
+
+    main [data-testid="stExpander"]{
+        border-radius:9px !important;
+    }
+
+    main [data-testid="stExpander"] summary{
+        min-height:42px !important;
+        font-size:11px !important;
+        font-weight:640 !important;
+    }
+
+    /* Campos grandes o suficiente para celular */
+    main label p{
+        font-size:9.5px !important;
+        font-weight:650 !important;
+    }
+
+    main div[data-baseweb="select"] > div,
+    main div[data-baseweb="base-input"] > div,
+    main div[data-baseweb="input"] > div,
+    main [data-baseweb="textarea"] > div,
+    main div[role="combobox"]{
+        min-height:43px !important;
+        border-radius:8px !important;
+        font-size:12px !important;
+    }
+
+    main input{
+        font-size:13px !important;
+    }
+
+    /* Botões: grandes para toque, mas sem parecer cartões gigantes */
+    main .stButton > button,
+    main .stDownloadButton > button,
+    main [data-testid="stFormSubmitButton"] > button{
+        min-height:44px !important;
+        border-radius:8px !important;
+        font-size:11.5px !important;
+        font-weight:660 !important;
+    }
+
+    /* Botões principais do fluxo */
+    div[class*="st-key-engm_all_present"] button,
+    div[class*="st-key-engm_confirm_conv"] button{
+        width:100% !important;
+    }
+
+    /* Salvar equipe e confirmar convocação ficam sempre à mão. */
+    main [data-testid="stForm"] [data-testid="stFormSubmitButton"]{
+        position:sticky !important;
+        bottom:8px !important;
+        z-index:80 !important;
+        padding-top:6px !important;
+        background:linear-gradient(
+            to top,
+            var(--st-background-color,var(--background-color,#F5F7FA)) 68%,
+            transparent
+        ) !important;
+    }
+
+    main [data-testid="stForm"] [data-testid="stFormSubmitButton"] button{
+        box-shadow:0 6px 20px rgba(15,23,42,.15) !important;
+    }
+
+    /* Alertas */
+    [data-testid="stAlert"]{
+        border-radius:9px !important;
+        font-size:10.5px !important;
+        padding:.65rem .72rem !important;
+    }
+
+    /* Listas compactas de convocados */
+    .engm-list{
+        display:flex;
+        flex-direction:column;
+        gap:6px;
+        margin:4px 0;
+    }
+
+    .engm-list-item{
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:9px;
+        padding:9px 10px;
+        border:1px solid color-mix(
+            in srgb,
+            var(--st-text-color,var(--text-color,#172235)) 9%,
+            transparent
+        );
+        border-radius:8px;
+        background:var(
+            --st-secondary-background-color,
+            var(--secondary-background-color,#FFFFFF)
+        );
+    }
+
+    .engm-list-main{
+        min-width:0;
+    }
+
+    .engm-list-name{
+        font-size:11px;
+        line-height:1.2;
+        font-weight:680;
+        color:var(
+            --st-text-color,
+            var(--text-color,#172235)
+        );
+        white-space:nowrap;
+        overflow:hidden;
+        text-overflow:ellipsis;
+    }
+
+    .engm-list-meta{
+        margin-top:3px;
+        font-size:9px;
+        color:color-mix(
+            in srgb,
+            var(--st-text-color,var(--text-color,#172235)) 48%,
+            transparent
+        );
+        white-space:nowrap;
+        overflow:hidden;
+        text-overflow:ellipsis;
+    }
+
+    .engm-list-side{
+        flex:0 0 auto;
+        font-size:9px;
+        font-weight:650;
+        color:color-mix(
+            in srgb,
+            var(--st-text-color,var(--text-color,#172235)) 58%,
+            transparent
+        );
+    }
+
+    /* Disponibilidade */
+    .engm-avail-ok{color:#14805D !important;}
+    .engm-avail-busy{color:#B66C18 !important;}
+    .engm-avail-off{color:#C44557 !important;}
+
+    /* Menos desperdício vertical no celular. */
+    @media(max-width:520px){
+        [data-testid="stMainBlockContainer"],
+        main .block-container{
+            padding:.55rem .6rem 5rem !important;
+        }
+
+        .engm-title{
+            font-size:22px;
+        }
+
+        .engm-date{
+            font-size:9px;
+        }
+
+        .engm-summary-item{
+            padding:11px 9px 10px;
+        }
+
+        .engm-summary-value{
+            font-size:21px;
+        }
+
+        main [data-testid="stHorizontalBlock"]{
+            gap:.45rem !important;
+        }
+    }
+    </style>
+    """)
 
     def _buscar_convocacoes_campo(engenheiro, data_ref):
-        try:
-            return (
-                supabase.table("convocacoes")
-                .select("*")
-                .eq("engenheiro", engenheiro)
-                .eq("data", data_ref.isoformat())
-                .execute().data or []
-            )
-        except Exception:
-            return []
+        return _buscar_convocacoes_intervalo(
+            data_ref,
+            data_ref,
+            engenheiro,
+        ) or []
 
     def _enriquecer_convocacoes_campo(registros):
         saida = []
@@ -6213,351 +6710,1503 @@ elif modo_campo:
             item = dict(registro)
             item["dados_obra"] = dict_obras.get(
                 item.get("obra_id"),
-                {"unidade": "Desconhecida", "nome": NOME_OBRA_PLACEHOLDER},
+                {
+                    "unidade": "Desconhecida",
+                    "nome": NOME_OBRA_PLACEHOLDER,
+                },
             )
             saida.append(item)
         return saida
 
     def _convocacao_apontada_campo(conv):
-        obra = conv.get("dados_obra") or dict_obras.get(conv.get("obra_id"), {})
+        obra = conv.get("dados_obra") or dict_obras.get(
+            conv.get("obra_id"),
+            {},
+        )
         return bool(obra) and not eh_obra_placeholder(obra)
 
-    def _mudar_secao_campo(secao):
-        st.session_state["campo_secao"] = secao
+    def _lista_convocados_mobile(registros, mostrar_status=False):
+        if not registros:
+            st.caption("Nenhuma pessoa convocada.")
+            return
 
-    hoje_campo = datetime.date.today()
-    amanha_campo = proximo_dia_util(hoje_campo)
+        itens_html = []
+        for conv in registros:
+            colab = dict_colaboradores.get(
+                conv.get("colaborador_id"),
+                {},
+            )
+            obra = conv.get("dados_obra") or dict_obras.get(
+                conv.get("obra_id"),
+                {},
+            )
+            nome = str(colab.get("nome") or "Não identificado")
+            funcao = str(colab.get("funcao") or "-")
+            unidade = str(obra.get("unidade") or "-")
+            turno = turno_da_convocacao(conv)
+            status = normalizar_status_operacional(
+                conv.get("status")
+            )
 
-    topo_c1, topo_c2 = st.columns([1.2, 2.8])
-    with topo_c1:
-        engenheiro_campo = st.selectbox(
-            "Engenheiro",
-            ENGENHEIROS,
-            key="engenheiro_campo_global",
-        )
-    with topo_c2:
+            lado = status if mostrar_status else turno
+            itens_html.append(
+                f"""
+                <div class="engm-list-item">
+                    <div class="engm-list-main">
+                        <div class="engm-list-name">{_html.escape(nome)}</div>
+                        <div class="engm-list-meta">
+                            {_html.escape(funcao)} · {_html.escape(unidade)} · {_html.escape(turno)}
+                        </div>
+                    </div>
+                    <div class="engm-list-side">{_html.escape(str(lado))}</div>
+                </div>
+                """
+            )
+
         st.markdown(
-            f"<div style='padding-top:29px;color:#94A3B8;font-size:13px;'>"
-            f"Hoje: <b style='color:#F8FAFC'>{hoje_campo.strftime('%d/%m/%Y')}</b> &nbsp;•&nbsp; "
-            f"Próximo dia: <b style='color:#F8FAFC'>{amanha_campo.strftime('%d/%m/%Y')}</b>"
-            f"</div>",
+            '<div class="engm-list">'
+            + "".join(itens_html)
+            + "</div>",
             unsafe_allow_html=True,
         )
 
-    secoes_principais_campo = [
-        "📌 RESUMO", "👥 CONVOCADOS", "👥 DISPONIBILIDADE"
-    ]
-    secoes_ocultas_campo = ["✅ APONTAMENTO", "📋 EQUIPE DE AMANHÃ"]
-    secoes_validas_campo = secoes_principais_campo + secoes_ocultas_campo
+    hoje_campo = agora_aproar().date()
+    amanha_campo = proximo_dia_util(hoje_campo)
 
-    if st.session_state.get("campo_secao") not in secoes_validas_campo:
-        st.session_state["campo_secao"] = "📌 RESUMO"
+    st.markdown(
+        f"""
+        <div class="engm-head">
+            <div class="engm-brand">
+                <div class="engm-kicker">APROAR · Campo</div>
+                <div class="engm-title">Minha equipe</div>
+            </div>
+            <div class="engm-date">
+                Hoje<br><b>{hoje_campo.strftime('%d/%m')}</b>
+                &nbsp;·&nbsp;
+                Próximo<br><b>{amanha_campo.strftime('%d/%m')}</b>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    secao_campo = st.session_state["campo_secao"]
-    secao_nav = st.radio(
+    engenheiro_campo = st.selectbox(
+        "Engenheiro",
+        ENGENHEIROS,
+        key="engenheiro_campo_mobile",
+    )
+
+    area_campo = st.radio(
         "Navegação",
-        secoes_principais_campo,
-        index=secoes_principais_campo.index(secao_campo) if secao_campo in secoes_principais_campo else 0,
+        ["Hoje", "Amanhã", "Disponibilidade"],
         horizontal=True,
         label_visibility="collapsed",
-        key="campo_nav_principal_melhorias",
+        key="eng_mobile_nav",
     )
-    if secao_campo in secoes_principais_campo and secao_nav != secao_campo:
-        st.session_state["campo_secao"] = secao_nav
-        st.rerun()
 
-    # --------------------------------------------------------------
-    # RESUMO DO ENGENHEIRO
-    # --------------------------------------------------------------
-    if secao_campo == "📌 RESUMO":
-        convocacoes_hoje_campo = _enriquecer_convocacoes_campo(
-            _buscar_convocacoes_campo(engenheiro_campo, hoje_campo)
-        )
-        convocacoes_amanha_campo = _enriquecer_convocacoes_campo(
-            _buscar_convocacoes_campo(engenheiro_campo, amanha_campo)
+    # =====================================================================
+    # HOJE — RESUMO + CONVOCADOS + APONTAMENTO NA MESMA TELA
+    # =====================================================================
+    if area_campo == "Hoje":
+        data_apont = st.date_input(
+            "Data do apontamento",
+            value=hoje_campo,
+            format="DD/MM/YYYY",
+            key="engm_data_apont",
         )
 
-        total_hoje = len(convocacoes_hoje_campo)
-        apontados_hoje = sum(1 for c in convocacoes_hoje_campo if _convocacao_apontada_campo(c))
-        pendentes_hoje = max(0, total_hoje - apontados_hoje)
-        faltas_hoje = sum(1 for c in convocacoes_hoje_campo if str(c.get("status")) == "Falta")
-        atestados_hoje = sum(1 for c in convocacoes_hoje_campo if str(c.get("status")) == "Atestado")
-
-        st.markdown("### Resumo do dia")
-        k1, k2 = st.columns(2)
-        k1.metric("Equipe", total_hoje)
-        k2.metric("Apontados", apontados_hoje)
-
-        k3, k4 = st.columns(2)
-        k3.metric("Pendentes", pendentes_hoje)
-        k4.metric("Faltas / Atestados", faltas_hoje + atestados_hoje)
-
-        if pendentes_hoje:
-            st.warning(f"⚠️ Você ainda tem **{pendentes_hoje} apontamento(s)** para concluir hoje.")
-        elif total_hoje:
-            st.success("✅ Todos os colaboradores de hoje já têm Obra/Serviço definida no apontamento.")
-        else:
-            st.info("Nenhuma equipe foi convocada para você hoje.")
-
-        st.button(
-            "✅ FAZER APONTAMENTO DE HOJE",
-            type="primary",
-            use_container_width=True,
-            on_click=_mudar_secao_campo,
-            args=("✅ APONTAMENTO",),
-            key="btn_ir_apontamento_resumo_campo",
-        )
-        st.caption("Defina obra/serviço e ajuste presenças.")
-
-        st.button(
-            "📋 MONTAR EQUIPE DO PRÓXIMO DIA",
-            use_container_width=True,
-            on_click=_mudar_secao_campo,
-            args=("📋 EQUIPE DE AMANHÃ",),
-            key="btn_ir_convocacao_resumo_campo",
-        )
-        st.caption("Escolha unidade, turno e colaboradores.")
-
-        st.markdown("### Próximo dia")
-        if convocacoes_amanha_campo:
-            unidades_amanha = sorted({str((c.get("dados_obra") or {}).get("unidade") or "-") for c in convocacoes_amanha_campo})
-            st.info(
-                f"**{len(convocacoes_amanha_campo)} pessoa(s) convocada(s)** para {amanha_campo.strftime('%d/%m/%Y')}"
-                + (f" • {', '.join(unidades_amanha)}" if unidades_amanha else "")
+        convocacoes_data = _enriquecer_convocacoes_campo(
+            _buscar_convocacoes_campo(
+                engenheiro_campo,
+                data_apont,
             )
-            with st.expander("Ver equipe já convocada", expanded=False):
-                for conv in convocacoes_amanha_campo:
-                    colab = dict_colaboradores.get(conv.get("colaborador_id"), {})
-                    unidade = (conv.get("dados_obra") or {}).get("unidade", "-")
-                    turno, _ = decompor_observacao_operacional(conv.get("observacao") or "")
-                    st.markdown(f"• **{colab.get('nome', 'Não identificado')}** — {unidade} • {turno}")
-        else:
-            st.caption("Nenhuma convocação sua registrada para o próximo dia.")
-
-    # --------------------------------------------------------------
-    # CONVOCADOS PELO ENGENHEIRO
-    # --------------------------------------------------------------
-    elif secao_campo == "👥 CONVOCADOS":
-        convocacoes_hoje_campo = _enriquecer_convocacoes_campo(
-            _buscar_convocacoes_campo(engenheiro_campo, hoje_campo)
-        )
-        convocacoes_amanha_campo = _enriquecer_convocacoes_campo(
-            _buscar_convocacoes_campo(engenheiro_campo, amanha_campo)
         )
 
-        st.markdown("### 👥 Convocados por você")
-        st.caption("Veja rapidamente quem foi convocado por você hoje e no próximo dia.")
+        total_data = len(convocacoes_data)
+        apontados_data = sum(
+            1
+            for c in convocacoes_data
+            if _convocacao_apontada_campo(c)
+        )
+        pendentes_data = max(
+            0,
+            total_data - apontados_data,
+        )
+        ausencias_data = sum(
+            1
+            for c in convocacoes_data
+            if normalizar_status_operacional(
+                c.get("status")
+            )
+            in {"Falta", "Atestado"}
+        )
 
-        c1, c2 = st.columns(2)
-        c1.metric("Hoje", len(convocacoes_hoje_campo))
-        c2.metric("Próximo dia", len(convocacoes_amanha_campo))
+        classe_pend = "warn" if pendentes_data else ""
+        classe_aus = "danger" if ausencias_data else ""
 
-        st.markdown(f"#### Hoje • {hoje_campo.strftime('%d/%m/%Y')}")
-        if convocacoes_hoje_campo:
-            for conv in convocacoes_hoje_campo:
-                colab = dict_colaboradores.get(conv.get("colaborador_id"), {})
-                unidade = (conv.get("dados_obra") or {}).get("unidade", "-")
-                turno, _ = decompor_observacao_operacional(conv.get("observacao") or "")
-                status = str(conv.get("status") or "Pendente")
-                st.markdown(
-                    f"• **{colab.get('nome', 'Não identificado')}** — {unidade} • {turno} • {status}"
+        st.markdown(
+            f"""
+            <div class="engm-summary">
+                <div class="engm-summary-item">
+                    <div class="engm-summary-label">Equipe</div>
+                    <div class="engm-summary-value">{total_data}</div>
+                    <div class="engm-summary-note">na data</div>
+                </div>
+                <div class="engm-summary-item {classe_pend}">
+                    <div class="engm-summary-label">Pendentes</div>
+                    <div class="engm-summary-value">{pendentes_data}</div>
+                    <div class="engm-summary-note">{apontados_data} concluído(s)</div>
+                </div>
+                <div class="engm-summary-item {classe_aus}">
+                    <div class="engm-summary-label">Ausências</div>
+                    <div class="engm-summary-value">{ausencias_data}</div>
+                    <div class="engm-summary-note">falta / atestado</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        if data_apont < hoje_campo:
+            st.warning(
+                "Apontamento retroativo. O sistema registrará o atraso automaticamente."
+            )
+
+        st.markdown(
+            '<div class="engm-section-title">Apontar equipe</div>'
+            '<div class="engm-section-sub">'
+            'Status e serviço ficam visíveis. Extra, observação e 2º serviço ficam em “Mais opções”.'
+            '</div>',
+            unsafe_allow_html=True,
+        )
+
+        # Inclusão excepcional continua disponível, sem atrapalhar o fluxo comum.
+        with st.expander(
+            "Adicionar colaborador que não estava na convocação",
+            expanded=False,
+        ):
+            labels_inc = {
+                f"{c.get('nome')} ({c.get('funcao','-')})": c.get("id")
+                for c in sorted(
+                    colaboradores,
+                    key=lambda x: normalizar(x.get("nome", "")),
                 )
-        else:
-            st.caption("Nenhuma pessoa convocada por você hoje.")
+            }
 
-        st.markdown(f"#### Próximo dia • {amanha_campo.strftime('%d/%m/%Y')}")
-        if convocacoes_amanha_campo:
-            for conv in convocacoes_amanha_campo:
-                colab = dict_colaboradores.get(conv.get("colaborador_id"), {})
-                unidade = (conv.get("dados_obra") or {}).get("unidade", "-")
-                turno, _ = decompor_observacao_operacional(conv.get("observacao") or "")
-                st.markdown(
-                    f"• **{colab.get('nome', 'Não identificado')}** — {unidade} • {turno}"
+            nome_inc = st.selectbox(
+                "Colaborador",
+                ["— Selecione —"] + list(labels_inc.keys()),
+                key="engm_inc_colab",
+            )
+
+            unidades_inc = sorted(
+                {
+                    str(o.get("unidade"))
+                    for o in obras
+                    if o.get("unidade")
+                }
+            )
+
+            unidade_inc = st.selectbox(
+                "Unidade",
+                unidades_inc,
+                key="engm_inc_unidade",
+            ) if unidades_inc else None
+
+            obras_inc = (
+                obras_reais_da_unidade(unidade_inc)
+                if unidade_inc
+                else []
+            )
+            mapa_inc = {
+                o.get("nome"): o.get("id")
+                for o in obras_inc
+            }
+
+            obra_inc = st.selectbox(
+                "Obra / Serviço",
+                ["— Selecione —"] + list(mapa_inc.keys()),
+                key="engm_inc_obra",
+            )
+
+            if st.button(
+                "Adicionar ao apontamento",
+                use_container_width=True,
+                key="engm_inc_btn",
+            ):
+                if (
+                    nome_inc == "— Selecione —"
+                    or obra_inc not in mapa_inc
+                ):
+                    st.warning(
+                        "Selecione colaborador, unidade e obra/serviço."
+                    )
+                else:
+                    ok, msg = incluir_colaborador_direto_apontamento(
+                        labels_inc[nome_inc],
+                        engenheiro_campo,
+                        data_apont,
+                        mapa_inc[obra_inc],
+                    )
+                    (st.success if ok else st.warning)(msg)
+                    if ok:
+                        limpar_cache_operacional()
+                        st.rerun()
+
+        if not convocacoes_data:
+            st.info(
+                "Nenhuma equipe encontrada para esta data. "
+                "Use a inclusão acima se precisar fazer um apontamento retroativo."
+            )
+
+        else:
+            # Um único filtro aparece somente quando há mais de uma unidade.
+            unidades_data = sorted(
+                {
+                    str(
+                        (c.get("dados_obra") or {}).get(
+                            "unidade",
+                            "Desconhecida",
+                        )
+                    )
+                    for c in convocacoes_data
+                }
+            )
+
+            if len(unidades_data) > 1:
+                unidade_filtro = st.selectbox(
+                    "Filtrar unidade",
+                    ["Todas"] + unidades_data,
+                    key="engm_unidade_apont",
                 )
-        else:
-            st.caption("Nenhuma pessoa convocada por você para o próximo dia.")
+            else:
+                unidade_filtro = "Todas"
 
-    # --------------------------------------------------------------
-    # APONTAMENTO — MULTISSERVIÇO / RETROATIVO / EXTRA SEPARADA
-    # --------------------------------------------------------------
-    elif secao_campo == "✅ APONTAMENTO":
-        if st.button("⬅️ Voltar ao resumo", key="voltar_resumo_apont_campo_melhorias"):
-            _mudar_secao_campo("📌 RESUMO")
-            st.rerun()
-        render_apontamento_operacional(engenheiro_campo, "campo_apont_melhorias")
+            render_campo = [
+                c
+                for c in convocacoes_data
+                if unidade_filtro == "Todas"
+                or str(
+                    (c.get("dados_obra") or {}).get(
+                        "unidade",
+                        "",
+                    )
+                )
+                == unidade_filtro
+            ]
 
-    # --------------------------------------------------------------
-    # CONVOCAÇÃO — PRÓXIMO DIA
-    # --------------------------------------------------------------
-    elif secao_campo == "📋 EQUIPE DE AMANHÃ":
-        if st.button("⬅️ Voltar ao resumo", key="voltar_resumo_conv_campo"):
-            _mudar_secao_campo("📌 RESUMO")
-            st.rerun()
-        st.markdown("### 📋 Equipe do próximo dia")
-        st.caption("Escolha a Unidade e as pessoas. A Obra/Serviço específica continua sendo definida no apontamento.")
+            if st.button(
+                "Marcar exibidos como presentes",
+                use_container_width=True,
+                key="engm_all_present",
+            ):
+                for conv in render_campo:
+                    try:
+                        supabase.table("convocacoes").update(
+                            {"status": "Presente (Integral)"}
+                        ).eq(
+                            "id",
+                            conv.get("id"),
+                        ).execute()
+                    except Exception:
+                        pass
 
+                limpar_cache_operacional()
+                st.rerun()
+
+            # Todas as convocações do dia são necessárias para aplicar a regra
+            # do 2º serviço sem duplicar alguém que já tem outra convocação.
+            try:
+                todas_convs_data = (
+                    supabase.table("convocacoes")
+                    .select("*")
+                    .eq("data", data_apont.isoformat())
+                    .execute()
+                    .data
+                    or []
+                )
+            except Exception:
+                todas_convs_data = list(convocacoes_data)
+
+            convs_por_colaborador = {}
+            for item_conv in todas_convs_data:
+                chave_colab = str(
+                    item_conv.get("colaborador_id")
+                    or ""
+                )
+                convs_por_colaborador.setdefault(
+                    chave_colab,
+                    [],
+                ).append(item_conv)
+
+            periodos_servico = [
+                "Integral",
+                "Manhã",
+                "Tarde",
+                "Noite",
+                "Outro",
+            ]
+
+            dados_form = {}
+
+            with st.form("engm_form_apontamentos"):
+                for conv in render_campo:
+                    c_id = conv.get("id")
+                    colab = dict_colaboradores.get(
+                        conv.get("colaborador_id"),
+                        {
+                            "nome": "Desconhecido",
+                            "funcao": "-",
+                        },
+                    )
+                    unidade = str(
+                        (conv.get("dados_obra") or {}).get(
+                            "unidade",
+                            "Desconhecida",
+                        )
+                    )
+
+                    obras_card = obras_reais_da_unidade(
+                        unidade
+                    )
+                    mapa_obras = {
+                        o.get("nome"): o.get("id")
+                        for o in obras_card
+                    }
+                    opcoes_obras = [
+                        "— Selecione o serviço —"
+                    ] + list(mapa_obras.keys())
+
+                    obra_atual = dict_obras.get(
+                        conv.get("obra_id"),
+                        {},
+                    )
+                    nome_obra_atual = str(
+                        obra_atual.get("nome")
+                        or ""
+                    )
+                    idx_obra = (
+                        opcoes_obras.index(
+                            nome_obra_atual
+                        )
+                        if nome_obra_atual in mapa_obras
+                        else 0
+                    )
+
+                    status_atual = (
+                        normalizar_status_operacional(
+                            conv.get("status")
+                        )
+                    )
+                    idx_status = (
+                        OPCOES_STATUS_PRESENCA.index(
+                            status_atual
+                        )
+                        if status_atual
+                        in OPCOES_STATUS_PRESENCA
+                        else 0
+                    )
+
+                    turno_conv = turno_da_convocacao(
+                        conv
+                    )
+                    _, obs_livre = (
+                        decompor_observacao_operacional(
+                            conv.get("observacao")
+                            or ""
+                        )
+                    )
+
+                    meta_atual = (
+                        obter_metadata_operacional(
+                            conv.get("observacao")
+                            or ""
+                        )
+                    )
+
+                    periodo_principal_atual = str(
+                        meta_atual.get(
+                            "periodo_servico_principal"
+                        )
+                        or turno_conv
+                        or "Integral"
+                    )
+
+                    if (
+                        periodo_principal_atual
+                        not in periodos_servico
+                    ):
+                        periodo_principal_atual = "Outro"
+
+                    adicionais_atuais = [
+                        x
+                        for x in _normalizar_servicos_adicionais(
+                            meta_atual
+                        )
+                        if x.get("servico")
+                        in mapa_obras
+                    ]
+
+                    mesma_pessoa = convs_por_colaborador.get(
+                        str(
+                            conv.get("colaborador_id")
+                            or ""
+                        ),
+                        [],
+                    )
+                    outras_convs = [
+                        outra
+                        for outra in mesma_pessoa
+                        if str(outra.get("id"))
+                        != str(c_id)
+                    ]
+                    tem_conv_separada = bool(
+                        outras_convs
+                    )
+
+                    with st.container(border=True):
+                        st.markdown(
+                            f"""
+                            <div class="engm-person-head">
+                                <div>
+                                    <div class="engm-person-name">
+                                        {_html.escape(str(colab.get('nome') or '-'))}
+                                    </div>
+                                    <div class="engm-person-meta">
+                                        {_html.escape(str(colab.get('funcao') or '-'))}
+                                        · {_html.escape(unidade)}
+                                    </div>
+                                </div>
+                                <div class="engm-chip">
+                                    {_html.escape(turno_conv)}
+                                </div>
+                            </div>
+                            """,
+                            unsafe_allow_html=True,
+                        )
+
+                        status_sel = st.selectbox(
+                            "Status",
+                            OPCOES_STATUS_PRESENCA,
+                            index=idx_status,
+                            key=f"engm_st_{c_id}",
+                        )
+
+                        obra_sel = st.selectbox(
+                            "Obra / Serviço",
+                            opcoes_obras,
+                            index=idx_obra,
+                            key=f"engm_obra_{c_id}",
+                        )
+
+                        periodo_principal = st.selectbox(
+                            "Período no serviço",
+                            periodos_servico,
+                            index=periodos_servico.index(
+                                periodo_principal_atual
+                            ),
+                            key=f"engm_periodo_{c_id}",
+                        )
+
+                        segundo_servico = "— Nenhum —"
+                        segundo_periodo = "Tarde"
+
+                        with st.expander(
+                            "Mais opções",
+                            expanded=False,
+                        ):
+                            val_extra = st.number_input(
+                                "Extra (R$)",
+                                min_value=0.0,
+                                value=float(
+                                    conv.get("valor_extra")
+                                    or 0.0
+                                ),
+                                step=10.0,
+                                key=f"engm_extra_{c_id}",
+                                help=(
+                                    "Se o status for falta ou atestado, "
+                                    "o extra será salvo como zero."
+                                ),
+                            )
+
+                            obs_nova = st.text_input(
+                                "Observação / justificativa",
+                                value=obs_livre,
+                                key=f"engm_obs_{c_id}",
+                            )
+
+                            if not tem_conv_separada:
+                                opcoes_adic = [
+                                    "— Nenhum —"
+                                ] + list(
+                                    mapa_obras.keys()
+                                )
+                                adic_atual = (
+                                    adicionais_atuais[0].get(
+                                        "servico"
+                                    )
+                                    if adicionais_atuais
+                                    else "— Nenhum —"
+                                )
+                                idx_adic = (
+                                    opcoes_adic.index(
+                                        adic_atual
+                                    )
+                                    if adic_atual
+                                    in opcoes_adic
+                                    else 0
+                                )
+
+                                segundo_servico = st.selectbox(
+                                    "2º serviço na mesma unidade",
+                                    opcoes_adic,
+                                    index=idx_adic,
+                                    key=f"engm_seg_serv_{c_id}",
+                                )
+
+                                periodo_adic_atual = (
+                                    adicionais_atuais[0].get(
+                                        "periodo",
+                                        "Tarde",
+                                    )
+                                    if adicionais_atuais
+                                    else "Tarde"
+                                )
+
+                                if (
+                                    periodo_adic_atual
+                                    not in periodos_servico
+                                ):
+                                    periodo_adic_atual = "Outro"
+
+                                segundo_periodo = st.selectbox(
+                                    "Período do 2º serviço",
+                                    periodos_servico,
+                                    index=periodos_servico.index(
+                                        periodo_adic_atual
+                                    ),
+                                    key=f"engm_seg_periodo_{c_id}",
+                                )
+                            else:
+                                st.caption(
+                                    "Já existe outra convocação desta pessoa "
+                                    "no mesmo dia. Cada turno é apontado separadamente."
+                                )
+
+                    dados_form[str(c_id)] = {
+                        "conv": conv,
+                        "colab": colab,
+                        "mapa_obras": mapa_obras,
+                        "obra_sel": obra_sel,
+                        "status_sel": status_sel,
+                        "periodo_principal": periodo_principal,
+                        "segundo_servico": segundo_servico,
+                        "segundo_periodo": segundo_periodo,
+                        "tem_conv_separada": tem_conv_separada,
+                        "val_extra": val_extra,
+                        "obs_nova": obs_nova,
+                        "turno_conv": turno_conv,
+                    }
+
+                salvar_todos = st.form_submit_button(
+                    "Salvar equipe",
+                    type="primary",
+                    use_container_width=True,
+                )
+
+            if salvar_todos:
+                erros_validacao = []
+
+                for item in dados_form.values():
+                    nome_pessoa = str(
+                        item["colab"].get("nome")
+                        or "Colaborador"
+                    )
+
+                    if (
+                        item["obra_sel"]
+                        not in item["mapa_obras"]
+                    ):
+                        erros_validacao.append(
+                            f"{nome_pessoa}: selecione a obra/serviço."
+                        )
+
+                    if (
+                        item["segundo_servico"]
+                        == item["obra_sel"]
+                        and item["segundo_servico"]
+                        != "— Nenhum —"
+                    ):
+                        erros_validacao.append(
+                            f"{nome_pessoa}: o 2º serviço deve ser diferente do principal."
+                        )
+
+                if erros_validacao:
+                    for msg in erros_validacao:
+                        st.warning(msg)
+
+                else:
+                    salvos = 0
+                    falhas = []
+
+                    for item in dados_form.values():
+                        conv = item["conv"]
+                        c_id = conv.get("id")
+                        nome_pessoa = str(
+                            item["colab"].get("nome")
+                            or "Colaborador"
+                        )
+
+                        adicionais = []
+
+                        if (
+                            not item["tem_conv_separada"]
+                            and item["segundo_servico"]
+                            in item["mapa_obras"]
+                        ):
+                            adicionais.append(
+                                {
+                                    "servico": item[
+                                        "segundo_servico"
+                                    ],
+                                    "periodo": item[
+                                        "segundo_periodo"
+                                    ],
+                                }
+                            )
+
+                        meta = registrar_metadata_apontamento(
+                            conv,
+                            data_apont,
+                            apontado_por=engenheiro_campo,
+                            periodo_principal=item[
+                                "periodo_principal"
+                            ],
+                            servicos_adicionais=adicionais,
+                        )
+
+                        nova_obs = montar_observacao_operacional(
+                            item["turno_conv"],
+                            item["obs_nova"],
+                            meta,
+                        )
+
+                        valor_extra_final = (
+                            float(item["val_extra"])
+                            if status_eh_presenca(
+                                item["status_sel"]
+                            )
+                            else 0.0
+                        )
+
+                        try:
+                            obra_id_final = item[
+                                "mapa_obras"
+                            ][item["obra_sel"]]
+
+                            supabase.table(
+                                "convocacoes"
+                            ).update(
+                                {
+                                    "obra_id": obra_id_final,
+                                    "status": item[
+                                        "status_sel"
+                                    ],
+                                    "valor_extra": (
+                                        valor_extra_final
+                                    ),
+                                    "observacao": nova_obs,
+                                }
+                            ).eq(
+                                "id",
+                                c_id,
+                            ).execute()
+
+                            salvar_apontamento_estruturado(
+                                conv,
+                                data_apont,
+                                engenheiro_campo,
+                                item["status_sel"],
+                                valor_extra_final,
+                                item["obs_nova"],
+                                obra_id_final,
+                                item[
+                                    "periodo_principal"
+                                ],
+                                adicionais,
+                            )
+
+                            salvos += 1
+
+                        except Exception as e:
+                            falhas.append(
+                                f"{nome_pessoa}: {str(e)[:110]}"
+                            )
+
+                    limpar_cache_operacional()
+
+                    if salvos:
+                        st.success(
+                            f"{salvos} apontamento(s) salvo(s)."
+                        )
+
+                    for msg in falhas:
+                        st.error(msg)
+
+                    if salvos and not falhas:
+                        st.rerun()
+
+    # =====================================================================
+    # AMANHÃ — CONVOCADOS + NOVA CONVOCAÇÃO NA MESMA TELA
+    # =====================================================================
+    elif area_campo == "Amanhã":
         data_conv_auto = amanha_campo
-        ja_convocados = _enriquecer_convocacoes_campo(_buscar_convocacoes_campo(engenheiro_campo, data_conv_auto))
 
-        hc1, hc2 = st.columns(2)
-        hc1.info(f"📅 **Data:** {data_conv_auto.strftime('%d/%m/%Y')}")
-        hc2.info(f"👥 **Já convocados por você:** {len(ja_convocados)}")
+        ja_convocados = _enriquecer_convocacoes_campo(
+            _buscar_convocacoes_campo(
+                engenheiro_campo,
+                data_conv_auto,
+            )
+        )
+
+        st.markdown(
+            f"""
+            <div class="engm-summary">
+                <div class="engm-summary-item">
+                    <div class="engm-summary-label">Data</div>
+                    <div class="engm-summary-value" style="font-size:17px">
+                        {data_conv_auto.strftime('%d/%m')}
+                    </div>
+                    <div class="engm-summary-note">próximo dia útil</div>
+                </div>
+                <div class="engm-summary-item">
+                    <div class="engm-summary-label">Convocados</div>
+                    <div class="engm-summary-value">{len(ja_convocados)}</div>
+                    <div class="engm-summary-note">por você</div>
+                </div>
+                <div class="engm-summary-item">
+                    <div class="engm-summary-label">Ação</div>
+                    <div class="engm-summary-value" style="font-size:17px">
+                        Montar
+                    </div>
+                    <div class="engm-summary-note">e confirmar abaixo</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
         if ja_convocados:
-            with st.expander("Ver equipe já convocada", expanded=False):
-                for conv in ja_convocados:
-                    colab = dict_colaboradores.get(conv.get("colaborador_id"), {})
-                    unidade = (conv.get("dados_obra") or {}).get("unidade", "-")
-                    turno, _ = decompor_observacao_operacional(conv.get("observacao") or "")
-                    st.markdown(f"• **{colab.get('nome', 'Não identificado')}** — {unidade} • {turno}")
+            st.markdown(
+                '<div class="engm-section-title">Já convocados</div>',
+                unsafe_allow_html=True,
+            )
+            _lista_convocados_mobile(
+                ja_convocados,
+                mostrar_status=False,
+            )
+
+        st.markdown(
+            '<div class="engm-section-title">Adicionar à equipe</div>'
+            '<div class="engm-section-sub">'
+            'Escolha unidade, turno e pessoas. O conflito só é bloqueado quando você confirma.'
+            '</div>',
+            unsafe_allow_html=True,
+        )
 
         if not obras:
-            st.info("Cadastre pelo menos uma Unidade/Obra na administração.")
+            st.info(
+                "Nenhuma obra/unidade cadastrada."
+            )
         else:
-            cc1, cc2 = st.columns(2)
-            unidades_unicas = UNIDADES_APROAR.copy()
-            with cc1:
-                unidade_selecionada = st.selectbox("Unidade", unidades_unicas, key="u_c_sel_novo")
-            with cc2:
-                turno_conv_campo = st.selectbox("Turno", ["Integral", "Manhã", "Tarde", "Noite"], key="turno_conv_campo_novo")
+            unidades_reais = sorted(
+                {
+                    str(o.get("unidade"))
+                    for o in obras
+                    if o.get("unidade")
+                }
+            )
 
-            funcoes_disponiveis = sorted({c.get("funcao", "") for c in colaboradores if c.get("funcao")})
-            filtro_funcao = st.selectbox("Filtrar por função", ["TODAS"] + funcoes_disponiveis, key="f_c_sel_campo_novo")
-            colabs_filtrados = [c for c in colaboradores if filtro_funcao == "TODAS" or c.get("funcao") == filtro_funcao]
+            unidades_opcoes = []
+            for u in UNIDADES_APROAR + unidades_reais:
+                if u and u not in unidades_opcoes:
+                    unidades_opcoes.append(u)
 
-            # Mostra no próprio seletor se a pessoa já está ocupada em outro turno.
+            unidade_selecionada = st.selectbox(
+                "Unidade",
+                unidades_opcoes,
+                key="engm_conv_unidade",
+            )
+
+            turno_conv_campo = st.selectbox(
+                "Turno",
+                [
+                    "Integral",
+                    "Manhã",
+                    "Tarde",
+                    "Noite",
+                ],
+                key="engm_conv_turno",
+            )
+
+            funcoes_disponiveis = sorted(
+                {
+                    str(c.get("funcao"))
+                    for c in colaboradores
+                    if c.get("funcao")
+                }
+            )
+
+            filtro_funcao = st.selectbox(
+                "Função",
+                ["Todas"] + funcoes_disponiveis,
+                key="engm_conv_funcao",
+            )
+
+            colabs_filtrados = [
+                c
+                for c in colaboradores
+                if filtro_funcao == "Todas"
+                or str(c.get("funcao"))
+                == filtro_funcao
+            ]
+
             try:
                 convs_data_todos = (
                     supabase.table("convocacoes")
                     .select("*")
-                    .eq("data", data_conv_auto.isoformat())
-                    .execute().data or []
+                    .eq(
+                        "data",
+                        data_conv_auto.isoformat(),
+                    )
+                    .execute()
+                    .data
+                    or []
                 )
             except Exception:
                 convs_data_todos = []
 
             convs_por_colab = {}
             for conv_exist in convs_data_todos:
-                convs_por_colab.setdefault(str(conv_exist.get("colaborador_id")), []).append(conv_exist)
+                convs_por_colab.setdefault(
+                    str(
+                        conv_exist.get(
+                            "colaborador_id"
+                        )
+                    ),
+                    [],
+                ).append(conv_exist)
+
+            indisponibilidades_amanha = (
+                _carregar_indisponibilidades_disponibilidade()
+                or []
+            )
+
+            indisp_por_colab = {}
+            for item in indisponibilidades_amanha:
+                cid_ind = str(
+                    item.get("colaborador_id")
+                    or ""
+                )
+
+                try:
+                    ini_ind = datetime.date.fromisoformat(
+                        str(item.get("inicio"))
+                    )
+                    fim_ind = datetime.date.fromisoformat(
+                        str(item.get("fim"))
+                    )
+                except Exception:
+                    continue
+
+                if (
+                    ini_ind
+                    <= data_conv_auto
+                    <= fim_ind
+                ):
+                    indisp_por_colab[cid_ind] = item
 
             mapa_colab_opcoes = {}
+
             for c in colabs_filtrados:
-                cid = c["id"]
-                alocacoes = convs_por_colab.get(str(cid), [])
+                cid = c.get("id")
+                nome = str(c.get("nome") or "-")
+                funcao = str(c.get("funcao") or "-")
+                alocacoes = convs_por_colab.get(
+                    str(cid),
+                    [],
+                )
+
                 sufixos = []
-                tem_sobreposicao = False
+
+                if str(cid) in indisp_por_colab:
+                    motivo = str(
+                        indisp_por_colab[
+                            str(cid)
+                        ].get("motivo")
+                        or "Indisponível"
+                    )
+                    sufixos.append(
+                        f"INDISPONÍVEL: {motivo}"
+                    )
 
                 for aloc in alocacoes:
-                    t_exist = turno_da_convocacao(aloc)
-                    eng_exist = str(aloc.get("engenheiro") or "N/A")
-                    obra_exist = dict_obras.get(aloc.get("obra_id"), {})
-                    unid_exist = obra_exist.get("unidade", "-")
-                    if turnos_se_sobrepoem(t_exist, turno_conv_campo):
-                        tem_sobreposicao = True
-                    # Todos continuam selecionáveis. A validação real só ocorre ao confirmar.
-                    sufixos.append(f"já {t_exist} - {eng_exist} / {unid_exist}")
+                    t_exist = turno_da_convocacao(
+                        aloc
+                    )
+                    eng_exist = str(
+                        aloc.get("engenheiro")
+                        or "N/A"
+                    )
+                    obra_exist = dict_obras.get(
+                        aloc.get("obra_id"),
+                        {},
+                    )
+                    unid_exist = str(
+                        obra_exist.get("unidade")
+                        or "-"
+                    )
 
-                status_aloc = f" — {' | '.join(sufixos)}" if sufixos else ""
-                label = f"{c['nome']}  ({c.get('funcao', '-')}){status_aloc}"
+                    if turnos_se_sobrepoem(
+                        t_exist,
+                        turno_conv_campo,
+                    ):
+                        sufixos.append(
+                            f"OCUPADO {t_exist} · {eng_exist}"
+                        )
+                    else:
+                        sufixos.append(
+                            f"já {t_exist} · {eng_exist}"
+                        )
+
+                status_aloc = (
+                    " — " + " | ".join(sufixos)
+                    if sufixos
+                    else ""
+                )
+
+                label = (
+                    f"{nome} ({funcao}){status_aloc}"
+                )
+
                 mapa_colab_opcoes[label] = cid
 
-            st.caption(
-                "Todos os colaboradores continuam selecionáveis. Se houver sobreposição de turno, "
-                "a confirmação será bloqueada e o conflito ficará registrado para o Paulo."
-            )
             equipe_selecionada = st.multiselect(
-                "Selecionar colaboradores",
+                "Colaboradores",
                 list(mapa_colab_opcoes.keys()),
-                placeholder="Digite para buscar pelo nome...",
-                key="eq_c_sel_campo_novo",
+                placeholder="Digite um nome para buscar...",
+                key="engm_conv_pessoas",
             )
 
-            avulso_campo = False
-            nome_manual_campo = ""
-            tipo_manual_campo = "Profissional"
-            funcao_manual_campo = ""
-            with st.expander("➕ Adicionar nome que não está na lista", expanded=False):
-                avulso_campo = st.checkbox("É avulso?", key="avulso_conv_campo_novo")
-                nome_manual_campo = st.text_input(
-                    "Nome",
-                    placeholder="Digite o nome completo...",
-                    key="nome_manual_conv_campo_novo",
-                )
-                if avulso_campo or nome_manual_campo.strip():
-                    cm1, cm2 = st.columns(2)
-                    with cm1:
-                        tipo_manual_campo = st.selectbox(
-                            "Categoria da diária", ["Profissional", "Ajudante"], key="tipo_manual_conv_campo_novo"
-                        )
-                    with cm2:
-                        funcao_manual_campo = st.text_input(
-                            "Função (opcional)", placeholder="Ex.: pintor, eletricista...", key="funcao_manual_conv_campo_novo"
-                        )
+            nome_manual = ""
+            tipo_manual = "Profissional"
+            funcao_manual = ""
+            avulso_manual = False
 
-            if st.button("CONFIRMAR CONVOCAÇÃO", type="primary", use_container_width=True, key="btn_conv_campo_novo"):
-                if avulso_campo and not nome_manual_campo.strip():
-                    st.warning("Para convocar como avulso, digite o nome do colaborador.")
-                elif not equipe_selecionada and not nome_manual_campo.strip():
-                    st.warning("Selecione pelo menos um colaborador ou digite um nome.")
+            with st.expander(
+                "Adicionar nome que não está na lista",
+                expanded=False,
+            ):
+                nome_manual = st.text_input(
+                    "Nome",
+                    key="engm_manual_nome",
+                    placeholder="Nome completo",
+                )
+
+                avulso_manual = st.checkbox(
+                    "É avulso?",
+                    key="engm_manual_avulso",
+                )
+
+                tipo_manual = st.selectbox(
+                    "Categoria da diária",
+                    [
+                        "Profissional",
+                        "Ajudante",
+                    ],
+                    key="engm_manual_tipo",
+                )
+
+                funcao_manual = st.text_input(
+                    "Função (opcional)",
+                    key="engm_manual_funcao",
+                )
+
+            if st.button(
+                "Confirmar convocação",
+                type="primary",
+                use_container_width=True,
+                key="engm_confirm_conv",
+            ):
+                if (
+                    not equipe_selecionada
+                    and not nome_manual.strip()
+                ):
+                    st.warning(
+                        "Selecione pelo menos uma pessoa."
+                    )
                 else:
-                    obra_id_placeholder = obter_obra_placeholder_unidade(unidade_selecionada)
+                    obra_id_placeholder = (
+                        obter_obra_placeholder_unidade(
+                            unidade_selecionada
+                        )
+                    )
+
                     if not obra_id_placeholder:
                         st.error(
-                            f"Não foi possível preparar a Unidade **{unidade_selecionada}** "
-                            "para a convocação."
+                            "Não foi possível preparar a unidade para a convocação."
                         )
-                        detalhe_placeholder = st.session_state.get("erro_placeholder_unidade", "")
-                        if detalhe_placeholder:
-                            with st.expander("Diagnóstico técnico"):
-                                st.code(detalhe_placeholder)
                     else:
                         pessoas = []
-                        for label_colab in equipe_selecionada:
-                            c_id = mapa_colab_opcoes[label_colab]
-                            nome_existente = dict_colaboradores.get(c_id, {}).get("nome", label_colab.split("  (")[0])
-                            pessoas.append((c_id, nome_existente))
 
-                        if nome_manual_campo.strip():
-                            c_id_manual, colab_manual, msg_manual = criar_ou_obter_colaborador_manual(
-                                nome_manual_campo, tipo_manual_campo, funcao_manual_campo, avulso=avulso_campo
+                        for label_colab in equipe_selecionada:
+                            c_id = mapa_colab_opcoes[
+                                label_colab
+                            ]
+                            nome_existente = str(
+                                dict_colaboradores.get(
+                                    c_id,
+                                    {},
+                                ).get("nome")
+                                or label_colab.split(
+                                    " ("
+                                )[0]
                             )
+                            pessoas.append(
+                                (
+                                    c_id,
+                                    nome_existente,
+                                )
+                            )
+
+                        if nome_manual.strip():
+                            c_id_manual, colab_manual, msg_manual = (
+                                criar_ou_obter_colaborador_manual(
+                                    nome_manual,
+                                    tipo_manual,
+                                    funcao_manual,
+                                    avulso=avulso_manual,
+                                )
+                            )
+
                             if c_id_manual:
-                                pessoas.append((c_id_manual, colab_manual.get("nome", nome_manual_campo)))
+                                pessoas.append(
+                                    (
+                                        c_id_manual,
+                                        str(
+                                            colab_manual.get(
+                                                "nome"
+                                            )
+                                            or nome_manual
+                                        ),
+                                    )
+                                )
                             else:
                                 st.error(msg_manual)
 
                         pessoas_unicas = []
                         ids_vistos = set()
+
                         for cid, nome_pessoa in pessoas:
-                            if cid and cid not in ids_vistos:
-                                pessoas_unicas.append((cid, nome_pessoa))
+                            if (
+                                cid
+                                and cid not in ids_vistos
+                            ):
+                                pessoas_unicas.append(
+                                    (
+                                        cid,
+                                        nome_pessoa,
+                                    )
+                                )
                                 ids_vistos.add(cid)
 
                         sucessos = 0
                         avisos = []
+
                         for c_id, nome_pessoa in pessoas_unicas:
-                            ok, motivo = inserir_convocacao_segura(
-                                obra_id_placeholder, c_id, data_conv_auto, engenheiro_campo, turno_conv_campo
+                            ok, motivo = (
+                                inserir_convocacao_segura(
+                                    obra_id_placeholder,
+                                    c_id,
+                                    data_conv_auto,
+                                    engenheiro_campo,
+                                    turno_conv_campo,
+                                )
                             )
+
                             if ok:
                                 sucessos += 1
                             else:
-                                avisos.append(f"{nome_pessoa}: {motivo}.")
+                                avisos.append(
+                                    f"{nome_pessoa}: {motivo}"
+                                )
 
                         if sucessos:
                             limpar_cache_operacional()
                             st.success(
-                                f"✅ {sucessos} colaborador(es) convocado(s) para {unidade_selecionada} "
-                                f"em {data_conv_auto.strftime('%d/%m/%Y')} • Turno {turno_conv_campo}."
+                                f"{sucessos} pessoa(s) convocada(s) "
+                                f"para {unidade_selecionada} · {turno_conv_campo}."
                             )
+
+                            # A próxima convocação começa limpa.
+                            for chave in [
+                                "engm_conv_pessoas",
+                                "engm_manual_nome",
+                                "engm_manual_funcao",
+                                "engm_manual_avulso",
+                            ]:
+                                st.session_state.pop(
+                                    chave,
+                                    None,
+                                )
+
                         for aviso in avisos:
                             st.warning(aviso)
 
-    # --------------------------------------------------------------
-    # DISPONIBILIDADE
-    # --------------------------------------------------------------
-    elif secao_campo == "👥 DISPONIBILIDADE":
-        render_aba_disponibilidade("campo_novo")
+                        if sucessos and not avisos:
+                            st.rerun()
+
+    # =====================================================================
+    # DISPONIBILIDADE — LISTA PENSADA PARA CELULAR
+    # =====================================================================
+    else:
+        data_disp = st.date_input(
+            "Data",
+            value=amanha_campo,
+            format="DD/MM/YYYY",
+            key="engm_disp_data",
+        )
+
+        turno_disp = st.selectbox(
+            "Turno",
+            [
+                "Integral",
+                "Manhã",
+                "Tarde",
+                "Noite",
+            ],
+            key="engm_disp_turno",
+        )
+
+        try:
+            convs_disp = (
+                _buscar_convocacoes_intervalo(
+                    data_disp,
+                    data_disp,
+                    None,
+                )
+                or []
+            )
+        except Exception:
+            convs_disp = []
+
+        indisponibilidades = (
+            _carregar_indisponibilidades_disponibilidade()
+            or []
+        )
+
+        indisponiveis_map = {}
+
+        for item in indisponibilidades:
+            alvo = str(
+                item.get("colaborador_id")
+                or ""
+            )
+
+            if not alvo:
+                continue
+
+            try:
+                ini = datetime.date.fromisoformat(
+                    str(item.get("inicio"))
+                )
+                fim = datetime.date.fromisoformat(
+                    str(item.get("fim"))
+                )
+            except Exception:
+                continue
+
+            if ini <= data_disp <= fim:
+                indisponiveis_map[alvo] = item
+
+        por_colaborador = {}
+
+        for conv in convs_disp:
+            cid = str(
+                conv.get("colaborador_id")
+                or ""
+            )
+
+            if cid:
+                por_colaborador.setdefault(
+                    cid,
+                    [],
+                ).append(conv)
+
+        disponiveis = []
+        ocupados = []
+        indisponiveis = []
+
+        for colab in sorted(
+            colaboradores,
+            key=lambda c: normalizar(
+                c.get("nome", "")
+            ),
+        ):
+            cid = str(
+                colab.get("id")
+                or ""
+            )
+            nome = str(
+                colab.get("nome")
+                or "-"
+            )
+            funcao = str(
+                colab.get("funcao")
+                or "-"
+            )
+
+            if cid in indisponiveis_map:
+                ind = indisponiveis_map[cid]
+                indisponiveis.append(
+                    {
+                        "nome": nome,
+                        "funcao": funcao,
+                        "detalhe": str(
+                            ind.get("motivo")
+                            or "Indisponível"
+                        ),
+                    }
+                )
+                continue
+
+            alocacoes = por_colaborador.get(
+                cid,
+                [],
+            )
+
+            sobrepostas = [
+                conv
+                for conv in alocacoes
+                if turnos_se_sobrepoem(
+                    turno_da_convocacao(conv),
+                    turno_disp,
+                )
+            ]
+
+            if sobrepostas:
+                detalhes = []
+
+                for conv in sobrepostas:
+                    obra = dict_obras.get(
+                        conv.get("obra_id"),
+                        {},
+                    )
+                    detalhes.append(
+                        f"{turno_da_convocacao(conv)} · "
+                        f"{obra.get('unidade','-')} · "
+                        f"{conv.get('engenheiro','-')}"
+                    )
+
+                ocupados.append(
+                    {
+                        "nome": nome,
+                        "funcao": funcao,
+                        "detalhe": " | ".join(
+                            detalhes
+                        ),
+                    }
+                )
+
+            else:
+                outras = []
+
+                for conv in alocacoes:
+                    obra = dict_obras.get(
+                        conv.get("obra_id"),
+                        {},
+                    )
+                    outras.append(
+                        f"{turno_da_convocacao(conv)} · "
+                        f"{obra.get('unidade','-')}"
+                    )
+
+                disponiveis.append(
+                    {
+                        "nome": nome,
+                        "funcao": funcao,
+                        "detalhe": (
+                            "Outro turno: "
+                            + " | ".join(outras)
+                            if outras
+                            else "Livre no dia"
+                        ),
+                    }
+                )
+
+        st.markdown(
+            f"""
+            <div class="engm-summary">
+                <div class="engm-summary-item">
+                    <div class="engm-summary-label">Disponíveis</div>
+                    <div class="engm-summary-value engm-avail-ok">{len(disponiveis)}</div>
+                    <div class="engm-summary-note">{turno_disp}</div>
+                </div>
+                <div class="engm-summary-item">
+                    <div class="engm-summary-label">Ocupados</div>
+                    <div class="engm-summary-value engm-avail-busy">{len(ocupados)}</div>
+                    <div class="engm-summary-note">conflitam no turno</div>
+                </div>
+                <div class="engm-summary-item">
+                    <div class="engm-summary-label">Indisponíveis</div>
+                    <div class="engm-summary-value engm-avail-off">{len(indisponiveis)}</div>
+                    <div class="engm-summary-note">bloqueados</div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        busca_disp = st.text_input(
+            "Buscar colaborador",
+            placeholder="Digite nome ou função...",
+            key="engm_disp_busca",
+        )
+
+        termo_busca = normalizar(
+            busca_disp
+        ).strip()
+
+        def _filtrar_lista_disp(lista):
+            if not termo_busca:
+                return lista
+
+            return [
+                item
+                for item in lista
+                if termo_busca
+                in normalizar(
+                    f"{item['nome']} {item['funcao']}"
+                )
+            ]
+
+        disponiveis_view = _filtrar_lista_disp(
+            disponiveis
+        )
+        ocupados_view = _filtrar_lista_disp(
+            ocupados
+        )
+        indisponiveis_view = _filtrar_lista_disp(
+            indisponiveis
+        )
+
+        st.markdown(
+            f'<div class="engm-section-title">Disponíveis · {len(disponiveis_view)}</div>',
+            unsafe_allow_html=True,
+        )
+
+        if disponiveis_view:
+            itens = []
+
+            for item in disponiveis_view:
+                itens.append(
+                    f"""
+                    <div class="engm-list-item">
+                        <div class="engm-list-main">
+                            <div class="engm-list-name">
+                                {_html.escape(item['nome'])}
+                            </div>
+                            <div class="engm-list-meta">
+                                {_html.escape(item['funcao'])} · {_html.escape(item['detalhe'])}
+                            </div>
+                        </div>
+                        <div class="engm-list-side engm-avail-ok">Livre</div>
+                    </div>
+                    """
+                )
+
+            st.markdown(
+                '<div class="engm-list">'
+                + "".join(itens)
+                + "</div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.caption(
+                "Nenhum disponível para o filtro."
+            )
+
+        total_ocultos = (
+            len(ocupados_view)
+            + len(indisponiveis_view)
+        )
+
+        with st.expander(
+            f"Ver ocupados e indisponíveis · {total_ocultos}",
+            expanded=False,
+        ):
+            if ocupados_view:
+                st.markdown(
+                    "**Ocupados no turno**"
+                )
+
+                itens = []
+
+                for item in ocupados_view:
+                    itens.append(
+                        f"""
+                        <div class="engm-list-item">
+                            <div class="engm-list-main">
+                                <div class="engm-list-name">
+                                    {_html.escape(item['nome'])}
+                                </div>
+                                <div class="engm-list-meta">
+                                    {_html.escape(item['funcao'])} · {_html.escape(item['detalhe'])}
+                                </div>
+                            </div>
+                            <div class="engm-list-side engm-avail-busy">Ocupado</div>
+                        </div>
+                        """
+                    )
+
+                st.markdown(
+                    '<div class="engm-list">'
+                    + "".join(itens)
+                    + "</div>",
+                    unsafe_allow_html=True,
+                )
+
+            if indisponiveis_view:
+                st.markdown(
+                    "**Indisponíveis**"
+                )
+
+                itens = []
+
+                for item in indisponiveis_view:
+                    itens.append(
+                        f"""
+                        <div class="engm-list-item">
+                            <div class="engm-list-main">
+                                <div class="engm-list-name">
+                                    {_html.escape(item['nome'])}
+                                </div>
+                                <div class="engm-list-meta">
+                                    {_html.escape(item['funcao'])} · {_html.escape(item['detalhe'])}
+                                </div>
+                            </div>
+                            <div class="engm-list-side engm-avail-off">Indisp.</div>
+                        </div>
+                        """
+                    )
+
+                st.markdown(
+                    '<div class="engm-list">'
+                    + "".join(itens)
+                    + "</div>",
+                    unsafe_allow_html=True,
+                )
 
 elif modo_financeiro:
     # ==========================================
