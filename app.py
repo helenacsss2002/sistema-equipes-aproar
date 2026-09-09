@@ -566,18 +566,6 @@ div[role="combobox"] {
 # --- PATCH VISUAL V2: SIDEBAR + PÁGINAS ANALÍTICAS ---
 st.markdown("""
 <style>
-/* Material Symbols da navegação: mantém a fonte correta e proporções do mockup */
-section[data-testid="stSidebar"] [data-testid="stIconMaterial"] {
-    font-family: "Material Symbols Outlined", "Material Symbols Rounded" !important;
-    font-size: 20px !important;
-    color: #D8E2F1 !important;
-    margin-right: 8px !important;
-    font-variation-settings: "FILL" 0, "wght" 300, "GRAD" 0, "opsz" 24 !important;
-}
-section[data-testid="stSidebar"] [data-testid="stBaseButton-primary"] [data-testid="stIconMaterial"] {
-    color: #FFFFFF !important;
-    font-variation-settings: "FILL" 1, "wght" 500, "GRAD" 0, "opsz" 24 !important;
-}
 section[data-testid="stSidebar"] .stButton > button {
     gap: 7px !important;
     min-height: 42px !important;
@@ -663,6 +651,59 @@ section[data-testid="stSidebar"] > div:first-child {
 </style>
 """, unsafe_allow_html=True)
 
+
+
+# --- SIDEBAR V3: ÍCONES SVG CONSISTENTES (SEM MATERIAL ICONS) ---
+st.markdown("""
+<style>
+/* Não dependemos mais da fonte de ícones do Streamlit para o menu. */
+section[data-testid="stSidebar"] .stButton > button {
+    position: relative !important;
+    padding-left: 48px !important;
+    justify-content: flex-start !important;
+    gap: 0 !important;
+}
+section[data-testid="stSidebar"] .stButton > button::before {
+    content: "";
+    position: absolute;
+    left: 17px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 20px;
+    height: 20px;
+    background-color: currentColor;
+    -webkit-mask-image: var(--nav-icon);
+    mask-image: var(--nav-icon);
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+    -webkit-mask-position: center;
+    mask-position: center;
+    -webkit-mask-size: 20px 20px;
+    mask-size: 20px 20px;
+    opacity: .96;
+}
+section[data-testid="stSidebar"] .stButton > button p {
+    margin: 0 !important;
+}
+/* O botão de bloquear edição não recebe ícone. */
+section[data-testid="stSidebar"] div[class*="st-key-bloquear_edicao_sidebar_ui4"] button {
+    padding-left: 12px !important;
+    justify-content: center !important;
+}
+section[data-testid="stSidebar"] div[class*="st-key-bloquear_edicao_sidebar_ui4"] button::before { display:none !important; }
+section[data-testid="stSidebar"] div[class*="st-key-btn_nav_inicio_ui4"] { --nav-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m3%2011%209-8%209%208%22%2F%3E%3Cpath%20d%3D%22M5%2010v10h14V10%22%2F%3E%3Cpath%20d%3D%22M9%2020v-6h6v6%22%2F%3E%3C%2Fsvg%3E"); }
+section[data-testid="stSidebar"] div[class*="st-key-btn_nav_conv_ui4"] { --nav-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M6%202h8l4%204v16H6z%22%2F%3E%3Cpath%20d%3D%22M14%202v5h5%22%2F%3E%3Cpath%20d%3D%22M9%2013h6%22%2F%3E%3Cpath%20d%3D%22M9%2017h6%22%2F%3E%3C%2Fsvg%3E"); }
+section[data-testid="stSidebar"] div[class*="st-key-btn_nav_conf_ui4"] { --nav-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M12%203%202.5%2020h19z%22%2F%3E%3Cpath%20d%3D%22M12%209v4%22%2F%3E%3Cpath%20d%3D%22M12%2017h.01%22%2F%3E%3C%2Fsvg%3E"); }
+section[data-testid="stSidebar"] div[class*="st-key-btn_nav_apon_ui4"] { --nav-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%223%22%20y%3D%223%22%20width%3D%2218%22%20height%3D%2218%22%20rx%3D%223%22%2F%3E%3Cpath%20d%3D%22m8%2012%203%203%205-6%22%2F%3E%3C%2Fsvg%3E"); }
+section[data-testid="stSidebar"] div[class*="st-key-btn_nav_wpp_ui4"] { --nav-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M21%2015a4%204%200%200%201-4%204H8l-5%203V7a4%204%200%200%201%204-4h10a4%204%200%200%201%204%204z%22%2F%3E%3Cpath%20d%3D%22M8%209h8%22%2F%3E%3Cpath%20d%3D%22M8%2013h5%22%2F%3E%3C%2Fsvg%3E"); }
+section[data-testid="stSidebar"] div[class*="st-key-btn_nav_disp_ui4"] { --nav-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M16%2021v-2a4%204%200%200%200-4-4H6a4%204%200%200%200-4%204v2%22%2F%3E%3Ccircle%20cx%3D%229%22%20cy%3D%227%22%20r%3D%224%22%2F%3E%3Cpath%20d%3D%22M22%2021v-2a4%204%200%200%200-3-3.87%22%2F%3E%3Cpath%20d%3D%22M16%203.13a4%204%200%200%201%200%207.75%22%2F%3E%3C%2Fsvg%3E"); }
+section[data-testid="stSidebar"] div[class*="st-key-btn_nav_indisp_ui4"] { --nav-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Ccircle%20cx%3D%2212%22%20cy%3D%2212%22%20r%3D%229%22%2F%3E%3Cpath%20d%3D%22m5.6%205.6%2012.8%2012.8%22%2F%3E%3C%2Fsvg%3E"); }
+section[data-testid="stSidebar"] div[class*="st-key-btn_nav_dash_ui4"] { --nav-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Crect%20x%3D%223%22%20y%3D%223%22%20width%3D%227%22%20height%3D%227%22%20rx%3D%221%22%2F%3E%3Crect%20x%3D%2214%22%20y%3D%223%22%20width%3D%227%22%20height%3D%227%22%20rx%3D%221%22%2F%3E%3Crect%20x%3D%223%22%20y%3D%2214%22%20width%3D%227%22%20height%3D%227%22%20rx%3D%221%22%2F%3E%3Crect%20x%3D%2214%22%20y%3D%2214%22%20width%3D%227%22%20height%3D%227%22%20rx%3D%221%22%2F%3E%3C%2Fsvg%3E"); }
+section[data-testid="stSidebar"] div[class*="st-key-btn_nav_rel_ui4"] { --nav-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M4%2020V10%22%2F%3E%3Cpath%20d%3D%22M10%2020V4%22%2F%3E%3Cpath%20d%3D%22M16%2020v-7%22%2F%3E%3Cpath%20d%3D%22M22%2020H2%22%2F%3E%3C%2Fsvg%3E"); }
+section[data-testid="stSidebar"] div[class*="st-key-btn_nav_ind_ui4"] { --nav-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22m3%2017%205-5%204%204%208-9%22%2F%3E%3Cpath%20d%3D%22M15%207h5v5%22%2F%3E%3C%2Fsvg%3E"); }
+section[data-testid="stSidebar"] div[class*="st-key-btn_nav_cfg_ui4"] { --nav-icon: url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%222%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Ccircle%20cx%3D%2212%22%20cy%3D%2212%22%20r%3D%223%22%2F%3E%3Cpath%20d%3D%22M19.4%2015a1.65%201.65%200%200%200%20.33%201.82l.06.06-2.83%202.83-.06-.06A1.65%201.65%200%200%200%2015%2019.4a1.65%201.65%200%200%200-1%20.6%201.65%201.65%200%200%200-.4%201.08V21h-4v-.08A1.65%201.65%200%200%200%208.6%2019.4a1.65%201.65%200%200%200-1.82.33l-.06.06-2.83-2.83.06-.06A1.65%201.65%200%200%200%204.6%2015a1.65%201.65%200%200%200-.6-1%201.65%201.65%200%200%200-1.08-.4H3v-4h.08A1.65%201.65%200%200%200%204.6%208.6a1.65%201.65%200%200%200-.33-1.82l-.06-.06%202.83-2.83.06.06A1.65%201.65%200%200%200%209%204.6a1.65%201.65%200%200%200%201-.6%201.65%201.65%200%200%200%20.4-1.08V3h4v.08A1.65%201.65%200%200%200%2015.4%204.6a1.65%201.65%200%200%200%201.82-.33l.06-.06%202.83%202.83-.06.06A1.65%201.65%200%200%200%2019.4%209c.18.36.27.76.27%201.16s-.09.8-.27%201.16Z%22%2F%3E%3C%2Fsvg%3E"); }
+</style>
+""", unsafe_allow_html=True)
 
 # --- MESES EM PORTUGUÊS ---
 MESES_PT = {
@@ -5025,35 +5066,34 @@ else:
 
         st.markdown("<div class='aproar-sidebar-subtitle'>GESTÃO DE EQUIPES</div>", unsafe_allow_html=True)
 
-        def _nav_admin(label, destino, key, icon):
+        def _nav_admin(label, destino, key):
             ativo = st.session_state.get("menu_ativo") == destino
             st.button(
                 label,
                 key=key,
                 type="primary" if ativo else "secondary",
-                icon=icon,
                 use_container_width=True,
                 on_click=_ir_menu_admin,
                 args=(destino,),
             )
 
-        _nav_admin("Início", "🏠 INÍCIO", "btn_nav_inicio_ui4", ":material/home:")
+        _nav_admin("Início", "🏠 INÍCIO", "btn_nav_inicio_ui4")
 
         st.markdown("<div class='aproar-sidebar-section'>OPERAÇÃO</div>", unsafe_allow_html=True)
-        _nav_admin("Convocação", "📋 CONVOCAÇÃO", "btn_nav_conv_ui4", ":material/description:")
-        _nav_admin("Conflitos", "🚨 CONFLITOS", "btn_nav_conf_ui4", ":material/warning_amber:")
-        _nav_admin("Apontamento", "✅ APONTAMENTO", "btn_nav_apon_ui4", ":material/check_box:")
-        _nav_admin("WhatsApp", "💬 WHATSAPP", "btn_nav_wpp_ui4", ":material/forum:")
-        _nav_admin("Disponibilidade", "👥 DISPONIBILIDADE", "btn_nav_disp_ui4", ":material/groups:")
-        _nav_admin("Indisponibilidade", "🚫 INDISPONIBILIDADE", "btn_nav_indisp_ui4", ":material/block:")
+        _nav_admin("Convocação", "📋 CONVOCAÇÃO", "btn_nav_conv_ui4")
+        _nav_admin("Conflitos", "🚨 CONFLITOS", "btn_nav_conf_ui4")
+        _nav_admin("Apontamento", "✅ APONTAMENTO", "btn_nav_apon_ui4")
+        _nav_admin("WhatsApp", "💬 WHATSAPP", "btn_nav_wpp_ui4")
+        _nav_admin("Disponibilidade", "👥 DISPONIBILIDADE", "btn_nav_disp_ui4")
+        _nav_admin("Indisponibilidade", "🚫 INDISPONIBILIDADE", "btn_nav_indisp_ui4")
 
         st.markdown("<div class='aproar-sidebar-section'>ANÁLISE E FECHAMENTO</div>", unsafe_allow_html=True)
-        _nav_admin("Dashboard", "🎛️ DASHBOARD", "btn_nav_dash_ui4", ":material/space_dashboard:")
-        _nav_admin("Relatórios", "📊 RELATÓRIOS", "btn_nav_rel_ui4", ":material/bar_chart:")
-        _nav_admin("Indicadores", "📈 INDICADORES", "btn_nav_ind_ui4", ":material/show_chart:")
+        _nav_admin("Dashboard", "🎛️ DASHBOARD", "btn_nav_dash_ui4")
+        _nav_admin("Relatórios", "📊 RELATÓRIOS", "btn_nav_rel_ui4")
+        _nav_admin("Indicadores", "📈 INDICADORES", "btn_nav_ind_ui4")
 
         st.markdown("<div class='aproar-sidebar-section'>SISTEMA</div>", unsafe_allow_html=True)
-        _nav_admin("Configurações", "⚙️ CONFIGURAÇÕES", "btn_nav_cfg_ui4", ":material/settings:")
+        _nav_admin("Configurações", "⚙️ CONFIGURAÇÕES", "btn_nav_cfg_ui4")
 
         st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
         st.caption("Modo de edição ativo")
