@@ -1040,7 +1040,9 @@ div[class*="st-key-ap2_quick_ind"] button *{
     white-space:nowrap !important;
 }
 
-div[class*="st-key-ap2_quick_conv"] button *{ color:#FFFFFF !important; }
+div[class*="st-key-ap2_quick_conv"] button *{
+    color:inherit !important;
+}
 div[class*="st-key-ap2_quick_apon"] button *,
 div[class*="st-key-ap2_quick_disp"] button *,
 div[class*="st-key-ap2_quick_ind"] button *{ color:#35485F !important; }
@@ -1103,7 +1105,8 @@ st.markdown("""
     color:var(--st-text-color, var(--text-color, #314258)) !important;
 }
 
-/* Ações secundárias: usam o fundo, texto e borda do tema atual. */
+/* Todas as ações rápidas acompanham o tema atual. */
+div[class*="st-key-ap2_quick_conv"] button,
 div[class*="st-key-ap2_quick_apon"] button,
 div[class*="st-key-ap2_quick_disp"] button,
 div[class*="st-key-ap2_quick_ind"] button{
@@ -1122,6 +1125,7 @@ div[class*="st-key-ap2_quick_ind"] button{
 }
 
 /* O texto interno herda a cor real do botão. */
+div[class*="st-key-ap2_quick_conv"] button *,
 div[class*="st-key-ap2_quick_apon"] button *,
 div[class*="st-key-ap2_quick_disp"] button *,
 div[class*="st-key-ap2_quick_ind"] button *{
@@ -1165,6 +1169,68 @@ div[class*="st-key-ap2_quick_ind"] button:hover{
             --st-border-color,
             #2C3950
         ) !important;
+    }
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+
+
+# --- PATCH V2.4 | CORREÇÃO DEFINITIVA DO BOTÃO NOVA CONVOCAÇÃO --------------
+st.markdown("""
+<style>
+div[class*="st-key-ap2_quick_conv"] button{
+    background:var(
+        --st-secondary-background-color,
+        var(--secondary-background-color, #FFFFFF)
+    ) !important;
+    color:var(
+        --st-text-color,
+        var(--text-color, #35485F)
+    ) !important;
+    border:1px solid var(
+        --st-border-color,
+        rgba(128,140,158,.28)
+    ) !important;
+    box-shadow:none !important;
+}
+
+div[class*="st-key-ap2_quick_conv"] button *,
+div[class*="st-key-ap2_quick_conv"] button p,
+div[class*="st-key-ap2_quick_conv"] button span{
+    color:inherit !important;
+    -webkit-text-fill-color:currentColor !important;
+    opacity:1 !important;
+}
+
+div[class*="st-key-ap2_quick_conv"] button::before{
+    background-color:currentColor !important;
+}
+
+div[class*="st-key-ap2_quick_conv"] button:hover{
+    background:color-mix(
+        in srgb,
+        var(--st-text-color, var(--text-color, #35485F)) 7%,
+        var(--st-secondary-background-color, var(--secondary-background-color, #FFFFFF))
+    ) !important;
+    color:var(
+        --st-text-color,
+        var(--text-color, #35485F)
+    ) !important;
+}
+
+@media (prefers-color-scheme: dark){
+    div[class*="st-key-ap2_quick_conv"] button{
+        background:var(
+            --st-secondary-background-color,
+            var(--secondary-background-color, #172033)
+        ) !important;
+        color:var(
+            --st-text-color,
+            var(--text-color, #E6ECF4)
+        ) !important;
+        border-color:var(--st-border-color, #2C3950) !important;
     }
 }
 </style>
