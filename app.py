@@ -1487,14 +1487,14 @@ main .block-container{
 
 /* Sidebar também começa no topo de forma natural. */
 [data-testid="stSidebarContent"]{
-    padding-top:.8rem !important;
-    padding-bottom:.8rem !important;
+    padding-top:1.1rem !important;
+    padding-bottom:1rem !important;
 }
 section[data-testid="stSidebar"]{
     padding-top:0 !important;
 }
 section[data-testid="stSidebar"] > div:first-child{
-    padding-top:.75rem !important;
+    padding-top:1rem !important;
 }
 
 /* Os elementos invisíveis de estilo não devem reservar altura em versões
@@ -1523,21 +1523,21 @@ main [data-testid="stHorizontalBlock"]{
 
 /* Sidebar: remove o ar excessivo entre logo, grupos e opções. */
 [data-testid="stSidebarContent"] [data-testid="stVerticalBlock"]{
-    gap:.15rem !important;
+    gap:.34rem !important;
 }
 section[data-testid="stSidebar"] [data-testid="stImage"]{
-    margin:0 auto 0 !important;
+    margin:0 auto .35rem !important;
 }
 .aproar-sidebar-subtitle{
-    margin:1px 8px 10px !important;
+    margin:4px 8px 14px !important;
 }
 .aproar-sidebar-section{
-    margin:11px 9px 4px !important;
+    margin:16px 10px 7px !important;
 }
 section[data-testid="stSidebar"] .stButton > button{
     margin:0 !important;
-    min-height:36px !important;
-    height:36px !important;
+    min-height:40px !important;
+    height:40px !important;
 }
 
 /* Home */
