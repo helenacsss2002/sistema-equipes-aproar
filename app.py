@@ -2036,6 +2036,83 @@ div[class*="st-key-ap2_quick"] .stButton > button{
 """)
 
 
+
+
+# --- APROAR V4.2 | TOPO DAS PÁGINAS + AÇÕES DE RELATÓRIO --------------------
+st.html("""
+<style>
+/*
+O cabeçalho fixo do Streamlit mede cerca de 46 px.
+Na V4 o conteúdo estava com apenas 1.75rem de padding, então títulos de
+Dashboard, Relatórios, Indicadores etc. entravam por baixo dele.
+*/
+[data-testid="stMainBlockContainer"],
+main .block-container{
+    padding-top:4.15rem !important;
+}
+
+/* Garante que nenhum cabeçalho interno seja recortado. */
+.ap3-page-head,
+.ap-home-head{
+    overflow:visible !important;
+}
+.ap3-page-title,
+.ap-home-title{
+    line-height:1.16 !important;
+    padding-top:2px !important;
+}
+
+/* Relatórios: ações menos pesadas que dois blocos azuis gigantes. */
+div[class*="st-key-rel_gerar_pdf_v42"] button,
+div[class*="st-key-rel_gerar_excel_v42"] button{
+    min-height:40px !important;
+    background:var(
+        --st-secondary-background-color,
+        var(--secondary-background-color,#FFFFFF)
+    ) !important;
+    color:var(
+        --st-text-color,
+        var(--text-color,#24364D)
+    ) !important;
+    border:1px solid color-mix(
+        in srgb,
+        var(--st-text-color,var(--text-color,#24364D)) 16%,
+        transparent
+    ) !important;
+    border-radius:7px !important;
+    box-shadow:none !important;
+    font-size:11px !important;
+    font-weight:620 !important;
+}
+div[class*="st-key-rel_gerar_pdf_v42"] button *,
+div[class*="st-key-rel_gerar_excel_v42"] button *{
+    color:inherit !important;
+}
+div[class*="st-key-rel_gerar_pdf_v42"] button:hover,
+div[class*="st-key-rel_gerar_excel_v42"] button:hover{
+    background:color-mix(
+        in srgb,
+        var(--st-text-color,var(--text-color,#24364D)) 5%,
+        var(--st-secondary-background-color,var(--secondary-background-color,#FFFFFF))
+    ) !important;
+    border-color:color-mix(
+        in srgb,
+        var(--st-primary-color,var(--primary-color,#245FD6)) 42%,
+        transparent
+    ) !important;
+}
+
+/* Em telas menores também preserva o espaço do cabeçalho. */
+@media(max-width:900px){
+    [data-testid="stMainBlockContainer"],
+    main .block-container{
+        padding-top:3.9rem !important;
+    }
+}
+</style>
+""")
+
+
 # --- MESES EM PORTUGUÊS ---
 MESES_PT = {
     1: "JANEIRO", 2: "FEVEREIRO", 3: "MARÇO", 4: "ABRIL",
@@ -7375,7 +7452,7 @@ else:
         col_btn1, col_btn2 = st.columns(2)
 
         with col_btn1:
-            if st.button("📄 Gerar PDF", type="primary", use_container_width=True):
+            if st.button("Gerar PDF", use_container_width=True, key="rel_gerar_pdf_v42"):
                 try:
                     if data_inicio_rel > data_fim_rel:
                         st.error("Data inicial maior que a final.")
@@ -7448,7 +7525,7 @@ else:
                     exibir_erro_amigavel("relatorios", "gerar_pdf", e, "Não foi possível gerar o PDF.")
 
         with col_btn2:
-            if st.button("📊 Gerar Excel (Abas por Dia + Cores por Engenheiro)", use_container_width=True):
+            if st.button("Gerar Excel", use_container_width=True, key="rel_gerar_excel_v42"):
                 try:
                     if data_inicio_rel > data_fim_rel:
                         st.error("Data inicial maior que a final.")
