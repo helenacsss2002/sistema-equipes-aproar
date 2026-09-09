@@ -1640,6 +1640,402 @@ main div[style*="height:24px"]{
 """)
 
 
+
+
+# --- APROAR V4 | ACABAMENTO CORPORATIVO -------------------------------------
+st.html("""
+<style>
+/* ==========================================================================
+   IDENTIDADE
+   ========================================================================== */
+:root{
+    --corp-navy:#0B1B33;
+    --corp-navy-2:#102746;
+    --corp-blue:#245FD6;
+    --corp-blue-hover:#1D51BE;
+    --corp-bg:#F4F6F9;
+    --corp-surface:#FFFFFF;
+    --corp-text:#172235;
+    --corp-muted:#718096;
+    --corp-border:#E0E6EE;
+    --corp-border-soft:#E9EDF3;
+    --corp-shadow:0 1px 2px rgba(15,23,42,.035), 0 5px 16px rgba(15,23,42,.025);
+}
+
+/* Fundo e largura da aplicação */
+html,body,.stApp,[data-testid="stAppViewContainer"],[data-testid="stMain"]{
+    background:var(--st-background-color, var(--background-color, var(--corp-bg))) !important;
+}
+[data-testid="stMainBlockContainer"],
+main .block-container{
+    max-width:1480px !important;
+    padding-left:2.4rem !important;
+    padding-right:2.4rem !important;
+    padding-top:1.75rem !important;
+}
+
+/* Tipografia */
+html,body,p,label,input,textarea,button,.stMarkdown,.stCaption{
+    font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif !important;
+}
+main h1,main h2,main h3,main h4{
+    letter-spacing:-.025em !important;
+}
+
+/* ==========================================================================
+   SIDEBAR — MAIS SÓLIDA E CORPORATIVA
+   ========================================================================== */
+section[data-testid="stSidebar"]{
+    width:224px !important;
+    min-width:224px !important;
+    background:var(--corp-navy) !important;
+    border-right:1px solid #173152 !important;
+}
+[data-testid="stSidebarContent"]{
+    padding:1.15rem 14px 1.1rem !important;
+}
+section[data-testid="stSidebar"] > div:first-child{
+    padding-top:1rem !important;
+}
+
+/* Logo */
+section[data-testid="stSidebar"] [data-testid="stImage"]{
+    max-width:150px !important;
+    margin:0 auto .5rem !important;
+}
+.aproar-sidebar-subtitle{
+    color:#8093AE !important;
+    font-size:8px !important;
+    font-weight:750 !important;
+    letter-spacing:1.65px !important;
+    margin:4px 8px 17px !important;
+}
+
+/* Grupos */
+.aproar-sidebar-section{
+    color:#6682A5 !important;
+    font-size:7.5px !important;
+    font-weight:800 !important;
+    letter-spacing:1.45px !important;
+    margin:18px 10px 7px !important;
+}
+
+/* Navegação */
+[data-testid="stSidebarContent"] [data-testid="stVerticalBlock"]{
+    gap:.3rem !important;
+}
+section[data-testid="stSidebar"] .stButton{
+    margin:0 !important;
+}
+section[data-testid="stSidebar"] .stButton > button{
+    height:40px !important;
+    min-height:40px !important;
+    border-radius:7px !important;
+    border:1px solid transparent !important;
+    padding-left:44px !important;
+    padding-right:12px !important;
+    background:transparent !important;
+    color:#CED8E5 !important;
+    font-size:12.5px !important;
+    font-weight:530 !important;
+    box-shadow:none !important;
+    transition:background .15s ease,border-color .15s ease,color .15s ease !important;
+}
+section[data-testid="stSidebar"] .stButton > button:hover{
+    background:#122C4D !important;
+    border-color:#1A385D !important;
+    color:#FFFFFF !important;
+}
+section[data-testid="stSidebar"] [data-testid="stBaseButton-primary"],
+section[data-testid="stSidebar"] .stButton > button[kind="primary"]{
+    background:var(--corp-blue) !important;
+    border-color:var(--corp-blue) !important;
+    color:#FFFFFF !important;
+}
+section[data-testid="stSidebar"] [data-testid="stBaseButton-primary"]:hover,
+section[data-testid="stSidebar"] .stButton > button[kind="primary"]:hover{
+    background:var(--corp-blue-hover) !important;
+    border-color:var(--corp-blue-hover) !important;
+}
+
+/* Ícones */
+section[data-testid="stSidebar"] .stButton > button::before{
+    left:14px !important;
+    width:17px !important;
+    height:17px !important;
+    -webkit-mask-size:17px 17px !important;
+    mask-size:17px 17px !important;
+    opacity:.88 !important;
+}
+
+/* Rodapé de edição */
+section[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p{
+    color:#657A96 !important;
+    font-size:9.5px !important;
+}
+section[data-testid="stSidebar"] div[class*="st-key-bloquear_edicao_sidebar_ui4"] button{
+    height:31px !important;
+    min-height:31px !important;
+    padding:0 8px !important;
+    color:#91A2B8 !important;
+    font-size:10.5px !important;
+    border:1px solid #203A5B !important;
+    background:#0E213B !important;
+}
+section[data-testid="stSidebar"] div[class*="st-key-bloquear_edicao_sidebar_ui4"] button:hover{
+    background:#142A47 !important;
+    color:#DCE5F0 !important;
+}
+
+/* ==========================================================================
+   CABEÇALHOS
+   ========================================================================== */
+.ap-home-head{
+    margin:0 0 14px !important;
+}
+.ap-home-title{
+    font-size:30px !important;
+    font-weight:760 !important;
+    color:var(--st-text-color,var(--text-color,var(--corp-text))) !important;
+}
+.ap-home-sub{
+    font-size:12px !important;
+    color:color-mix(in srgb,var(--st-text-color,var(--text-color,#172235)) 55%,transparent) !important;
+}
+.ap-home-date{
+    font-size:11px !important;
+    color:color-mix(in srgb,var(--st-text-color,var(--text-color,#172235)) 68%,transparent) !important;
+}
+.ap-home-date span{
+    font-size:10px !important;
+    color:color-mix(in srgb,var(--st-text-color,var(--text-color,#172235)) 45%,transparent) !important;
+}
+
+.ap3-page-head{
+    margin:0 0 15px !important;
+    padding-bottom:12px !important;
+    border-bottom:1px solid color-mix(in srgb,var(--st-text-color,var(--text-color,#172235)) 10%,transparent) !important;
+}
+.ap3-page-kicker{
+    font-size:8px !important;
+    letter-spacing:1.35px !important;
+    color:var(--st-primary-color,var(--primary-color,var(--corp-blue))) !important;
+}
+.ap3-page-title{
+    font-size:27px !important;
+    font-weight:755 !important;
+}
+.ap3-page-sub{
+    font-size:11.5px !important;
+    max-width:720px !important;
+}
+.ap3-section{
+    margin:17px 0 8px !important;
+}
+.ap3-section-title{
+    font-size:13.5px !important;
+}
+
+/* Homologação mais discreta */
+.ap-env-banner{
+    border-radius:5px !important;
+    padding:5px 8px !important;
+    font-size:9.5px !important;
+    box-shadow:none !important;
+}
+
+/* ==========================================================================
+   FILTROS / FORMULÁRIOS
+   ========================================================================== */
+div[class*="st-key-ap2_filters"] [data-testid="stVerticalBlockBorderWrapper"] > div{
+    background:var(--st-secondary-background-color,var(--secondary-background-color,#FFFFFF)) !important;
+    border:1px solid color-mix(in srgb,var(--st-text-color,var(--text-color,#172235)) 13%,transparent) !important;
+    border-radius:8px !important;
+    padding:9px 12px 8px !important;
+    box-shadow:var(--corp-shadow) !important;
+}
+main label p{
+    font-size:9.5px !important;
+    font-weight:680 !important;
+    color:color-mix(in srgb,var(--st-text-color,var(--text-color,#172235)) 58%,transparent) !important;
+}
+main div[data-baseweb="select"] > div,
+main div[data-baseweb="base-input"] > div,
+main div[data-baseweb="input"] > div,
+main [data-baseweb="textarea"] > div,
+main div[role="combobox"]{
+    min-height:38px !important;
+    border-radius:6px !important;
+    border:1px solid color-mix(in srgb,var(--st-text-color,var(--text-color,#172235)) 13%,transparent) !important;
+    background:var(--st-secondary-background-color,var(--secondary-background-color,#FFFFFF)) !important;
+    box-shadow:none !important;
+}
+main div[data-baseweb="select"] > div:focus-within,
+main div[data-baseweb="base-input"] > div:focus-within,
+main div[data-baseweb="input"] > div:focus-within{
+    border-color:color-mix(in srgb,var(--st-primary-color,var(--primary-color,#245FD6)) 65%,transparent) !important;
+    box-shadow:0 0 0 2px color-mix(in srgb,var(--st-primary-color,var(--primary-color,#245FD6)) 10%,transparent) !important;
+}
+
+/* ==========================================================================
+   CARDS / MÉTRICAS
+   ========================================================================== */
+.ap-kpi-strip{
+    border:1px solid color-mix(in srgb,var(--st-text-color,var(--text-color,#172235)) 12%,transparent) !important;
+    border-radius:9px !important;
+    box-shadow:var(--corp-shadow) !important;
+}
+.ap-kpi{
+    min-height:88px !important;
+    padding:14px 17px 13px !important;
+}
+.ap-kpi-label{
+    font-size:8.5px !important;
+    letter-spacing:.45px !important;
+}
+.ap-kpi-value{
+    font-size:26px !important;
+    font-weight:745 !important;
+}
+.ap-kpi-note{
+    font-size:9.5px !important;
+}
+.ap-card{
+    border:1px solid color-mix(in srgb,var(--st-text-color,var(--text-color,#172235)) 11%,transparent) !important;
+    border-radius:9px !important;
+    box-shadow:var(--corp-shadow) !important;
+}
+.ap-card-title{
+    font-size:14px !important;
+}
+.ap-card-sub{
+    font-size:10px !important;
+}
+.ap-task,.ap-conflict{
+    border-radius:6px !important;
+}
+.ap-task strong,.ap-conflict-name{
+    font-size:11.5px !important;
+}
+
+[data-testid="stMetric"]{
+    border:1px solid color-mix(in srgb,var(--st-text-color,var(--text-color,#172235)) 11%,transparent) !important;
+    border-radius:8px !important;
+    padding:12px 14px !important;
+    box-shadow:var(--corp-shadow) !important;
+}
+[data-testid="stMetricValue"]{
+    font-size:23px !important;
+    font-weight:735 !important;
+}
+
+/* Containers internos */
+main [data-testid="stVerticalBlockBorderWrapper"] > div,
+main [data-testid="stExpander"]{
+    border-radius:8px !important;
+    border-color:color-mix(in srgb,var(--st-text-color,var(--text-color,#172235)) 11%,transparent) !important;
+    box-shadow:none !important;
+}
+
+/* ==========================================================================
+   TABS
+   ========================================================================== */
+[data-testid="stTabs"] [data-baseweb="tab-list"]{
+    gap:25px !important;
+}
+[data-testid="stTabs"] [data-baseweb="tab"]{
+    font-size:11px !important;
+    font-weight:620 !important;
+}
+
+/* ==========================================================================
+   TABELAS
+   ========================================================================== */
+[data-testid="stDataFrame"],
+[data-testid="stDataEditor"]{
+    border:1px solid color-mix(in srgb,var(--st-text-color,var(--text-color,#172235)) 13%,transparent) !important;
+    border-radius:8px !important;
+    box-shadow:var(--corp-shadow) !important;
+}
+[data-testid="stDataFrame"] [role="columnheader"],
+[data-testid="stDataEditor"] [role="columnheader"]{
+    background:color-mix(in srgb,var(--st-text-color,var(--text-color,#172235)) 4%,var(--st-secondary-background-color,var(--secondary-background-color,#FFFFFF))) !important;
+    font-size:9.5px !important;
+    font-weight:720 !important;
+}
+[data-testid="stDataFrame"] [role="gridcell"],
+[data-testid="stDataEditor"] [role="gridcell"]{
+    font-size:10.5px !important;
+}
+
+/* ==========================================================================
+   BOTÕES
+   ========================================================================== */
+main .stButton > button,
+main .stDownloadButton > button{
+    min-height:37px !important;
+    height:auto !important;
+    border-radius:6px !important;
+    font-size:10.8px !important;
+    font-weight:620 !important;
+    box-shadow:none !important;
+    transition:background .15s ease,border-color .15s ease,transform .08s ease !important;
+}
+main .stButton > button:active,
+main .stDownloadButton > button:active{
+    transform:translateY(1px);
+}
+main [data-testid="stBaseButton-primary"],
+main .stButton > button[kind="primary"],
+main [data-testid="stFormSubmitButton"] > button{
+    background:var(--st-primary-color,var(--primary-color,var(--corp-blue))) !important;
+    border-color:var(--st-primary-color,var(--primary-color,var(--corp-blue))) !important;
+    color:#FFFFFF !important;
+}
+
+/* Ações rápidas: linguagem uniforme e sem exagero */
+.ap-quick-head{
+    font-size:12px !important;
+    margin:14px 0 7px !important;
+}
+div[class*="st-key-ap2_quick"] .stButton > button{
+    border-radius:6px !important;
+}
+
+/* ==========================================================================
+   ALERTAS
+   ========================================================================== */
+[data-testid="stAlert"]{
+    border-radius:7px !important;
+    font-size:10.5px !important;
+    border-width:1px !important;
+}
+
+/* ==========================================================================
+   RESPONSIVO
+   ========================================================================== */
+@media(max-width:1100px){
+    [data-testid="stMainBlockContainer"],
+    main .block-container{
+        padding-left:1.25rem !important;
+        padding-right:1.25rem !important;
+    }
+}
+@media(max-width:760px){
+    section[data-testid="stSidebar"]{
+        width:212px !important;
+        min-width:212px !important;
+    }
+    [data-testid="stMainBlockContainer"],
+    main .block-container{
+        padding-left:.9rem !important;
+        padding-right:.9rem !important;
+    }
+}
+</style>
+""")
+
+
 # --- MESES EM PORTUGUÊS ---
 MESES_PT = {
     1: "JANEIRO", 2: "FEVEREIRO", 3: "MARÇO", 4: "ABRIL",
