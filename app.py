@@ -1090,6 +1090,100 @@ div[class*="st-key-ap2_quick_ind"] button::before{
 """, unsafe_allow_html=True)
 
 
+
+
+# --- PATCH REDESIGN V2.2 | AÇÕES RÁPIDAS ADAPTATIVAS AO TEMA -----------------
+# Usa as variáveis de tema do próprio Streamlit. Assim os botões acompanham
+# tema claro, escuro e a opção "System" sem manter fundo branco fixo.
+st.markdown("""
+<style>
+.ap-quick-head{
+    color:var(--st-text-color, var(--text-color, #314258)) !important;
+}
+
+/* Ações secundárias: usam o fundo, texto e borda do tema atual. */
+div[class*="st-key-ap2_quick_apon"] button,
+div[class*="st-key-ap2_quick_disp"] button,
+div[class*="st-key-ap2_quick_ind"] button{
+    background:var(
+        --st-secondary-background-color,
+        var(--secondary-background-color, #FFFFFF)
+    ) !important;
+    color:var(
+        --st-text-color,
+        var(--text-color, #35485F)
+    ) !important;
+    border-color:var(
+        --st-border-color,
+        rgba(128, 140, 158, .28)
+    ) !important;
+}
+
+/* O texto interno herda a cor real do botão. */
+div[class*="st-key-ap2_quick_apon"] button *,
+div[class*="st-key-ap2_quick_disp"] button *,
+div[class*="st-key-ap2_quick_ind"] button *{
+    color:inherit !important;
+}
+
+/* Hover também acompanha o tema, sem virar um retângulo branco no escuro. */
+div[class*="st-key-ap2_quick_apon"] button:hover,
+div[class*="st-key-ap2_quick_disp"] button:hover,
+div[class*="st-key-ap2_quick_ind"] button:hover{
+    background:color-mix(
+        in srgb,
+        var(--st-text-color, var(--text-color, #35485F)) 7%,
+        var(--st-secondary-background-color, var(--secondary-background-color, #FFFFFF))
+    ) !important;
+    border-color:color-mix(
+        in srgb,
+        var(--st-text-color, var(--text-color, #35485F)) 24%,
+        transparent
+    ) !important;
+}
+
+/* Ação principal usa a cor primária do tema, mantendo a hierarquia. */
+div[class*="st-key-ap2_quick_conv"] button{
+    background:var(
+        --st-primary-color,
+        var(--primary-color, #245FE5)
+    ) !important;
+    border-color:var(
+        --st-primary-color,
+        var(--primary-color, #245FE5)
+    ) !important;
+    color:#FFFFFF !important;
+}
+div[class*="st-key-ap2_quick_conv"] button *{
+    color:#FFFFFF !important;
+}
+div[class*="st-key-ap2_quick_conv"] button:hover{
+    filter:brightness(.94);
+}
+
+/* Fallback para navegadores/versões que não exponham as variáveis do tema. */
+@media (prefers-color-scheme: dark){
+    div[class*="st-key-ap2_quick_apon"] button,
+    div[class*="st-key-ap2_quick_disp"] button,
+    div[class*="st-key-ap2_quick_ind"] button{
+        background:var(
+            --st-secondary-background-color,
+            var(--secondary-background-color, #172033)
+        ) !important;
+        color:var(
+            --st-text-color,
+            var(--text-color, #E6ECF4)
+        ) !important;
+        border-color:var(
+            --st-border-color,
+            #2C3950
+        ) !important;
+    }
+}
+</style>
+""", unsafe_allow_html=True)
+
+
 # --- MESES EM PORTUGUÊS ---
 MESES_PT = {
     1: "JANEIRO", 2: "FEVEREIRO", 3: "MARÇO", 4: "ABRIL",
