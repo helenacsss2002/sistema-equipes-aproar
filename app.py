@@ -6763,11 +6763,10 @@ elif modo_campo:
                 """
             )
 
-        st.markdown(
+        st.html(
             '<div class="engm-list">'
             + "".join(itens_html)
-            + "</div>",
-            unsafe_allow_html=True,
+            + "</div>"
         )
 
     hoje_campo = agora_aproar().date()
@@ -7463,6 +7462,37 @@ elif modo_campo:
     elif area_campo == "Amanhã":
         data_conv_auto = amanha_campo
 
+        # Se a convocação anterior foi salva, limpa somente os campos de pessoas
+        # ANTES de recriar os widgets. Isso evita conflito com o Session State.
+        if st.session_state.pop("_engm_reset_convocacao", False):
+            for _chave in (
+                "engm_conv_pessoas",
+                "engm_manual_nome",
+                "engm_manual_funcao",
+                "engm_manual_avulso",
+            ):
+                st.session_state.pop(_chave, None)
+
+        # Feedback sobrevive ao st.rerun, então o engenheiro enxerga claramente
+        # se a convocação foi salva ou se alguém foi bloqueado.
+        _feedback_conv = st.session_state.pop("_engm_conv_feedback", None)
+        if _feedback_conv:
+            _qtd_ok = int(_feedback_conv.get("sucessos") or 0)
+            _avisos_fb = list(_feedback_conv.get("avisos") or [])
+            _unidade_fb = str(_feedback_conv.get("unidade") or "")
+            _turno_fb = str(_feedback_conv.get("turno") or "")
+
+            if _qtd_ok:
+                st.success(
+                    f"{_qtd_ok} pessoa(s) convocada(s) com sucesso"
+                    + (f" para {_unidade_fb}" if _unidade_fb else "")
+                    + (f" · {_turno_fb}" if _turno_fb else "")
+                    + "."
+                )
+
+            for _aviso_fb in _avisos_fb:
+                st.warning(_aviso_fb)
+
         ja_convocados = _enriquecer_convocacoes_campo(
             _buscar_convocacoes_campo(
                 engenheiro_campo,
@@ -7743,129 +7773,134 @@ elif modo_campo:
                     not equipe_selecionada
                     and not nome_manual.strip()
                 ):
-                    st.warning(
-                        "Selecione pelo menos uma pessoa."
-                    )
+                    st.warning("Selecione pelo menos uma pessoa.")
                 else:
-                    obra_id_placeholder = (
-                        obter_obra_placeholder_unidade(
-                            unidade_selecionada
-                        )
-                    )
-
-                    if not obra_id_placeholder:
-                        st.error(
-                            "Não foi possível preparar a unidade para a convocação."
-                        )
-                    else:
-                        pessoas = []
-
-                        for label_colab in equipe_selecionada:
-                            c_id = mapa_colab_opcoes[
-                                label_colab
-                            ]
-                            nome_existente = str(
-                                dict_colaboradores.get(
-                                    c_id,
-                                    {},
-                                ).get("nome")
-                                or label_colab.split(
-                                    " ("
-                                )[0]
+                    with st.spinner("Salvando convocação..."):
+                        try:
+                            obra_id_placeholder = obter_obra_placeholder_unidade(
+                                unidade_selecionada
                             )
-                            pessoas.append(
-                                (
-                                    c_id,
-                                    nome_existente,
+
+                            if not obra_id_placeholder:
+                                detalhe_placeholder = str(
+                                    st.session_state.get(
+                                        "erro_placeholder_unidade",
+                                        ""
+                                    )
+                                    or ""
                                 )
-                            )
-
-                        if nome_manual.strip():
-                            c_id_manual, colab_manual, msg_manual = (
-                                criar_ou_obter_colaborador_manual(
-                                    nome_manual,
-                                    tipo_manual,
-                                    funcao_manual,
-                                    avulso=avulso_manual,
+                                st.error(
+                                    "Não foi possível preparar a unidade para a convocação."
+                                    + (
+                                        f" Detalhe: {detalhe_placeholder}"
+                                        if detalhe_placeholder
+                                        else ""
+                                    )
                                 )
-                            )
+                            else:
+                                pessoas = []
+                                avisos = []
 
-                            if c_id_manual:
-                                pessoas.append(
-                                    (
-                                        c_id_manual,
-                                        str(
-                                            colab_manual.get(
-                                                "nome"
+                                for label_colab in equipe_selecionada:
+                                    c_id = mapa_colab_opcoes.get(label_colab)
+                                    if not c_id:
+                                        avisos.append(
+                                            f"{label_colab}: colaborador não localizado. "
+                                            "Atualize a página e tente novamente."
+                                        )
+                                        continue
+
+                                    nome_existente = str(
+                                        dict_colaboradores.get(
+                                            c_id,
+                                            {},
+                                        ).get("nome")
+                                        or label_colab.split(" (")[0]
+                                    )
+                                    pessoas.append((c_id, nome_existente))
+
+                                if nome_manual.strip():
+                                    c_id_manual, colab_manual, msg_manual = (
+                                        criar_ou_obter_colaborador_manual(
+                                            nome_manual,
+                                            tipo_manual,
+                                            funcao_manual,
+                                            avulso=avulso_manual,
+                                        )
+                                    )
+
+                                    if c_id_manual:
+                                        pessoas.append(
+                                            (
+                                                c_id_manual,
+                                                str(
+                                                    colab_manual.get("nome")
+                                                    or nome_manual
+                                                ),
                                             )
-                                            or nome_manual
-                                        ),
+                                        )
+                                    else:
+                                        avisos.append(
+                                            msg_manual
+                                            or f"{nome_manual}: não foi possível cadastrar."
+                                        )
+
+                                pessoas_unicas = []
+                                ids_vistos = set()
+
+                                for cid, nome_pessoa in pessoas:
+                                    cid_ref = str(cid)
+                                    if cid and cid_ref not in ids_vistos:
+                                        pessoas_unicas.append((cid, nome_pessoa))
+                                        ids_vistos.add(cid_ref)
+
+                                sucessos = 0
+
+                                for c_id, nome_pessoa in pessoas_unicas:
+                                    ok, motivo = inserir_convocacao_segura(
+                                        obra_id_placeholder,
+                                        c_id,
+                                        data_conv_auto,
+                                        engenheiro_campo,
+                                        turno_conv_campo,
                                     )
-                                )
-                            else:
-                                st.error(msg_manual)
 
-                        pessoas_unicas = []
-                        ids_vistos = set()
+                                    if ok:
+                                        sucessos += 1
+                                    else:
+                                        avisos.append(
+                                            f"{nome_pessoa}: {motivo}"
+                                        )
 
-                        for cid, nome_pessoa in pessoas:
-                            if (
-                                cid
-                                and cid not in ids_vistos
-                            ):
-                                pessoas_unicas.append(
-                                    (
-                                        cid,
-                                        nome_pessoa,
-                                    )
-                                )
-                                ids_vistos.add(cid)
+                                # O resultado fica salvo na sessão para continuar
+                                # aparecendo depois do rerun que atualiza "Já convocados".
+                                if sucessos:
+                                    limpar_cache_operacional()
+                                    st.session_state["_engm_conv_feedback"] = {
+                                        "sucessos": sucessos,
+                                        "avisos": avisos,
+                                        "unidade": unidade_selecionada,
+                                        "turno": turno_conv_campo,
+                                    }
+                                    st.session_state["_engm_reset_convocacao"] = True
+                                    st.rerun()
+                                else:
+                                    if avisos:
+                                        for aviso in avisos:
+                                            st.warning(aviso)
+                                    else:
+                                        st.error(
+                                            "A convocação não foi salva. "
+                                            "Nenhum colaborador válido foi encontrado."
+                                        )
 
-                        sucessos = 0
-                        avisos = []
-
-                        for c_id, nome_pessoa in pessoas_unicas:
-                            ok, motivo = (
-                                inserir_convocacao_segura(
-                                    obra_id_placeholder,
-                                    c_id,
-                                    data_conv_auto,
-                                    engenheiro_campo,
-                                    turno_conv_campo,
-                                )
+                        except Exception as e:
+                            exibir_erro_amigavel(
+                                "engenheiro",
+                                "confirmar_convocacao_mobile",
+                                e,
+                                "Não foi possível concluir a convocação. Tente novamente.",
                             )
-
-                            if ok:
-                                sucessos += 1
-                            else:
-                                avisos.append(
-                                    f"{nome_pessoa}: {motivo}"
-                                )
-
-                        if sucessos:
-                            limpar_cache_operacional()
-                            st.success(
-                                f"{sucessos} pessoa(s) convocada(s) "
-                                f"para {unidade_selecionada} · {turno_conv_campo}."
-                            )
-
-                            # A próxima convocação começa limpa.
-                            for chave in [
-                                "engm_conv_pessoas",
-                                "engm_manual_nome",
-                                "engm_manual_funcao",
-                                "engm_manual_avulso",
-                            ]:
-                                st.session_state.pop(
-                                    chave,
-                                    None,
-                                )
-
-                        for aviso in avisos:
-                            st.warning(aviso)
-
-                        if sucessos and not avisos:
-                            st.rerun()
 
     # =====================================================================
     # DISPONIBILIDADE — LISTA PENSADA PARA CELULAR
@@ -8126,11 +8161,10 @@ elif modo_campo:
                     """
                 )
 
-            st.markdown(
+            st.html(
                 '<div class="engm-list">'
                 + "".join(itens)
-                + "</div>",
-                unsafe_allow_html=True,
+                + "</div>"
             )
         else:
             st.caption(
@@ -8170,11 +8204,10 @@ elif modo_campo:
                         """
                     )
 
-                st.markdown(
+                st.html(
                     '<div class="engm-list">'
                     + "".join(itens)
-                    + "</div>",
-                    unsafe_allow_html=True,
+                    + "</div>"
                 )
 
             if indisponiveis_view:
@@ -8201,11 +8234,10 @@ elif modo_campo:
                         """
                     )
 
-                st.markdown(
+                st.html(
                     '<div class="engm-list">'
                     + "".join(itens)
-                    + "</div>",
-                    unsafe_allow_html=True,
+                    + "</div>"
                 )
 
 elif modo_financeiro:
