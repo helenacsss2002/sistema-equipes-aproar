@@ -3971,6 +3971,214 @@ def inserir_convocacao_segura(obra_id, colaborador_id, data_convocacao, engenhei
         return False, "não pôde ser convocado(a); verifique os dados e tente novamente"
 
 
+
+def inserir_convocacoes_lote_mobile(
+    obra_id,
+    pessoas,
+    data_convocacao,
+    engenheiro,
+    turno,
+    existentes_data=None,
+    indisponiveis_map=None,
+):
+    """
+    Versão otimizada para o portal ?eng.
+
+    - Reaproveita convocações/indisponibilidades já carregadas na tela.
+    - Valida conflito em memória.
+    - Insere todos os colaboradores aptos em uma única operação de banco.
+    - Mantém o registro de conflito para o Paulo.
+    """
+    turno_tentativa = normalizar_turno_convocacao(turno)
+    existentes_data = list(existentes_data or [])
+    indisponiveis_map = dict(indisponiveis_map or {})
+
+    existentes_por_colab = {}
+    for reg in existentes_data:
+        cid_reg = str(reg.get("colaborador_id") or "").strip()
+        if cid_reg:
+            existentes_por_colab.setdefault(cid_reg, []).append(reg)
+
+    aptos = []
+    avisos = []
+
+    obra_tentativa = dict_obras.get(obra_id, {}) if "dict_obras" in globals() else {}
+    unidade_tentativa = str(obra_tentativa.get("unidade") or "")
+
+    for colaborador_id, nome_pessoa in pessoas:
+        cid = str(colaborador_id or "").strip()
+        if not cid:
+            avisos.append(f"{nome_pessoa}: colaborador inválido.")
+            continue
+
+        indisp = indisponiveis_map.get(cid)
+        if indisp:
+            avisos.append(
+                f"{nome_pessoa}: indisponível "
+                f"({indisp.get('motivo','Indisponível')}) de "
+                f"{indisp.get('inicio','')} a {indisp.get('fim','')}."
+            )
+            continue
+
+        conflitos_outro_eng = []
+        duplicidades_mesmo_eng = []
+
+        for reg in existentes_por_colab.get(cid, []):
+            turno_existente = turno_da_convocacao(reg)
+            if not turnos_se_sobrepoem(turno_existente, turno_tentativa):
+                continue
+
+            eng_atual = str(reg.get("engenheiro") or "N/A")
+            if normalizar(eng_atual) == normalizar(engenheiro):
+                duplicidades_mesmo_eng.append((reg, turno_existente))
+            else:
+                conflitos_outro_eng.append((reg, turno_existente, eng_atual))
+
+        if conflitos_outro_eng:
+            mensagens = []
+            for reg, turno_existente, eng_atual in conflitos_outro_eng:
+                registrado = registrar_conflito_convocacao(
+                    reg,
+                    engenheiro,
+                    turno_tentativa=turno_tentativa,
+                    unidade_tentativa=unidade_tentativa,
+                )
+                complemento = (
+                    " O conflito foi registrado para conferência do Paulo."
+                    if registrado else ""
+                )
+                mensagens.append(
+                    f"já está com {eng_atual} no turno {turno_existente}; "
+                    f"{turno_tentativa} se sobrepõe.{complemento}"
+                )
+
+            avisos.append(f"{nome_pessoa}: " + " ".join(mensagens))
+            continue
+
+        if duplicidades_mesmo_eng:
+            turnos_existentes = ", ".join(
+                sorted({t for _, t in duplicidades_mesmo_eng})
+            )
+            avisos.append(
+                f"{nome_pessoa}: já está na sua equipe em turno que se sobrepõe "
+                f"({turnos_existentes})."
+            )
+            continue
+
+        aptos.append((colaborador_id, nome_pessoa))
+
+    if not aptos:
+        return 0, avisos
+
+    _garantir_multiturno_neon()
+
+    agora = agora_aproar()
+    payloads = []
+    for colaborador_id, _nome_pessoa in aptos:
+        meta = {
+            "convocado_em": agora.isoformat(),
+            "convocado_por": str(engenheiro),
+            "convocacao_atrasada": bool(
+                agora.hour >= 16
+                and data_convocacao == proximo_dia_util(agora.date())
+            ),
+        }
+
+        payload = {
+            "obra_id": obra_id,
+            "colaborador_id": colaborador_id,
+            "data": data_convocacao.isoformat(),
+            "engenheiro": engenheiro,
+            "status": "Presente (Integral)",
+            "valor_extra": 0,
+            "observacao": montar_observacao_operacional(
+                turno_tentativa, "", meta
+            ),
+        }
+
+        if schema_producao_disponivel():
+            payload.update({
+                "turno": turno_tentativa,
+                "criado_em": agora.isoformat(),
+                "criado_por": str(engenheiro),
+            })
+
+        payloads.append(payload)
+
+    try:
+        # _PostgresCompat trata uma lista inteira dentro da mesma conexão.
+        retorno = (
+            supabase.table("convocacoes")
+            .insert(payloads)
+            .execute()
+            .data
+            or []
+        )
+
+        quantidade = len(retorno) if retorno else len(payloads)
+
+        # Auditoria em uma única conexão para não transformar 10 pessoas
+        # em 10 novas conexões só para o histórico.
+        if (
+            retorno
+            and DB_BACKEND == "NEON"
+            and schema_producao_disponivel()
+            and hasattr(supabase, "_connect")
+        ):
+            try:
+                with supabase._connect() as conn:
+                    with conn.cursor() as cur:
+                        for reg in retorno:
+                            cur.execute(
+                                """
+                                INSERT INTO auditoria
+                                    (entidade, entidade_id, acao, usuario, antes, depois, contexto)
+                                VALUES (%s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb)
+                                """,
+                                (
+                                    "convocacao",
+                                    str(reg.get("id") or ""),
+                                    "CRIAR",
+                                    str(engenheiro),
+                                    None,
+                                    _json_db({
+                                        "colaborador_id": str(reg.get("colaborador_id") or ""),
+                                        "data": data_convocacao,
+                                        "turno": turno_tentativa,
+                                        "obra_id": str(obra_id),
+                                    }),
+                                    _json_db({"origem": "portal_engenheiro_lote"}),
+                                ),
+                            )
+                        conn.commit()
+            except Exception:
+                pass
+
+        limpar_cache_operacional()
+        return quantidade, avisos
+
+    except Exception:
+        # Fallback seguro: se o banco recusar o lote por alguma condição
+        # concorrente, volta para a validação individual já existente.
+        sucessos = 0
+        avisos_fallback = list(avisos)
+
+        for colaborador_id, nome_pessoa in aptos:
+            ok, motivo = inserir_convocacao_segura(
+                obra_id,
+                colaborador_id,
+                data_convocacao,
+                engenheiro,
+                turno_tentativa,
+            )
+            if ok:
+                sucessos += 1
+            else:
+                avisos_fallback.append(f"{nome_pessoa}: {motivo}")
+
+        return sucessos, avisos_fallback
+
+
 # --- ACESSO RESILIENTE AO BANCO ---
 def _cliente_supabase_para_tentativa(tentativa=0):
     """
@@ -5459,45 +5667,162 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
     tabela_aproar(pd.DataFrame(resumo_unidades).sort_values("Taxa Absenteísmo (%)", ascending=False), key=f"{key_prefix}_tbl_abs_unidades")
 
 
-def incluir_colaborador_direto_apontamento(colaborador_id, engenheiro, data_servico, obra_id, turno="Integral"):
-    ind = obter_indisponibilidade_colaborador(colaborador_id, data_servico)
+def incluir_colaborador_direto_apontamento(
+    colaborador_id,
+    engenheiro,
+    data_servico,
+    obra_id,
+    turno="Integral",
+):
+    """
+    Inclusão direta para apontamento, inclusive retroativo.
+
+    O mesmo colaborador pode ter mais de um serviço no mesmo dia desde que
+    os turnos não se sobreponham. Ex.: Manhã + Tarde é permitido.
+    """
+    turno_novo = normalizar_turno_convocacao(turno)
+
+    ind = obter_indisponibilidade_colaborador(
+        colaborador_id,
+        data_servico,
+    )
     if ind:
-        return False, f"Colaborador indisponível: {ind.get('motivo','Indisponível')} ({ind.get('inicio')} a {ind.get('fim')})."
-    existente = buscar_convocacao_existente(colaborador_id, data_servico)
-    if existente:
-        reg = existente[0]
-        if normalizar(reg.get("engenheiro")) != normalizar(engenheiro):
-            registrar_conflito_convocacao(reg, engenheiro)
-            return False, f"Esse colaborador já está com {reg.get('engenheiro','outro engenheiro')}. O conflito foi registrado para o Paulo."
-        return False, "Esse colaborador já está no seu apontamento desta data."
+        return False, (
+            f"Colaborador indisponível: {ind.get('motivo','Indisponível')} "
+            f"({ind.get('inicio')} a {ind.get('fim')})."
+        )
+
+    existentes = buscar_convocacao_existente(
+        colaborador_id,
+        data_servico,
+    )
+
+    obra_nova = dict_obras.get(obra_id, {}) if "dict_obras" in globals() else {}
+    unidade_nova = str(obra_nova.get("unidade") or "")
+
+    for reg in existentes:
+        turno_existente = turno_da_convocacao(reg)
+
+        # Outro serviço em turno diferente é permitido.
+        if not turnos_se_sobrepoem(
+            turno_existente,
+            turno_novo,
+        ):
+            continue
+
+        eng_existente = str(
+            reg.get("engenheiro")
+            or "outro engenheiro"
+        )
+
+        if normalizar(eng_existente) != normalizar(engenheiro):
+            registrar_conflito_convocacao(
+                reg,
+                engenheiro,
+                turno_tentativa=turno_novo,
+                unidade_tentativa=unidade_nova,
+            )
+            return False, (
+                f"Esse colaborador já está com {eng_existente} em "
+                f"{turno_existente}. O conflito foi registrado para o Paulo."
+            )
+
+        return False, (
+            f"Esse colaborador já está no seu apontamento em {turno_existente}. "
+            f"Escolha outro turno para adicionar um segundo serviço."
+        )
+
+    _garantir_multiturno_neon()
+
     agora = agora_aproar()
     meta = {
         "convocado_em": agora.isoformat(),
         "convocado_por": str(engenheiro),
         "incluido_direto_apontamento": True,
-        "convocacao_atrasada": bool(agora.hour >= 16 and data_servico == proximo_dia_util(agora.date())),
+        "convocacao_atrasada": bool(
+            agora.hour >= 16
+            and data_servico == proximo_dia_util(agora.date())
+        ),
         "apontado_em": agora.isoformat(),
         "ultimo_apontamento_em": agora.isoformat(),
         "apontado_por": str(engenheiro),
-        "apontamento_atrasado": bool(agora.date() > data_servico),
+        "apontamento_atrasado": bool(
+            agora.date() > data_servico
+        ),
         "servicos_extras": [],
         "servicos_adicionais": [],
-        "periodo_servico_principal": turno,
+        "periodo_servico_principal": turno_novo,
     }
+
+    status_inicial = {
+        "Manhã": "Presente (Só Manhã)",
+        "Tarde": "Presente (Só Tarde)",
+    }.get(turno_novo, "Presente (Integral)")
+
+    payload = {
+        "obra_id": obra_id,
+        "colaborador_id": colaborador_id,
+        "data": data_servico.isoformat(),
+        "engenheiro": engenheiro,
+        "status": status_inicial,
+        "valor_extra": 0,
+        "observacao": montar_observacao_operacional(
+            turno_novo,
+            "",
+            meta,
+        ),
+    }
+
+    if schema_producao_disponivel():
+        payload.update({
+            "turno": turno_novo,
+            "criado_em": agora.isoformat(),
+            "criado_por": str(engenheiro),
+        })
+
     try:
-        supabase.table("convocacoes").insert({
-            "obra_id": obra_id,
-            "colaborador_id": colaborador_id,
-            "data": data_servico.isoformat(),
-            "engenheiro": engenheiro,
-            "status": "Presente (Integral)",
-            "valor_extra": 0,
-            "observacao": montar_observacao_operacional(turno, "", meta),
-        }).execute()
+        retorno = (
+            supabase.table("convocacoes")
+            .insert(payload)
+            .execute()
+            .data
+            or []
+        )
+
+        novo_id = (
+            retorno[0].get("id")
+            if retorno
+            else ""
+        )
+
+        registrar_auditoria_prod(
+            "convocacao",
+            novo_id,
+            "INCLUIR_DIRETO_APONTAMENTO",
+            engenheiro,
+            depois={
+                "colaborador_id": str(colaborador_id),
+                "data": data_servico,
+                "turno": turno_novo,
+                "obra_id": str(obra_id),
+            },
+            contexto={
+                "retroativo": bool(
+                    agora.date() > data_servico
+                )
+            },
+        )
+
         limpar_cache_operacional()
-        return True, "Colaborador incluído no apontamento."
+        return True, (
+            f"Colaborador incluído em {turno_novo}. "
+            "Você pode adicioná-lo novamente em outro turno compatível."
+        )
+
     except Exception:
-        return False, "Não foi possível incluir o colaborador."
+        return False, (
+            "Não foi possível incluir o colaborador neste serviço/turno."
+        )
 
 
 def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
@@ -6879,24 +7204,69 @@ elif modo_campo:
             unsafe_allow_html=True,
         )
 
-        # Inclusão excepcional continua disponível, sem atrapalhar o fluxo comum.
+        # Inclusão excepcional / retroativa.
         with st.expander(
-            "Adicionar colaborador que não estava na convocação",
+            "Adicionar colaborador / avulso ao apontamento",
             expanded=False,
         ):
-            labels_inc = {
-                f"{c.get('nome')} ({c.get('funcao','-')})": c.get("id")
-                for c in sorted(
-                    colaboradores,
-                    key=lambda x: normalizar(x.get("nome", "")),
-                )
-            }
-
-            nome_inc = st.selectbox(
-                "Colaborador",
-                ["— Selecione —"] + list(labels_inc.keys()),
-                key="engm_inc_colab",
+            st.caption(
+                "Para lançar mais de um serviço no mesmo dia, adicione o colaborador "
+                "novamente escolhendo outro turno compatível."
             )
+
+            tipo_inc = st.radio(
+                "Tipo",
+                ["Cadastrado", "Avulso"],
+                horizontal=True,
+                key="engm_inc_tipo",
+            )
+
+            colaborador_id_inc = None
+            nome_exibicao_inc = ""
+
+            if tipo_inc == "Cadastrado":
+                labels_inc = {
+                    f"{c.get('nome')} ({c.get('funcao','-')})": c.get("id")
+                    for c in sorted(
+                        colaboradores,
+                        key=lambda x: normalizar(
+                            x.get("nome", "")
+                        ),
+                    )
+                }
+
+                nome_inc = st.selectbox(
+                    "Colaborador",
+                    ["— Selecione —"]
+                    + list(labels_inc.keys()),
+                    key="engm_inc_colab",
+                )
+
+                if nome_inc != "— Selecione —":
+                    colaborador_id_inc = labels_inc.get(
+                        nome_inc
+                    )
+                    nome_exibicao_inc = nome_inc
+
+            else:
+                nome_avulso_inc = st.text_input(
+                    "Nome do avulso",
+                    key="engm_inc_avulso_nome",
+                    placeholder="Nome completo",
+                )
+
+                c_av1, c_av2 = st.columns(2)
+                with c_av1:
+                    tipo_diaria_inc = st.selectbox(
+                        "Categoria da diária",
+                        ["Profissional", "Ajudante"],
+                        key="engm_inc_avulso_tipo",
+                    )
+                with c_av2:
+                    funcao_avulso_inc = st.text_input(
+                        "Função (opcional)",
+                        key="engm_inc_avulso_funcao",
+                    )
 
             unidades_inc = sorted(
                 {
@@ -6906,14 +7276,35 @@ elif modo_campo:
                 }
             )
 
-            unidade_inc = st.selectbox(
-                "Unidade",
-                unidades_inc,
-                key="engm_inc_unidade",
-            ) if unidades_inc else None
+            c_inc1, c_inc2 = st.columns(2)
+
+            with c_inc1:
+                unidade_inc = (
+                    st.selectbox(
+                        "Unidade",
+                        unidades_inc,
+                        key="engm_inc_unidade",
+                    )
+                    if unidades_inc
+                    else None
+                )
+
+            with c_inc2:
+                turno_inc = st.selectbox(
+                    "Turno do colaborador",
+                    [
+                        "Manhã",
+                        "Tarde",
+                        "Noite",
+                        "Integral",
+                    ],
+                    key="engm_inc_turno",
+                )
 
             obras_inc = (
-                obras_reais_da_unidade(unidade_inc)
+                obras_reais_da_unidade(
+                    unidade_inc
+                )
                 if unidade_inc
                 else []
             )
@@ -6924,7 +7315,8 @@ elif modo_campo:
 
             obra_inc = st.selectbox(
                 "Obra / Serviço",
-                ["— Selecione —"] + list(mapa_inc.keys()),
+                ["— Selecione —"]
+                + list(mapa_inc.keys()),
                 key="engm_inc_obra",
             )
 
@@ -6933,24 +7325,82 @@ elif modo_campo:
                 use_container_width=True,
                 key="engm_inc_btn",
             ):
-                if (
-                    nome_inc == "— Selecione —"
-                    or obra_inc not in mapa_inc
-                ):
+                if obra_inc not in mapa_inc:
                     st.warning(
-                        "Selecione colaborador, unidade e obra/serviço."
+                        "Selecione a unidade e a obra/serviço."
                     )
                 else:
-                    ok, msg = incluir_colaborador_direto_apontamento(
-                        labels_inc[nome_inc],
-                        engenheiro_campo,
-                        data_apont,
-                        mapa_inc[obra_inc],
-                    )
-                    (st.success if ok else st.warning)(msg)
-                    if ok:
-                        limpar_cache_operacional()
-                        st.rerun()
+                    # Se for avulso, cria/localiza o cadastro antes de incluir.
+                    if tipo_inc == "Avulso":
+                        if not nome_avulso_inc.strip():
+                            st.warning(
+                                "Digite o nome do funcionário avulso."
+                            )
+                            colaborador_id_inc = None
+                        else:
+                            (
+                                colaborador_id_inc,
+                                colab_criado_inc,
+                                msg_criacao_inc,
+                            ) = criar_ou_obter_colaborador_manual(
+                                nome_avulso_inc,
+                                tipo_diaria_inc,
+                                funcao_avulso_inc,
+                                avulso=True,
+                            )
+
+                            nome_exibicao_inc = str(
+                                (
+                                    colab_criado_inc
+                                    or {}
+                                ).get("nome")
+                                or nome_avulso_inc
+                            )
+
+                            if not colaborador_id_inc:
+                                st.warning(
+                                    msg_criacao_inc
+                                    or "Não foi possível cadastrar o avulso."
+                                )
+
+                    if not colaborador_id_inc:
+                        if tipo_inc == "Cadastrado":
+                            st.warning(
+                                "Selecione um colaborador."
+                            )
+                    else:
+                        ok, msg = (
+                            incluir_colaborador_direto_apontamento(
+                                colaborador_id_inc,
+                                engenheiro_campo,
+                                data_apont,
+                                mapa_inc[obra_inc],
+                                turno=turno_inc,
+                            )
+                        )
+
+                        (
+                            st.success
+                            if ok
+                            else st.warning
+                        )(msg)
+
+                        if ok:
+                            st.session_state[
+                                "_engm_inc_feedback"
+                            ] = (
+                                f"{nome_exibicao_inc} incluído em "
+                                f"{turno_inc} · {obra_inc}."
+                            )
+                            limpar_cache_operacional()
+                            st.rerun()
+
+            feedback_inc = st.session_state.pop(
+                "_engm_inc_feedback",
+                None,
+            )
+            if feedback_inc:
+                st.success(feedback_inc)
 
         if not convocacoes_data:
             st.info(
@@ -7528,19 +7978,19 @@ elif modo_campo:
         )
 
         if ja_convocados:
-            st.markdown(
-                '<div class="engm-section-title">Já convocados</div>',
-                unsafe_allow_html=True,
-            )
-            _lista_convocados_mobile(
-                ja_convocados,
-                mostrar_status=False,
-            )
+            with st.expander(
+                f"Já convocados · {len(ja_convocados)}",
+                expanded=False,
+            ):
+                _lista_convocados_mobile(
+                    ja_convocados,
+                    mostrar_status=False,
+                )
 
         st.markdown(
             '<div class="engm-section-title">Adicionar à equipe</div>'
             '<div class="engm-section-sub">'
-            'Escolha unidade, turno e pessoas. O conflito só é bloqueado quando você confirma.'
+            'Escolha unidade, turno e pessoas. Ao confirmar, a equipe é salva de uma vez.'
             '</div>',
             unsafe_allow_html=True,
         )
@@ -7854,23 +8304,18 @@ elif modo_campo:
                                         pessoas_unicas.append((cid, nome_pessoa))
                                         ids_vistos.add(cid_ref)
 
-                                sucessos = 0
-
-                                for c_id, nome_pessoa in pessoas_unicas:
-                                    ok, motivo = inserir_convocacao_segura(
+                                sucessos, avisos_lote = (
+                                    inserir_convocacoes_lote_mobile(
                                         obra_id_placeholder,
-                                        c_id,
+                                        pessoas_unicas,
                                         data_conv_auto,
                                         engenheiro_campo,
                                         turno_conv_campo,
+                                        existentes_data=convs_data_todos,
+                                        indisponiveis_map=indisp_por_colab,
                                     )
-
-                                    if ok:
-                                        sucessos += 1
-                                    else:
-                                        avisos.append(
-                                            f"{nome_pessoa}: {motivo}"
-                                        )
+                                )
+                                avisos.extend(avisos_lote)
 
                                 # O resultado fica salvo na sessão para continuar
                                 # aparecendo depois do rerun que atualiza "Já convocados".
