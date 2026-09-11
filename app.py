@@ -6181,20 +6181,35 @@ def incluir_colaborador_direto_apontamento(
     """
     turno_novo = normalizar_turno_convocacao(turno)
 
-    ind = obter_indisponibilidade_colaborador(
-        colaborador_id,
-        data_servico,
-    )
+    cid_alvo = str(colaborador_id or "").strip()
+
+    # Caminho rápido do portal do engenheiro: reaproveita os dados já
+    # carregados/cacheados em vez de rodar a rotina completa novamente.
+    if indisponiveis_map is not None:
+        ind = dict(indisponiveis_map or {}).get(cid_alvo)
+    else:
+        ind = obter_indisponibilidade_colaborador(
+            colaborador_id,
+            data_servico,
+        )
+
     if ind:
         return False, (
             f"Colaborador indisponível: {ind.get('motivo','Indisponível')} "
             f"({ind.get('inicio')} a {ind.get('fim')})."
         )
 
-    existentes = buscar_convocacao_existente(
-        colaborador_id,
-        data_servico,
-    )
+    if existentes_data is not None:
+        existentes = [
+            reg
+            for reg in (existentes_data or [])
+            if str(reg.get("colaborador_id") or "").strip() == cid_alvo
+        ]
+    else:
+        existentes = buscar_convocacao_existente(
+            colaborador_id,
+            data_servico,
+        )
 
     obra_nova = dict_obras.get(obra_id, {}) if "dict_obras" in globals() else {}
     unidade_nova = str(obra_nova.get("unidade") or "")
@@ -6329,6 +6344,8 @@ def incluir_multiplos_servicos_direto_apontamento(
     engenheiro,
     data_servico,
     servicos,
+    existentes_data=None,
+    indisponiveis_map=None,
 ):
     """
     Inclui 1 ou mais serviços para o mesmo colaborador no apontamento.
@@ -7716,6 +7733,13 @@ elif modo_campo:
     .engm-avail-off{color:#C44557 !important;}
 
     /* Menos desperdício vertical no celular. */
+    /* Linha Engenheiro + Unidade + Data no apontamento */
+    div[class*="st-key-engenheiro_campo_mobile"],
+    div[class*="st-key-engm_unidade_apont_top"],
+    div[class*="st-key-engm_data_apont"]{
+        margin-bottom:0 !important;
+    }
+
     @media(max-width:520px){
         [data-testid="stMainBlockContainer"],
         main .block-container{
@@ -7746,12 +7770,11 @@ elif modo_campo:
     """)
 
     def _feedback_salvo_mobile(mensagem):
-        """Mostra confirmação pequena por 2 segundos antes de atualizar a tela."""
+        """Mostra confirmação pequena sem atrasar o fluxo."""
         try:
             st.toast(mensagem)
         except Exception:
             st.caption(f"✓ {mensagem}")
-        time.sleep(2)
 
     def _buscar_convocacoes_campo(engenheiro, data_ref):
         return _buscar_convocacoes_intervalo(
@@ -7845,12 +7868,6 @@ elif modo_campo:
         unsafe_allow_html=True,
     )
 
-    engenheiro_campo = st.selectbox(
-        "Engenheiro",
-        ENGENHEIROS,
-        key="engenheiro_campo_mobile",
-    )
-
     area_campo = st.radio(
         "Navegação",
         ["Hoje", "Amanhã", "Disponibilidade"],
@@ -7863,19 +7880,97 @@ elif modo_campo:
     # HOJE — RESUMO + CONVOCADOS + APONTAMENTO NA MESMA TELA
     # =====================================================================
     if area_campo == "Hoje":
-        data_apont = st.date_input(
-            "Data do apontamento",
-            value=hoje_campo,
-            format="DD/MM/YYYY",
-            key="engm_data_apont",
+        _feedback_retroativo = st.session_state.pop(
+            "_engm_inc_feedback",
+            None,
+        )
+        if _feedback_retroativo:
+            _feedback_salvo_mobile(
+                _feedback_retroativo
+            )
+
+        c_ap_eng, c_ap_unid, c_ap_data = st.columns(
+            [1.05, 1.05, .82]
         )
 
-        convocacoes_data = _enriquecer_convocacoes_campo(
+        with c_ap_eng:
+            engenheiro_campo = st.selectbox(
+                "Engenheiro",
+                ENGENHEIROS,
+                key="engenheiro_campo_mobile",
+            )
+
+        with c_ap_data:
+            data_apont = st.date_input(
+                "Data",
+                value=hoje_campo,
+                format="DD/MM/YYYY",
+                key="engm_data_apont",
+            )
+
+        convocacoes_todas_unidades = _enriquecer_convocacoes_campo(
             _buscar_convocacoes_campo(
                 engenheiro_campo,
                 data_apont,
             )
         )
+
+        # Prioriza no seletor as unidades nas quais esse engenheiro realmente
+        # tem equipe na data escolhida. As demais continuam disponíveis para
+        # apontamento retroativo/inclusão excepcional.
+        unidades_com_equipe = sorted(
+            {
+                str(
+                    (c.get("dados_obra") or {}).get(
+                        "unidade",
+                        "",
+                    )
+                ).strip()
+                for c in convocacoes_todas_unidades
+                if str(
+                    (c.get("dados_obra") or {}).get(
+                        "unidade",
+                        "",
+                    )
+                ).strip()
+            }
+        )
+
+        # No apontamento, o engenheiro só pode escolher unidades para as quais
+        # ele realmente fez convocação na data selecionada.
+        unidades_apontamento = list(
+            unidades_com_equipe
+        )
+
+        with c_ap_unid:
+            if unidades_apontamento:
+                unidade_apont_campo = st.selectbox(
+                    "Unidade",
+                    unidades_apontamento,
+                    key="engm_unidade_apont_top",
+                )
+            else:
+                unidade_apont_campo = ""
+                st.text_input(
+                    "Unidade",
+                    value="Nenhuma unidade convocada",
+                    disabled=True,
+                    key="engm_unidade_apont_vazia",
+                )
+
+        # Daqui para baixo o apontamento inteiro considera SOMENTE a unidade
+        # selecionada: resumo, colaboradores, ação em massa e salvamento.
+        convocacoes_data = [
+            c
+            for c in convocacoes_todas_unidades
+            if str(
+                (c.get("dados_obra") or {}).get(
+                    "unidade",
+                    "",
+                )
+            ).strip()
+            == unidade_apont_campo
+        ]
 
         total_data = len(convocacoes_data)
         apontados_data = sum(
@@ -8001,23 +8096,18 @@ elif modo_campo:
                         key="engm_inc_avulso_funcao",
                     )
 
-            unidades_inc = sorted(
-                {
-                    str(o.get("unidade"))
-                    for o in obras
-                    if o.get("unidade")
-                }
-            )
+            # A unidade do retroativo é a mesma selecionada no topo.
+            # Para apontar outra unidade, basta trocar o seletor superior.
+            unidade_inc = unidade_apont_campo
 
-            unidade_inc = (
-                st.selectbox(
-                    "Unidade",
-                    unidades_inc,
-                    key="engm_inc_unidade",
+            if unidade_inc:
+                st.caption(
+                    f"Unidade selecionada: {unidade_inc}"
                 )
-                if unidades_inc
-                else None
-            )
+            else:
+                st.caption(
+                    "Não há unidade convocada para este engenheiro nesta data."
+                )
 
             obras_inc = (
                 obras_reais_da_unidade(
@@ -8200,20 +8290,61 @@ elif modo_campo:
                                 }
                             )
 
-                        ok, msg = (
-                            incluir_multiplos_servicos_direto_apontamento(
-                                colaborador_id_inc,
-                                engenheiro_campo,
-                                data_apont,
-                                servicos_inc,
+                        # Dados necessários para a validação são carregados
+                        # uma única vez e reaproveitados pela inclusão.
+                        try:
+                            existentes_todos_data = (
+                                _buscar_convocacoes_intervalo(
+                                    data_apont,
+                                    data_apont,
+                                    None,
+                                )
+                                or []
                             )
-                        )
+                        except Exception:
+                            existentes_todos_data = []
 
-                        (
-                            st.success
-                            if ok
-                            else st.warning
-                        )(msg)
+                        indisp_map_apont = {}
+                        try:
+                            for _ind in (
+                                _carregar_indisponibilidades_disponibilidade()
+                                or []
+                            ):
+                                _cid_ind = str(
+                                    _ind.get("colaborador_id")
+                                    or ""
+                                ).strip()
+                                if not _cid_ind:
+                                    continue
+
+                                try:
+                                    _ini_ind = datetime.date.fromisoformat(
+                                        str(_ind.get("inicio"))
+                                    )
+                                    _fim_ind = datetime.date.fromisoformat(
+                                        str(_ind.get("fim"))
+                                    )
+                                except Exception:
+                                    continue
+
+                                if _ini_ind <= data_apont <= _fim_ind:
+                                    indisp_map_apont[_cid_ind] = _ind
+                        except Exception:
+                            indisp_map_apont = {}
+
+                        with st.spinner(
+                            "Salvando apontamento..."
+                        ):
+                            ok, msg = (
+                                incluir_multiplos_servicos_direto_apontamento(
+                                    colaborador_id_inc,
+                                    engenheiro_campo,
+                                    data_apont,
+                                    servicos_inc,
+                                    existentes_data=existentes_todos_data,
+                                    indisponiveis_map=indisp_map_apont,
+                                )
+                            )
 
                         if ok:
                             detalhe_servicos = (
@@ -8226,10 +8357,17 @@ elif modo_campo:
                                 )
 
                             limpar_cache_operacional()
-                            _feedback_salvo_mobile(
+
+                            # Mostra uma mensagem pequena após o rerun e
+                            # atualiza imediatamente a equipe da tela.
+                            st.session_state[
+                                "_engm_inc_feedback"
+                            ] = (
                                 f"Apontamento salvo · {nome_exibicao_inc}."
                             )
                             st.rerun()
+                        else:
+                            st.warning(msg)
 
         if not convocacoes_data:
             st.info(
@@ -8238,40 +8376,8 @@ elif modo_campo:
             )
 
         else:
-            # Um único filtro aparece somente quando há mais de uma unidade.
-            unidades_data = sorted(
-                {
-                    str(
-                        (c.get("dados_obra") or {}).get(
-                            "unidade",
-                            "Desconhecida",
-                        )
-                    )
-                    for c in convocacoes_data
-                }
-            )
-
-            if len(unidades_data) > 1:
-                unidade_filtro = st.selectbox(
-                    "Filtrar unidade",
-                    ["Todas"] + unidades_data,
-                    key="engm_unidade_apont",
-                )
-            else:
-                unidade_filtro = "Todas"
-
-            render_campo = [
-                c
-                for c in convocacoes_data
-                if unidade_filtro == "Todas"
-                or str(
-                    (c.get("dados_obra") or {}).get(
-                        "unidade",
-                        "",
-                    )
-                )
-                == unidade_filtro
-            ]
+            # A unidade já foi escolhida no topo, ao lado do engenheiro.
+            render_campo = list(convocacoes_data)
 
             # Só libera a ação em massa quando todos os colaboradores exibidos
             # já possuem uma obra/serviço real definida.
@@ -8763,6 +8869,12 @@ elif modo_campo:
     # AMANHÃ — CONVOCADOS + NOVA CONVOCAÇÃO NA MESMA TELA
     # =====================================================================
     elif area_campo == "Amanhã":
+        engenheiro_campo = st.selectbox(
+            "Engenheiro",
+            ENGENHEIROS,
+            key="engenheiro_campo_mobile",
+        )
+
         data_conv_auto = amanha_campo
 
         # Se a convocação anterior foi salva, limpa somente os campos de pessoas
