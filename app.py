@@ -10859,8 +10859,8 @@ else:
                             color="1E293B",
                         )
                         fill_obra_hdr = PatternFill(
-                            start_color="E2E8F0",
-                            end_color="E2E8F0",
+                            start_color="FFF2CC",
+                            end_color="FFF2CC",
                             fill_type="solid",
                         )
                         borda_fina = Border(
@@ -11320,7 +11320,8 @@ else:
             st.markdown("**Importar planilha de colaboradores**")
             st.write(
                 "Envie uma planilha para adicionar novos colaboradores ou atualizar cadastros existentes. "
-                "A conferência é feita pelo nome e nenhum colaborador ausente da planilha será excluído."
+                "A conferência é feita pelo nome e nenhum colaborador ausente da planilha será excluído. "
+                "A planilha deve conter uma coluna com o valor da diária de cada colaborador."
             )
 
             if st.session_state.get("msg_import_colab"):
@@ -11496,6 +11497,17 @@ else:
                     col_categoria_auto = localizar_coluna_import([
                         "CATEGORIA", "TIPO", "CLASSIFICACAO", "CLASSIFICAÇÃO"
                     ])
+                    col_valor_auto = localizar_coluna_import([
+                        "VALOR DO COLABORADOR",
+                        "VALOR COLABORADOR",
+                        "VALOR DA DIARIA",
+                        "VALOR DA DIÁRIA",
+                        "VALOR DIARIA",
+                        "VALOR DIÁRIA",
+                        "DIARIA",
+                        "DIÁRIA",
+                        "VALOR"
+                    ])
                     col_avulso_auto = localizar_coluna_import(["AVULSO"])
 
                     c_imp1, c_imp2 = st.columns(2)
@@ -11537,8 +11549,67 @@ else:
                             key="map_avulso_import"
                         )
 
+                    opcoes_valor = ["(selecione)"] + colunas
+                    idx_valor = (
+                        opcoes_valor.index(col_valor_auto)
+                        if col_valor_auto in colunas
+                        else 0
+                    )
+                    col_valor_import = st.selectbox(
+                        "Coluna VALOR DO COLABORADOR (obrigatória):",
+                        opcoes_valor,
+                        index=idx_valor,
+                        key="map_valor_import",
+                        help=(
+                            "Aceita números como 241,74, 241.74 ou R$ 241,74. "
+                            "Esse valor será salvo como a diária do colaborador."
+                        ),
+                    )
+
+                    def _converter_valor_colaborador_import(valor):
+                        if pd.isna(valor):
+                            return None
+
+                        if isinstance(valor, (int, float)) and not isinstance(valor, bool):
+                            try:
+                                numero = float(valor)
+                                return numero if numero > 0 else None
+                            except Exception:
+                                return None
+
+                        txt = str(valor).strip()
+                        if not txt:
+                            return None
+
+                        txt = (
+                            txt.replace("R$", "")
+                            .replace("r$", "")
+                            .replace(" ", "")
+                        )
+
+                        # Formato brasileiro: 1.234,56
+                        if "," in txt:
+                            txt = txt.replace(".", "").replace(",", ".")
+                        else:
+                            # Formato 1234.56 permanece como está.
+                            txt = txt.replace(",", ".")
+
+                        try:
+                            numero = float(txt)
+                            return numero if numero > 0 else None
+                        except Exception:
+                            return None
+
                     registros_por_nome = {}
                     linhas_invalidas = 0
+                    linhas_valor_invalido = 0
+
+                    if col_valor_import == "(selecione)":
+                        st.error(
+                            "A planilha precisa ter uma coluna com o valor do colaborador. "
+                            "Selecione a coluna correta acima."
+                        )
+
                     for _, linha in df_import.iterrows():
                         nome_val = linha.get(col_nome_import)
                         if pd.isna(nome_val) or not str(nome_val).strip():
@@ -11578,7 +11649,17 @@ else:
                             funcao_val = f"AVULSO - {funcao_val}"
 
                         funcao_salva = limpar_funcao(funcao_val)
-                        diaria_salva = valor_diaria_por_tipo(tipo_val)
+
+                        if col_valor_import == "(selecione)":
+                            linhas_valor_invalido += 1
+                            continue
+
+                        diaria_salva = _converter_valor_colaborador_import(
+                            linha.get(col_valor_import)
+                        )
+                        if diaria_salva is None:
+                            linhas_valor_invalido += 1
+                            continue
 
                         # Se o mesmo nome aparecer mais de uma vez na planilha, mantém a última ocorrência.
                         registros_por_nome[normalizar(nome_limpo)] = {
@@ -11597,14 +11678,27 @@ else:
                                 "Nome": r["nome"],
                                 "Função": r["funcao"],
                                 "Categoria": r["tipo"],
-                                "Diária": formatar_reais(r["valor_diaria"]),
+                                "Valor do colaborador": formatar_reais(r["valor_diaria"]),
                                 "Avulso": "SIM" if r["avulso"] else "NÃO",
                             }
                             for r in registros_import
                         ])
+                        avisos_import = []
+                        if linhas_invalidas:
+                            avisos_import.append(
+                                f"{linhas_invalidas} linha(s) sem nome foram ignoradas"
+                            )
+                        if linhas_valor_invalido:
+                            avisos_import.append(
+                                f"{linhas_valor_invalido} linha(s) sem valor válido foram ignoradas"
+                            )
+
                         st.caption(
-                            f"{len(registros_import)} colaborador(es) pronto(s) para importar. "
-                            + (f"{linhas_invalidas} linha(s) sem nome foram ignoradas." if linhas_invalidas else "")
+                            f"{len(registros_import)} colaborador(es) pronto(s) para importar."
+                            + (
+                                " " + " • ".join(avisos_import) + "."
+                                if avisos_import else ""
+                            )
                         )
                         tabela_aproar(preview_import, key="tbl_import_preview", altura_max=360)
 
