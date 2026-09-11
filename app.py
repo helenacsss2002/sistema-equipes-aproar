@@ -5825,6 +5825,230 @@ def incluir_colaborador_direto_apontamento(
         )
 
 
+def incluir_multiplos_servicos_direto_apontamento(
+    colaborador_id,
+    engenheiro,
+    data_servico,
+    servicos,
+):
+    """
+    Inclui 1 ou mais serviços para o mesmo colaborador no apontamento.
+
+    Cada item de `servicos` deve conter:
+        {"obra_id": ..., "turno": ...}
+
+    Os serviços são validados juntos e gravados em lote, evitando inclusão
+    parcial quando o próprio formulário contém turnos incompatíveis.
+    """
+    itens = []
+    vistos = set()
+
+    for item in servicos or []:
+        if not isinstance(item, dict):
+            continue
+
+        obra_id = item.get("obra_id")
+        turno = normalizar_turno_convocacao(
+            item.get("turno") or "Integral"
+        )
+
+        if not obra_id:
+            continue
+
+        chave = (str(obra_id), turno)
+        if chave in vistos:
+            continue
+
+        vistos.add(chave)
+        itens.append({
+            "obra_id": obra_id,
+            "turno": turno,
+        })
+
+    if not itens:
+        return False, "Selecione pelo menos um serviço."
+
+    # Dois serviços do mesmo colaborador não podem ocupar turnos sobrepostos.
+    for i, atual in enumerate(itens):
+        for outro in itens[i + 1:]:
+            if turnos_se_sobrepoem(
+                atual["turno"],
+                outro["turno"],
+            ):
+                return False, (
+                    f"Os turnos {atual['turno']} e {outro['turno']} se sobrepõem. "
+                    "Escolha turnos compatíveis para os dois serviços."
+                )
+
+    ind = obter_indisponibilidade_colaborador(
+        colaborador_id,
+        data_servico,
+    )
+    if ind:
+        return False, (
+            f"Colaborador indisponível: {ind.get('motivo','Indisponível')} "
+            f"({ind.get('inicio')} a {ind.get('fim')})."
+        )
+
+    existentes = buscar_convocacao_existente(
+        colaborador_id,
+        data_servico,
+    )
+
+    # Valida todos os novos serviços contra o que já existe antes de gravar.
+    for novo in itens:
+        obra_nova = (
+            dict_obras.get(novo["obra_id"], {})
+            if "dict_obras" in globals()
+            else {}
+        )
+        unidade_nova = str(
+            obra_nova.get("unidade") or ""
+        )
+
+        for reg in existentes:
+            turno_existente = turno_da_convocacao(reg)
+
+            if not turnos_se_sobrepoem(
+                turno_existente,
+                novo["turno"],
+            ):
+                continue
+
+            eng_existente = str(
+                reg.get("engenheiro")
+                or "outro engenheiro"
+            )
+
+            if normalizar(eng_existente) != normalizar(engenheiro):
+                registrar_conflito_convocacao(
+                    reg,
+                    engenheiro,
+                    turno_tentativa=novo["turno"],
+                    unidade_tentativa=unidade_nova,
+                )
+                return False, (
+                    f"Esse colaborador já está com {eng_existente} em "
+                    f"{turno_existente}. O conflito foi registrado para o Paulo."
+                )
+
+            return False, (
+                f"Esse colaborador já está no seu apontamento em "
+                f"{turno_existente}. Escolha outro turno."
+            )
+
+    _garantir_multiturno_neon()
+
+    agora = agora_aproar()
+    payloads = []
+
+    for novo in itens:
+        turno_novo = novo["turno"]
+
+        meta = {
+            "convocado_em": agora.isoformat(),
+            "convocado_por": str(engenheiro),
+            "incluido_direto_apontamento": True,
+            "convocacao_atrasada": bool(
+                agora.hour >= 16
+                and data_servico
+                == proximo_dia_util(agora.date())
+            ),
+            "apontado_em": agora.isoformat(),
+            "ultimo_apontamento_em": agora.isoformat(),
+            "apontado_por": str(engenheiro),
+            "apontamento_atrasado": bool(
+                agora.date() > data_servico
+            ),
+            "servicos_extras": [],
+            "servicos_adicionais": [],
+            "periodo_servico_principal": turno_novo,
+        }
+
+        status_inicial = {
+            "Manhã": "Presente (Só Manhã)",
+            "Tarde": "Presente (Só Tarde)",
+        }.get(
+            turno_novo,
+            "Presente (Integral)",
+        )
+
+        payload = {
+            "obra_id": novo["obra_id"],
+            "colaborador_id": colaborador_id,
+            "data": data_servico.isoformat(),
+            "engenheiro": engenheiro,
+            "status": status_inicial,
+            "valor_extra": 0,
+            "observacao": montar_observacao_operacional(
+                turno_novo,
+                "",
+                meta,
+            ),
+        }
+
+        if schema_producao_disponivel():
+            payload.update({
+                "turno": turno_novo,
+                "criado_em": agora.isoformat(),
+                "criado_por": str(engenheiro),
+            })
+
+        payloads.append(payload)
+
+    try:
+        retorno = (
+            supabase.table("convocacoes")
+            .insert(payloads)
+            .execute()
+            .data
+            or []
+        )
+
+        # Mantém auditoria individual dos registros criados.
+        for idx, novo in enumerate(itens):
+            registro = (
+                retorno[idx]
+                if idx < len(retorno)
+                else {}
+            )
+            registrar_auditoria_prod(
+                "convocacao",
+                registro.get("id") or "",
+                "INCLUIR_DIRETO_APONTAMENTO",
+                engenheiro,
+                depois={
+                    "colaborador_id": str(colaborador_id),
+                    "data": data_servico,
+                    "turno": novo["turno"],
+                    "obra_id": str(novo["obra_id"]),
+                },
+                contexto={
+                    "retroativo": bool(
+                        agora.date() > data_servico
+                    ),
+                    "origem": "portal_engenheiro_multisservico",
+                },
+            )
+
+        limpar_cache_operacional()
+
+        if len(itens) == 1:
+            return True, (
+                f"Colaborador incluído em {itens[0]['turno']}."
+            )
+
+        return True, (
+            f"{len(itens)} serviços adicionados para o colaborador."
+        )
+
+    except Exception as e:
+        return False, (
+            "Não foi possível incluir os serviços do colaborador. "
+            f"Detalhe: {str(e)[:120]}"
+        )
+
+
 def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
     cabecalho_pagina_aproar(
         "Apontamento",
@@ -7210,8 +7434,8 @@ elif modo_campo:
             expanded=False,
         ):
             st.caption(
-                "Para lançar mais de um serviço no mesmo dia, adicione o colaborador "
-                "novamente escolhendo outro turno compatível."
+                "Você pode lançar um ou dois serviços para a mesma pessoa. "
+                "Quando houver 2 serviços, informe o turno de cada um."
             )
 
             tipo_inc = st.radio(
@@ -7256,12 +7480,14 @@ elif modo_campo:
                 )
 
                 c_av1, c_av2 = st.columns(2)
+
                 with c_av1:
                     tipo_diaria_inc = st.selectbox(
                         "Categoria da diária",
                         ["Profissional", "Ajudante"],
                         key="engm_inc_avulso_tipo",
                     )
+
                 with c_av2:
                     funcao_avulso_inc = st.text_input(
                         "Função (opcional)",
@@ -7276,30 +7502,15 @@ elif modo_campo:
                 }
             )
 
-            c_inc1, c_inc2 = st.columns(2)
-
-            with c_inc1:
-                unidade_inc = (
-                    st.selectbox(
-                        "Unidade",
-                        unidades_inc,
-                        key="engm_inc_unidade",
-                    )
-                    if unidades_inc
-                    else None
+            unidade_inc = (
+                st.selectbox(
+                    "Unidade",
+                    unidades_inc,
+                    key="engm_inc_unidade",
                 )
-
-            with c_inc2:
-                turno_inc = st.selectbox(
-                    "Turno do colaborador",
-                    [
-                        "Manhã",
-                        "Tarde",
-                        "Noite",
-                        "Integral",
-                    ],
-                    key="engm_inc_turno",
-                )
+                if unidades_inc
+                else None
+            )
 
             obras_inc = (
                 obras_reais_da_unidade(
@@ -7308,29 +7519,122 @@ elif modo_campo:
                 if unidade_inc
                 else []
             )
+
             mapa_inc = {
                 o.get("nome"): o.get("id")
                 for o in obras_inc
             }
 
-            obra_inc = st.selectbox(
-                "Obra / Serviço",
-                ["— Selecione —"]
-                + list(mapa_inc.keys()),
-                key="engm_inc_obra",
+            # -------------------------------------------------------
+            # 1º serviço
+            # -------------------------------------------------------
+            st.markdown("**1º serviço**")
+
+            s1c1, s1c2 = st.columns(
+                [1.55, .65]
             )
+
+            with s1c1:
+                obra_inc_1 = st.selectbox(
+                    "Obra / Serviço",
+                    ["— Selecione —"]
+                    + list(mapa_inc.keys()),
+                    key="engm_inc_obra_1",
+                )
+
+            with s1c2:
+                turno_inc_1 = st.selectbox(
+                    "Turno",
+                    [
+                        "Manhã",
+                        "Tarde",
+                        "Noite",
+                        "Integral",
+                    ],
+                    key="engm_inc_turno_1",
+                )
+
+            adicionar_segundo = st.checkbox(
+                "Adicionar 2º serviço",
+                key="engm_inc_tem_segundo",
+            )
+
+            obra_inc_2 = "— Nenhum —"
+            turno_inc_2 = "Tarde"
+
+            if adicionar_segundo:
+                st.markdown("**2º serviço**")
+
+                s2c1, s2c2 = st.columns(
+                    [1.55, .65]
+                )
+
+                with s2c1:
+                    obra_inc_2 = st.selectbox(
+                        "Obra / Serviço",
+                        ["— Selecione —"]
+                        + list(mapa_inc.keys()),
+                        key="engm_inc_obra_2",
+                    )
+
+                with s2c2:
+                    turno_inc_2 = st.selectbox(
+                        "Turno",
+                        [
+                            "Manhã",
+                            "Tarde",
+                            "Noite",
+                            "Integral",
+                        ],
+                        index=1,
+                        key="engm_inc_turno_2",
+                    )
 
             if st.button(
                 "Adicionar ao apontamento",
                 use_container_width=True,
                 key="engm_inc_btn",
             ):
-                if obra_inc not in mapa_inc:
+                # -----------------------------------------------
+                # Validação dos serviços
+                # -----------------------------------------------
+                if obra_inc_1 not in mapa_inc:
                     st.warning(
-                        "Selecione a unidade e a obra/serviço."
+                        "Selecione a obra/serviço principal."
                     )
+
+                elif (
+                    adicionar_segundo
+                    and obra_inc_2 not in mapa_inc
+                ):
+                    st.warning(
+                        "Selecione a 2ª obra/serviço."
+                    )
+
+                elif (
+                    adicionar_segundo
+                    and obra_inc_2 == obra_inc_1
+                ):
+                    st.warning(
+                        "O 2º serviço deve ser diferente do 1º."
+                    )
+
+                elif (
+                    adicionar_segundo
+                    and turnos_se_sobrepoem(
+                        turno_inc_1,
+                        turno_inc_2,
+                    )
+                ):
+                    st.warning(
+                        "Os turnos dos dois serviços se sobrepõem. "
+                        "Escolha turnos compatíveis, como Manhã + Tarde."
+                    )
+
                 else:
-                    # Se for avulso, cria/localiza o cadastro antes de incluir.
+                    # -------------------------------------------
+                    # Avulso: cria/localiza cadastro primeiro.
+                    # -------------------------------------------
                     if tipo_inc == "Avulso":
                         if not nome_avulso_inc.strip():
                             st.warning(
@@ -7368,14 +7672,33 @@ elif modo_campo:
                             st.warning(
                                 "Selecione um colaborador."
                             )
+
                     else:
+                        servicos_inc = [
+                            {
+                                "obra_id": mapa_inc[
+                                    obra_inc_1
+                                ],
+                                "turno": turno_inc_1,
+                            }
+                        ]
+
+                        if adicionar_segundo:
+                            servicos_inc.append(
+                                {
+                                    "obra_id": mapa_inc[
+                                        obra_inc_2
+                                    ],
+                                    "turno": turno_inc_2,
+                                }
+                            )
+
                         ok, msg = (
-                            incluir_colaborador_direto_apontamento(
+                            incluir_multiplos_servicos_direto_apontamento(
                                 colaborador_id_inc,
                                 engenheiro_campo,
                                 data_apont,
-                                mapa_inc[obra_inc],
-                                turno=turno_inc,
+                                servicos_inc,
                             )
                         )
 
@@ -7386,12 +7709,22 @@ elif modo_campo:
                         )(msg)
 
                         if ok:
+                            detalhe_servicos = (
+                                f"{obra_inc_1} · {turno_inc_1}"
+                            )
+
+                            if adicionar_segundo:
+                                detalhe_servicos += (
+                                    f" + {obra_inc_2} · {turno_inc_2}"
+                                )
+
                             st.session_state[
                                 "_engm_inc_feedback"
                             ] = (
-                                f"{nome_exibicao_inc} incluído em "
-                                f"{turno_inc} · {obra_inc}."
+                                f"{nome_exibicao_inc}: "
+                                f"{detalhe_servicos}."
                             )
+
                             limpar_cache_operacional()
                             st.rerun()
 
@@ -7399,6 +7732,7 @@ elif modo_campo:
                 "_engm_inc_feedback",
                 None,
             )
+
             if feedback_inc:
                 st.success(feedback_inc)
 
