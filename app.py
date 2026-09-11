@@ -11504,6 +11504,10 @@ else:
                         "VALOR DA DIÁRIA",
                         "VALOR DIARIA",
                         "VALOR DIÁRIA",
+                        "CUSTO DIARIO",
+                        "CUSTO DIÁRIO",
+                        "CUSTO DIARIO DO COLABORADOR",
+                        "CUSTO DIÁRIO DO COLABORADOR",
                         "DIARIA",
                         "DIÁRIA",
                         "VALOR"
@@ -11561,8 +11565,9 @@ else:
                         index=idx_valor,
                         key="map_valor_import",
                         help=(
-                            "Aceita números como 241,74, 241.74 ou R$ 241,74. "
-                            "Esse valor será salvo como a diária do colaborador."
+                            "Aceita 241,74, 241.74, R$ 241,74 e também o formato "
+                            "contábil do Excel, em que 'R$' fica numa coluna e o valor "
+                            "numérico aparece na coluna seguinte."
                         ),
                     )
 
@@ -11584,14 +11589,19 @@ else:
                         txt = (
                             txt.replace("R$", "")
                             .replace("r$", "")
+                            .replace("\xa0", "")
                             .replace(" ", "")
                         )
+
+                        # Se a célula contiver apenas o símbolo de moeda,
+                        # o número pode estar na coluna seguinte (formato contábil do Excel).
+                        if txt in {"", "-", "R$", "r$"}:
+                            return None
 
                         # Formato brasileiro: 1.234,56
                         if "," in txt:
                             txt = txt.replace(".", "").replace(",", ".")
                         else:
-                            # Formato 1234.56 permanece como está.
                             txt = txt.replace(",", ".")
 
                         try:
@@ -11599,6 +11609,62 @@ else:
                             return numero if numero > 0 else None
                         except Exception:
                             return None
+
+                    def _extrair_valor_colaborador_linha(linha, coluna_valor):
+                        """
+                        Suporta:
+                        1) valor na própria coluna: 258,10 / 258.10 / R$ 258,10
+                        2) formato contábil do Excel:
+                           coluna 'Custo diário' = R$
+                           coluna seguinte = 258,10
+                        """
+                        if coluna_valor == "(selecione)":
+                            return None
+
+                        valor_direto = _converter_valor_colaborador_import(
+                            linha.get(coluna_valor)
+                        )
+                        if valor_direto is not None:
+                            return valor_direto
+
+                        try:
+                            idx = colunas.index(coluna_valor)
+                        except ValueError:
+                            return None
+
+                        # Procura nas duas colunas imediatamente seguintes.
+                        # Isso cobre arquivos com uma coluna vazia/intermediária
+                        # gerada pelo formato contábil/mesclagem do Excel.
+                        for prox_idx in (idx + 1, idx + 2):
+                            if prox_idx >= len(colunas):
+                                continue
+
+                            prox_col = colunas[prox_idx]
+                            valor_prox = _converter_valor_colaborador_import(
+                                linha.get(prox_col)
+                            )
+                            if valor_prox is not None:
+                                return valor_prox
+
+                        return None
+
+                    # Diagnóstico visual: informa quando a planilha usa
+                    # "R$" em uma coluna e o número na coluna ao lado.
+                    if col_valor_import != "(selecione)":
+                        amostra_valores = []
+                        for _, _linha_teste in df_import.head(20).iterrows():
+                            _v = _extrair_valor_colaborador_linha(
+                                _linha_teste,
+                                col_valor_import,
+                            )
+                            if _v is not None:
+                                amostra_valores.append(_v)
+
+                        if amostra_valores:
+                            st.caption(
+                                f"✓ Coluna de custo reconhecida. "
+                                f"Exemplo detectado: {formatar_reais(amostra_valores[0])}."
+                            )
 
                     registros_por_nome = {}
                     linhas_invalidas = 0
@@ -11654,8 +11720,9 @@ else:
                             linhas_valor_invalido += 1
                             continue
 
-                        diaria_salva = _converter_valor_colaborador_import(
-                            linha.get(col_valor_import)
+                        diaria_salva = _extrair_valor_colaborador_linha(
+                            linha,
+                            col_valor_import,
                         )
                         if diaria_salva is None:
                             linhas_valor_invalido += 1
