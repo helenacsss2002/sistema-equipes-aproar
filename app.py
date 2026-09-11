@@ -5171,6 +5171,410 @@ def _processar_registro_operacional(registro):
     }
 
 
+
+def _peso_periodo_relatorio(periodo):
+    """Converte o período do serviço em blocos de custo."""
+    p = normalizar_turno_convocacao(periodo)
+    if p == "Manhã":
+        return {"M": 0.5}
+    if p == "Tarde":
+        return {"T": 0.5}
+    if p == "Noite":
+        # O sistema atual remunera Noite como diária integral.
+        return {"N": 1.0}
+    return {"M": 0.5, "T": 0.5}
+
+
+def _blocos_presenca_registro_relatorio(registro):
+    """
+    Retorna os blocos de diária efetivamente remunerados pelo registro.
+
+    O uso de MAX por bloco no agrupamento evita pagar duas meias-diárias
+    quando a mesma pessoa executou dois serviços na mesma manhã.
+    """
+    status = normalizar_status_operacional(
+        registro.get("status")
+    )
+    turno = turno_da_convocacao(registro)
+
+    if not status_eh_presenca(status):
+        return {}
+
+    if status == "Presente (Só Manhã)":
+        return {"M": 0.5}
+
+    if status == "Presente (Só Tarde)":
+        return {"T": 0.5}
+
+    if status == "Saída Antecipada":
+        if turno == "Tarde":
+            return {"T": 0.5}
+        if turno == "Noite":
+            return {"N": 0.5}
+        return {"M": 0.5}
+
+    # Para registros presentes integrais, o turno específico prevalece.
+    # Integral/legado ocupa manhã + tarde.
+    if turno == "Manhã":
+        return {"M": 0.5}
+    if turno == "Tarde":
+        return {"T": 0.5}
+    if turno == "Noite":
+        return {"N": 1.0}
+
+    return {"M": 0.5, "T": 0.5}
+
+
+def _localizar_obra_por_nome_relatorio(nome, unidade_preferida=""):
+    alvo = normalizar(nome or "")
+    unidade_pref = normalizar(unidade_preferida or "")
+    candidatas = [
+        o for o in obras
+        if normalizar(o.get("nome") or "") == alvo
+    ]
+    if unidade_pref:
+        mesma_unidade = next(
+            (
+                o for o in candidatas
+                if normalizar(o.get("unidade") or "") == unidade_pref
+            ),
+            None,
+        )
+        if mesma_unidade:
+            return mesma_unidade
+    return candidatas[0] if candidatas else {}
+
+
+def _servicos_do_registro_relatorio(registro):
+    """Expande principal + serviços adicionais em itens individualizados."""
+    obra_principal = dict_obras.get(
+        registro.get("obra_id"),
+        {},
+    )
+    meta = obter_metadata_operacional(
+        registro.get("observacao") or ""
+    )
+
+    turno_registro = turno_da_convocacao(registro)
+    periodo_principal = str(
+        meta.get("periodo_servico_principal")
+        or turno_registro
+        or "Integral"
+    )
+
+    itens = []
+
+    if obra_principal and not eh_obra_placeholder(obra_principal):
+        itens.append({
+            "obra_id": str(obra_principal.get("id") or registro.get("obra_id") or ""),
+            "obra": str(obra_principal.get("nome") or "N/A"),
+            "unidade": str(obra_principal.get("unidade") or "GERAL"),
+            "periodo": normalizar_turno_convocacao(periodo_principal),
+            "principal": True,
+        })
+
+    for adicional in _normalizar_servicos_adicionais(meta):
+        nome = str(adicional.get("servico") or "").strip()
+        if not nome:
+            continue
+
+        periodo = str(
+            adicional.get("periodo")
+            or periodo_principal
+            or turno_registro
+            or "Integral"
+        )
+        if periodo == "Não informado":
+            periodo = periodo_principal or turno_registro or "Integral"
+
+        obra_add = _localizar_obra_por_nome_relatorio(
+            nome,
+            obra_principal.get("unidade") if obra_principal else "",
+        )
+
+        itens.append({
+            "obra_id": str(obra_add.get("id") or ""),
+            "obra": nome,
+            "unidade": str(
+                obra_add.get("unidade")
+                or obra_principal.get("unidade")
+                or "GERAL"
+            ),
+            "periodo": normalizar_turno_convocacao(periodo),
+            "principal": False,
+        })
+
+    # Evita duplicar o mesmo serviço/período dentro de um registro.
+    saida = []
+    vistos = set()
+    for item in itens:
+        chave = (
+            str(item.get("obra_id") or ""),
+            normalizar(item.get("obra") or ""),
+            normalizar(item.get("unidade") or ""),
+            item.get("periodo"),
+        )
+        if chave in vistos:
+            continue
+        vistos.add(chave)
+        saida.append(item)
+
+    return saida
+
+
+def ratear_registros_por_servico(registros):
+    """
+    Retorna uma linha por colaborador/data/serviço com a diária corretamente
+    distribuída entre os serviços executados.
+
+    Exemplos:
+      - Só manhã + 1 serviço = 1/2 diária nesse serviço.
+      - Só manhã + 2 serviços = 1/4 diária em cada serviço.
+      - Manhã em 2 serviços + tarde em 1 = 1/4 + 1/4 + 1/2.
+      - Obras podem ser da mesma unidade ou de unidades diferentes.
+    """
+    grupos = {}
+
+    for registro in registros or []:
+        data = str(registro.get("data") or "")
+        colaborador_id = str(
+            registro.get("colaborador_id")
+            or ""
+        )
+        chave_grupo = (data, colaborador_id)
+        grupos.setdefault(chave_grupo, []).append(registro)
+
+    linhas = []
+
+    for (data, colaborador_id), regs in grupos.items():
+        colab = dict_colaboradores.get(
+            regs[0].get("colaborador_id"),
+            {},
+        )
+        valor_diaria = float(
+            obter_valor_diaria_colaborador(colab)
+        )
+
+        # Orçamento diário por bloco de presença.
+        orcamento_blocos = {}
+        for reg in regs:
+            for bloco, peso in _blocos_presenca_registro_relatorio(reg).items():
+                orcamento_blocos[bloco] = max(
+                    float(orcamento_blocos.get(bloco, 0.0)),
+                    float(peso),
+                )
+
+        # Serviços únicos do dia, preservando de qual registro vieram.
+        servicos = {}
+        extras_por_servico = {}
+
+        for reg in regs:
+            itens_reg = _servicos_do_registro_relatorio(reg)
+            status_reg = normalizar_status_operacional(
+                reg.get("status")
+            )
+            extra_reg = (
+                float(reg.get("valor_extra") or 0.0)
+                if status_eh_presenca(status_reg)
+                else 0.0
+            )
+
+            # Extra não pode ser repetida ao expandir um mesmo registro.
+            extra_por_item = (
+                extra_reg / len(itens_reg)
+                if itens_reg
+                else 0.0
+            )
+
+            _, obs_livre = decompor_observacao_operacional(
+                reg.get("observacao") or ""
+            )
+
+            for item in itens_reg:
+                chave_serv = (
+                    str(item.get("obra_id") or ""),
+                    normalizar(item.get("obra") or ""),
+                    normalizar(item.get("unidade") or ""),
+                )
+
+                atual = servicos.setdefault(
+                    chave_serv,
+                    {
+                        "obra_id": str(item.get("obra_id") or ""),
+                        "obra": str(item.get("obra") or "N/A"),
+                        "unidade": str(item.get("unidade") or "GERAL"),
+                        "periodos": set(),
+                        "engenheiros": set(),
+                        "status": [],
+                        "observacoes": [],
+                    },
+                )
+
+                periodo = normalizar_turno_convocacao(
+                    item.get("periodo") or turno_da_convocacao(reg)
+                )
+                atual["periodos"].add(periodo)
+                atual["engenheiros"].add(
+                    str(reg.get("engenheiro") or "N/A")
+                )
+                atual["status"].append(status_reg)
+
+                if obs_livre:
+                    atual["observacoes"].append(obs_livre)
+
+                extras_por_servico[chave_serv] = (
+                    float(extras_por_servico.get(chave_serv, 0.0))
+                    + extra_por_item
+                )
+
+        # Se não há serviço real, não há o que atribuir no relatório por obra.
+        if not servicos:
+            continue
+
+        # Quais serviços participam de cada bloco (M/T/N).
+        servicos_por_bloco = {
+            bloco: []
+            for bloco in orcamento_blocos.keys()
+        }
+
+        for chave_serv, serv in servicos.items():
+            blocos_serv = set()
+            for periodo in serv["periodos"]:
+                blocos_serv.update(
+                    _peso_periodo_relatorio(periodo).keys()
+                )
+
+            for bloco in servicos_por_bloco:
+                if bloco in blocos_serv:
+                    servicos_por_bloco[bloco].append(chave_serv)
+
+        rateio_fracao = {
+            chave: 0.0
+            for chave in servicos.keys()
+        }
+
+        # Divide cada meia-diária/diária noturna entre os serviços daquele bloco.
+        for bloco, peso_bloco in orcamento_blocos.items():
+            participantes = list(
+                dict.fromkeys(
+                    servicos_por_bloco.get(bloco)
+                    or []
+                )
+            )
+
+            # Compatibilidade com registros antigos sem período confiável.
+            if not participantes:
+                participantes = list(servicos.keys())
+
+            if not participantes:
+                continue
+
+            parte = float(peso_bloco) / len(participantes)
+            for chave_serv in participantes:
+                rateio_fracao[chave_serv] += parte
+
+        # Segurança: garante que 100% do valor remunerável seja atribuído.
+        total_esperado = sum(
+            float(x)
+            for x in orcamento_blocos.values()
+        )
+        total_rateado = sum(
+            float(x)
+            for x in rateio_fracao.values()
+        )
+        residual = max(0.0, total_esperado - total_rateado)
+
+        if residual > 0.000001 and servicos:
+            parte_residual = residual / len(servicos)
+            for chave_serv in rateio_fracao:
+                rateio_fracao[chave_serv] += parte_residual
+
+        for chave_serv, serv in servicos.items():
+            diaria_rateada = round(
+                valor_diaria
+                * float(rateio_fracao.get(chave_serv, 0.0)),
+                2,
+            )
+            extra_rateada = round(
+                float(extras_por_servico.get(chave_serv, 0.0)),
+                2,
+            )
+
+            periodos = sorted(
+                serv["periodos"],
+                key=lambda p: {
+                    "Manhã": 1,
+                    "Tarde": 2,
+                    "Noite": 3,
+                    "Integral": 4,
+                }.get(p, 9),
+            )
+
+            statuses = [
+                s for s in serv["status"]
+                if s
+            ]
+            status_exibido = (
+                statuses[0]
+                if statuses
+                and len(set(statuses)) == 1
+                else " / ".join(dict.fromkeys(statuses))
+            )
+
+            linhas.append({
+                "Data": data,
+                "obra_id": serv["obra_id"],
+                "Obra": serv["obra"],
+                "Unidade": serv["unidade"],
+                "Período do serviço": " + ".join(periodos),
+                "Engenheiro": " / ".join(
+                    sorted(serv["engenheiros"])
+                ),
+                "Colaborador": str(
+                    colab.get("nome")
+                    or "Desconhecido"
+                ),
+                "Função": str(
+                    colab.get("funcao")
+                    or "-"
+                ),
+                "Status": status_exibido,
+                "Diária (R$)": diaria_rateada,
+                "Extra (R$)": extra_rateada,
+                "Custo (R$)": round(
+                    diaria_rateada + extra_rateada,
+                    2,
+                ),
+                "Observação": " | ".join(
+                    dict.fromkeys(serv["observacoes"])
+                ),
+                "_colaborador_id": colaborador_id,
+            })
+
+    return linhas
+
+
+def _filtrar_rateio_por_obra(linhas, obra_id=None, obra_nome=None):
+    if not obra_id and not obra_nome:
+        return list(linhas or [])
+
+    alvo_id = str(obra_id or "")
+    alvo_nome = normalizar(obra_nome or "")
+
+    return [
+        linha
+        for linha in linhas or []
+        if (
+            alvo_id
+            and str(linha.get("obra_id") or "") == alvo_id
+        )
+        or (
+            alvo_nome
+            and normalizar(linha.get("Obra") or "") == alvo_nome
+        )
+    ]
+
+
 def _gerar_excel_dataframe(df, titulo="APROAR - RELATÓRIO"):
     buffer = io.BytesIO()
     wb = openpyxl.Workbook()
@@ -5433,39 +5837,134 @@ def render_relatorio_visualizador(key_prefix="rel_view", engenheiro_fixo=None):
         "Consulte os registros da equipe e exporte os dados necessários para conferência.",
         categoria="ANÁLISE E FECHAMENTO",
     )
-    c1, c2, c3 = st.columns(3)
+
+    c1, c2, c3, c4 = st.columns(4)
     with c1:
-        inicio = st.date_input("Início", value=agora_aproar().date().replace(day=1), format="DD/MM/YYYY", key=f"{key_prefix}_ini")
+        inicio = st.date_input(
+            "Início",
+            value=agora_aproar().date().replace(day=1),
+            format="DD/MM/YYYY",
+            key=f"{key_prefix}_ini",
+        )
     with c2:
-        fim = st.date_input("Fim", value=agora_aproar().date(), format="DD/MM/YYYY", key=f"{key_prefix}_fim")
+        fim = st.date_input(
+            "Fim",
+            value=agora_aproar().date(),
+            format="DD/MM/YYYY",
+            key=f"{key_prefix}_fim",
+        )
     with c3:
-        unidades = sorted({o.get("unidade") for o in obras if o.get("unidade")})
-        unidade = st.selectbox("Unidade", ["TODAS"] + unidades, key=f"{key_prefix}_unid")
+        unidades = sorted(
+            {
+                o.get("unidade")
+                for o in obras
+                if o.get("unidade")
+            }
+        )
+        unidade = st.selectbox(
+            "Unidade",
+            ["TODAS"] + unidades,
+            key=f"{key_prefix}_unid",
+        )
+    with c4:
+        obras_opcoes = sorted(
+            {
+                o.get("nome")
+                for o in obras
+                if o.get("nome")
+                and not eh_obra_placeholder(o)
+            }
+        )
+        obra_filtro = st.selectbox(
+            "Obra / Serviço",
+            ["TODAS"] + obras_opcoes,
+            key=f"{key_prefix}_obra",
+        )
+
     if inicio > fim:
-        st.error("A data inicial não pode ser maior que a final.")
+        st.error(
+            "A data inicial não pode ser maior que a final."
+        )
         return
-    registros = _buscar_convocacoes_intervalo(inicio, fim, engenheiro_fixo)
-    linhas = []
-    for r in registros:
-        p = _processar_registro_operacional(r)
-        if unidade != "TODAS" and p["Unidade"] != unidade:
-            continue
-        linhas.append(p)
+
+    registros = _buscar_convocacoes_intervalo(
+        inicio,
+        fim,
+        engenheiro_fixo,
+    )
+
+    linhas = ratear_registros_por_servico(registros)
+
+    if unidade != "TODAS":
+        linhas = [
+            x for x in linhas
+            if x["Unidade"] == unidade
+        ]
+
+    if obra_filtro != "TODAS":
+        linhas = _filtrar_rateio_por_obra(
+            linhas,
+            obra_nome=obra_filtro,
+        )
+
     if not linhas:
         st.info("Sem registros para o período.")
         return
+
     df = pd.DataFrame(linhas)
+
     total = float(df["Custo (R$)"].sum())
+
+    pessoas_dia = (
+        df[["Data", "_colaborador_id"]]
+        .drop_duplicates()
+        .shape[0]
+    )
+
     e1, e2, e3 = st.columns(3)
     e1.metric("CUSTO TOTAL", formatar_reais(total))
-    e2.metric("PESSOAS/DIA", len(df))
-    e3.metric("DIAS COM REGISTRO", df["Data"].nunique())
-    tabela_aproar(df[["Data", "Unidade", "Serviço(s)", "Colaborador", "Status", "Diária (R$)", "Extra (R$)", "Custo (R$)"]], key=f"{key_prefix}_tbl_relatorio")
+    e2.metric("PESSOAS/DIA", pessoas_dia)
+    e3.metric(
+        "DIAS COM REGISTRO",
+        df["Data"].nunique(),
+    )
+
+    tabela_aproar(
+        df[
+            [
+                "Data",
+                "Unidade",
+                "Obra",
+                "Período do serviço",
+                "Colaborador",
+                "Status",
+                "Diária (R$)",
+                "Extra (R$)",
+                "Custo (R$)",
+            ]
+        ],
+        key=f"{key_prefix}_tbl_relatorio",
+    )
+
+    df_export = df.drop(
+        columns=["_colaborador_id"],
+        errors="ignore",
+    )
+
     st.download_button(
         "📥 BAIXAR RELATÓRIO EXCEL",
-        data=_gerar_excel_dataframe(df, "APROAR - RELATÓRIO DE APONTAMENTOS"),
-        file_name=f"relatorio_apontamentos_{inicio.isoformat()}_a_{fim.isoformat()}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        data=_gerar_excel_dataframe(
+            df_export,
+            "APROAR - RELATÓRIO DE APONTAMENTOS",
+        ),
+        file_name=(
+            f"relatorio_apontamentos_"
+            f"{inicio.isoformat()}_a_{fim.isoformat()}.xlsx"
+        ),
+        mime=(
+            "application/vnd.openxmlformats-officedocument."
+            "spreadsheetml.sheet"
+        ),
         use_container_width=True,
         key=f"{key_prefix}_download",
     )
@@ -7246,6 +7745,14 @@ elif modo_campo:
     </style>
     """)
 
+    def _feedback_salvo_mobile(mensagem):
+        """Mostra confirmação pequena por 2 segundos antes de atualizar a tela."""
+        try:
+            st.toast(mensagem)
+        except Exception:
+            st.caption(f"✓ {mensagem}")
+        time.sleep(2)
+
     def _buscar_convocacoes_campo(engenheiro, data_ref):
         return _buscar_convocacoes_intervalo(
             data_ref,
@@ -7718,23 +8225,11 @@ elif modo_campo:
                                     f" + {obra_inc_2} · {turno_inc_2}"
                                 )
 
-                            st.session_state[
-                                "_engm_inc_feedback"
-                            ] = (
-                                f"{nome_exibicao_inc}: "
-                                f"{detalhe_servicos}."
-                            )
-
                             limpar_cache_operacional()
+                            _feedback_salvo_mobile(
+                                f"Apontamento salvo · {nome_exibicao_inc}."
+                            )
                             st.rerun()
-
-            feedback_inc = st.session_state.pop(
-                "_engm_inc_feedback",
-                None,
-            )
-
-            if feedback_inc:
-                st.success(feedback_inc)
 
         if not convocacoes_data:
             st.info(
@@ -7778,10 +8273,29 @@ elif modo_campo:
                 == unidade_filtro
             ]
 
+            # Só libera a ação em massa quando todos os colaboradores exibidos
+            # já possuem uma obra/serviço real definida.
+            sem_servico_definido = [
+                conv
+                for conv in render_campo
+                if not _convocacao_apontada_campo(conv)
+            ]
+            todos_com_servico = (
+                bool(render_campo)
+                and not sem_servico_definido
+            )
+
+            if not todos_com_servico:
+                st.caption(
+                    "Para marcar todos como presentes, defina primeiro a obra/serviço "
+                    "de todos os colaboradores exibidos."
+                )
+
             if st.button(
-                "Marcar exibidos como presentes",
+                "Marcar todos como presentes",
                 use_container_width=True,
                 key="engm_all_present",
+                disabled=not todos_com_servico,
             ):
                 for conv in render_campo:
                     try:
@@ -7795,6 +8309,9 @@ elif modo_campo:
                         pass
 
                 limpar_cache_operacional()
+                _feedback_salvo_mobile(
+                    "Todos foram marcados como presentes."
+                )
                 st.rerun()
 
             # Todas as convocações do dia são necessárias para aplicar a regra
@@ -8229,16 +8746,18 @@ elif modo_campo:
 
                     limpar_cache_operacional()
 
-                    if salvos:
-                        st.success(
-                            f"{salvos} apontamento(s) salvo(s)."
-                        )
-
                     for msg in falhas:
                         st.error(msg)
 
                     if salvos and not falhas:
+                        _feedback_salvo_mobile(
+                            f"Apontamento salvo · {salvos} registro(s)."
+                        )
                         st.rerun()
+                    elif salvos:
+                        st.caption(
+                            f"✓ {salvos} apontamento(s) foram salvos, mas houve pendências abaixo."
+                        )
 
     # =====================================================================
     # AMANHÃ — CONVOCADOS + NOVA CONVOCAÇÃO NA MESMA TELA
@@ -8257,23 +8776,14 @@ elif modo_campo:
             ):
                 st.session_state.pop(_chave, None)
 
-        # Feedback sobrevive ao st.rerun, então o engenheiro enxerga claramente
-        # se a convocação foi salva ou se alguém foi bloqueado.
+        # Avisos de conflito/bloqueio sobrevivem ao rerun.
+        # O sucesso é mostrado como toast pequeno antes da atualização.
         _feedback_conv = st.session_state.pop("_engm_conv_feedback", None)
         if _feedback_conv:
-            _qtd_ok = int(_feedback_conv.get("sucessos") or 0)
-            _avisos_fb = list(_feedback_conv.get("avisos") or [])
-            _unidade_fb = str(_feedback_conv.get("unidade") or "")
-            _turno_fb = str(_feedback_conv.get("turno") or "")
-
-            if _qtd_ok:
-                st.success(
-                    f"{_qtd_ok} pessoa(s) convocada(s) com sucesso"
-                    + (f" para {_unidade_fb}" if _unidade_fb else "")
-                    + (f" · {_turno_fb}" if _turno_fb else "")
-                    + "."
-                )
-
+            _avisos_fb = list(
+                _feedback_conv.get("avisos")
+                or []
+            )
             for _aviso_fb in _avisos_fb:
                 st.warning(_aviso_fb)
 
@@ -8655,13 +9165,18 @@ elif modo_campo:
                                 # aparecendo depois do rerun que atualiza "Já convocados".
                                 if sucessos:
                                     limpar_cache_operacional()
-                                    st.session_state["_engm_conv_feedback"] = {
-                                        "sucessos": sucessos,
-                                        "avisos": avisos,
-                                        "unidade": unidade_selecionada,
-                                        "turno": turno_conv_campo,
-                                    }
+
+                                    # Só os avisos precisam sobreviver ao rerun.
+                                    if avisos:
+                                        st.session_state["_engm_conv_feedback"] = {
+                                            "avisos": avisos,
+                                        }
+
                                     st.session_state["_engm_reset_convocacao"] = True
+
+                                    _feedback_salvo_mobile(
+                                        f"Convocação salva · {sucessos} pessoa(s)."
+                                    )
                                     st.rerun()
                                 else:
                                     if avisos:
@@ -9996,226 +10511,638 @@ else:
             obra_id_filtro = next((o['id'] for o in obras if o['nome'] == obra_relatorio), None)
 
         dados_relatorio = (
-            _buscar_convocacoes_intervalo(data_inicio_rel, data_fim_rel, eng_rel_filtro)
-            if data_inicio_rel <= data_fim_rel else []
+            _buscar_convocacoes_intervalo(
+                data_inicio_rel,
+                data_fim_rel,
+                eng_rel_filtro,
+            )
+            if data_inicio_rel <= data_fim_rel
+            else []
         )
-        if obra_relatorio != "TODAS AS OBRAS" and obra_id_filtro:
-            dados_relatorio = [
-                row for row in dados_relatorio
-                if str(row.get("obra_id")) == str(obra_id_filtro)
-                or any(
-                    normalizar(x.get("servico")) == normalizar(obra_relatorio)
-                    for x in _normalizar_servicos_adicionais(obter_metadata_operacional(row.get("observacao") or ""))
-                )
-            ]
+
+        # Expande cada colaborador por obra/serviço e rateia a diária.
+        # O filtro por obra é aplicado DEPOIS do rateio para trazer apenas
+        # a parcela financeira correspondente ao serviço selecionado.
+        linhas_relatorio = ratear_registros_por_servico(
+            dados_relatorio
+        )
+
+        if obra_relatorio != "TODAS AS OBRAS":
+            linhas_relatorio = _filtrar_rateio_por_obra(
+                linhas_relatorio,
+                obra_id=obra_id_filtro,
+                obra_nome=obra_relatorio,
+            )
 
         col_btn1, col_btn2 = st.columns(2)
 
         with col_btn1:
-            if st.button("Gerar PDF", use_container_width=True, key="rel_gerar_pdf_v42"):
+            if st.button(
+                "Gerar PDF",
+                use_container_width=True,
+                key="rel_gerar_pdf_v42",
+            ):
                 try:
                     if data_inicio_rel > data_fim_rel:
                         st.error("Data inicial maior que a final.")
-                    elif not dados_relatorio:
+                    elif not linhas_relatorio:
                         st.warning("Sem dados no período.")
                     else:
-                        agrupado_eng = {}
-                        for row in dados_relatorio:
-                            eng = row.get('engenheiro', 'NÃO IDENTIFICADO')
-                            ob = row['obra_id']
-                            if eng not in agrupado_eng: agrupado_eng[eng] = {}
-                            if ob not in agrupado_eng[eng]: agrupado_eng[eng][ob] = []
-                            agrupado_eng[eng][ob].append(row)
+                        df_pdf = pd.DataFrame(
+                            linhas_relatorio
+                        )
 
-                        pdf = FPDF(orientation='L')
-                        for eng, obras_eng in agrupado_eng.items():
+                        grupos_obra = []
+                        for (
+                            obra_nome,
+                            unidade_nome,
+                        ), df_obra in df_pdf.groupby(
+                            ["Obra", "Unidade"],
+                            dropna=False,
+                            sort=True,
+                        ):
+                            grupos_obra.append(
+                                (
+                                    str(obra_nome),
+                                    str(unidade_nome),
+                                    df_obra.sort_values(
+                                        [
+                                            "Data",
+                                            "Colaborador",
+                                            "Período do serviço",
+                                        ]
+                                    ),
+                                )
+                            )
+
+                        pdf = FPDF(orientation="L")
+
+                        periodo_rotulo_pdf = (
+                            f"{data_inicio_rel.strftime('%d/%m/%Y')} "
+                            f"a {data_fim_rel.strftime('%d/%m/%Y')} "
+                            f"({periodicidade})"
+                        )
+
+                        for (
+                            obra_nome,
+                            unidade_nome,
+                            df_obra,
+                        ) in grupos_obra:
                             pdf.add_page()
-                            pdf.set_font("Arial", 'B', 14)
-                            pdf.cell(0, 10, txt=to_latin(f"APROAR - RELATÓRIO DE CUSTOS | ENG: {eng}"), ln=True, align='C')
-                            pdf.set_font("Arial", size=10)
-                            pdf.cell(0, 8, txt=to_latin(f"Período: {data_inicio_rel.strftime('%d/%m/%Y')} a {data_fim_rel.strftime('%d/%m/%Y')} ({periodicidade})"), ln=True, align='C')
-                            pdf.ln(5)
-                            
-                            for o_id, apontamentos in obras_eng.items():
-                                dados_ob = dict_obras.get(o_id, {"nome": "N/A", "unidade": "N/A"})
-                                pdf.set_font("Arial", 'B', 10)
-                                pdf.set_fill_color(30, 41, 59)
-                                pdf.set_text_color(255, 255, 255)
-                                pdf.cell(0, 7, txt=to_latin(f"Unidade: {dados_ob['unidade']} | Obra: {dados_ob['nome']}"), ln=True, fill=True)
-                                pdf.set_text_color(0, 0, 0)
-                                
-                                pdf.set_font("Arial", 'B', 9)
-                                pdf.cell(25, 6, to_latin("Data"), border=1, align='C')
-                                pdf.cell(65, 6, to_latin("Colaborador"), border=1)
-                                pdf.cell(50, 6, to_latin("Função"), border=1)
-                                pdf.cell(32, 6, to_latin("Status"), border=1, align='C')
-                                pdf.cell(24, 6, to_latin("Diária"), border=1, align='C')
-                                pdf.cell(24, 6, to_latin("Extra"), border=1, align='C')
-                                pdf.cell(51, 6, to_latin("Obs"), border=1, ln=True)
-                                
-                                pdf.set_font("Arial", '', 8)
-                                for row in apontamentos:
-                                    colab = dict_colaboradores.get(row['colaborador_id'], {})
-                                    nome = colab.get('nome', 'N/A')
-                                    funcao = colab.get('funcao', 'N/A')
-                                    status = normalizar_status_operacional(row.get('status', 'Presente (Integral)'))
-                                    extra = float(row.get('valor_extra', 0) or 0) if status_eh_presenca(status) else 0.0
-                                    obs_livre_pdf = decompor_observacao_operacional(row.get('observacao', ''))[1]
-                                    servicos_pdf = descricao_servicos_convocacao(row, dados_ob)
-                                    obs = f"{servicos_pdf} | {obs_livre_pdf}" if obs_livre_pdf else servicos_pdf
-                                    diaria_base = calcular_diaria_proporcional(status, obter_valor_diaria_colaborador(colab))
-                                    
-                                    pdf.cell(25, 6, to_latin(row.get('data', '')), border=1, align='C')
-                                    pdf.cell(65, 6, to_latin(nome[:28]), border=1)
-                                    pdf.cell(50, 6, to_latin(funcao[:20]), border=1)
-                                    pdf.cell(32, 6, to_latin(status[:14]), border=1, align='C')
-                                    pdf.cell(24, 6, to_latin(f"R$ {diaria_base:.2f}"), border=1, align='C')
-                                    pdf.cell(24, 6, to_latin(f"R$ {extra:.2f}"), border=1, align='C')
-                                    pdf.cell(51, 6, to_latin(obs[:30]), border=1, ln=True)
-                                pdf.ln(3)
 
-                        pdf_output = pdf.output(dest='S').encode('latin1')
+                            pdf.set_font(
+                                "Arial",
+                                "B",
+                                13,
+                            )
+                            pdf.cell(
+                                0,
+                                9,
+                                txt=to_latin(
+                                    "APROAR - RELATÓRIO DE CUSTOS"
+                                ),
+                                ln=True,
+                                align="C",
+                            )
+
+                            # Um único cabeçalho para a obra e o período.
+                            pdf.set_font(
+                                "Arial",
+                                "B",
+                                10,
+                            )
+                            pdf.set_fill_color(
+                                30,
+                                41,
+                                59,
+                            )
+                            pdf.set_text_color(
+                                255,
+                                255,
+                                255,
+                            )
+                            pdf.cell(
+                                0,
+                                8,
+                                txt=to_latin(
+                                    f"UNIDADE: {unidade_nome} | "
+                                    f"OBRA: {obra_nome} | "
+                                    f"PERÍODO: {periodo_rotulo_pdf}"
+                                ),
+                                ln=True,
+                                fill=True,
+                                align="C",
+                            )
+                            pdf.set_text_color(0, 0, 0)
+                            pdf.ln(3)
+
+                            cabecalhos = [
+                                ("Data", 22, "C"),
+                                ("Colaborador", 53, "L"),
+                                ("Função", 36, "L"),
+                                ("Engenheiro", 30, "C"),
+                                ("Status", 37, "C"),
+                                ("Turno/Período", 27, "C"),
+                                ("Diária", 24, "C"),
+                                ("Extra", 22, "C"),
+                                ("Observação", 27, "L"),
+                            ]
+
+                            pdf.set_font(
+                                "Arial",
+                                "B",
+                                8,
+                            )
+                            for idx, (
+                                titulo,
+                                largura,
+                                alinhamento,
+                            ) in enumerate(cabecalhos):
+                                pdf.cell(
+                                    largura,
+                                    6,
+                                    to_latin(titulo),
+                                    border=1,
+                                    align=alinhamento,
+                                    ln=(
+                                        idx
+                                        == len(cabecalhos) - 1
+                                    ),
+                                )
+
+                            pdf.set_font(
+                                "Arial",
+                                "",
+                                7.5,
+                            )
+
+                            for _, row in df_obra.iterrows():
+                                valores = [
+                                    (
+                                        str(row["Data"]),
+                                        22,
+                                        "C",
+                                    ),
+                                    (
+                                        str(row["Colaborador"])[:26],
+                                        53,
+                                        "L",
+                                    ),
+                                    (
+                                        str(row["Função"])[:18],
+                                        36,
+                                        "L",
+                                    ),
+                                    (
+                                        str(row["Engenheiro"])[:14],
+                                        30,
+                                        "C",
+                                    ),
+                                    (
+                                        str(row["Status"])[:18],
+                                        37,
+                                        "C",
+                                    ),
+                                    (
+                                        str(
+                                            row[
+                                                "Período do serviço"
+                                            ]
+                                        )[:14],
+                                        27,
+                                        "C",
+                                    ),
+                                    (
+                                        f"R$ {float(row['Diária (R$)']):.2f}",
+                                        24,
+                                        "C",
+                                    ),
+                                    (
+                                        f"R$ {float(row['Extra (R$)']):.2f}",
+                                        22,
+                                        "C",
+                                    ),
+                                    (
+                                        str(
+                                            row.get(
+                                                "Observação",
+                                                "",
+                                            )
+                                        )[:18],
+                                        27,
+                                        "L",
+                                    ),
+                                ]
+
+                                for idx, (
+                                    valor,
+                                    largura,
+                                    alinhamento,
+                                ) in enumerate(valores):
+                                    pdf.cell(
+                                        largura,
+                                        6,
+                                        to_latin(valor),
+                                        border=1,
+                                        align=alinhamento,
+                                        ln=(
+                                            idx
+                                            == len(valores) - 1
+                                        ),
+                                    )
+
+                            total_obra = float(
+                                df_obra[
+                                    "Custo (R$)"
+                                ].sum()
+                            )
+
+                            pdf.set_font(
+                                "Arial",
+                                "B",
+                                9,
+                            )
+                            pdf.cell(
+                                227,
+                                7,
+                                to_latin("TOTAL DA OBRA:"),
+                                border=0,
+                                align="R",
+                            )
+                            pdf.cell(
+                                44,
+                                7,
+                                to_latin(
+                                    formatar_reais(
+                                        total_obra
+                                    )
+                                ),
+                                border=1,
+                                align="C",
+                                ln=True,
+                            )
+
+                        pdf_output = (
+                            pdf.output(dest="S")
+                            .encode("latin1")
+                        )
+
                         st.download_button(
                             label="📥 Baixar PDF Gerado",
                             data=pdf_output,
-                            file_name=f"relatorio_custos_{data_inicio_rel.strftime('%d-%m-%Y')}_a_{data_fim_rel.strftime('%d-%m-%Y')}.pdf",
-                            mime="application/pdf"
+                            file_name=(
+                                f"relatorio_custos_"
+                                f"{data_inicio_rel.strftime('%d-%m-%Y')}"
+                                f"_a_"
+                                f"{data_fim_rel.strftime('%d-%m-%Y')}.pdf"
+                            ),
+                            mime="application/pdf",
                         )
+
                 except Exception as e:
-                    exibir_erro_amigavel("relatorios", "gerar_pdf", e, "Não foi possível gerar o PDF.")
+                    exibir_erro_amigavel(
+                        "relatorios",
+                        "gerar_pdf",
+                        e,
+                        "Não foi possível gerar o PDF.",
+                    )
 
         with col_btn2:
-            if st.button("Gerar Excel", use_container_width=True, key="rel_gerar_excel_v42"):
+            if st.button(
+                "Gerar Excel",
+                use_container_width=True,
+                key="rel_gerar_excel_v42",
+            ):
                 try:
                     if data_inicio_rel > data_fim_rel:
-                        st.error("Data inicial maior que a final.")
-                    elif not dados_relatorio:
-                        st.warning("Sem dados no período.")
+                        st.error(
+                            "Data inicial maior que a final."
+                        )
+                    elif not linhas_relatorio:
+                        st.warning(
+                            "Sem dados no período."
+                        )
                     else:
-                        lista_excel = []
-                        for row in dados_relatorio:
-                            ob = dict_obras.get(row['obra_id'], {"nome": "N/A", "unidade": "N/A"})
-                            colab = dict_colaboradores.get(row['colaborador_id'], {})
-                            status = normalizar_status_operacional(row.get('status', 'Presente (Integral)'))
-                            diaria_calc = float(calcular_diaria_proporcional(status, obter_valor_diaria_colaborador(colab)))
-                            extra = float(row.get('valor_extra') or 0.0) if status_eh_presenca(status) else 0.0
-                            
-                            lista_excel.append({
-                                "Data": str(row.get('data')),
-                                "Engenheiro": str(row.get('engenheiro', 'N/A')),
-                                "Unidade": str(ob['unidade']),
-                                "Obra": str(descricao_servicos_convocacao(row, ob)),
-                                "Colaborador": str(colab.get('nome', 'N/A')),
-                                "Funcao": str(colab.get('funcao', 'N/A')),
-                                "Status": str(status),
-                                "Diaria": diaria_calc,
-                                "Extra": extra,
-                                "Observacao": str(decompor_observacao_operacional(row.get('observacao', ''))[1])
-                            })
-                        
-                        df_excel = pd.DataFrame(lista_excel)
+                        df_excel = pd.DataFrame(
+                            linhas_relatorio
+                        )
+
                         cores_engenheiros = {
-                            "VICTOR": "E0F2FE", "EDUARDO": "DCFCE7", "GUSTAVO": "FEF9C3",
-                            "JOEL": "F3E8FF", "NETO": "FFEDD5", "SOARES": "FFE4E6",
-                            "GABRIEL": "CCFBF1", "PAULO": "F1F5F9"
+                            "VICTOR": "E0F2FE",
+                            "EDUARDO": "DCFCE7",
+                            "GUSTAVO": "FEF9C3",
+                            "JOEL": "F3E8FF",
+                            "NETO": "FFEDD5",
+                            "SOARES": "FFE4E6",
+                            "GABRIEL": "CCFBF1",
+                            "PAULO": "F1F5F9",
                         }
-                        
+
                         wb = openpyxl.Workbook()
                         wb.remove(wb.active)
-                        
-                        font_titulo = Font(name="Arial", size=11, bold=True, color="FFFFFF")
-                        fill_cabecalho = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
-                        font_obra_hdr = Font(name="Arial", size=10, bold=True, color="1E293B")
-                        fill_obra_hdr = PatternFill(start_color="E2E8F0", end_color="E2E8F0", fill_type="solid")
-                        borda_fina = Border(
-                            left=Side(style='thin', color='CBD5E1'), right=Side(style='thin', color='CBD5E1'),
-                            top=Side(style='thin', color='CBD5E1'), bottom=Side(style='thin', color='CBD5E1')
+
+                        font_titulo = Font(
+                            name="Arial",
+                            size=9,
+                            bold=True,
+                            color="FFFFFF",
                         )
-                        
-                        for data_str in sorted(df_excel['Data'].unique()):
-                            df_dia = df_excel[df_excel['Data'] == data_str]
-                            ws = wb.create_sheet(title=str(data_str))
-                            
+                        fill_cabecalho = PatternFill(
+                            start_color="1E293B",
+                            end_color="1E293B",
+                            fill_type="solid",
+                        )
+                        font_obra_hdr = Font(
+                            name="Arial",
+                            size=10,
+                            bold=True,
+                            color="1E293B",
+                        )
+                        fill_obra_hdr = PatternFill(
+                            start_color="E2E8F0",
+                            end_color="E2E8F0",
+                            fill_type="solid",
+                        )
+                        borda_fina = Border(
+                            left=Side(
+                                style="thin",
+                                color="CBD5E1",
+                            ),
+                            right=Side(
+                                style="thin",
+                                color="CBD5E1",
+                            ),
+                            top=Side(
+                                style="thin",
+                                color="CBD5E1",
+                            ),
+                            bottom=Side(
+                                style="thin",
+                                color="CBD5E1",
+                            ),
+                        )
+
+                        periodo_rotulo_excel = (
+                            f"{data_inicio_rel.strftime('%d/%m/%Y')} "
+                            f"a {data_fim_rel.strftime('%d/%m/%Y')} "
+                            f"({periodicidade})"
+                        )
+
+                        for data_str in sorted(
+                            df_excel["Data"].unique()
+                        ):
+                            df_dia = df_excel[
+                                df_excel["Data"] == data_str
+                            ]
+
+                            titulo_aba = str(data_str)[-31:]
+                            ws = wb.create_sheet(
+                                title=titulo_aba
+                            )
+
                             current_row = 1
-                            ws.cell(row=current_row, column=1, value=f"APONTAMENTO DIÁRIO DE EQUIPES - DATA: {data_str}").font = Font(name="Arial", size=12, bold=True)
+
+                            ws.cell(
+                                row=current_row,
+                                column=1,
+                                value=(
+                                    "APONTAMENTO DIÁRIO DE EQUIPES "
+                                    f"- DATA: {data_str}"
+                                ),
+                            ).font = Font(
+                                name="Arial",
+                                size=12,
+                                bold=True,
+                            )
                             current_row += 2
-                            
-                            for unidade_nome in sorted(df_dia['Unidade'].unique()):
-                                df_unidade = df_dia[df_dia['Unidade'] == unidade_nome]
-                                for obra_nome in sorted(df_unidade['Obra'].unique()):
-                                    df_obra = df_unidade[df_unidade['Obra'] == obra_nome]
-                                    
-                                    ws.cell(row=current_row, column=1, value=f"UNIDADE: {unidade_nome}  |  OBRA: {obra_nome}").font = font_obra_hdr
-                                    for c_idx in range(1, 9):
-                                        ws.cell(row=current_row, column=c_idx).fill = fill_obra_hdr
+
+                            grupos = df_dia.groupby(
+                                ["Obra", "Unidade"],
+                                dropna=False,
+                                sort=True,
+                            )
+
+                            for (
+                                obra_nome,
+                                unidade_nome,
+                            ), df_obra in grupos:
+
+                                # Apenas um cabeçalho da obra para todos os colaboradores.
+                                ws.cell(
+                                    row=current_row,
+                                    column=1,
+                                    value=(
+                                        f"UNIDADE: {unidade_nome}  |  "
+                                        f"OBRA: {obra_nome}  |  "
+                                        f"PERÍODO: {periodo_rotulo_excel}"
+                                    ),
+                                ).font = font_obra_hdr
+
+                                for c_idx in range(1, 10):
+                                    ws.cell(
+                                        row=current_row,
+                                        column=c_idx,
+                                    ).fill = fill_obra_hdr
+
+                                current_row += 1
+
+                                colunas_tabela = [
+                                    "Colaborador",
+                                    "Função",
+                                    "Engenheiro Resp.",
+                                    "Status",
+                                    "Turno / Período",
+                                    "Diária Rateada (R$)",
+                                    "Extra (R$)",
+                                    "Custo Total (R$)",
+                                    "Observação",
+                                ]
+
+                                for c_idx, col_nome in enumerate(
+                                    colunas_tabela,
+                                    1,
+                                ):
+                                    cell = ws.cell(
+                                        row=current_row,
+                                        column=c_idx,
+                                        value=col_nome,
+                                    )
+                                    cell.font = font_titulo
+                                    cell.fill = fill_cabecalho
+                                    cell.alignment = Alignment(
+                                        horizontal="center",
+                                        vertical="center",
+                                    )
+
+                                current_row += 1
+                                inicio_dados_obra = current_row
+
+                                df_obra = df_obra.sort_values(
+                                    [
+                                        "Colaborador",
+                                        "Período do serviço",
+                                    ]
+                                )
+
+                                for _, r in df_obra.iterrows():
+                                    eng_resp = r["Engenheiro"]
+                                    eng_cor_chave = str(
+                                        eng_resp
+                                    ).split(" / ")[0].upper()
+
+                                    cor_hex = cores_engenheiros.get(
+                                        eng_cor_chave,
+                                        "FFFFFF",
+                                    )
+
+                                    fill_engenheiro = PatternFill(
+                                        start_color=cor_hex,
+                                        end_color=cor_hex,
+                                        fill_type="solid",
+                                    )
+
+                                    celula_custo_formula = (
+                                        f"=F{current_row}+G{current_row}"
+                                    )
+
+                                    linha_dados = [
+                                        r["Colaborador"],
+                                        r["Função"],
+                                        r["Engenheiro"],
+                                        r["Status"],
+                                        r["Período do serviço"],
+                                        float(r["Diária (R$)"]),
+                                        float(r["Extra (R$)"]),
+                                        celula_custo_formula,
+                                        r["Observação"],
+                                    ]
+
+                                    for c_idx, val in enumerate(
+                                        linha_dados,
+                                        1,
+                                    ):
+                                        c_cell = ws.cell(
+                                            row=current_row,
+                                            column=c_idx,
+                                            value=val,
+                                        )
+                                        c_cell.font = Font(
+                                            name="Arial",
+                                            size=9,
+                                        )
+                                        c_cell.border = borda_fina
+                                        c_cell.fill = fill_engenheiro
+
+                                        if c_idx in [6, 7, 8]:
+                                            c_cell.number_format = (
+                                                'R$ #,##0.00'
+                                            )
+                                            c_cell.alignment = Alignment(
+                                                horizontal="right"
+                                            )
+                                        elif c_idx in [3, 4, 5]:
+                                            c_cell.alignment = Alignment(
+                                                horizontal="center"
+                                            )
+
                                     current_row += 1
-                                    
-                                    colunas_tabela = ["Colaborador", "Função", "Engenheiro Resp.", "Status", "Diária (R$)", "Extra (R$)", "Custo Total (R$)", "Observação"]
-                                    for c_idx, col_nome in enumerate(colunas_tabela, 1):
-                                        cell = ws.cell(row=current_row, column=c_idx, value=col_nome)
-                                        cell.font = font_titulo
-                                        cell.fill = fill_cabecalho
-                                        cell.alignment = Alignment(horizontal="center", vertical="center")
-                                    current_row += 1
-                                    
-                                    inicio_dados_obra = current_row
-                                    for _, r in df_obra.iterrows():
-                                        eng_resp = r["Engenheiro"]
-                                        cor_hex = cores_engenheiros.get(str(eng_resp).upper(), "FFFFFF")
-                                        fill_engenheiro = PatternFill(start_color=cor_hex, end_color=cor_hex, fill_type="solid")
-                                        
-                                        celula_custo_formula = f"=E{current_row}+F{current_row}"
-                                        linha_dados = [
-                                            r["Colaborador"], r["Funcao"], r["Engenheiro"], r["Status"],
-                                            r["Diaria"], r["Extra"], celula_custo_formula, r["Observacao"]
-                                        ]
-                                        
-                                        for c_idx, val in enumerate(linha_dados, 1):
-                                            c_cell = ws.cell(row=current_row, column=c_idx, value=val)
-                                            c_cell.font = Font(name="Arial", size=9)
-                                            c_cell.border = borda_fina
-                                            c_cell.fill = fill_engenheiro 
-                                            
-                                            if c_idx in [5, 6, 7]:
-                                                c_cell.number_format = 'R$ #,##0.00'
-                                                c_cell.alignment = Alignment(horizontal="right")
-                                            elif c_idx in [3, 4]:
-                                                c_cell.alignment = Alignment(horizontal="center")
-                                        current_row += 1
-                                    
-                                    fim_dados_obra = current_row - 1
-                                    ws.cell(row=current_row, column=5, value=f"TOTAL OBRA {obra_nome}:").font = Font(name="Arial", size=10, bold=True)
-                                    ws.cell(row=current_row, column=5).alignment = Alignment(horizontal="right")
-                                    
-                                    celula_subtotal = ws.cell(row=current_row, column=7, value=f"=SUM(G{inicio_dados_obra}:G{fim_dados_obra})")
-                                    celula_subtotal.font = Font(name="Arial", size=10, bold=True)
-                                    celula_subtotal.number_format = 'R$ #,##0.00'
-                                    celula_subtotal.border = borda_fina
-                                    current_row += 2
+
+                                fim_dados_obra = (
+                                    current_row - 1
+                                )
+
+                                ws.cell(
+                                    row=current_row,
+                                    column=7,
+                                    value="TOTAL DA OBRA:",
+                                ).font = Font(
+                                    name="Arial",
+                                    size=10,
+                                    bold=True,
+                                )
+                                ws.cell(
+                                    row=current_row,
+                                    column=7,
+                                ).alignment = Alignment(
+                                    horizontal="right"
+                                )
+
+                                celula_subtotal = ws.cell(
+                                    row=current_row,
+                                    column=8,
+                                    value=(
+                                        f"=SUM(H{inicio_dados_obra}:"
+                                        f"H{fim_dados_obra})"
+                                    ),
+                                )
+                                celula_subtotal.font = Font(
+                                    name="Arial",
+                                    size=10,
+                                    bold=True,
+                                )
+                                celula_subtotal.number_format = (
+                                    'R$ #,##0.00'
+                                )
+                                celula_subtotal.border = borda_fina
+
+                                current_row += 2
 
                             for col in ws.columns:
                                 max_len = 0
-                                col_letter = openpyxl.utils.get_column_letter(col[0].column)
+                                col_letter = (
+                                    openpyxl.utils
+                                    .get_column_letter(
+                                        col[0].column
+                                    )
+                                )
+
                                 for cell in col:
-                                    if cell.row in [1, 2, 3] or (cell.value and str(cell.value).startswith("UNIDADE:")):
-                                        continue
                                     if cell.value:
-                                        val_str = str(cell.value)
-                                        if len(val_str) > max_len:
-                                            max_len = len(val_str)
-                                ws.column_dimensions[col_letter].width = max(min(max_len + 4, 35), 14)
+                                        val_str = str(
+                                            cell.value
+                                        )
+                                        max_len = max(
+                                            max_len,
+                                            len(val_str),
+                                        )
+
+                                ws.column_dimensions[
+                                    col_letter
+                                ].width = min(
+                                    max(max_len + 3, 13),
+                                    38,
+                                )
+
+                            ws.freeze_panes = "A4"
 
                         buffer = io.BytesIO()
                         wb.save(buffer)
-                        
+
                         st.download_button(
-                            label="📥 Baixar Excel (Abas por Dia + Cores de Engenheiros)",
+                            label=(
+                                "📥 Baixar Excel "
+                                "(rateado por serviço)"
+                            ),
                             data=buffer.getvalue(),
-                            file_name=f"apontamentos_por_dia_{data_inicio_rel.strftime('%d-%m-%Y')}_a_{data_fim_rel.strftime('%d-%m-%Y')}.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                            file_name=(
+                                f"apontamentos_rateados_"
+                                f"{data_inicio_rel.strftime('%d-%m-%Y')}"
+                                f"_a_"
+                                f"{data_fim_rel.strftime('%d-%m-%Y')}.xlsx"
+                            ),
+                            mime=(
+                                "application/vnd.openxmlformats-officedocument."
+                                "spreadsheetml.sheet"
+                            ),
                         )
+
                 except Exception as e:
-                    exibir_erro_amigavel("relatorios", "gerar_excel", e, "Não foi possível gerar o Excel.")
+                    exibir_erro_amigavel(
+                        "relatorios",
+                        "gerar_excel",
+                        e,
+                        "Não foi possível gerar o Excel.",
+                    )
 
     # --- 5. INDICADORES ---
     elif menu_escolhido == "📈 INDICADORES":
