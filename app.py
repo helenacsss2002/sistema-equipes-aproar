@@ -2482,9 +2482,8 @@ except Exception as e:
 # --- LIMPEZA SELETIVA DE CACHE ---
 def limpar_cache_operacional():
     """
-    Atualiza apenas os caches do banco local.
-    Não limpa o cache do Trello: isso evita uma nova chamada desnecessária
-    ao quadro público após cada inclusão, exclusão ou sincronização.
+    Atualiza os caches estruturais quando obras/colaboradores podem ter mudado.
+    Não limpa o cache do Trello.
     """
     for nome_funcao in (
         "buscar_obras", "buscar_colaboradores",
@@ -2496,6 +2495,20 @@ def limpar_cache_operacional():
                 funcao.clear()
             except Exception:
                 pass
+
+
+def limpar_cache_convocacoes():
+    """
+    Cache rápido para ações de campo.
+    Convocar/apontar altera convocações, mas não a base de obras/colaboradores.
+    Evita recarregar cadastros inteiros no rerun.
+    """
+    funcao = globals().get("_buscar_convocacoes_intervalo")
+    if funcao is not None and hasattr(funcao, "clear"):
+        try:
+            funcao.clear()
+        except Exception:
+            pass
 
 
 # --- FUNÇÕES DE LIMPEZA E PADRONIZAÇÃO ---
@@ -3336,7 +3349,7 @@ def status_eh_presenca(status):
 
 
 def _normalizar_servicos_adicionais(meta):
-    """Compatibilidade entre o modelo antigo (lista de nomes) e o novo (serviço + período)."""
+    """Compatibilidade entre versões, preservando obra, unidade e período."""
     meta = meta or {}
     saida = []
     vistos = set()
@@ -3345,12 +3358,22 @@ def _normalizar_servicos_adicionais(meta):
         if isinstance(item, dict):
             nome = str(item.get("servico") or "").strip()
             periodo = str(item.get("periodo") or "").strip() or "Não informado"
+            obra_id = str(item.get("obra_id") or "").strip()
+            unidade = str(item.get("unidade") or "").strip()
         else:
             nome = str(item or "").strip()
             periodo = "Não informado"
-        chave = normalizar(nome)
+            obra_id = ""
+            unidade = ""
+
+        chave = obra_id or normalizar(nome)
         if nome and chave not in vistos:
-            saida.append({"servico": nome, "periodo": periodo})
+            saida.append({
+                "servico": nome,
+                "periodo": periodo,
+                "obra_id": obra_id,
+                "unidade": unidade,
+            })
             vistos.add(chave)
 
     # Registros das versões anteriores continuam válidos.
@@ -3358,8 +3381,14 @@ def _normalizar_servicos_adicionais(meta):
         nome = str(nome or "").strip()
         chave = normalizar(nome)
         if nome and chave not in vistos:
-            saida.append({"servico": nome, "periodo": "Não informado"})
+            saida.append({
+                "servico": nome,
+                "periodo": "Não informado",
+                "obra_id": "",
+                "unidade": "",
+            })
             vistos.add(chave)
+
     return saida
 
 
@@ -3406,10 +3435,19 @@ def registrar_metadata_apontamento(
     for item in servicos_adicionais or []:
         if not isinstance(item, dict):
             continue
+
         nome = str(item.get("servico") or "").strip()
         periodo = str(item.get("periodo") or "Não informado").strip()
+        obra_id = str(item.get("obra_id") or "").strip()
+        unidade = str(item.get("unidade") or "").strip()
+
         if nome:
-            adicionais.append({"servico": nome, "periodo": periodo})
+            adicionais.append({
+                "servico": nome,
+                "periodo": periodo,
+                "obra_id": obra_id,
+                "unidade": unidade,
+            })
 
     # Compatibilidade com chamadas antigas.
     if not adicionais and servicos_extras:
@@ -4154,7 +4192,7 @@ def inserir_convocacoes_lote_mobile(
             except Exception:
                 pass
 
-        limpar_cache_operacional()
+        limpar_cache_convocacoes()
         return quantidade, avisos
 
     except Exception:
@@ -5287,17 +5325,43 @@ def _servicos_do_registro_relatorio(registro):
         if periodo == "Não informado":
             periodo = periodo_principal or turno_registro or "Integral"
 
-        obra_add = _localizar_obra_por_nome_relatorio(
-            nome,
-            obra_principal.get("unidade") if obra_principal else "",
+        obra_id_add = str(
+            adicional.get("obra_id")
+            or ""
+        ).strip()
+
+        obra_add = (
+            dict_obras.get(obra_id_add, {})
+            if obra_id_add
+            else {}
         )
 
+        if not obra_add:
+            obra_add = _localizar_obra_por_nome_relatorio(
+                nome,
+                adicional.get("unidade")
+                or (
+                    obra_principal.get("unidade")
+                    if obra_principal
+                    else ""
+                ),
+            )
+
         itens.append({
-            "obra_id": str(obra_add.get("id") or ""),
+            "obra_id": str(
+                obra_add.get("id")
+                or obra_id_add
+                or ""
+            ),
             "obra": nome,
             "unidade": str(
-                obra_add.get("unidade")
-                or obra_principal.get("unidade")
+                adicional.get("unidade")
+                or obra_add.get("unidade")
+                or (
+                    obra_principal.get("unidade")
+                    if obra_principal
+                    else ""
+                )
                 or "GERAL"
             ),
             "periodo": normalizar_turno_convocacao(periodo),
@@ -6348,13 +6412,13 @@ def incluir_multiplos_servicos_direto_apontamento(
     indisponiveis_map=None,
 ):
     """
-    Inclui 1 ou mais serviços para o mesmo colaborador no apontamento.
+    Inclui 1 ou 2 serviços para o mesmo colaborador.
 
-    Cada item de `servicos` deve conter:
-        {"obra_id": ..., "turno": ...}
-
-    Os serviços são validados juntos e gravados em lote, evitando inclusão
-    parcial quando o próprio formulário contém turnos incompatíveis.
+    Regras:
+    - Dois serviços no MESMO turno são permitidos e ficam no mesmo registro,
+      para que a meia diária daquele turno seja rateada entre as obras.
+    - Turnos compatíveis diferentes (Manhã + Tarde, etc.) viram registros separados.
+    - Integral + outro turno diferente continua bloqueado.
     """
     itens = []
     vistos = set()
@@ -6371,6 +6435,12 @@ def incluir_multiplos_servicos_direto_apontamento(
         if not obra_id:
             continue
 
+        obra_ref = (
+            dict_obras.get(obra_id, {})
+            if "dict_obras" in globals()
+            else {}
+        )
+
         chave = (str(obra_id), turno)
         if chave in vistos:
             continue
@@ -6378,48 +6448,88 @@ def incluir_multiplos_servicos_direto_apontamento(
         vistos.add(chave)
         itens.append({
             "obra_id": obra_id,
+            "obra": str(
+                obra_ref.get("nome")
+                or "Serviço"
+            ),
+            "unidade": str(
+                obra_ref.get("unidade")
+                or ""
+            ),
             "turno": turno,
         })
 
     if not itens:
         return False, "Selecione pelo menos um serviço."
 
-    # Dois serviços do mesmo colaborador não podem ocupar turnos sobrepostos.
-    for i, atual in enumerate(itens):
-        for outro in itens[i + 1:]:
+    if len({str(x["obra_id"]) for x in itens}) != len(itens):
+        return False, "Os serviços selecionados devem ser diferentes."
+
+    # Agrupa serviços do mesmo turno. Mesmo turno = rateio dentro do mesmo registro.
+    grupos_turno = {}
+    for item in itens:
+        grupos_turno.setdefault(
+            item["turno"],
+            [],
+        ).append(item)
+
+    turnos_novos = list(grupos_turno.keys())
+
+    # Entre grupos diferentes, não pode haver sobreposição.
+    for i, turno_atual in enumerate(turnos_novos):
+        for turno_outro in turnos_novos[i + 1:]:
             if turnos_se_sobrepoem(
-                atual["turno"],
-                outro["turno"],
+                turno_atual,
+                turno_outro,
             ):
                 return False, (
-                    f"Os turnos {atual['turno']} e {outro['turno']} se sobrepõem. "
-                    "Escolha turnos compatíveis para os dois serviços."
+                    f"Os turnos {turno_atual} e {turno_outro} se sobrepõem. "
+                    "Use o mesmo turno nos dois serviços quando ambos ocorreram "
+                    "no mesmo período, ou escolha períodos compatíveis."
                 )
 
-    ind = obter_indisponibilidade_colaborador(
-        colaborador_id,
-        data_servico,
-    )
+    cid_alvo = str(
+        colaborador_id
+        or ""
+    ).strip()
+
+    if indisponiveis_map is not None:
+        ind = dict(
+            indisponiveis_map
+            or {}
+        ).get(cid_alvo)
+    else:
+        ind = obter_indisponibilidade_colaborador(
+            colaborador_id,
+            data_servico,
+        )
+
     if ind:
         return False, (
             f"Colaborador indisponível: {ind.get('motivo','Indisponível')} "
             f"({ind.get('inicio')} a {ind.get('fim')})."
         )
 
-    existentes = buscar_convocacao_existente(
-        colaborador_id,
-        data_servico,
-    )
-
-    # Valida todos os novos serviços contra o que já existe antes de gravar.
-    for novo in itens:
-        obra_nova = (
-            dict_obras.get(novo["obra_id"], {})
-            if "dict_obras" in globals()
-            else {}
+    if existentes_data is not None:
+        existentes = [
+            reg
+            for reg in (existentes_data or [])
+            if str(
+                reg.get("colaborador_id")
+                or ""
+            ).strip() == cid_alvo
+        ]
+    else:
+        existentes = buscar_convocacao_existente(
+            colaborador_id,
+            data_servico,
         )
+
+    # Valida cada grupo/turno contra registros que já existiam antes do clique.
+    for turno_novo, itens_turno in grupos_turno.items():
         unidade_nova = str(
-            obra_nova.get("unidade") or ""
+            itens_turno[0].get("unidade")
+            or ""
         )
 
         for reg in existentes:
@@ -6427,7 +6537,7 @@ def incluir_multiplos_servicos_direto_apontamento(
 
             if not turnos_se_sobrepoem(
                 turno_existente,
-                novo["turno"],
+                turno_novo,
             ):
                 continue
 
@@ -6440,7 +6550,7 @@ def incluir_multiplos_servicos_direto_apontamento(
                 registrar_conflito_convocacao(
                     reg,
                     engenheiro,
-                    turno_tentativa=novo["turno"],
+                    turno_tentativa=turno_novo,
                     unidade_tentativa=unidade_nova,
                 )
                 return False, (
@@ -6450,16 +6560,26 @@ def incluir_multiplos_servicos_direto_apontamento(
 
             return False, (
                 f"Esse colaborador já está no seu apontamento em "
-                f"{turno_existente}. Escolha outro turno."
+                f"{turno_existente}. Edite o registro existente ou use outro turno."
             )
 
     _garantir_multiturno_neon()
 
     agora = agora_aproar()
     payloads = []
+    grupos_payload = []
 
-    for novo in itens:
-        turno_novo = novo["turno"]
+    for turno_novo, itens_turno in grupos_turno.items():
+        principal = itens_turno[0]
+        adicionais = []
+
+        for extra in itens_turno[1:]:
+            adicionais.append({
+                "servico": extra["obra"],
+                "periodo": turno_novo,
+                "obra_id": str(extra["obra_id"]),
+                "unidade": extra["unidade"],
+            })
 
         meta = {
             "convocado_em": agora.isoformat(),
@@ -6476,9 +6596,12 @@ def incluir_multiplos_servicos_direto_apontamento(
             "apontamento_atrasado": bool(
                 agora.date() > data_servico
             ),
-            "servicos_extras": [],
-            "servicos_adicionais": [],
             "periodo_servico_principal": turno_novo,
+            "servicos_adicionais": adicionais,
+            "servicos_extras": [
+                x["servico"]
+                for x in adicionais
+            ],
         }
 
         status_inicial = {
@@ -6490,7 +6613,7 @@ def incluir_multiplos_servicos_direto_apontamento(
         )
 
         payload = {
-            "obra_id": novo["obra_id"],
+            "obra_id": principal["obra_id"],
             "colaborador_id": colaborador_id,
             "data": data_servico.isoformat(),
             "engenheiro": engenheiro,
@@ -6511,6 +6634,10 @@ def incluir_multiplos_servicos_direto_apontamento(
             })
 
         payloads.append(payload)
+        grupos_payload.append({
+            "turno": turno_novo,
+            "servicos": itens_turno,
+        })
 
     try:
         retorno = (
@@ -6521,13 +6648,13 @@ def incluir_multiplos_servicos_direto_apontamento(
             or []
         )
 
-        # Mantém auditoria individual dos registros criados.
-        for idx, novo in enumerate(itens):
+        for idx, grupo in enumerate(grupos_payload):
             registro = (
                 retorno[idx]
                 if idx < len(retorno)
                 else {}
             )
+
             registrar_auditoria_prod(
                 "convocacao",
                 registro.get("id") or "",
@@ -6536,8 +6663,15 @@ def incluir_multiplos_servicos_direto_apontamento(
                 depois={
                     "colaborador_id": str(colaborador_id),
                     "data": data_servico,
-                    "turno": novo["turno"],
-                    "obra_id": str(novo["obra_id"]),
+                    "turno": grupo["turno"],
+                    "servicos": [
+                        {
+                            "obra_id": str(x["obra_id"]),
+                            "obra": x["obra"],
+                            "unidade": x["unidade"],
+                        }
+                        for x in grupo["servicos"]
+                    ],
                 },
                 contexto={
                     "retroativo": bool(
@@ -6547,15 +6681,10 @@ def incluir_multiplos_servicos_direto_apontamento(
                 },
             )
 
-        limpar_cache_operacional()
-
-        if len(itens) == 1:
-            return True, (
-                f"Colaborador incluído em {itens[0]['turno']}."
-            )
+        limpar_cache_convocacoes()
 
         return True, (
-            f"{len(itens)} serviços adicionados para o colaborador."
+            f"{len(itens)} serviço(s) adicionado(s) para o colaborador."
         )
 
     except Exception as e:
@@ -7598,6 +7727,37 @@ elif modo_campo:
         min-height:42px !important;
         font-size:11px !important;
         font-weight:640 !important;
+        position:relative !important;
+        padding-left:30px !important;
+    }
+
+    /* Em algumas versões do Streamlit o ícone Material do expander aparece
+       como texto ("arrow_right"). Escondemos o ícone interno e desenhamos
+       uma seta simples via CSS. */
+    main [data-testid="stExpander"] summary [data-testid="stIconMaterial"],
+    main [data-testid="stExpander"] summary .material-symbols-rounded,
+    main [data-testid="stExpander"] summary .material-symbols-outlined{
+        display:none !important;
+    }
+
+    main [data-testid="stExpander"] summary::before{
+        content:"›";
+        position:absolute;
+        left:11px;
+        top:50%;
+        transform:translateY(-50%);
+        font-size:20px;
+        line-height:1;
+        color:color-mix(
+            in srgb,
+            var(--st-text-color,var(--text-color,#172235)) 70%,
+            transparent
+        );
+        transition:transform .15s ease;
+    }
+
+    main [data-testid="stExpander"] details[open] summary::before{
+        transform:translateY(-50%) rotate(90deg);
     }
 
     /* Campos grandes o suficiente para celular */
@@ -7770,11 +7930,323 @@ elif modo_campo:
     """)
 
     def _feedback_salvo_mobile(mensagem):
-        """Mostra confirmação pequena sem atrasar o fluxo."""
+        """Confirmação pequena e imediata, sem atrasar o fluxo."""
         try:
-            st.toast(mensagem)
+            st.toast(
+                mensagem,
+                icon="✅",
+            )
         except Exception:
-            st.caption(f"✓ {mensagem}")
+            st.caption(mensagem)
+
+    def _mostrar_confirmacao_campo():
+        """Exibe uma confirmação pequena e confiável após o rerun."""
+        mensagem = st.session_state.pop(
+            "_engm_success_message",
+            None,
+        )
+        if mensagem:
+            _feedback_salvo_mobile(mensagem)
+
+    def _salvar_apontamentos_lote_mobile(
+        itens,
+        data_servico,
+        engenheiro,
+    ):
+        """
+        Salva toda a equipe em uma única conexão no Neon.
+        Mantém exatamente os mesmos dados gravados pelo fluxo anterior,
+        mas evita 2+ conexões por colaborador.
+        """
+        itens = list(itens or [])
+        if not itens:
+            return 0, []
+
+        # Caminho rápido de produção.
+        if (
+            DB_BACKEND == "NEON"
+            and hasattr(supabase, "_connect")
+        ):
+            try:
+                usar_estrutura = schema_producao_disponivel()
+                retroativo = bool(
+                    agora_aproar().date()
+                    > data_servico
+                )
+
+                with supabase._connect() as conn:
+                    with conn.cursor() as cur:
+                        for item in itens:
+                            conv = item["conv"]
+                            conv_id = str(
+                                conv.get("id")
+                                or ""
+                            )
+                            colab_id = str(
+                                conv.get("colaborador_id")
+                                or ""
+                            )
+
+                            cur.execute(
+                                """
+                                UPDATE convocacoes
+                                   SET obra_id = %s,
+                                       status = %s,
+                                       valor_extra = %s,
+                                       observacao = %s
+                                 WHERE id = %s
+                                """,
+                                (
+                                    item["obra_id_final"],
+                                    item["status"],
+                                    float(
+                                        item["valor_extra_final"]
+                                        or 0
+                                    ),
+                                    item["nova_obs"],
+                                    conv_id,
+                                ),
+                            )
+
+                            if not usar_estrutura:
+                                continue
+
+                            cur.execute(
+                                """
+                                INSERT INTO apontamentos (
+                                    convocacao_id, data_servico, colaborador_id,
+                                    engenheiro, status, valor_extra, observacao,
+                                    apontado_em, apontado_por, retroativo, atualizado_em
+                                )
+                                VALUES (%s,%s,%s,%s,%s,%s,%s,NOW(),%s,%s,NOW())
+                                ON CONFLICT (convocacao_id) DO UPDATE SET
+                                    data_servico = EXCLUDED.data_servico,
+                                    colaborador_id = EXCLUDED.colaborador_id,
+                                    engenheiro = EXCLUDED.engenheiro,
+                                    status = EXCLUDED.status,
+                                    valor_extra = EXCLUDED.valor_extra,
+                                    observacao = EXCLUDED.observacao,
+                                    apontado_por = EXCLUDED.apontado_por,
+                                    retroativo = EXCLUDED.retroativo,
+                                    atualizado_em = NOW()
+                                """,
+                                (
+                                    conv_id,
+                                    data_servico,
+                                    colab_id,
+                                    str(engenheiro),
+                                    str(item["status"]),
+                                    float(
+                                        item["valor_extra_final"]
+                                        or 0
+                                    ),
+                                    str(
+                                        item["obs_livre"]
+                                        or ""
+                                    ),
+                                    str(engenheiro),
+                                    retroativo,
+                                ),
+                            )
+
+                            cur.execute(
+                                """
+                                DELETE FROM servicos_apontamento
+                                WHERE convocacao_id = %s
+                                """,
+                                (conv_id,),
+                            )
+
+                            obra_principal = dict_obras.get(
+                                item["obra_id_final"],
+                                {},
+                            )
+
+                            cur.execute(
+                                """
+                                INSERT INTO servicos_apontamento (
+                                    convocacao_id, obra_id, obra_nome_snapshot,
+                                    unidade_snapshot, periodo, principal
+                                )
+                                VALUES (%s,%s,%s,%s,%s,TRUE)
+                                """,
+                                (
+                                    conv_id,
+                                    str(
+                                        item["obra_id_final"]
+                                        or ""
+                                    ),
+                                    str(
+                                        obra_principal.get("nome")
+                                        or ""
+                                    ),
+                                    str(
+                                        obra_principal.get("unidade")
+                                        or ""
+                                    ),
+                                    str(
+                                        item["periodo_principal"]
+                                        or ""
+                                    ),
+                                ),
+                            )
+
+                            for adicional in (
+                                item["adicionais"]
+                                or []
+                            ):
+                                nome = str(
+                                    adicional.get("servico")
+                                    or ""
+                                ).strip()
+                                if not nome:
+                                    continue
+
+                                obra_id_adic = str(
+                                    adicional.get("obra_id")
+                                    or ""
+                                ).strip()
+                                obra_adic = (
+                                    dict_obras.get(
+                                        obra_id_adic,
+                                        {},
+                                    )
+                                    if obra_id_adic
+                                    else {}
+                                )
+
+                                if not obra_adic:
+                                    obra_adic = next(
+                                        (
+                                            o for o in obras
+                                            if normalizar(
+                                                o.get("nome")
+                                            )
+                                            == normalizar(nome)
+                                        ),
+                                        {},
+                                    )
+
+                                cur.execute(
+                                    """
+                                    INSERT INTO servicos_apontamento (
+                                        convocacao_id, obra_id, obra_nome_snapshot,
+                                        unidade_snapshot, periodo, principal
+                                    )
+                                    VALUES (%s,%s,%s,%s,%s,FALSE)
+                                    """,
+                                    (
+                                        conv_id,
+                                        str(
+                                            obra_adic.get("id")
+                                            or obra_id_adic
+                                            or ""
+                                        ),
+                                        nome,
+                                        str(
+                                            adicional.get("unidade")
+                                            or obra_adic.get("unidade")
+                                            or obra_principal.get("unidade")
+                                            or ""
+                                        ),
+                                        str(
+                                            adicional.get("periodo")
+                                            or ""
+                                        ),
+                                    ),
+                                )
+
+                            # Auditoria no mesmo commit: sem abrir outra conexão.
+                            cur.execute(
+                                """
+                                INSERT INTO auditoria
+                                    (entidade, entidade_id, acao, usuario,
+                                     antes, depois, contexto)
+                                VALUES
+                                    (%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s::jsonb)
+                                """,
+                                (
+                                    "apontamento",
+                                    conv_id,
+                                    "SALVAR",
+                                    str(engenheiro),
+                                    None,
+                                    _json_db({
+                                        "data_servico": data_servico,
+                                        "status": item["status"],
+                                        "valor_extra": item["valor_extra_final"],
+                                        "obra_principal_id": str(
+                                            item["obra_id_final"]
+                                        ),
+                                        "periodo_principal": item["periodo_principal"],
+                                        "servicos_adicionais": item["adicionais"],
+                                        "retroativo": retroativo,
+                                    }),
+                                    _json_db({
+                                        "origem": "portal_engenheiro_lote",
+                                    }),
+                                ),
+                            )
+
+                        conn.commit()
+
+                limpar_cache_convocacoes()
+                return len(itens), []
+
+            except Exception:
+                # Fallback abaixo mantém o comportamento antigo se houver
+                # qualquer incompatibilidade inesperada no banco.
+                pass
+
+        salvos = 0
+        falhas = []
+
+        for item in itens:
+            conv = item["conv"]
+            nome_pessoa = item["nome_pessoa"]
+
+            try:
+                supabase.table(
+                    "convocacoes"
+                ).update(
+                    {
+                        "obra_id": item[
+                            "obra_id_final"
+                        ],
+                        "status": item["status"],
+                        "valor_extra": item[
+                            "valor_extra_final"
+                        ],
+                        "observacao": item[
+                            "nova_obs"
+                        ],
+                    }
+                ).eq(
+                    "id",
+                    conv.get("id"),
+                ).execute()
+
+                salvar_apontamento_estruturado(
+                    conv,
+                    data_servico,
+                    engenheiro,
+                    item["status"],
+                    item["valor_extra_final"],
+                    item["obs_livre"],
+                    item["obra_id_final"],
+                    item["periodo_principal"],
+                    item["adicionais"],
+                )
+
+                salvos += 1
+
+            except Exception as e:
+                falhas.append(
+                    f"{nome_pessoa}: {str(e)[:110]}"
+                )
+
+        limpar_cache_convocacoes()
+        return salvos, falhas
 
     def _buscar_convocacoes_campo(engenheiro, data_ref):
         return _buscar_convocacoes_intervalo(
@@ -7876,19 +8348,12 @@ elif modo_campo:
         key="eng_mobile_nav",
     )
 
+    _mostrar_confirmacao_campo()
+
     # =====================================================================
     # HOJE — RESUMO + CONVOCADOS + APONTAMENTO NA MESMA TELA
     # =====================================================================
     if area_campo == "Hoje":
-        _feedback_retroativo = st.session_state.pop(
-            "_engm_inc_feedback",
-            None,
-        )
-        if _feedback_retroativo:
-            _feedback_salvo_mobile(
-                _feedback_retroativo
-            )
-
         c_ap_eng, c_ap_unid, c_ap_data = st.columns(
             [1.05, 1.05, .82]
         )
@@ -7952,8 +8417,12 @@ elif modo_campo:
             else:
                 unidade_apont_campo = ""
                 st.text_input(
-                    "Unidade",
-                    value="Nenhuma unidade convocada",
+                    "Unidade convocada",
+                    value=(
+                        "Sem convocação nesta data"
+                        if data_apont < hoje_campo
+                        else "Nenhuma unidade convocada"
+                    ),
                     disabled=True,
                     key="engm_unidade_apont_vazia",
                 )
@@ -8036,8 +8505,8 @@ elif modo_campo:
             expanded=False,
         ):
             st.caption(
-                "Você pode lançar um ou dois serviços para a mesma pessoa. "
-                "Quando houver 2 serviços, informe o turno de cada um."
+                "Use esta área para apontamento retroativo ou inclusão excepcional. "
+                "Você pode lançar um ou dois serviços para a mesma pessoa."
             )
 
             tipo_inc = st.radio(
@@ -8096,35 +8565,49 @@ elif modo_campo:
                         key="engm_inc_avulso_funcao",
                     )
 
-            # A unidade do retroativo é a mesma selecionada no topo.
-            # Para apontar outra unidade, basta trocar o seletor superior.
-            unidade_inc = unidade_apont_campo
+            unidades_retro = sorted(
+                {
+                    str(o.get("unidade") or "").strip()
+                    for o in obras
+                    if str(o.get("unidade") or "").strip()
+                    and not eh_obra_placeholder(o)
+                }
+            )
 
-            if unidade_inc:
-                st.caption(
-                    f"Unidade selecionada: {unidade_inc}"
+            eh_retroativo = data_apont < hoje_campo
+
+            # Se existe uma unidade convocada hoje, ela continua sendo a padrão.
+            # Em retroativo (ou sem convocação) o engenheiro pode escolher qualquer
+            # unidade válida para conseguir lançar o serviço.
+            if eh_retroativo or not unidade_apont_campo:
+                unidade_inc_1 = (
+                    st.selectbox(
+                        "Unidade do 1º serviço",
+                        unidades_retro,
+                        key="engm_inc_unidade_1",
+                    )
+                    if unidades_retro
+                    else ""
                 )
             else:
+                unidade_inc_1 = unidade_apont_campo
                 st.caption(
-                    "Não há unidade convocada para este engenheiro nesta data."
+                    f"Unidade do serviço: {unidade_inc_1}"
                 )
 
-            obras_inc = (
+            obras_inc_1 = (
                 obras_reais_da_unidade(
-                    unidade_inc
+                    unidade_inc_1
                 )
-                if unidade_inc
+                if unidade_inc_1
                 else []
             )
 
-            mapa_inc = {
+            mapa_inc_1 = {
                 o.get("nome"): o.get("id")
-                for o in obras_inc
+                for o in obras_inc_1
             }
 
-            # -------------------------------------------------------
-            # 1º serviço
-            # -------------------------------------------------------
             st.markdown("**1º serviço**")
 
             s1c1, s1c2 = st.columns(
@@ -8135,7 +8618,7 @@ elif modo_campo:
                 obra_inc_1 = st.selectbox(
                     "Obra / Serviço",
                     ["— Selecione —"]
-                    + list(mapa_inc.keys()),
+                    + list(mapa_inc_1.keys()),
                     key="engm_inc_obra_1",
                 )
 
@@ -8156,11 +8639,46 @@ elif modo_campo:
                 key="engm_inc_tem_segundo",
             )
 
+            unidade_inc_2 = unidade_inc_1
             obra_inc_2 = "— Nenhum —"
             turno_inc_2 = "Tarde"
+            mapa_inc_2 = {}
 
             if adicionar_segundo:
                 st.markdown("**2º serviço**")
+
+                if eh_retroativo or not unidade_apont_campo:
+                    idx_unid_2 = (
+                        unidades_retro.index(unidade_inc_1)
+                        if unidade_inc_1 in unidades_retro
+                        else 0
+                    )
+
+                    unidade_inc_2 = (
+                        st.selectbox(
+                            "Unidade do 2º serviço",
+                            unidades_retro,
+                            index=idx_unid_2,
+                            key="engm_inc_unidade_2",
+                        )
+                        if unidades_retro
+                        else ""
+                    )
+                else:
+                    unidade_inc_2 = unidade_apont_campo
+
+                obras_inc_2 = (
+                    obras_reais_da_unidade(
+                        unidade_inc_2
+                    )
+                    if unidade_inc_2
+                    else []
+                )
+
+                mapa_inc_2 = {
+                    o.get("nome"): o.get("id")
+                    for o in obras_inc_2
+                }
 
                 s2c1, s2c2 = st.columns(
                     [1.55, .65]
@@ -8170,7 +8688,7 @@ elif modo_campo:
                     obra_inc_2 = st.selectbox(
                         "Obra / Serviço",
                         ["— Selecione —"]
-                        + list(mapa_inc.keys()),
+                        + list(mapa_inc_2.keys()),
                         key="engm_inc_obra_2",
                     )
 
@@ -8192,17 +8710,27 @@ elif modo_campo:
                 use_container_width=True,
                 key="engm_inc_btn",
             ):
-                # -----------------------------------------------
-                # Validação dos serviços
-                # -----------------------------------------------
-                if obra_inc_1 not in mapa_inc:
+                if not unidade_inc_1:
+                    st.warning(
+                        "Selecione a unidade do 1º serviço."
+                    )
+
+                elif obra_inc_1 not in mapa_inc_1:
                     st.warning(
                         "Selecione a obra/serviço principal."
                     )
 
                 elif (
                     adicionar_segundo
-                    and obra_inc_2 not in mapa_inc
+                    and not unidade_inc_2
+                ):
+                    st.warning(
+                        "Selecione a unidade do 2º serviço."
+                    )
+
+                elif (
+                    adicionar_segundo
+                    and obra_inc_2 not in mapa_inc_2
                 ):
                     st.warning(
                         "Selecione a 2ª obra/serviço."
@@ -8210,7 +8738,8 @@ elif modo_campo:
 
                 elif (
                     adicionar_segundo
-                    and obra_inc_2 == obra_inc_1
+                    and str(mapa_inc_2.get(obra_inc_2))
+                    == str(mapa_inc_1.get(obra_inc_1))
                 ):
                     st.warning(
                         "O 2º serviço deve ser diferente do 1º."
@@ -8218,20 +8747,20 @@ elif modo_campo:
 
                 elif (
                     adicionar_segundo
+                    and turno_inc_1 != turno_inc_2
                     and turnos_se_sobrepoem(
                         turno_inc_1,
                         turno_inc_2,
                     )
                 ):
                     st.warning(
-                        "Os turnos dos dois serviços se sobrepõem. "
-                        "Escolha turnos compatíveis, como Manhã + Tarde."
+                        "Esses turnos se sobrepõem. "
+                        "Se os dois serviços ocorreram no mesmo período, "
+                        "selecione o mesmo turno nos dois. "
+                        "Caso contrário, escolha períodos compatíveis."
                     )
 
                 else:
-                    # -------------------------------------------
-                    # Avulso: cria/localiza cadastro primeiro.
-                    # -------------------------------------------
                     if tipo_inc == "Avulso":
                         if not nome_avulso_inc.strip():
                             st.warning(
@@ -8273,7 +8802,7 @@ elif modo_campo:
                     else:
                         servicos_inc = [
                             {
-                                "obra_id": mapa_inc[
+                                "obra_id": mapa_inc_1[
                                     obra_inc_1
                                 ],
                                 "turno": turno_inc_1,
@@ -8281,17 +8810,13 @@ elif modo_campo:
                         ]
 
                         if adicionar_segundo:
-                            servicos_inc.append(
-                                {
-                                    "obra_id": mapa_inc[
-                                        obra_inc_2
-                                    ],
-                                    "turno": turno_inc_2,
-                                }
-                            )
+                            servicos_inc.append({
+                                "obra_id": mapa_inc_2[
+                                    obra_inc_2
+                                ],
+                                "turno": turno_inc_2,
+                            })
 
-                        # Dados necessários para a validação são carregados
-                        # uma única vez e reaproveitados pela inclusão.
                         try:
                             existentes_todos_data = (
                                 _buscar_convocacoes_intervalo(
@@ -8314,6 +8839,7 @@ elif modo_campo:
                                     _ind.get("colaborador_id")
                                     or ""
                                 ).strip()
+
                                 if not _cid_ind:
                                     continue
 
@@ -8327,8 +8853,15 @@ elif modo_campo:
                                 except Exception:
                                     continue
 
-                                if _ini_ind <= data_apont <= _fim_ind:
-                                    indisp_map_apont[_cid_ind] = _ind
+                                if (
+                                    _ini_ind
+                                    <= data_apont
+                                    <= _fim_ind
+                                ):
+                                    indisp_map_apont[
+                                        _cid_ind
+                                    ] = _ind
+
                         except Exception:
                             indisp_map_apont = {}
 
@@ -8347,23 +8880,12 @@ elif modo_campo:
                             )
 
                         if ok:
-                            detalhe_servicos = (
-                                f"{obra_inc_1} · {turno_inc_1}"
-                            )
-
-                            if adicionar_segundo:
-                                detalhe_servicos += (
-                                    f" + {obra_inc_2} · {turno_inc_2}"
-                                )
-
-                            limpar_cache_operacional()
-
-                            # Mostra uma mensagem pequena após o rerun e
-                            # atualiza imediatamente a equipe da tela.
+                            limpar_cache_convocacoes()
                             st.session_state[
-                                "_engm_inc_feedback"
+                                "_engm_success_message"
                             ] = (
-                                f"Apontamento salvo · {nome_exibicao_inc}."
+                                f"✓ Apontamento salvo com sucesso · "
+                                f"{nome_exibicao_inc}."
                             )
                             st.rerun()
                         else:
@@ -8405,8 +8927,19 @@ elif modo_campo:
             ):
                 for conv in render_campo:
                     try:
+                        _turno_lote = turno_da_convocacao(
+                            conv
+                        )
+                        _status_lote = {
+                            "Manhã": "Presente (Só Manhã)",
+                            "Tarde": "Presente (Só Tarde)",
+                        }.get(
+                            _turno_lote,
+                            "Presente (Integral)",
+                        )
+
                         supabase.table("convocacoes").update(
-                            {"status": "Presente (Integral)"}
+                            {"status": _status_lote}
                         ).eq(
                             "id",
                             conv.get("id"),
@@ -8414,21 +8947,21 @@ elif modo_campo:
                     except Exception:
                         pass
 
-                limpar_cache_operacional()
-                _feedback_salvo_mobile(
-                    "Todos foram marcados como presentes."
-                )
+                limpar_cache_convocacoes()
+                st.session_state[
+                    "_engm_success_message"
+                ] = "✓ Presenças salvas com sucesso."
                 st.rerun()
 
             # Todas as convocações do dia são necessárias para aplicar a regra
             # do 2º serviço sem duplicar alguém que já tem outra convocação.
             try:
                 todas_convs_data = (
-                    supabase.table("convocacoes")
-                    .select("*")
-                    .eq("data", data_apont.isoformat())
-                    .execute()
-                    .data
+                    _buscar_convocacoes_intervalo(
+                        data_apont,
+                        data_apont,
+                        None,
+                    )
                     or []
                 )
             except Exception:
@@ -8753,12 +9286,10 @@ elif modo_campo:
                         st.warning(msg)
 
                 else:
-                    salvos = 0
-                    falhas = []
+                    itens_salvar = []
 
                     for item in dados_form.values():
                         conv = item["conv"]
-                        c_id = conv.get("id")
                         nome_pessoa = str(
                             item["colab"].get("nome")
                             or "Colaborador"
@@ -8771,16 +9302,31 @@ elif modo_campo:
                             and item["segundo_servico"]
                             in item["mapa_obras"]
                         ):
-                            adicionais.append(
-                                {
-                                    "servico": item[
-                                        "segundo_servico"
-                                    ],
-                                    "periodo": item[
-                                        "segundo_periodo"
-                                    ],
-                                }
+                            _obra_adic_id = item[
+                                "mapa_obras"
+                            ][item["segundo_servico"]]
+                            _obra_adic = dict_obras.get(
+                                _obra_adic_id,
+                                {},
                             )
+                            adicionais.append({
+                                "servico": item[
+                                    "segundo_servico"
+                                ],
+                                "periodo": item[
+                                    "segundo_periodo"
+                                ],
+                                "obra_id": str(
+                                    _obra_adic_id
+                                    or ""
+                                ),
+                                "unidade": str(
+                                    _obra_adic.get(
+                                        "unidade"
+                                    )
+                                    or ""
+                                ),
+                            })
 
                         meta = registrar_metadata_apontamento(
                             conv,
@@ -8806,63 +9352,57 @@ elif modo_campo:
                             else 0.0
                         )
 
-                        try:
-                            obra_id_final = item[
-                                "mapa_obras"
-                            ][item["obra_sel"]]
+                        obra_id_final = item[
+                            "mapa_obras"
+                        ][item["obra_sel"]]
 
-                            supabase.table(
-                                "convocacoes"
-                            ).update(
-                                {
-                                    "obra_id": obra_id_final,
-                                    "status": item[
-                                        "status_sel"
-                                    ],
-                                    "valor_extra": (
-                                        valor_extra_final
-                                    ),
-                                    "observacao": nova_obs,
-                                }
-                            ).eq(
-                                "id",
-                                c_id,
-                            ).execute()
+                        itens_salvar.append({
+                            "conv": conv,
+                            "nome_pessoa": nome_pessoa,
+                            "status": item[
+                                "status_sel"
+                            ],
+                            "valor_extra_final": (
+                                valor_extra_final
+                            ),
+                            "obs_livre": item[
+                                "obs_nova"
+                            ],
+                            "nova_obs": nova_obs,
+                            "obra_id_final": obra_id_final,
+                            "periodo_principal": item[
+                                "periodo_principal"
+                            ],
+                            "adicionais": adicionais,
+                        })
 
-                            salvar_apontamento_estruturado(
-                                conv,
+                    with st.spinner(
+                        "Salvando apontamento..."
+                    ):
+                        salvos, falhas = (
+                            _salvar_apontamentos_lote_mobile(
+                                itens_salvar,
                                 data_apont,
                                 engenheiro_campo,
-                                item["status_sel"],
-                                valor_extra_final,
-                                item["obs_nova"],
-                                obra_id_final,
-                                item[
-                                    "periodo_principal"
-                                ],
-                                adicionais,
                             )
-
-                            salvos += 1
-
-                        except Exception as e:
-                            falhas.append(
-                                f"{nome_pessoa}: {str(e)[:110]}"
-                            )
-
-                    limpar_cache_operacional()
+                        )
 
                     for msg in falhas:
                         st.error(msg)
 
                     if salvos and not falhas:
-                        _feedback_salvo_mobile(
-                            f"Apontamento salvo · {salvos} registro(s)."
+                        st.session_state[
+                            "_engm_success_message"
+                        ] = (
+                            f"✓ Apontamento salvo com sucesso · "
+                            f"{salvos} registro(s)."
                         )
                         st.rerun()
+
                     elif salvos:
                         st.caption(
-                            f"✓ {salvos} apontamento(s) foram salvos, mas houve pendências abaixo."
+                            f"✓ {salvos} apontamento(s) foram salvos, "
+                            "mas houve pendências abaixo."
                         )
 
     # =====================================================================
@@ -9010,14 +9550,11 @@ elif modo_campo:
 
             try:
                 convs_data_todos = (
-                    supabase.table("convocacoes")
-                    .select("*")
-                    .eq(
-                        "data",
-                        data_conv_auto.isoformat(),
+                    _buscar_convocacoes_intervalo(
+                        data_conv_auto,
+                        data_conv_auto,
+                        None,
                     )
-                    .execute()
-                    .data
                     or []
                 )
             except Exception:
@@ -9276,7 +9813,7 @@ elif modo_campo:
                                 # O resultado fica salvo na sessão para continuar
                                 # aparecendo depois do rerun que atualiza "Já convocados".
                                 if sucessos:
-                                    limpar_cache_operacional()
+                                    limpar_cache_convocacoes()
 
                                     # Só os avisos precisam sobreviver ao rerun.
                                     if avisos:
@@ -9285,9 +9822,11 @@ elif modo_campo:
                                         }
 
                                     st.session_state["_engm_reset_convocacao"] = True
-
-                                    _feedback_salvo_mobile(
-                                        f"Convocação salva · {sucessos} pessoa(s)."
+                                    st.session_state[
+                                        "_engm_success_message"
+                                    ] = (
+                                        f"✓ Convocação salva com sucesso · "
+                                        f"{sucessos} pessoa(s)."
                                     )
                                     st.rerun()
                                 else:
