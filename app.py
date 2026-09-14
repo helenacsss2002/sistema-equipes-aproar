@@ -8802,8 +8802,23 @@ elif modo_campo:
         )
 
         if data_apont < hoje_campo:
-            st.warning(
-                "Apontamento retroativo. O sistema registrará o atraso automaticamente."
+            st.markdown(
+                """
+                <div style="
+                    background:#FFF7BF;
+                    color:#111827;
+                    border:1px solid #F3E38B;
+                    border-radius:10px;
+                    padding:14px 16px;
+                    font-size:14px;
+                    line-height:1.45;
+                    font-weight:500;
+                    margin:6px 0 12px 0;
+                ">
+                    Apontamento retroativo. O sistema registrará o atraso automaticamente.
+                </div>
+                """,
+                unsafe_allow_html=True,
             )
 
         st.markdown(
