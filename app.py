@@ -6558,9 +6558,173 @@ def incluir_multiplos_servicos_direto_apontamento(
                     f"{turno_existente}. O conflito foi registrado para o Paulo."
                 )
 
+            # Mesmo engenheiro + mesmo turno: não é conflito.
+            # É o caso de uma pessoa fazer duas obras/serviços no mesmo período.
+            if (
+                normalizar_turno_convocacao(turno_existente)
+                == normalizar_turno_convocacao(turno_novo)
+            ):
+                meta_existente = obter_metadata_operacional(
+                    reg.get("observacao")
+                    or ""
+                )
+                obra_principal_existente = dict_obras.get(
+                    reg.get("obra_id"),
+                    {},
+                )
+
+                periodo_principal_existente = str(
+                    meta_existente.get(
+                        "periodo_servico_principal"
+                    )
+                    or turno_existente
+                    or turno_novo
+                )
+
+                adicionais_existentes = list(
+                    _normalizar_servicos_adicionais(
+                        meta_existente
+                    )
+                )
+
+                # Se o registro ainda era placeholder, o primeiro serviço novo
+                # vira principal. Caso contrário, preservamos o principal atual
+                # e anexamos apenas os novos serviços como adicionais.
+                principal_real = bool(
+                    obra_principal_existente
+                    and not eh_obra_placeholder(
+                        obra_principal_existente
+                    )
+                )
+
+                novos_para_anexar = list(itens_turno)
+
+                if not principal_real and novos_para_anexar:
+                    novo_principal = novos_para_anexar.pop(0)
+                    obra_id_principal_final = novo_principal[
+                        "obra_id"
+                    ]
+                    periodo_principal_existente = turno_novo
+                else:
+                    obra_id_principal_final = reg.get(
+                        "obra_id"
+                    )
+
+                chaves_existentes = set()
+
+                if principal_real:
+                    chaves_existentes.add(
+                        str(reg.get("obra_id") or "")
+                    )
+
+                for adicional in adicionais_existentes:
+                    chave_adic = str(
+                        adicional.get("obra_id")
+                        or ""
+                    )
+                    if not chave_adic:
+                        chave_adic = normalizar(
+                            adicional.get("servico")
+                            or ""
+                        )
+                    chaves_existentes.add(chave_adic)
+
+                for novo_servico in novos_para_anexar:
+                    chave_nova = str(
+                        novo_servico.get("obra_id")
+                        or ""
+                    )
+                    if not chave_nova:
+                        chave_nova = normalizar(
+                            novo_servico.get("obra")
+                            or ""
+                        )
+
+                    if chave_nova in chaves_existentes:
+                        continue
+
+                    adicionais_existentes.append({
+                        "servico": novo_servico[
+                            "obra"
+                        ],
+                        "periodo": turno_novo,
+                        "obra_id": str(
+                            novo_servico[
+                                "obra_id"
+                            ]
+                        ),
+                        "unidade": novo_servico[
+                            "unidade"
+                        ],
+                    })
+                    chaves_existentes.add(
+                        chave_nova
+                    )
+
+                meta_existente[
+                    "periodo_servico_principal"
+                ] = periodo_principal_existente
+                meta_existente[
+                    "servicos_adicionais"
+                ] = adicionais_existentes
+                meta_existente[
+                    "servicos_extras"
+                ] = [
+                    x.get("servico")
+                    for x in adicionais_existentes
+                    if x.get("servico")
+                ]
+                meta_existente[
+                    "ultimo_apontamento_em"
+                ] = agora_aproar().isoformat()
+                meta_existente[
+                    "apontado_por"
+                ] = str(engenheiro)
+
+                _turno_obs, obs_livre_existente = (
+                    decompor_observacao_operacional(
+                        reg.get("observacao")
+                        or ""
+                    )
+                )
+
+                nova_obs_existente = (
+                    montar_observacao_operacional(
+                        turno_novo,
+                        obs_livre_existente,
+                        meta_existente,
+                    )
+                )
+
+                try:
+                    supabase.table(
+                        "convocacoes"
+                    ).update(
+                        {
+                            "obra_id": obra_id_principal_final,
+                            "observacao": nova_obs_existente,
+                        }
+                    ).eq(
+                        "id",
+                        reg.get("id"),
+                    ).execute()
+
+                    limpar_cache_convocacoes()
+
+                    return True, (
+                        f"{len(itens_turno)} serviço(s) vinculado(s) "
+                        f"ao apontamento existente de {turno_novo}."
+                    )
+
+                except Exception as e:
+                    return False, (
+                        "Não foi possível vincular o novo serviço ao "
+                        f"apontamento existente. Detalhe: {str(e)[:120]}"
+                    )
+
             return False, (
                 f"Esse colaborador já está no seu apontamento em "
-                f"{turno_existente}. Edite o registro existente ou use outro turno."
+                f"{turno_existente}. Escolha um período compatível."
             )
 
     _garantir_multiturno_neon()
@@ -8276,6 +8440,148 @@ elif modo_campo:
         )
         return bool(obra) and not eh_obra_placeholder(obra)
 
+    def _servicos_convocacao_mobile(conv):
+        """
+        Retorna todos os serviços reais vinculados ao registro:
+        principal + adicionais, preservando unidade/obra_id.
+        """
+        servicos = []
+
+        obra_principal = (
+            conv.get("dados_obra")
+            or dict_obras.get(conv.get("obra_id"), {})
+            or {}
+        )
+
+        if obra_principal and not eh_obra_placeholder(obra_principal):
+            servicos.append({
+                "principal": True,
+                "obra_id": str(
+                    obra_principal.get("id")
+                    or conv.get("obra_id")
+                    or ""
+                ),
+                "obra": str(
+                    obra_principal.get("nome")
+                    or ""
+                ),
+                "unidade": str(
+                    obra_principal.get("unidade")
+                    or ""
+                ),
+                "periodo": turno_da_convocacao(conv),
+            })
+
+        meta = obter_metadata_operacional(
+            conv.get("observacao")
+            or ""
+        )
+
+        for adicional in _normalizar_servicos_adicionais(meta):
+            nome = str(
+                adicional.get("servico")
+                or ""
+            ).strip()
+            obra_id = str(
+                adicional.get("obra_id")
+                or ""
+            ).strip()
+            unidade = str(
+                adicional.get("unidade")
+                or ""
+            ).strip()
+
+            obra_ref = (
+                dict_obras.get(obra_id, {})
+                if obra_id
+                else {}
+            )
+
+            if not obra_ref and nome:
+                obra_ref = next(
+                    (
+                        o for o in obras
+                        if normalizar(
+                            o.get("nome")
+                        ) == normalizar(nome)
+                        and (
+                            not unidade
+                            or normalizar(
+                                o.get("unidade")
+                            ) == normalizar(unidade)
+                        )
+                    ),
+                    {},
+                )
+
+            servicos.append({
+                "principal": False,
+                "obra_id": str(
+                    obra_ref.get("id")
+                    or obra_id
+                    or ""
+                ),
+                "obra": str(
+                    nome
+                    or obra_ref.get("nome")
+                    or ""
+                ),
+                "unidade": str(
+                    unidade
+                    or obra_ref.get("unidade")
+                    or ""
+                ),
+                "periodo": str(
+                    adicional.get("periodo")
+                    or turno_da_convocacao(conv)
+                ),
+            })
+
+        # Remove duplicatas reais.
+        saida = []
+        vistos = set()
+        for item in servicos:
+            chave = (
+                str(item.get("obra_id") or ""),
+                normalizar(item.get("obra") or ""),
+                normalizar(item.get("unidade") or ""),
+                bool(item.get("principal")),
+            )
+            if chave in vistos:
+                continue
+            vistos.add(chave)
+            saida.append(item)
+
+        return saida
+
+    def _convocacao_tem_unidade_mobile(conv, unidade):
+        alvo = normalizar(unidade or "")
+        if not alvo:
+            return False
+
+        return any(
+            normalizar(serv.get("unidade") or "") == alvo
+            for serv in _servicos_convocacao_mobile(conv)
+        )
+
+    def _servico_contexto_unidade_mobile(conv, unidade):
+        alvo = normalizar(unidade or "")
+        servicos = _servicos_convocacao_mobile(conv)
+
+        # Se houver principal nessa unidade, ele tem prioridade.
+        for serv in servicos:
+            if (
+                serv.get("principal")
+                and normalizar(serv.get("unidade") or "") == alvo
+            ):
+                return serv
+
+        for serv in servicos:
+            if normalizar(serv.get("unidade") or "") == alvo:
+                return serv
+
+        return None
+
     def _lista_convocados_mobile(registros, mostrar_status=False):
         if not registros:
             st.caption("Nenhuma pessoa convocada.")
@@ -8385,19 +8691,10 @@ elif modo_campo:
         # apontamento retroativo/inclusão excepcional.
         unidades_com_equipe = sorted(
             {
-                str(
-                    (c.get("dados_obra") or {}).get(
-                        "unidade",
-                        "",
-                    )
-                ).strip()
+                str(serv.get("unidade") or "").strip()
                 for c in convocacoes_todas_unidades
-                if str(
-                    (c.get("dados_obra") or {}).get(
-                        "unidade",
-                        "",
-                    )
-                ).strip()
+                for serv in _servicos_convocacao_mobile(c)
+                if str(serv.get("unidade") or "").strip()
             }
         )
 
@@ -8432,13 +8729,10 @@ elif modo_campo:
         convocacoes_data = [
             c
             for c in convocacoes_todas_unidades
-            if str(
-                (c.get("dados_obra") or {}).get(
-                    "unidade",
-                    "",
-                )
-            ).strip()
-            == unidade_apont_campo
+            if _convocacao_tem_unidade_mobile(
+                c,
+                unidade_apont_campo,
+            )
         ]
 
         total_data = len(convocacoes_data)
@@ -8998,11 +9292,20 @@ elif modo_campo:
                             "funcao": "-",
                         },
                     )
-                    unidade = str(
-                        (conv.get("dados_obra") or {}).get(
-                            "unidade",
-                            "Desconhecida",
+                    contexto_unidade = (
+                        _servico_contexto_unidade_mobile(
+                            conv,
+                            unidade_apont_campo,
                         )
+                    )
+
+                    unidade = str(
+                        (
+                            contexto_unidade
+                            or {}
+                        ).get("unidade")
+                        or unidade_apont_campo
+                        or "Desconhecida"
                     )
 
                     obras_card = obras_reais_da_unidade(
@@ -9020,16 +9323,35 @@ elif modo_campo:
                         conv.get("obra_id"),
                         {},
                     )
+
                     nome_obra_atual = str(
-                        obra_atual.get("nome")
+                        (
+                            contexto_unidade
+                            or {}
+                        ).get("obra")
+                        or obra_atual.get("nome")
                         or ""
                     )
+
                     idx_obra = (
                         opcoes_obras.index(
                             nome_obra_atual
                         )
                         if nome_obra_atual in mapa_obras
                         else 0
+                    )
+
+                    contexto_eh_principal = bool(
+                        (contexto_unidade or {}).get(
+                            "principal"
+                        )
+                    )
+
+                    contexto_obra_id_original = str(
+                        (contexto_unidade or {}).get(
+                            "obra_id"
+                        )
+                        or ""
                     )
 
                     status_atual = (
@@ -9063,12 +9385,20 @@ elif modo_campo:
                         )
                     )
 
-                    periodo_principal_atual = str(
+                    periodo_principal_meta = str(
                         meta_atual.get(
                             "periodo_servico_principal"
                         )
                         or turno_conv
                         or "Integral"
+                    )
+
+                    periodo_principal_atual = str(
+                        (
+                            contexto_unidade
+                            or {}
+                        ).get("periodo")
+                        or periodo_principal_meta
                     )
 
                     if (
@@ -9077,14 +9407,64 @@ elif modo_campo:
                     ):
                         periodo_principal_atual = "Outro"
 
-                    adicionais_atuais = [
-                        x
-                        for x in _normalizar_servicos_adicionais(
+                    todos_adicionais_atuais = list(
+                        _normalizar_servicos_adicionais(
                             meta_atual
                         )
-                        if x.get("servico")
-                        in mapa_obras
-                    ]
+                    )
+
+                    adicionais_unidade_atual = []
+                    adicionais_outras_unidades = []
+
+                    for _adic in todos_adicionais_atuais:
+                        _adic_unidade = str(
+                            _adic.get("unidade")
+                            or ""
+                        ).strip()
+
+                        if not _adic_unidade:
+                            _adic_obra_id = str(
+                                _adic.get("obra_id")
+                                or ""
+                            )
+                            _adic_obra = (
+                                dict_obras.get(
+                                    _adic_obra_id,
+                                    {},
+                                )
+                                if _adic_obra_id
+                                else {}
+                            )
+                            _adic_unidade = str(
+                                _adic_obra.get("unidade")
+                                or ""
+                            ).strip()
+
+                        if normalizar(_adic_unidade) == normalizar(unidade):
+                            adicionais_unidade_atual.append(
+                                _adic
+                            )
+                        else:
+                            adicionais_outras_unidades.append(
+                                _adic
+                            )
+
+                    # Quando esta unidade representa um serviço adicional,
+                    # o próprio serviço de contexto não deve aparecer como
+                    # "2º serviço" dele mesmo.
+                    if not contexto_eh_principal:
+                        adicionais_unidade_atual = [
+                            _adic
+                            for _adic in adicionais_unidade_atual
+                            if not (
+                                contexto_obra_id_original
+                                and str(
+                                    _adic.get("obra_id")
+                                    or ""
+                                )
+                                == contexto_obra_id_original
+                            )
+                        ]
 
                     mesma_pessoa = convs_por_colaborador.get(
                         str(
@@ -9175,17 +9555,20 @@ elif modo_campo:
                                 key=f"engm_obs_{c_id}",
                             )
 
-                            if not tem_conv_separada:
+                            if (
+                                not tem_conv_separada
+                                and contexto_eh_principal
+                            ):
                                 opcoes_adic = [
                                     "— Nenhum —"
                                 ] + list(
                                     mapa_obras.keys()
                                 )
                                 adic_atual = (
-                                    adicionais_atuais[0].get(
+                                    adicionais_unidade_atual[0].get(
                                         "servico"
                                     )
-                                    if adicionais_atuais
+                                    if adicionais_unidade_atual
                                     else "— Nenhum —"
                                 )
                                 idx_adic = (
@@ -9205,11 +9588,11 @@ elif modo_campo:
                                 )
 
                                 periodo_adic_atual = (
-                                    adicionais_atuais[0].get(
+                                    adicionais_unidade_atual[0].get(
                                         "periodo",
                                         "Tarde",
                                     )
-                                    if adicionais_atuais
+                                    if adicionais_unidade_atual
                                     else "Tarde"
                                 )
 
@@ -9228,10 +9611,16 @@ elif modo_campo:
                                     key=f"engm_seg_periodo_{c_id}",
                                 )
                             else:
-                                st.caption(
-                                    "Já existe outra convocação desta pessoa "
-                                    "no mesmo dia. Cada turno é apontado separadamente."
-                                )
+                                if not contexto_eh_principal:
+                                    st.caption(
+                                        "Este é um serviço adicional do mesmo turno. "
+                                        "Ele está vinculado ao mesmo apontamento."
+                                    )
+                                else:
+                                    st.caption(
+                                        "Já existe outra convocação desta pessoa "
+                                        "no mesmo dia. Cada turno é apontado separadamente."
+                                    )
 
                     dados_form[str(c_id)] = {
                         "conv": conv,
@@ -9246,6 +9635,12 @@ elif modo_campo:
                         "val_extra": val_extra,
                         "obs_nova": obs_nova,
                         "turno_conv": turno_conv,
+                        "contexto_eh_principal": contexto_eh_principal,
+                        "contexto_obra_id_original": contexto_obra_id_original,
+                        "periodo_principal_meta": periodo_principal_meta,
+                        "adicionais_outras_unidades": adicionais_outras_unidades,
+                        "adicionais_unidade_atual": adicionais_unidade_atual,
+                        "unidade_contexto": unidade,
                     }
 
                 salvar_todos = st.form_submit_button(
@@ -9295,35 +9690,129 @@ elif modo_campo:
                             or "Colaborador"
                         )
 
-                        adicionais = []
+                        # Começa preservando todos os serviços adicionais
+                        # que pertencem a outras unidades.
+                        adicionais = [
+                            dict(x)
+                            for x in item[
+                                "adicionais_outras_unidades"
+                            ]
+                        ]
 
-                        if (
-                            not item["tem_conv_separada"]
-                            and item["segundo_servico"]
-                            in item["mapa_obras"]
-                        ):
-                            _obra_adic_id = item[
+                        if item["contexto_eh_principal"]:
+                            # Preserva outros adicionais da mesma unidade que
+                            # não estão sendo editados pelo seletor opcional.
+                            adicionais_mesma_unidade = [
+                                dict(x)
+                                for x in item[
+                                    "adicionais_unidade_atual"
+                                ]
+                            ]
+
+                            if (
+                                not item["tem_conv_separada"]
+                                and item["segundo_servico"]
+                                in item["mapa_obras"]
+                            ):
+                                _obra_adic_id = item[
+                                    "mapa_obras"
+                                ][item["segundo_servico"]]
+                                _obra_adic = dict_obras.get(
+                                    _obra_adic_id,
+                                    {},
+                                )
+
+                                novo_adicional = {
+                                    "servico": item[
+                                        "segundo_servico"
+                                    ],
+                                    "periodo": item[
+                                        "segundo_periodo"
+                                    ],
+                                    "obra_id": str(
+                                        _obra_adic_id
+                                        or ""
+                                    ),
+                                    "unidade": str(
+                                        _obra_adic.get(
+                                            "unidade"
+                                        )
+                                        or item[
+                                            "unidade_contexto"
+                                        ]
+                                        or ""
+                                    ),
+                                }
+
+                                # Substitui o primeiro adicional editável da
+                                # unidade; preserva os demais, se existirem.
+                                if adicionais_mesma_unidade:
+                                    adicionais_mesma_unidade[0] = (
+                                        novo_adicional
+                                    )
+                                else:
+                                    adicionais_mesma_unidade.append(
+                                        novo_adicional
+                                    )
+
+                            adicionais.extend(
+                                adicionais_mesma_unidade
+                            )
+
+                            obra_id_final = item[
                                 "mapa_obras"
-                            ][item["segundo_servico"]]
-                            _obra_adic = dict_obras.get(
-                                _obra_adic_id,
+                            ][item["obra_sel"]]
+
+                            periodo_meta_final = item[
+                                "periodo_principal"
+                            ]
+
+                        else:
+                            # O card atual representa um serviço adicional
+                            # de outra unidade. O principal permanece intacto.
+                            obra_id_final = conv.get(
+                                "obra_id"
+                            )
+
+                            periodo_meta_final = item[
+                                "periodo_principal_meta"
+                            ]
+
+                            # Preserva adicionais da mesma unidade, exceto o
+                            # serviço atual, que será substituído pelo seletor.
+                            adicionais.extend(
+                                [
+                                    dict(x)
+                                    for x in item[
+                                        "adicionais_unidade_atual"
+                                    ]
+                                ]
+                            )
+
+                            _obra_contexto_nova_id = item[
+                                "mapa_obras"
+                            ][item["obra_sel"]]
+                            _obra_contexto_nova = dict_obras.get(
+                                _obra_contexto_nova_id,
                                 {},
                             )
+
                             adicionais.append({
-                                "servico": item[
-                                    "segundo_servico"
-                                ],
+                                "servico": item["obra_sel"],
                                 "periodo": item[
-                                    "segundo_periodo"
+                                    "periodo_principal"
                                 ],
                                 "obra_id": str(
-                                    _obra_adic_id
+                                    _obra_contexto_nova_id
                                     or ""
                                 ),
                                 "unidade": str(
-                                    _obra_adic.get(
+                                    _obra_contexto_nova.get(
                                         "unidade"
                                     )
+                                    or item[
+                                        "unidade_contexto"
+                                    ]
                                     or ""
                                 ),
                             })
@@ -9332,9 +9821,7 @@ elif modo_campo:
                             conv,
                             data_apont,
                             apontado_por=engenheiro_campo,
-                            periodo_principal=item[
-                                "periodo_principal"
-                            ],
+                            periodo_principal=periodo_meta_final,
                             servicos_adicionais=adicionais,
                         )
 
@@ -9352,10 +9839,6 @@ elif modo_campo:
                             else 0.0
                         )
 
-                        obra_id_final = item[
-                            "mapa_obras"
-                        ][item["obra_sel"]]
-
                         itens_salvar.append({
                             "conv": conv,
                             "nome_pessoa": nome_pessoa,
@@ -9370,9 +9853,7 @@ elif modo_campo:
                             ],
                             "nova_obs": nova_obs,
                             "obra_id_final": obra_id_final,
-                            "periodo_principal": item[
-                                "periodo_principal"
-                            ],
+                            "periodo_principal": periodo_meta_final,
                             "adicionais": adicionais,
                         })
 
