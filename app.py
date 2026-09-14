@@ -2218,6 +2218,27 @@ div[class*="st-key-btn_limpar_data_prod_v1"] button:hover{
 """)
 
 
+
+# --- APROAR V6.8 | LIMPEZA TOTAL ADMIN --------------------------------------
+st.html("""
+<style>
+div[class*="st-key-btn_limpar_todos_dados_admin_v68"] button:not(:disabled){
+    background:#C93D4F !important;
+    border-color:#C93D4F !important;
+    color:#FFFFFF !important;
+    font-weight:700 !important;
+}
+div[class*="st-key-btn_limpar_todos_dados_admin_v68"] button:not(:disabled):hover{
+    background:#B83243 !important;
+    border-color:#B83243 !important;
+}
+div[class*="st-key-btn_limpar_todos_dados_admin_v68"] button:disabled{
+    opacity:.45 !important;
+}
+</style>
+""")
+
+
 # --- MESES EM PORTUGUÊS ---
 MESES_PT = {
     1: "JANEIRO", 2: "FEVEREIRO", 3: "MARÇO", 4: "ABRIL",
@@ -13066,7 +13087,154 @@ else:
                                 "Não foi possível concluir a exclusão dos registros.",
                             )
 
+            with st.container(border=True):
+                st.markdown("**Limpar todos os dados operacionais**")
+                st.caption(
+                    "Use esta opção para apagar todos os testes realizados no sistema. "
+                    "Serão removidos convocações, apontamentos, serviços apontados, "
+                    "conflitos, indisponibilidades, auditoria e registros de erro. "
+                    "Obras e colaboradores serão mantidos."
+                )
+
+                st.warning(
+                    "Esta ação é permanente e deixa o sistema sem histórico operacional."
+                )
+
+                confirmar_limpeza_total = st.checkbox(
+                    "Entendo que todos os dados operacionais serão excluídos.",
+                    key="confirmar_limpeza_total_admin_v68",
+                )
+
+                texto_limpeza_total = st.text_input(
+                    'Digite "LIMPAR DADOS" para confirmar',
+                    placeholder="LIMPAR DADOS",
+                    key="texto_limpeza_total_admin_v68",
+                )
+
+                pode_limpar_total = (
+                    confirmar_limpeza_total
+                    and texto_limpeza_total.strip().upper() == "LIMPAR DADOS"
+                )
+
+                if st.button(
+                    "Limpar todos os dados operacionais",
+                    type="primary",
+                    use_container_width=True,
+                    disabled=not pode_limpar_total,
+                    key="btn_limpar_todos_dados_admin_v68",
+                ):
+                    try:
+                        tabelas_limpeza = [
+                            "servicos_apontamento",
+                            "apontamentos",
+                            "conflitos_convocacao",
+                            "indisponibilidades",
+                            "convocacoes",
+                            "auditoria",
+                            "erros_sistema",
+                        ]
+
+                        if (
+                            DB_BACKEND == "NEON"
+                            and hasattr(supabase, "_connect")
+                        ):
+                            with supabase._connect() as conn:
+                                with conn.cursor() as cur:
+                                    existentes = []
+
+                                    for tabela in tabelas_limpeza:
+                                        cur.execute(
+                                            "SELECT to_regclass(%s) AS tabela",
+                                            (f"public.{tabela}",),
+                                        )
+                                        row = cur.fetchone()
+
+                                        existe = (
+                                            row.get("tabela")
+                                            if isinstance(row, dict)
+                                            else (
+                                                row[0]
+                                                if row
+                                                else None
+                                            )
+                                        )
+
+                                        if existe:
+                                            existentes.append(tabela)
+
+                                    if existentes:
+                                        nomes_sql = ", ".join(
+                                            f'"{t}"'
+                                            for t in existentes
+                                        )
+
+                                        cur.execute(
+                                            f"TRUNCATE TABLE {nomes_sql} "
+                                            "RESTART IDENTITY CASCADE"
+                                        )
+
+                                conn.commit()
+
+                        else:
+                            # Fallback compatível: remove registro a registro.
+                            for tabela in tabelas_limpeza:
+                                try:
+                                    registros = (
+                                        supabase.table(tabela)
+                                        .select("id")
+                                        .execute()
+                                        .data
+                                        or []
+                                    )
+
+                                    for reg in registros:
+                                        reg_id = reg.get("id")
+                                        if reg_id is not None:
+                                            (
+                                                supabase.table(tabela)
+                                                .delete()
+                                                .eq("id", reg_id)
+                                                .execute()
+                                            )
+                                except Exception:
+                                    pass
+
+                        try:
+                            st.cache_data.clear()
+                        except Exception:
+                            pass
+
+                        try:
+                            limpar_cache_operacional()
+                        except Exception:
+                            pass
+
+                        st.session_state[
+                            "msg_limpeza_total_admin_v68"
+                        ] = (
+                            "Dados operacionais apagados com sucesso. "
+                            "Obras e colaboradores foram preservados."
+                        )
+
+                        st.rerun()
+
+                    except Exception as e:
+                        exibir_erro_amigavel(
+                            "administracao",
+                            "limpar_todos_dados_operacionais",
+                            e,
+                            "Não foi possível concluir a limpeza total dos dados.",
+                        )
+
+            if st.session_state.get("msg_limpeza_total_admin_v68"):
+                st.success(
+                    st.session_state.pop(
+                        "msg_limpeza_total_admin_v68"
+                    )
+                )
+
             if st.session_state.get("msg_limpeza_prod_v1"):
                 st.success(
                     st.session_state.pop("msg_limpeza_prod_v1")
                 )
+
