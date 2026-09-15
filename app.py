@@ -8512,6 +8512,292 @@ elif modo_campo:
             gap:.45rem !important;
         }
     }
+
+    /* ============================================================
+       APROAR V6.15 — NORMALIZAÇÃO FINAL DE CORES DO PORTAL CAMPO
+       Evita que Safari/iOS, modo escuro ou tema do Streamlit
+       sobrescrevam campos, alertas, tags, toasts e expanders.
+       ============================================================ */
+
+    html,
+    body,
+    .stApp,
+    [data-testid="stAppViewContainer"],
+    [data-testid="stMain"],
+    main{
+        color-scheme:light !important;
+        background:#F5F7FB !important;
+        color:#172235 !important;
+    }
+
+    /* Campos de texto / selects / datas sempre claros e legíveis */
+    main div[data-baseweb="select"] > div,
+    main div[data-baseweb="base-input"],
+    main div[data-baseweb="base-input"] > div,
+    main div[data-baseweb="input"],
+    main div[data-baseweb="input"] > div,
+    main [data-baseweb="textarea"],
+    main [data-baseweb="textarea"] > div,
+    main div[role="combobox"],
+    main [data-testid="stDateInput"] > div,
+    main [data-testid="stTextInput"] > div{
+        background:#FFFFFF !important;
+        color:#172235 !important;
+        border-color:#D6DFEA !important;
+        box-shadow:none !important;
+    }
+
+    main input,
+    main textarea,
+    main select,
+    main [data-baseweb="select"] span{
+        color:#172235 !important;
+        -webkit-text-fill-color:#172235 !important;
+        caret-color:#172235 !important;
+    }
+
+    main input::placeholder,
+    main textarea::placeholder{
+        color:#94A3B8 !important;
+        -webkit-text-fill-color:#94A3B8 !important;
+        opacity:1 !important;
+    }
+
+    /* Campo somente leitura/desabilitado não fica preto/cinza escuro */
+    main input:disabled,
+    main textarea:disabled,
+    main select:disabled,
+    main [aria-disabled="true"] input{
+        background:#F1F4F8 !important;
+        color:#7A8698 !important;
+        -webkit-text-fill-color:#7A8698 !important;
+        border-color:#D9E1EB !important;
+        opacity:1 !important;
+    }
+
+    main [data-testid="stDateInput"] input{
+        background:#FFFFFF !important;
+        color:#172235 !important;
+        -webkit-text-fill-color:#172235 !important;
+    }
+
+    main div[data-baseweb="select"] svg,
+    main div[data-baseweb="select"] [role="button"]{
+        color:#475569 !important;
+        fill:#475569 !important;
+    }
+
+    /* Expander: elimina cabeçalho preto herdado do tema/iOS */
+    main [data-testid="stExpander"]{
+        background:#FFFFFF !important;
+        border-color:#DCE3EC !important;
+        color:#172235 !important;
+    }
+
+    main [data-testid="stExpander"] details,
+    main [data-testid="stExpander"] summary{
+        background:#FFFFFF !important;
+        color:#172235 !important;
+    }
+
+    main [data-testid="stExpander"] summary *,
+    main [data-testid="stExpander"] details *{
+        color:#172235;
+    }
+
+    main [data-testid="stExpander"] summary:hover{
+        background:#F8FAFC !important;
+    }
+
+    /* Navegação Hoje / Amanhã / Disponibilidade como segmented control */
+    div[class*="st-key-eng_mobile_nav"] [role="radiogroup"]{
+        background:#EDF1F6 !important;
+        border:1px solid #D7DFE9 !important;
+    }
+
+    div[class*="st-key-eng_mobile_nav"] [role="radio"]{
+        background:transparent !important;
+        color:#172235 !important;
+        white-space:nowrap !important;
+        overflow:hidden !important;
+        text-overflow:ellipsis !important;
+    }
+
+    div[class*="st-key-eng_mobile_nav"] [role="radio"] *{
+        color:#172235 !important;
+    }
+
+    /* Esconde as bolinhas do radio, pois alguns Safari/iOS as pintam de preto */
+    div[class*="st-key-eng_mobile_nav"] [role="radio"] svg,
+    div[class*="st-key-eng_mobile_nav"] [role="radio"] [data-baseweb="radio"] > div:first-child{
+        display:none !important;
+    }
+
+    div[class*="st-key-eng_mobile_nav"] [aria-checked="true"]{
+        background:#FFFFFF !important;
+        color:#245FD6 !important;
+        box-shadow:0 1px 3px rgba(15,23,42,.10) !important;
+    }
+
+    div[class*="st-key-eng_mobile_nav"] [aria-checked="true"] *{
+        color:#245FD6 !important;
+    }
+
+    /* Não quebra Disponibilidade no meio da palavra */
+    div[class*="st-key-eng_mobile_nav"] [role="radio"] p,
+    div[class*="st-key-eng_mobile_nav"] [role="radio"] span{
+        white-space:nowrap !important;
+        word-break:normal !important;
+        overflow-wrap:normal !important;
+    }
+
+    /* Tags do multiselect: azul claro, sem rosa automático do tema */
+    main div[data-baseweb="tag"]{
+        background:#EAF1FF !important;
+        border:1px solid #C8D8FF !important;
+        color:#1D4ED8 !important;
+        border-radius:9px !important;
+    }
+
+    main div[data-baseweb="tag"] *,
+    main div[data-baseweb="tag"] svg{
+        color:#1D4ED8 !important;
+        fill:#1D4ED8 !important;
+        -webkit-text-fill-color:#1D4ED8 !important;
+    }
+
+    /* Botões principais */
+    main .stButton > button[kind="primary"],
+    main [data-testid="stFormSubmitButton"] > button{
+        background:#2F64E8 !important;
+        border-color:#2F64E8 !important;
+        color:#FFFFFF !important;
+    }
+
+    main .stButton > button[kind="primary"] *,
+    main [data-testid="stFormSubmitButton"] > button *{
+        color:#FFFFFF !important;
+        -webkit-text-fill-color:#FFFFFF !important;
+    }
+
+    /* Sair é ação secundária, não ação principal */
+    div[class*="st-key-btn_sair_supervisor"]{
+        display:flex !important;
+        justify-content:flex-end !important;
+    }
+
+    div[class*="st-key-btn_sair_supervisor"] button{
+        width:auto !important;
+        min-width:74px !important;
+        min-height:32px !important;
+        padding:4px 14px !important;
+        background:#FFFFFF !important;
+        border:1px solid #CBD7E6 !important;
+        color:#2D5FCA !important;
+        box-shadow:none !important;
+    }
+
+    div[class*="st-key-btn_sair_supervisor"] button *{
+        color:#2D5FCA !important;
+        -webkit-text-fill-color:#2D5FCA !important;
+    }
+
+    div[class*="st-key-btn_sair_supervisor"] button:hover{
+        background:#EEF4FF !important;
+        border-color:#AFC5F5 !important;
+        color:#244FAF !important;
+        transform:none !important;
+    }
+
+    /* Remover avulso: evita quadrado preto no iPhone */
+    div[class*="st-key-engm_remover_manual_"] button{
+        width:34px !important;
+        min-width:34px !important;
+        min-height:34px !important;
+        padding:0 !important;
+        background:#FFF5F6 !important;
+        border:1px solid #F4C7CD !important;
+        color:#B4233B !important;
+        border-radius:8px !important;
+        box-shadow:none !important;
+    }
+
+    div[class*="st-key-engm_remover_manual_"] button *{
+        color:#B4233B !important;
+        -webkit-text-fill-color:#B4233B !important;
+    }
+
+    /* Alertas: texto sempre escuro e legível */
+    main [data-testid="stAlert"]{
+        color:#172235 !important;
+        border-color:#D7E0EB !important;
+    }
+
+    main [data-testid="stAlert"] p,
+    main [data-testid="stAlert"] span,
+    main [data-testid="stAlert"] div{
+        color:#172235 !important;
+        -webkit-text-fill-color:#172235 !important;
+    }
+
+    /* Toast: fundo escuro exige texto branco */
+    div[data-baseweb="toast"],
+    [data-testid="stToast"]{
+        background:#111827 !important;
+        color:#FFFFFF !important;
+        border:1px solid #273449 !important;
+        border-radius:12px !important;
+        box-shadow:0 12px 30px rgba(15,23,42,.28) !important;
+    }
+
+    div[data-baseweb="toast"] *,
+    [data-testid="stToast"] *{
+        color:#FFFFFF !important;
+        -webkit-text-fill-color:#FFFFFF !important;
+    }
+
+    div[data-baseweb="toast"] svg,
+    [data-testid="stToast"] svg{
+        color:#FFFFFF !important;
+        fill:#FFFFFF !important;
+    }
+
+    /* Cards e resumo */
+    .engm-summary,
+    .engm-list-item{
+        background:#FFFFFF !important;
+        border-color:#DCE3EC !important;
+    }
+
+    .engm-summary-label,
+    .engm-summary-note,
+    .engm-list-meta,
+    .engm-section-sub,
+    .engm-date{
+        color:#7C899B !important;
+    }
+
+    .engm-summary-value,
+    .engm-list-name,
+    .engm-section-title,
+    .engm-person-name,
+    .engm-title{
+        color:#172235 !important;
+    }
+
+    @media(max-width:520px){
+        /* Dá espaço suficiente para "Disponibilidade" sem quebrar */
+        div[class*="st-key-eng_mobile_nav"] [role="radio"]{
+            font-size:10px !important;
+            padding:0 3px !important;
+        }
+
+        /* Sair fica discreto também no celular */
+        div[class*="st-key-btn_sair_supervisor"] button{
+            min-width:68px !important;
+            font-size:10px !important;
+        }
+    }
     </style>
     """)
 
