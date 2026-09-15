@@ -7888,10 +7888,26 @@ if modo_login:
     )
 
 elif modo_visualizador:
-    st.markdown("## 👁️ Painel Administrativo — Visualização")
-    st.caption(
-        "Dashboard, Relatórios e Indicadores disponíveis para consulta."
+    c_view_titulo, c_view_sair = st.columns(
+        [6, 1],
+        vertical_alignment="center",
     )
+
+    with c_view_titulo:
+        st.markdown("## 👁️ Painel Administrativo — Visualização")
+        st.caption(
+            "Dashboard, Relatórios e Indicadores disponíveis para consulta."
+        )
+
+    with c_view_sair:
+        if st.button(
+            "Sair",
+            key="btn_sair_visualizador",
+            use_container_width=True,
+        ):
+            _limpar_acesso()
+            st.query_params.clear()
+            st.rerun()
     secao_view = st.radio(
         "Navegação",
         [
@@ -8026,6 +8042,15 @@ elif modo_campo:
         border-radius:9px !important;
         font-size:14px !important;
         font-weight:630 !important;
+    }
+
+    /* Saída do Portal do Supervisor */
+    div[class*="st-key-btn_sair_supervisor"] button{
+        min-height:34px !important;
+        border-radius:7px !important;
+        font-size:10px !important;
+        font-weight:650 !important;
+        padding:4px 10px !important;
     }
 
     /* Navegação em 3 áreas: Hoje / Amanhã / Disponibilidade */
@@ -9112,6 +9137,21 @@ elif modo_campo:
         """,
         unsafe_allow_html=True,
     )
+
+    c_sup_space, c_sup_sair = st.columns(
+        [5.8, 1],
+        vertical_alignment="center",
+    )
+
+    with c_sup_sair:
+        if st.button(
+            "Sair",
+            key="btn_sair_supervisor",
+            use_container_width=True,
+        ):
+            _limpar_acesso()
+            st.query_params.clear()
+            st.rerun()
 
     area_campo = st.radio(
         "Navegação",
@@ -11733,6 +11773,77 @@ else:
             """,
             unsafe_allow_html=True,
         )
+
+        # Mostra exatamente quais são os apontamentos pendentes.
+        if pendentes:
+            with st.expander(
+                f"Ver apontamentos pendentes · {len(pendentes)}",
+                expanded=False,
+            ):
+                linhas_pendentes = []
+
+                for conv in pendentes:
+                    colaborador = dict_colaboradores.get(
+                        conv.get("colaborador_id"),
+                        {},
+                    )
+                    obra_placeholder = dict_obras.get(
+                        conv.get("obra_id"),
+                        {},
+                    )
+
+                    linhas_pendentes.append({
+                        "Colaborador": str(
+                            colaborador.get("nome")
+                            or "Não identificado"
+                        ),
+                        "Função": str(
+                            colaborador.get("funcao")
+                            or "-"
+                        ),
+                        "Engenheiro": str(
+                            conv.get("engenheiro")
+                            or "-"
+                        ),
+                        "Unidade": str(
+                            obra_placeholder.get("unidade")
+                            or "-"
+                        ),
+                        "Turno": turno_da_convocacao(
+                            conv
+                        ),
+                        "Data": data_home.strftime(
+                            "%d/%m/%Y"
+                        ),
+                        "Pendência": "Definir Obra / Serviço",
+                    })
+
+                df_pendentes_home = pd.DataFrame(
+                    linhas_pendentes
+                ).sort_values(
+                    [
+                        "Engenheiro",
+                        "Unidade",
+                        "Colaborador",
+                    ]
+                )
+
+                tabela_aproar(
+                    df_pendentes_home,
+                    key="ap2_home_pendentes_detalhe",
+                    altura_max=360,
+                )
+
+                if st.button(
+                    "Ir para Apontamentos",
+                    type="primary",
+                    use_container_width=True,
+                    key="ap2_home_ir_apontamentos",
+                ):
+                    _ir_menu_admin(
+                        "✅ APONTAMENTO"
+                    )
+                    st.rerun()
 
         st.markdown('<div class="ap-quick-head">Ações rápidas</div>', unsafe_allow_html=True)
         with st.container(key="ap2_quick"):
