@@ -7825,6 +7825,16 @@ def _render_login_aproar(
 
 parametros_url = st.query_params
 
+# Logout universal. O link ?logout=1 funciona em qualquer setor
+# e sempre retorna à tela inicial de login.
+if "logout" in parametros_url:
+    _limpar_acesso()
+    try:
+        st.query_params.clear()
+    except Exception:
+        pass
+    st.rerun()
+
 modo_campo_solicitado = (
     "eng" in parametros_url
     or parametros_url.get("modo") in [
@@ -8801,15 +8811,320 @@ elif modo_campo:
     </style>
     """)
 
+
+    st.html("""
+    <style>
+    /* =========================================================
+       APROAR V6.16 — MOBILE COLOR FIX
+       Seletores deliberadamente genéricos dentro do portal Campo.
+       ========================================================= */
+
+    :root,
+    html,
+    body,
+    .stApp{
+        color-scheme:light !important;
+        --primary-color:#2F64E8 !important;
+        --background-color:#F5F7FB !important;
+        --secondary-background-color:#FFFFFF !important;
+        --text-color:#172235 !important;
+        --st-primary-color:#2F64E8 !important;
+        --st-background-color:#F5F7FB !important;
+        --st-secondary-background-color:#FFFFFF !important;
+        --st-text-color:#172235 !important;
+    }
+
+    html,
+    body,
+    .stApp,
+    [data-testid="stAppViewContainer"],
+    [data-testid="stMain"],
+    main{
+        background:#F5F7FB !important;
+        color:#172235 !important;
+    }
+
+    /* ----- SAIR ----- */
+    .engm-logout-row{
+        display:flex;
+        justify-content:flex-end;
+        margin:0 0 2px;
+    }
+
+    .engm-logout-link{
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        min-height:34px;
+        padding:0 15px;
+        border:1px solid #CCD8E6;
+        border-radius:8px;
+        background:#FFFFFF;
+        color:#2859BD !important;
+        text-decoration:none !important;
+        font-size:11px;
+        font-weight:700;
+    }
+
+    .engm-logout-link:visited{
+        color:#2859BD !important;
+    }
+
+    /* ----- NAVEGAÇÃO: três botões limpos ----- */
+    [class*="st-key-eng_nav_hoje_v16"] button,
+    [class*="st-key-eng_nav_amanha_v16"] button,
+    [class*="st-key-eng_nav_disp_v16"] button{
+        min-height:42px !important;
+        border-radius:9px !important;
+        font-size:12px !important;
+        font-weight:700 !important;
+        white-space:nowrap !important;
+        padding-left:5px !important;
+        padding-right:5px !important;
+        box-shadow:none !important;
+    }
+
+    [class*="st-key-eng_nav_hoje_v16"] button[kind="secondary"],
+    [class*="st-key-eng_nav_amanha_v16"] button[kind="secondary"],
+    [class*="st-key-eng_nav_disp_v16"] button[kind="secondary"]{
+        background:#EDF1F6 !important;
+        border-color:#D7DFE9 !important;
+        color:#172235 !important;
+    }
+
+    [class*="st-key-eng_nav_hoje_v16"] button[kind="secondary"] *,
+    [class*="st-key-eng_nav_amanha_v16"] button[kind="secondary"] *,
+    [class*="st-key-eng_nav_disp_v16"] button[kind="secondary"] *{
+        color:#172235 !important;
+        -webkit-text-fill-color:#172235 !important;
+    }
+
+    [class*="st-key-eng_nav_hoje_v16"] button[kind="primary"],
+    [class*="st-key-eng_nav_amanha_v16"] button[kind="primary"],
+    [class*="st-key-eng_nav_disp_v16"] button[kind="primary"],
+    [class*="st-key-eng_nav_hoje_v16"] [data-testid="stBaseButton-primary"],
+    [class*="st-key-eng_nav_amanha_v16"] [data-testid="stBaseButton-primary"],
+    [class*="st-key-eng_nav_disp_v16"] [data-testid="stBaseButton-primary"]{
+        background:#2F64E8 !important;
+        border-color:#2F64E8 !important;
+        color:#FFFFFF !important;
+    }
+
+    [class*="st-key-eng_nav_hoje_v16"] button[kind="primary"] *,
+    [class*="st-key-eng_nav_amanha_v16"] button[kind="primary"] *,
+    [class*="st-key-eng_nav_disp_v16"] button[kind="primary"] *,
+    [class*="st-key-eng_nav_hoje_v16"] [data-testid="stBaseButton-primary"] *,
+    [class*="st-key-eng_nav_amanha_v16"] [data-testid="stBaseButton-primary"] *,
+    [class*="st-key-eng_nav_disp_v16"] [data-testid="stBaseButton-primary"] *{
+        color:#FFFFFF !important;
+        -webkit-text-fill-color:#FFFFFF !important;
+    }
+
+    /* ----- INPUTS NATIVOS: Safari/iOS não pode inverter ----- */
+    main input,
+    main input[type="text"],
+    main input[type="date"],
+    main input[type="number"],
+    main input[type="password"],
+    main textarea{
+        color-scheme:light !important;
+        background-color:#FFFFFF !important;
+        color:#172235 !important;
+        -webkit-text-fill-color:#172235 !important;
+        caret-color:#172235 !important;
+        opacity:1 !important;
+    }
+
+    main input[type="date"]::-webkit-date-and-time-value{
+        color:#172235 !important;
+        -webkit-text-fill-color:#172235 !important;
+    }
+
+    main input[type="date"]::-webkit-calendar-picker-indicator{
+        opacity:.75 !important;
+    }
+
+    /* ----- SELECTS BASEWEB ----- */
+    main [data-baseweb="select"],
+    main [data-baseweb="select"] > div,
+    main [data-baseweb="select"] > div > div,
+    main [role="combobox"]{
+        background:#FFFFFF !important;
+        color:#172235 !important;
+        border-color:#D8E0EA !important;
+    }
+
+    main [data-baseweb="select"] span,
+    main [data-baseweb="select"] input,
+    main [role="combobox"] *{
+        color:#172235 !important;
+        -webkit-text-fill-color:#172235 !important;
+    }
+
+    /* ----- MULTISELECT TAGS: selector correto é span[data-baseweb=tag] ----- */
+    main [data-baseweb="tag"]{
+        background:#EAF1FF !important;
+        border:1px solid #C8D8FF !important;
+        color:#1D4ED8 !important;
+        border-radius:9px !important;
+    }
+
+    main [data-baseweb="tag"] *,
+    main [data-baseweb="tag"] span,
+    main [data-baseweb="tag"] svg{
+        color:#1D4ED8 !important;
+        fill:#1D4ED8 !important;
+        -webkit-text-fill-color:#1D4ED8 !important;
+    }
+
+    /* ----- CHECKBOXES: azul, não vermelho ----- */
+    main input[type="checkbox"],
+    main input[type="radio"]{
+        accent-color:#2F64E8 !important;
+    }
+
+    main [data-baseweb="checkbox"] [aria-checked="true"],
+    main [data-baseweb="checkbox"] input:checked + div,
+    main label:has(input[type="checkbox"]:checked) > div:first-of-type{
+        background-color:#2F64E8 !important;
+        border-color:#2F64E8 !important;
+    }
+
+    /* ----- CAMPO ESTÁTICO ----- */
+    .engm-static-field{
+        margin:0;
+    }
+
+    .engm-static-label{
+        font-size:9.5px;
+        font-weight:650;
+        margin-bottom:6px;
+        color:#172235;
+    }
+
+    .engm-static-value{
+        min-height:43px;
+        display:flex;
+        align-items:center;
+        padding:0 12px;
+        border:1px solid #D9E1EB;
+        border-radius:8px;
+        background:#F1F4F8;
+        color:#7A8698;
+        font-size:12px;
+    }
+
+    /* ----- MENSAGEM DE SUCESSO PRÓPRIA ----- */
+    .engm-success-message{
+        display:flex;
+        align-items:center;
+        gap:9px;
+        padding:9px 11px;
+        margin:2px 0 5px;
+        border:1px solid #B9E3C9;
+        border-radius:9px;
+        background:#ECF8F0;
+        color:#176B3A;
+        font-size:11px;
+        font-weight:650;
+    }
+
+    .engm-success-icon{
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        width:19px;
+        height:19px;
+        flex:0 0 19px;
+        border-radius:50%;
+        background:#22A35A;
+        color:#FFFFFF !important;
+        font-size:12px;
+        line-height:1;
+    }
+
+    /* ----- EXPANDERS ----- */
+    main [data-testid="stExpander"],
+    main [data-testid="stExpander"] details,
+    main [data-testid="stExpander"] summary{
+        background:#FFFFFF !important;
+        color:#172235 !important;
+        border-color:#DCE3EC !important;
+    }
+
+    main [data-testid="stExpander"] summary *{
+        color:#172235 !important;
+        -webkit-text-fill-color:#172235 !important;
+    }
+
+    /* ----- BOTÕES SECUNDÁRIOS (inclui Remover) ----- */
+    main [data-testid="stBaseButton-secondary"],
+    main button[kind="secondary"]{
+        background:#FFFFFF !important;
+        border-color:#D7E0EB !important;
+        color:#31506F !important;
+    }
+
+    main [data-testid="stBaseButton-secondary"] *,
+    main button[kind="secondary"] *{
+        color:#31506F !important;
+        -webkit-text-fill-color:#31506F !important;
+    }
+
+    [class*="st-key-engm_remover_manual_"] button{
+        min-height:34px !important;
+        padding:3px 6px !important;
+        background:#FFF4F5 !important;
+        border-color:#F2C6CC !important;
+        color:#A92C3F !important;
+        font-size:9.5px !important;
+    }
+
+    [class*="st-key-engm_remover_manual_"] button *{
+        color:#A92C3F !important;
+        -webkit-text-fill-color:#A92C3F !important;
+    }
+
+    /* ----- ALERTAS NATIVOS ----- */
+    main [data-testid="stAlert"]{
+        color:#172235 !important;
+    }
+
+    main [data-testid="stAlert"] p,
+    main [data-testid="stAlert"] span{
+        color:#172235 !important;
+        -webkit-text-fill-color:#172235 !important;
+    }
+
+    @media(max-width:520px){
+        [class*="st-key-eng_nav_hoje_v16"] button,
+        [class*="st-key-eng_nav_amanha_v16"] button,
+        [class*="st-key-eng_nav_disp_v16"] button{
+            font-size:10.5px !important;
+            padding-left:2px !important;
+            padding-right:2px !important;
+        }
+
+        .engm-logout-link{
+            min-height:31px;
+            padding:0 13px;
+            font-size:10px;
+        }
+    }
+    </style>
+    """)
+
     def _feedback_salvo_mobile(mensagem):
-        """Confirmação pequena e imediata, sem atrasar o fluxo."""
-        try:
-            st.toast(
-                mensagem,
-                icon="✅",
-            )
-        except Exception:
-            st.caption(mensagem)
+        """Confirmação pequena, previsível e independente do tema do aparelho."""
+        st.markdown(
+            (
+                '<div class="engm-success-message">'
+                '<span class="engm-success-icon">✓</span>'
+                f'<span>{_html.escape(str(mensagem).replace("✓", "").strip())}</span>'
+                '</div>'
+            ),
+            unsafe_allow_html=True,
+        )
 
     def _mostrar_confirmacao_campo():
         """Exibe uma confirmação pequena e confiável após o rerun."""
@@ -9450,28 +9765,53 @@ elif modo_campo:
         unsafe_allow_html=True,
     )
 
-    c_sup_space, c_sup_sair = st.columns(
-        [5.8, 1],
-        vertical_alignment="center",
+    st.markdown(
+        """
+        <div class="engm-logout-row">
+            <a class="engm-logout-link" href="?logout=1">Sair</a>
+        </div>
+        """,
+        unsafe_allow_html=True,
     )
 
-    with c_sup_sair:
+    # Navegação por botões em vez de radio.
+    # Isso elimina de vez as bolinhas pretas/vermelhas do Safari/iOS.
+    if "_engm_area_campo" not in st.session_state:
+        st.session_state["_engm_area_campo"] = "Hoje"
+
+    area_campo = st.session_state["_engm_area_campo"]
+
+    nav_c1, nav_c2, nav_c3 = st.columns(3)
+
+    with nav_c1:
         if st.button(
-            "Sair",
-            key="btn_sair_supervisor",
+            "Hoje",
+            type=("primary" if area_campo == "Hoje" else "secondary"),
             use_container_width=True,
+            key="eng_nav_hoje_v16",
         ):
-            _limpar_acesso()
-            st.query_params.clear()
+            st.session_state["_engm_area_campo"] = "Hoje"
             st.rerun()
 
-    area_campo = st.radio(
-        "Navegação",
-        ["Hoje", "Amanhã", "Disponibilidade"],
-        horizontal=True,
-        label_visibility="collapsed",
-        key="eng_mobile_nav",
-    )
+    with nav_c2:
+        if st.button(
+            "Amanhã",
+            type=("primary" if area_campo == "Amanhã" else "secondary"),
+            use_container_width=True,
+            key="eng_nav_amanha_v16",
+        ):
+            st.session_state["_engm_area_campo"] = "Amanhã"
+            st.rerun()
+
+    with nav_c3:
+        if st.button(
+            "Disponibilidade",
+            type=("primary" if area_campo == "Disponibilidade" else "secondary"),
+            use_container_width=True,
+            key="eng_nav_disp_v16",
+        ):
+            st.session_state["_engm_area_campo"] = "Disponibilidade"
+            st.rerun()
 
     _mostrar_confirmacao_campo()
 
@@ -9532,15 +9872,19 @@ elif modo_campo:
                 )
             else:
                 unidade_apont_campo = ""
-                st.text_input(
-                    "Unidade convocada",
-                    value=(
-                        "Sem convocação nesta data"
-                        if data_apont < hoje_campo
-                        else "Nenhuma unidade convocada"
+                _texto_unidade_vazia = (
+                    "Sem convocação nesta data"
+                    if data_apont < hoje_campo
+                    else "Nenhuma unidade convocada"
+                )
+                st.markdown(
+                    (
+                        '<div class="engm-static-field">'
+                        '<div class="engm-static-label">Unidade convocada</div>'
+                        f'<div class="engm-static-value">{_html.escape(_texto_unidade_vazia)}</div>'
+                        '</div>'
                     ),
-                    disabled=True,
-                    key="engm_unidade_apont_vazia",
+                    unsafe_allow_html=True,
                 )
 
         # Daqui para baixo o apontamento inteiro considera SOMENTE a unidade
@@ -11115,7 +11459,7 @@ elif modo_campo:
                         list(fila_avulsos)
                     ):
                         c_nome, c_remover = st.columns(
-                            [5, 1]
+                            [3.9, 1.35]
                         )
 
                         with c_nome:
@@ -11134,12 +11478,14 @@ elif modo_campo:
 
                         with c_remover:
                             if st.button(
-                                "×",
+                                "Remover",
+                                type="secondary",
+                                use_container_width=True,
                                 key=(
                                     "engm_remover_manual_"
                                     f"{idx}"
                                 ),
-                                help="Remover",
+                                help="Remover da convocação",
                             ):
                                 fila_avulsos.pop(idx)
                                 st.session_state[
