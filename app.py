@@ -7734,8 +7734,13 @@ def _render_login_aproar(
 
         if entrar:
             if perfil_login == "Controladoria":
+                senha_ctrl = str(
+                    senha_digitada
+                    or ""
+                ).strip()
+
                 if hmac.compare_digest(
-                    str(senha_digitada),
+                    senha_ctrl,
                     SENHA_CONTROLADORIA,
                 ):
                     _limpar_acesso()
@@ -7745,7 +7750,12 @@ def _render_login_aproar(
                     st.session_state[
                         "perfil_acesso"
                     ] = "controladoria"
-                    st.query_params.clear()
+
+                    try:
+                        st.query_params.clear()
+                    except Exception:
+                        pass
+
                     st.rerun()
                 else:
                     erro_login = (
@@ -7753,8 +7763,13 @@ def _render_login_aproar(
                     )
 
             elif perfil_login == "Financeiro":
+                senha_fin = str(
+                    senha_digitada
+                    or ""
+                ).strip()
+
                 if hmac.compare_digest(
-                    str(senha_digitada),
+                    senha_fin,
                     SENHA_FINANCEIRO,
                 ):
                     _limpar_acesso()
@@ -7764,10 +7779,14 @@ def _render_login_aproar(
                     st.session_state[
                         "perfil_acesso"
                     ] = "financeiro"
-                    st.query_params.clear()
-                    st.query_params[
-                        "financeiro"
-                    ] = "1"
+
+                    # O setor passa a ser definido pela sessão.
+                    # Limpa parâmetros antigos sem precisar recriar ?financeiro.
+                    try:
+                        st.query_params.clear()
+                    except Exception:
+                        pass
+
                     st.rerun()
                 else:
                     erro_login = (
@@ -7835,14 +7854,31 @@ modo_visualizador_solicitado = (
 
 edicao_liberada = _edicao_liberada()
 financeiro_liberado = _financeiro_liberado()
+perfil_autenticado = str(
+    st.session_state.get("perfil_acesso")
+    or ""
+).strip().lower()
 
 # Regras:
 # - ?eng / Portal do Supervisor: sem senha.
 # - ?view / Somente visualizar: sem senha.
 # - Financeiro: senha "financeiro".
 # - Controladoria/Admin: senha "aproaradmin".
-# - A URL raiz, sem sessão autenticada, abre o login.
-if modo_campo_solicitado:
+# - Depois do login, a sessão autenticada é a fonte de verdade.
+#   Isso evita depender de query params para continuar no setor correto.
+if perfil_autenticado == "controladoria" and edicao_liberada:
+    modo_login = False
+    modo_campo = False
+    modo_financeiro = False
+    modo_visualizador = False
+
+elif perfil_autenticado == "financeiro" and financeiro_liberado:
+    modo_login = False
+    modo_campo = False
+    modo_financeiro = True
+    modo_visualizador = False
+
+elif modo_campo_solicitado:
     modo_login = False
     modo_campo = True
     modo_financeiro = False
@@ -7855,19 +7891,9 @@ elif modo_visualizador_solicitado:
     modo_visualizador = True
 
 elif modo_financeiro_solicitado:
-    if financeiro_liberado:
-        modo_login = False
-        modo_campo = False
-        modo_financeiro = True
-        modo_visualizador = False
-    else:
-        modo_login = True
-        modo_campo = False
-        modo_financeiro = False
-        modo_visualizador = False
-
-elif edicao_liberada:
-    modo_login = False
+    # A URL direta ?financeiro abre o login do Financeiro,
+    # mas só libera o portal depois da autenticação.
+    modo_login = True
     modo_campo = False
     modo_financeiro = False
     modo_visualizador = False
