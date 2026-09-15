@@ -8575,21 +8575,68 @@ elif modo_campo:
 
         return saida
 
+    def _unidades_convocacao_mobile(conv):
+        """
+        Unidades vinculadas à convocação.
+
+        IMPORTANTE:
+        antes do apontamento a obra principal é um placeholder da unidade.
+        Mesmo sendo placeholder, a unidade precisa aparecer no seletor para
+        que o engenheiro consiga escolher a obra/serviço real.
+        """
+        unidades = []
+
+        obra_principal = (
+            conv.get("dados_obra")
+            or dict_obras.get(conv.get("obra_id"), {})
+            or {}
+        )
+
+        unidade_principal = str(
+            obra_principal.get("unidade")
+            or ""
+        ).strip()
+
+        if (
+            unidade_principal
+            and normalizar(unidade_principal)
+            not in {"", "desconhecida", "desconhecido"}
+        ):
+            unidades.append(unidade_principal)
+
+        for serv in _servicos_convocacao_mobile(conv):
+            unidade_serv = str(
+                serv.get("unidade")
+                or ""
+            ).strip()
+
+            if (
+                unidade_serv
+                and normalizar(unidade_serv)
+                not in {
+                    normalizar(u)
+                    for u in unidades
+                }
+            ):
+                unidades.append(unidade_serv)
+
+        return unidades
+
     def _convocacao_tem_unidade_mobile(conv, unidade):
         alvo = normalizar(unidade or "")
         if not alvo:
             return False
 
         return any(
-            normalizar(serv.get("unidade") or "") == alvo
-            for serv in _servicos_convocacao_mobile(conv)
+            normalizar(unid) == alvo
+            for unid in _unidades_convocacao_mobile(conv)
         )
 
     def _servico_contexto_unidade_mobile(conv, unidade):
         alvo = normalizar(unidade or "")
         servicos = _servicos_convocacao_mobile(conv)
 
-        # Se houver principal nessa unidade, ele tem prioridade.
+        # Se houver serviço real principal nessa unidade, ele tem prioridade.
         for serv in servicos:
             if (
                 serv.get("principal")
@@ -8597,9 +8644,58 @@ elif modo_campo:
             ):
                 return serv
 
+        # Depois, procura serviço adicional real nessa unidade.
         for serv in servicos:
             if normalizar(serv.get("unidade") or "") == alvo:
                 return serv
+
+        # Se ainda não há serviço real definido, usa o placeholder apenas
+        # como contexto de UNIDADE. A obra continuará vazia para o engenheiro
+        # escolher no apontamento.
+        obra_principal = (
+            conv.get("dados_obra")
+            or dict_obras.get(conv.get("obra_id"), {})
+            or {}
+        )
+
+        unidade_principal = str(
+            obra_principal.get("unidade")
+            or ""
+        ).strip()
+
+        if (
+            unidade_principal
+            and normalizar(unidade_principal) == alvo
+        ):
+            return {
+                "principal": True,
+                "placeholder": eh_obra_placeholder(
+                    obra_principal
+                ),
+                "obra_id": (
+                    ""
+                    if eh_obra_placeholder(
+                        obra_principal
+                    )
+                    else str(
+                        obra_principal.get("id")
+                        or conv.get("obra_id")
+                        or ""
+                    )
+                ),
+                "obra": (
+                    ""
+                    if eh_obra_placeholder(
+                        obra_principal
+                    )
+                    else str(
+                        obra_principal.get("nome")
+                        or ""
+                    )
+                ),
+                "unidade": unidade_principal,
+                "periodo": turno_da_convocacao(conv),
+            }
 
         return None
 
@@ -8712,10 +8808,10 @@ elif modo_campo:
         # apontamento retroativo/inclusão excepcional.
         unidades_com_equipe = sorted(
             {
-                str(serv.get("unidade") or "").strip()
+                str(unidade).strip()
                 for c in convocacoes_todas_unidades
-                for serv in _servicos_convocacao_mobile(c)
-                if str(serv.get("unidade") or "").strip()
+                for unidade in _unidades_convocacao_mobile(c)
+                if str(unidade).strip()
             }
         )
 
@@ -9945,6 +10041,23 @@ elif modo_campo:
             ):
                 st.session_state.pop(_chave, None)
 
+            st.session_state[
+                "_engm_avulsos_convocacao"
+            ] = []
+
+        if st.session_state.pop(
+            "_engm_limpar_manual_campos",
+            False,
+        ):
+            for _campo_manual in (
+                "engm_manual_nome",
+                "engm_manual_funcao",
+            ):
+                st.session_state.pop(
+                    _campo_manual,
+                    None,
+                )
+
         # Avisos de conflito/bloqueio sobrevivem ao rerun.
         # O sucesso é mostrado como toast pequeno antes da atualização.
         _feedback_conv = st.session_state.pop("_engm_conv_feedback", None)
@@ -10189,15 +10302,33 @@ elif modo_campo:
                 key="engm_conv_pessoas",
             )
 
+            if "_engm_avulsos_convocacao" not in st.session_state:
+                st.session_state["_engm_avulsos_convocacao"] = []
+
+            fila_avulsos = st.session_state[
+                "_engm_avulsos_convocacao"
+            ]
+
             nome_manual = ""
             tipo_manual = "Profissional"
             funcao_manual = ""
-            avulso_manual = False
+            avulso_manual = True
 
             with st.expander(
-                "Adicionar nome que não está na lista",
+                (
+                    "Adicionar pessoas que não estão na lista"
+                    + (
+                        f" · {len(fila_avulsos)} adicionada(s)"
+                        if fila_avulsos
+                        else ""
+                    )
+                ),
                 expanded=False,
             ):
+                st.caption(
+                    "Adicione quantos avulsos precisar e confirme toda a equipe de uma vez."
+                )
+
                 nome_manual = st.text_input(
                     "Nome",
                     key="engm_manual_nome",
@@ -10206,22 +10337,113 @@ elif modo_campo:
 
                 avulso_manual = st.checkbox(
                     "É avulso?",
+                    value=True,
                     key="engm_manual_avulso",
                 )
 
-                tipo_manual = st.selectbox(
-                    "Categoria da diária",
-                    [
-                        "Profissional",
-                        "Ajudante",
-                    ],
-                    key="engm_manual_tipo",
-                )
+                c_manual_1, c_manual_2 = st.columns(2)
 
-                funcao_manual = st.text_input(
-                    "Função (opcional)",
-                    key="engm_manual_funcao",
-                )
+                with c_manual_1:
+                    tipo_manual = st.selectbox(
+                        "Categoria da diária",
+                        [
+                            "Profissional",
+                            "Ajudante",
+                        ],
+                        key="engm_manual_tipo",
+                    )
+
+                with c_manual_2:
+                    funcao_manual = st.text_input(
+                        "Função (opcional)",
+                        key="engm_manual_funcao",
+                    )
+
+                if st.button(
+                    "Adicionar à convocação",
+                    use_container_width=True,
+                    key="engm_add_manual_fila",
+                ):
+                    nome_limpo = " ".join(
+                        nome_manual.strip().split()
+                    )
+
+                    if not nome_limpo:
+                        st.warning(
+                            "Digite o nome da pessoa."
+                        )
+                    else:
+                        ja_na_fila = any(
+                            normalizar(
+                                item.get("nome")
+                                or ""
+                            )
+                            == normalizar(nome_limpo)
+                            for item in fila_avulsos
+                        )
+
+                        if ja_na_fila:
+                            st.warning(
+                                "Essa pessoa já foi adicionada à convocação."
+                            )
+                        else:
+                            fila_avulsos.append({
+                                "nome": nome_limpo,
+                                "tipo": tipo_manual,
+                                "funcao": funcao_manual.strip(),
+                                "avulso": bool(
+                                    avulso_manual
+                                ),
+                            })
+
+                            st.session_state[
+                                "_engm_avulsos_convocacao"
+                            ] = fila_avulsos
+
+                            # Limpa os campos no próximo rerun.
+                            st.session_state[
+                                "_engm_limpar_manual_campos"
+                            ] = True
+                            st.rerun()
+
+                if fila_avulsos:
+                    st.markdown("**Adicionados à convocação**")
+
+                    for idx, pessoa_fila in enumerate(
+                        list(fila_avulsos)
+                    ):
+                        c_nome, c_remover = st.columns(
+                            [5, 1]
+                        )
+
+                        with c_nome:
+                            sufixo_avulso = (
+                                " · Avulso"
+                                if pessoa_fila.get(
+                                    "avulso"
+                                )
+                                else ""
+                            )
+                            st.caption(
+                                f"{pessoa_fila.get('nome')} · "
+                                f"{pessoa_fila.get('tipo')}"
+                                f"{sufixo_avulso}"
+                            )
+
+                        with c_remover:
+                            if st.button(
+                                "×",
+                                key=(
+                                    "engm_remover_manual_"
+                                    f"{idx}"
+                                ),
+                                help="Remover",
+                            ):
+                                fila_avulsos.pop(idx)
+                                st.session_state[
+                                    "_engm_avulsos_convocacao"
+                                ] = fila_avulsos
+                                st.rerun()
 
             if st.button(
                 "Confirmar convocação",
@@ -10231,6 +10453,7 @@ elif modo_campo:
             ):
                 if (
                     not equipe_selecionada
+                    and not fila_avulsos
                     and not nome_manual.strip()
                 ):
                     st.warning("Selecione pelo menos uma pessoa.")
@@ -10279,14 +10502,60 @@ elif modo_campo:
                                     )
                                     pessoas.append((c_id, nome_existente))
 
+                                manuais_processar = [
+                                    dict(item)
+                                    for item in fila_avulsos
+                                ]
+
+                                # Se o usuário digitou um último nome e clicou
+                                # direto em "Confirmar convocação", ele também
+                                # entra sem obrigar o clique "Adicionar".
                                 if nome_manual.strip():
-                                    c_id_manual, colab_manual, msg_manual = (
-                                        criar_ou_obter_colaborador_manual(
-                                            nome_manual,
-                                            tipo_manual,
-                                            funcao_manual,
-                                            avulso=avulso_manual,
+                                    nome_digitado = " ".join(
+                                        nome_manual.strip().split()
+                                    )
+
+                                    if not any(
+                                        normalizar(
+                                            item.get("nome")
+                                            or ""
                                         )
+                                        == normalizar(
+                                            nome_digitado
+                                        )
+                                        for item in manuais_processar
+                                    ):
+                                        manuais_processar.append({
+                                            "nome": nome_digitado,
+                                            "tipo": tipo_manual,
+                                            "funcao": funcao_manual.strip(),
+                                            "avulso": bool(
+                                                avulso_manual
+                                            ),
+                                        })
+
+                                for pessoa_manual in manuais_processar:
+                                    nome_pessoa_manual = str(
+                                        pessoa_manual.get("nome")
+                                        or ""
+                                    ).strip()
+
+                                    if not nome_pessoa_manual:
+                                        continue
+
+                                    (
+                                        c_id_manual,
+                                        colab_manual,
+                                        msg_manual,
+                                    ) = criar_ou_obter_colaborador_manual(
+                                        nome_pessoa_manual,
+                                        pessoa_manual.get("tipo")
+                                        or "Profissional",
+                                        pessoa_manual.get("funcao")
+                                        or "",
+                                        avulso=bool(
+                                            pessoa_manual.get("avulso")
+                                        ),
                                     )
 
                                     if c_id_manual:
@@ -10294,15 +10563,21 @@ elif modo_campo:
                                             (
                                                 c_id_manual,
                                                 str(
-                                                    colab_manual.get("nome")
-                                                    or nome_manual
+                                                    (
+                                                        colab_manual
+                                                        or {}
+                                                    ).get("nome")
+                                                    or nome_pessoa_manual
                                                 ),
                                             )
                                         )
                                     else:
                                         avisos.append(
                                             msg_manual
-                                            or f"{nome_manual}: não foi possível cadastrar."
+                                            or (
+                                                f"{nome_pessoa_manual}: "
+                                                "não foi possível cadastrar."
+                                            )
                                         )
 
                                 pessoas_unicas = []
@@ -10339,6 +10614,9 @@ elif modo_campo:
                                         }
 
                                     st.session_state["_engm_reset_convocacao"] = True
+                                    st.session_state[
+                                        "_engm_avulsos_convocacao"
+                                    ] = []
                                     st.session_state[
                                         "_engm_success_message"
                                     ] = (
