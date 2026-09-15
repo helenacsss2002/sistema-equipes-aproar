@@ -7497,7 +7497,6 @@ def _render_login_aproar(
 
     st.html("""
     <style>
-    /* Login ocupa a tela sem sidebar/chrome visual do Streamlit. */
     [data-testid="stSidebar"],
     [data-testid="collapsedControl"],
     [data-testid="stToolbar"],
@@ -7523,16 +7522,21 @@ def _render_login_aproar(
     [data-testid="stMainBlockContainer"],
     main .block-container{
         max-width:520px !important;
-        padding:86px 20px 40px !important;
+        padding:72px 20px 40px !important;
         margin:0 auto !important;
     }
 
-    .aproar-login-card{
-        background:#FFFFFF;
-        border:1px solid #E2E8F0;
-        border-radius:14px;
-        padding:30px 30px 27px;
-        box-shadow:0 12px 34px rgba(15,23,42,.08);
+    /* Card real do Streamlit — não depende de HTML envolvendo widgets */
+    div[class*="st-key-login_card_aproar"]{
+        background:#FFFFFF !important;
+        border:1px solid #E2E8F0 !important;
+        border-radius:14px !important;
+        padding:28px 28px 26px !important;
+        box-shadow:0 12px 34px rgba(15,23,42,.08) !important;
+    }
+
+    div[class*="st-key-login_card_aproar"] > div{
+        gap:.48rem !important;
     }
 
     .aproar-login-brand{
@@ -7547,7 +7551,7 @@ def _render_login_aproar(
     .aproar-login-sub{
         font-size:11px;
         color:#8290A6;
-        margin-bottom:21px;
+        margin-bottom:19px;
     }
 
     .aproar-login-label{
@@ -7555,12 +7559,12 @@ def _render_login_aproar(
         font-weight:800;
         color:#4B5B72;
         text-transform:uppercase;
-        margin-bottom:5px;
+        margin:0 0 4px;
         letter-spacing:.15px;
     }
 
     div[class*="st-key-login_perfil_aproar"]{
-        margin-bottom:1px !important;
+        margin:0 0 2px !important;
     }
 
     div[class*="st-key-login_perfil_aproar"] label{
@@ -7571,26 +7575,35 @@ def _render_login_aproar(
         min-height:45px !important;
         border-radius:8px !important;
         background:#FFFFFF !important;
-        border-color:#253041 !important;
+        border:1px solid #273445 !important;
         font-size:13px !important;
     }
 
     div[class*="st-key-login_senha_aproar"]{
-        margin-top:-2px !important;
+        margin:0 0 2px !important;
     }
 
     div[class*="st-key-login_senha_aproar"] label{
         display:none !important;
     }
 
-    div[class*="st-key-login_senha_aproar"] input{
-        min-height:45px !important;
+    div[class*="st-key-login_senha_aproar"] [data-baseweb="base-input"]{
         border-radius:8px !important;
+        background:#FFFFFF !important;
+        border:1px solid #D6DEE9 !important;
+        min-height:45px !important;
+    }
+
+    div[class*="st-key-login_senha_aproar"] input{
+        min-height:43px !important;
         font-size:14px !important;
+        background:#FFFFFF !important;
+        color:#172235 !important;
     }
 
     div[class*="st-key-btn_login_aproar"] button{
         min-height:44px !important;
+        width:100% !important;
         background:#2D63E7 !important;
         border-color:#2D63E7 !important;
         color:#FFFFFF !important;
@@ -7601,6 +7614,10 @@ def _render_login_aproar(
         margin-top:3px !important;
     }
 
+    div[class*="st-key-btn_login_aproar"] button *{
+        color:#FFFFFF !important;
+    }
+
     div[class*="st-key-btn_login_aproar"] button:hover{
         background:#2557CF !important;
         border-color:#2557CF !important;
@@ -7609,12 +7626,18 @@ def _render_login_aproar(
     div[class*="st-key-btn_portal_supervisor"] button,
     div[class*="st-key-btn_somente_visualizar"] button{
         min-height:44px !important;
+        width:100% !important;
         border-radius:7px !important;
         background:#FFFFFF !important;
         color:#314562 !important;
         border:1px solid #DDE4ED !important;
         font-size:11.5px !important;
         font-weight:750 !important;
+    }
+
+    div[class*="st-key-btn_portal_supervisor"] button *,
+    div[class*="st-key-btn_somente_visualizar"] button *{
+        color:#314562 !important;
     }
 
     div[class*="st-key-btn_portal_supervisor"] button:hover,
@@ -7630,147 +7653,155 @@ def _render_login_aproar(
         border-radius:7px;
         padding:9px 11px;
         font-size:10.5px;
-        margin:7px 0 1px;
+        margin:6px 0 1px;
     }
 
     @media(max-width:560px){
         [data-testid="stMainBlockContainer"],
         main .block-container{
-            padding:38px 15px 30px !important;
+            padding:36px 14px 28px !important;
         }
 
-        .aproar-login-card{
-            padding:25px 21px 23px;
-            border-radius:12px;
+        div[class*="st-key-login_card_aproar"]{
+            padding:24px 20px 22px !important;
+            border-radius:12px !important;
         }
 
         .aproar-login-brand{
             font-size:25px;
         }
+
+        div[class*="st-key-login_botoes_secundarios"] [data-testid="stHorizontalBlock"]{
+            gap:.5rem !important;
+        }
     }
     </style>
     """)
 
-    st.markdown(
-        """
-        <div class="aproar-login-card">
+    with st.container(
+        key="login_card_aproar"
+    ):
+        st.markdown(
+            """
             <div class="aproar-login-brand">APROAR</div>
             <div class="aproar-login-sub">
                 GESTÃO DE EQUIPES · sistema operacional
             </div>
             <div class="aproar-login-label">ACESSO</div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    opcoes_acesso = [
-        "Controladoria",
-        "Financeiro",
-    ]
-
-    indice_acesso = (
-        opcoes_acesso.index(acesso_inicial)
-        if acesso_inicial in opcoes_acesso
-        else 0
-    )
-
-    perfil_login = st.selectbox(
-        "Acesso",
-        opcoes_acesso,
-        index=indice_acesso,
-        label_visibility="collapsed",
-        key="login_perfil_aproar",
-    )
-
-    st.markdown(
-        '<div class="aproar-login-label" style="margin-top:2px">SENHA</div>',
-        unsafe_allow_html=True,
-    )
-
-    senha_digitada = st.text_input(
-        "Senha",
-        type="password",
-        label_visibility="collapsed",
-        key="login_senha_aproar",
-    )
-
-    entrar = st.button(
-        "Entrar",
-        type="primary",
-        use_container_width=True,
-        key="btn_login_aproar",
-    )
-
-    erro_login = None
-
-    if entrar:
-        if perfil_login == "Controladoria":
-            if hmac.compare_digest(
-                str(senha_digitada),
-                SENHA_CONTROLADORIA,
-            ):
-                _limpar_acesso()
-                st.session_state[
-                    "edicao_liberada"
-                ] = True
-                st.session_state[
-                    "perfil_acesso"
-                ] = "controladoria"
-                st.query_params.clear()
-                st.rerun()
-            else:
-                erro_login = "Senha da Controladoria incorreta."
-
-        elif perfil_login == "Financeiro":
-            if hmac.compare_digest(
-                str(senha_digitada),
-                SENHA_FINANCEIRO,
-            ):
-                _limpar_acesso()
-                st.session_state[
-                    "financeiro_liberado"
-                ] = True
-                st.session_state[
-                    "perfil_acesso"
-                ] = "financeiro"
-                st.query_params.clear()
-                st.query_params[
-                    "financeiro"
-                ] = "1"
-                st.rerun()
-            else:
-                erro_login = "Senha do Financeiro incorreta."
-
-    if erro_login:
-        st.markdown(
-            f'<div class="aproar-login-error">{erro_login}</div>',
+            """,
             unsafe_allow_html=True,
         )
 
-    c_login_1, c_login_2 = st.columns(2)
+        opcoes_acesso = [
+            "Controladoria",
+            "Financeiro",
+        ]
 
-    with c_login_1:
-        if st.button(
-            "Portal do Supervisor",
+        indice_acesso = (
+            opcoes_acesso.index(acesso_inicial)
+            if acesso_inicial in opcoes_acesso
+            else 0
+        )
+
+        perfil_login = st.selectbox(
+            "Acesso",
+            opcoes_acesso,
+            index=indice_acesso,
+            label_visibility="collapsed",
+            key="login_perfil_aproar",
+        )
+
+        st.markdown(
+            '<div class="aproar-login-label">SENHA</div>',
+            unsafe_allow_html=True,
+        )
+
+        senha_digitada = st.text_input(
+            "Senha",
+            type="password",
+            label_visibility="collapsed",
+            key="login_senha_aproar",
+        )
+
+        entrar = st.button(
+            "Entrar",
+            type="primary",
             use_container_width=True,
-            key="btn_portal_supervisor",
-        ):
-            _ir_portal_supervisor()
-            st.rerun()
+            key="btn_login_aproar",
+        )
 
-    with c_login_2:
-        if st.button(
-            "Somente visualizar",
-            use_container_width=True,
-            key="btn_somente_visualizar",
-        ):
-            _ir_visualizacao()
-            st.rerun()
+        erro_login = None
 
-    st.markdown(
-        "</div>",
-        unsafe_allow_html=True,
-    )
+        if entrar:
+            if perfil_login == "Controladoria":
+                if hmac.compare_digest(
+                    str(senha_digitada),
+                    SENHA_CONTROLADORIA,
+                ):
+                    _limpar_acesso()
+                    st.session_state[
+                        "edicao_liberada"
+                    ] = True
+                    st.session_state[
+                        "perfil_acesso"
+                    ] = "controladoria"
+                    st.query_params.clear()
+                    st.rerun()
+                else:
+                    erro_login = (
+                        "Senha da Controladoria incorreta."
+                    )
+
+            elif perfil_login == "Financeiro":
+                if hmac.compare_digest(
+                    str(senha_digitada),
+                    SENHA_FINANCEIRO,
+                ):
+                    _limpar_acesso()
+                    st.session_state[
+                        "financeiro_liberado"
+                    ] = True
+                    st.session_state[
+                        "perfil_acesso"
+                    ] = "financeiro"
+                    st.query_params.clear()
+                    st.query_params[
+                        "financeiro"
+                    ] = "1"
+                    st.rerun()
+                else:
+                    erro_login = (
+                        "Senha do Financeiro incorreta."
+                    )
+
+        if erro_login:
+            st.markdown(
+                f'<div class="aproar-login-error">{erro_login}</div>',
+                unsafe_allow_html=True,
+            )
+
+        with st.container(
+            key="login_botoes_secundarios"
+        ):
+            c_login_1, c_login_2 = st.columns(2)
+
+            with c_login_1:
+                if st.button(
+                    "Portal do Supervisor",
+                    use_container_width=True,
+                    key="btn_portal_supervisor",
+                ):
+                    _ir_portal_supervisor()
+                    st.rerun()
+
+            with c_login_2:
+                if st.button(
+                    "Somente visualizar",
+                    use_container_width=True,
+                    key="btn_somente_visualizar",
+                ):
+                    _ir_visualizacao()
+                    st.rerun()
 
 
 parametros_url = st.query_params
