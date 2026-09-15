@@ -7446,126 +7446,445 @@ def gerar_pdf_financeiro(extras, ausencias, data_inicio, data_fim, data_pagament
 
     return pdf.output(dest="S").encode("latin1")
 
-# --- ACESSO SIMPLES: VISUALIZAÇÃO LIVRE + UMA SENHA ÚNICA DE EDIÇÃO ---
-def _obter_senha_edicao():
-    """
-    Aceita qualquer um destes formatos no secrets.toml:
+# --- ACESSO POR PERFIL -------------------------------------------------------
+# Controladoria e Financeiro usam senha.
+# Portal do Supervisor e Somente visualizar não exigem senha.
 
-    SENHA_EDICAO = "sua_senha"
-
-    ou:
-
-    [acesso]
-    senha_edicao = "sua_senha"
-
-    Quem não informar a senha permanece em modo somente leitura.
-    """
-    senha = ""
-    try:
-        senha = str(st.secrets.get("SENHA_EDICAO", "") or "").strip()
-    except Exception:
-        senha = ""
-
-    if senha:
-        return senha
-
-    try:
-        bloco = st.secrets.get("acesso", {})
-        senha = str(bloco.get("senha_edicao", "") or "").strip()
-    except Exception:
-        senha = ""
-    return senha
+SENHA_CONTROLADORIA = "aproaradmin"
+SENHA_FINANCEIRO = "financeiro"
 
 
 def _edicao_liberada():
-    return bool(st.session_state.get("edicao_liberada", False))
+    return bool(
+        st.session_state.get(
+            "edicao_liberada",
+            False,
+        )
+    )
 
 
-def _render_desbloqueio_edicao():
-    """Mostra um acesso discreto para quem possui a senha única de edição."""
-    senha_configurada = _obter_senha_edicao()
-    with st.expander("🔐 Tenho acesso para editar", expanded=False):
-        if not senha_configurada:
-            st.info("A senha de edição ainda não foi configurada nos Secrets. O sistema está em modo somente leitura.")
-            st.code('SENHA_EDICAO = "sua_senha"', language="toml")
-            return
+def _financeiro_liberado():
+    return bool(
+        st.session_state.get(
+            "financeiro_liberado",
+            False,
+        )
+    )
 
-        st.caption("Digite a senha de edição. Não é necessário usuário individual.")
-        with st.form("form_desbloquear_edicao", clear_on_submit=True):
-            senha_digitada = st.text_input("Senha de edição", type="password")
-            liberar = st.form_submit_button("LIBERAR EDIÇÃO", type="primary", use_container_width=True)
 
-        if liberar:
-            if hmac.compare_digest(str(senha_digitada), str(senha_configurada)):
-                st.session_state["edicao_liberada"] = True
-                st.success("Edição liberada.")
+def _limpar_acesso():
+    st.session_state["edicao_liberada"] = False
+    st.session_state["financeiro_liberado"] = False
+    st.session_state.pop("perfil_acesso", None)
+
+
+def _ir_portal_supervisor():
+    _limpar_acesso()
+    st.query_params.clear()
+    st.query_params["eng"] = "1"
+
+
+def _ir_visualizacao():
+    _limpar_acesso()
+    st.query_params.clear()
+    st.query_params["view"] = "1"
+
+
+def _render_login_aproar(
+    acesso_inicial="Controladoria",
+):
+    """Tela inicial de acesso da Gestão de Equipes."""
+
+    st.html("""
+    <style>
+    /* Login ocupa a tela sem sidebar/chrome visual do Streamlit. */
+    [data-testid="stSidebar"],
+    [data-testid="collapsedControl"],
+    [data-testid="stToolbar"],
+    [data-testid="stDecoration"],
+    #MainMenu,
+    footer{
+        display:none !important;
+    }
+
+    [data-testid="stHeader"]{
+        display:none !important;
+        height:0 !important;
+    }
+
+    html,
+    body,
+    .stApp,
+    [data-testid="stAppViewContainer"],
+    [data-testid="stMain"]{
+        background:#F4F7FC !important;
+    }
+
+    [data-testid="stMainBlockContainer"],
+    main .block-container{
+        max-width:520px !important;
+        padding:86px 20px 40px !important;
+        margin:0 auto !important;
+    }
+
+    .aproar-login-card{
+        background:#FFFFFF;
+        border:1px solid #E2E8F0;
+        border-radius:14px;
+        padding:30px 30px 27px;
+        box-shadow:0 12px 34px rgba(15,23,42,.08);
+    }
+
+    .aproar-login-brand{
+        font-size:27px;
+        line-height:1;
+        font-weight:850;
+        letter-spacing:-.8px;
+        color:#102442;
+        margin:0 0 7px;
+    }
+
+    .aproar-login-sub{
+        font-size:11px;
+        color:#8290A6;
+        margin-bottom:21px;
+    }
+
+    .aproar-login-label{
+        font-size:9px;
+        font-weight:800;
+        color:#4B5B72;
+        text-transform:uppercase;
+        margin-bottom:5px;
+        letter-spacing:.15px;
+    }
+
+    div[class*="st-key-login_perfil_aproar"]{
+        margin-bottom:1px !important;
+    }
+
+    div[class*="st-key-login_perfil_aproar"] label{
+        display:none !important;
+    }
+
+    div[class*="st-key-login_perfil_aproar"] div[data-baseweb="select"] > div{
+        min-height:45px !important;
+        border-radius:8px !important;
+        background:#FFFFFF !important;
+        border-color:#253041 !important;
+        font-size:13px !important;
+    }
+
+    div[class*="st-key-login_senha_aproar"]{
+        margin-top:-2px !important;
+    }
+
+    div[class*="st-key-login_senha_aproar"] label{
+        display:none !important;
+    }
+
+    div[class*="st-key-login_senha_aproar"] input{
+        min-height:45px !important;
+        border-radius:8px !important;
+        font-size:14px !important;
+    }
+
+    div[class*="st-key-btn_login_aproar"] button{
+        min-height:44px !important;
+        background:#2D63E7 !important;
+        border-color:#2D63E7 !important;
+        color:#FFFFFF !important;
+        border-radius:7px !important;
+        font-size:12px !important;
+        font-weight:800 !important;
+        text-transform:uppercase !important;
+        margin-top:3px !important;
+    }
+
+    div[class*="st-key-btn_login_aproar"] button:hover{
+        background:#2557CF !important;
+        border-color:#2557CF !important;
+    }
+
+    div[class*="st-key-btn_portal_supervisor"] button,
+    div[class*="st-key-btn_somente_visualizar"] button{
+        min-height:44px !important;
+        border-radius:7px !important;
+        background:#FFFFFF !important;
+        color:#314562 !important;
+        border:1px solid #DDE4ED !important;
+        font-size:11.5px !important;
+        font-weight:750 !important;
+    }
+
+    div[class*="st-key-btn_portal_supervisor"] button:hover,
+    div[class*="st-key-btn_somente_visualizar"] button:hover{
+        border-color:#AEBBD0 !important;
+        background:#F8FAFD !important;
+    }
+
+    .aproar-login-error{
+        color:#B42337;
+        background:#FFF2F4;
+        border:1px solid #FFD7DD;
+        border-radius:7px;
+        padding:9px 11px;
+        font-size:10.5px;
+        margin:7px 0 1px;
+    }
+
+    @media(max-width:560px){
+        [data-testid="stMainBlockContainer"],
+        main .block-container{
+            padding:38px 15px 30px !important;
+        }
+
+        .aproar-login-card{
+            padding:25px 21px 23px;
+            border-radius:12px;
+        }
+
+        .aproar-login-brand{
+            font-size:25px;
+        }
+    }
+    </style>
+    """)
+
+    st.markdown(
+        """
+        <div class="aproar-login-card">
+            <div class="aproar-login-brand">APROAR</div>
+            <div class="aproar-login-sub">
+                GESTÃO DE EQUIPES · sistema operacional
+            </div>
+            <div class="aproar-login-label">ACESSO</div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    opcoes_acesso = [
+        "Controladoria",
+        "Financeiro",
+    ]
+
+    indice_acesso = (
+        opcoes_acesso.index(acesso_inicial)
+        if acesso_inicial in opcoes_acesso
+        else 0
+    )
+
+    perfil_login = st.selectbox(
+        "Acesso",
+        opcoes_acesso,
+        index=indice_acesso,
+        label_visibility="collapsed",
+        key="login_perfil_aproar",
+    )
+
+    st.markdown(
+        '<div class="aproar-login-label" style="margin-top:2px">SENHA</div>',
+        unsafe_allow_html=True,
+    )
+
+    senha_digitada = st.text_input(
+        "Senha",
+        type="password",
+        label_visibility="collapsed",
+        key="login_senha_aproar",
+    )
+
+    entrar = st.button(
+        "Entrar",
+        type="primary",
+        use_container_width=True,
+        key="btn_login_aproar",
+    )
+
+    erro_login = None
+
+    if entrar:
+        if perfil_login == "Controladoria":
+            if hmac.compare_digest(
+                str(senha_digitada),
+                SENHA_CONTROLADORIA,
+            ):
+                _limpar_acesso()
+                st.session_state[
+                    "edicao_liberada"
+                ] = True
+                st.session_state[
+                    "perfil_acesso"
+                ] = "controladoria"
+                st.query_params.clear()
                 st.rerun()
             else:
-                st.error("Senha incorreta.")
+                erro_login = "Senha da Controladoria incorreta."
 
+        elif perfil_login == "Financeiro":
+            if hmac.compare_digest(
+                str(senha_digitada),
+                SENHA_FINANCEIRO,
+            ):
+                _limpar_acesso()
+                st.session_state[
+                    "financeiro_liberado"
+                ] = True
+                st.session_state[
+                    "perfil_acesso"
+                ] = "financeiro"
+                st.query_params.clear()
+                st.query_params[
+                    "financeiro"
+                ] = "1"
+                st.rerun()
+            else:
+                erro_login = "Senha do Financeiro incorreta."
 
-def _logout_disponivel():
-    """No novo modelo, 'sair' significa voltar ao modo somente leitura."""
-    if _edicao_liberada():
-        if st.button("🔒 BLOQUEAR EDIÇÃO", key="bloquear_edicao_topo"):
-            st.session_state["edicao_liberada"] = False
+    if erro_login:
+        st.markdown(
+            f'<div class="aproar-login-error">{erro_login}</div>',
+            unsafe_allow_html=True,
+        )
+
+    c_login_1, c_login_2 = st.columns(2)
+
+    with c_login_1:
+        if st.button(
+            "Portal do Supervisor",
+            use_container_width=True,
+            key="btn_portal_supervisor",
+        ):
+            _ir_portal_supervisor()
             st.rerun()
 
+    with c_login_2:
+        if st.button(
+            "Somente visualizar",
+            use_container_width=True,
+            key="btn_somente_visualizar",
+        ):
+            _ir_visualizacao()
+            st.rerun()
+
+    st.markdown(
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+
 parametros_url = st.query_params
-modo_campo_solicitado = "eng" in parametros_url or parametros_url.get("modo") in ["campo", "eng"]
+
+modo_campo_solicitado = (
+    "eng" in parametros_url
+    or parametros_url.get("modo") in [
+        "campo",
+        "eng",
+        "supervisor",
+    ]
+)
+
 modo_financeiro_solicitado = (
     "financeiro" in parametros_url
     or "fin" in parametros_url
-    or parametros_url.get("modo") in ["financeiro", "fin"]
+    or parametros_url.get("modo") in [
+        "financeiro",
+        "fin",
+    ]
 )
-modo_visualizador_solicitado = "view" in parametros_url or parametros_url.get("modo") in ["visualizador", "view"]
+
+modo_visualizador_solicitado = (
+    "view" in parametros_url
+    or parametros_url.get("modo") in [
+        "visualizador",
+        "view",
+        "consulta",
+    ]
+)
 
 edicao_liberada = _edicao_liberada()
+financeiro_liberado = _financeiro_liberado()
 
-# REGRA DE ACESSO:
-# 1) ?eng é SEMPRE o Portal do Engenheiro e mantém as funções operacionais.
-# 2) ?financeiro é SEMPRE o Portal Financeiro.
-# 3) A URL administrativa normal abre em visualização para quem não informou a senha.
-# 4) A mesma URL administrativa libera o painel completo após a senha de edição.
-# 5) ?view permanece apenas como atalho opcional para consulta, sem interferir no ?eng.
+# Regras:
+# - ?eng / Portal do Supervisor: sem senha.
+# - ?view / Somente visualizar: sem senha.
+# - Financeiro: senha "financeiro".
+# - Controladoria/Admin: senha "aproaradmin".
+# - A URL raiz, sem sessão autenticada, abre o login.
 if modo_campo_solicitado:
+    modo_login = False
     modo_campo = True
     modo_financeiro = False
     modo_visualizador = False
-elif modo_financeiro_solicitado:
-    modo_campo = False
-    modo_financeiro = True
-    modo_visualizador = False
+
 elif modo_visualizador_solicitado:
+    modo_login = False
     modo_campo = False
     modo_financeiro = False
     modo_visualizador = True
-elif not edicao_liberada:
-    modo_campo = False
-    modo_financeiro = False
-    modo_visualizador = True
-else:
+
+elif modo_financeiro_solicitado:
+    if financeiro_liberado:
+        modo_login = False
+        modo_campo = False
+        modo_financeiro = True
+        modo_visualizador = False
+    else:
+        modo_login = True
+        modo_campo = False
+        modo_financeiro = False
+        modo_visualizador = False
+
+elif edicao_liberada:
+    modo_login = False
     modo_campo = False
     modo_financeiro = False
     modo_visualizador = False
 
-if modo_visualizador:
+else:
+    modo_login = True
+    modo_campo = False
+    modo_financeiro = False
+    modo_visualizador = False
+
+if modo_login:
+    _render_login_aproar(
+        acesso_inicial=(
+            "Financeiro"
+            if modo_financeiro_solicitado
+            else "Controladoria"
+        )
+    )
+
+elif modo_visualizador:
     st.markdown("## 👁️ Painel Administrativo — Visualização")
-    st.caption("Dashboard, Relatórios e Indicadores ficam disponíveis para consulta. Use a senha de edição para liberar o painel administrativo completo.")
-    _render_desbloqueio_edicao()
+    st.caption(
+        "Dashboard, Relatórios e Indicadores disponíveis para consulta."
+    )
     secao_view = st.radio(
         "Navegação",
-        ["🎛️ DASHBOARD", "📊 RELATÓRIOS", "📈 INDICADORES"],
+        [
+            "🎛️ DASHBOARD",
+            "📊 RELATÓRIOS",
+            "📈 INDICADORES",
+        ],
         horizontal=True,
         label_visibility="collapsed",
         key="nav_visualizador_geral",
     )
+
     if secao_view == "🎛️ DASHBOARD":
-        render_dashboard_consulta("view_dash")
+        render_dashboard_consulta(
+            "view_dash"
+        )
     elif secao_view == "📊 RELATÓRIOS":
-        render_relatorio_visualizador("view_rel")
+        render_relatorio_visualizador(
+            "view_rel"
+        )
     else:
-        render_indicadores_cumprimento("view_ind")
+        render_indicadores_cumprimento(
+            "view_ind"
+        )
 
 elif modo_campo:
     # =====================================================================
@@ -10984,7 +11303,22 @@ elif modo_financeiro:
     # ==========================================
     # PORTAL FINANCEIRO (?financeiro)
     # ==========================================
-    st.markdown("### 💰 ACESSO FINANCEIRO")
+    c_fin_titulo, c_fin_sair = st.columns(
+        [5, 1]
+    )
+
+    with c_fin_titulo:
+        st.markdown("### 💰 ACESSO FINANCEIRO")
+
+    with c_fin_sair:
+        if st.button(
+            "Sair",
+            key="btn_sair_financeiro",
+            use_container_width=True,
+        ):
+            _limpar_acesso()
+            st.query_params.clear()
+            st.rerun()
     st.caption("Conferência semanal de extras, faltas e atestados. As extras são fechadas em ciclos de terça-feira a segunda-feira.")
 
     ciclos_fin = listar_ciclos_financeiros(26)
@@ -11153,9 +11487,14 @@ else:
         _nav_admin("Configurações", "⚙️ CONFIGURAÇÕES", "btn_nav_cfg_ui4")
 
         st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
-        st.caption("Modo de edição ativo")
-        if st.button("Bloquear edição", key="bloquear_edicao_sidebar_ui4", use_container_width=True):
-            st.session_state["edicao_liberada"] = False
+        st.caption("Controladoria")
+        if st.button(
+            "Sair",
+            key="bloquear_edicao_sidebar_ui4",
+            use_container_width=True,
+        ):
+            _limpar_acesso()
+            st.query_params.clear()
             st.rerun()
 
     menu_escolhido = st.session_state.menu_ativo
