@@ -2622,6 +2622,152 @@ def limpar_cache_convocacoes():
             pass
 
 
+def limpar_cache_colaboradores():
+    """Limpa somente a base de colaboradores, sem tocar em obras/convocações."""
+    for nome_funcao in (
+        "buscar_colaboradores",
+        "buscar_colaboradores_todos",
+    ):
+        funcao = globals().get(nome_funcao)
+        if funcao is not None and hasattr(funcao, "clear"):
+            try:
+                funcao.clear()
+            except Exception:
+                pass
+
+
+def _atualizar_colaborador_admin_rapido(
+    colaborador_id,
+    campos,
+    acao,
+    antes=None,
+):
+    """
+    UPDATE administrativo rápido.
+
+    No Neon, atualização + auditoria usam a MESMA conexão/transação.
+    Isso reduz bastante o tempo percebido para excluir ou alterar moradia.
+    """
+    campos_permitidos = {
+        "ativo",
+        "local_moradia",
+        "nome",
+        "funcao",
+        "valor_diaria",
+    }
+
+    payload = {
+        k: v
+        for k, v in dict(campos or {}).items()
+        if k in campos_permitidos
+    }
+
+    if not payload:
+        return False
+
+    if (
+        DB_BACKEND == "NEON"
+        and hasattr(supabase, "_connect")
+    ):
+        try:
+            with supabase._connect() as conn:
+                with conn.cursor() as cur:
+                    atribuicoes = ", ".join(
+                        f"{campo} = %s"
+                        for campo in payload.keys()
+                    )
+
+                    valores = list(payload.values())
+                    valores.append(colaborador_id)
+
+                    cur.execute(
+                        f"""
+                        UPDATE colaboradores
+                           SET {atribuicoes},
+                               atualizado_em = NOW()
+                         WHERE id = %s
+                        """,
+                        tuple(valores),
+                    )
+
+                    # Auditoria sem abrir uma segunda conexão.
+                    # SAVEPOINT impede que uma falha de auditoria cancele o UPDATE.
+                    try:
+                        cur.execute("SAVEPOINT audit_colab_inline")
+                        cur.execute(
+                            """
+                            INSERT INTO auditoria
+                                (entidade, entidade_id, acao, usuario,
+                                 antes, depois, contexto)
+                            VALUES
+                                (%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s::jsonb)
+                            """,
+                            (
+                                "colaboradores",
+                                str(colaborador_id),
+                                str(acao),
+                                "ADMIN",
+                                (
+                                    _json_db(antes)
+                                    if antes is not None
+                                    else None
+                                ),
+                                _json_db(payload),
+                                _json_db({
+                                    "origem": "banco_funcionarios_inline"
+                                }),
+                            ),
+                        )
+                        cur.execute(
+                            "RELEASE SAVEPOINT audit_colab_inline"
+                        )
+                    except Exception:
+                        try:
+                            cur.execute(
+                                "ROLLBACK TO SAVEPOINT audit_colab_inline"
+                            )
+                            cur.execute(
+                                "RELEASE SAVEPOINT audit_colab_inline"
+                            )
+                        except Exception:
+                            pass
+
+                conn.commit()
+
+            limpar_cache_colaboradores()
+            return True
+
+        except Exception:
+            return False
+
+    # Fallback compatível com backend legado.
+    try:
+        (
+            supabase.table("colaboradores")
+            .update(payload)
+            .eq("id", colaborador_id)
+            .execute()
+        )
+
+        limpar_cache_colaboradores()
+
+        registrar_auditoria_prod(
+            "colaboradores",
+            colaborador_id,
+            acao,
+            "ADMIN",
+            antes=antes,
+            depois=payload,
+            contexto={
+                "origem": "banco_funcionarios_inline"
+            },
+        )
+        return True
+
+    except Exception:
+        return False
+
+
 # --- FUNÇÕES DE LIMPEZA E PADRONIZAÇÃO ---
 def identificar_unidade(nome_card):
     if not nome_card: return "GERAL"
@@ -14428,73 +14574,68 @@ else:
             if ativos_filtrados:
                 st.html("""
                 <style>
-                /* Banco de funcionários — edição inline */
-                div[class*="st-key-func_inline_row_"]{
-                    background:#FFFFFF;
-                    border:1px solid #E3E8EF;
-                    border-radius:8px;
-                    padding:6px 8px;
-                    margin-bottom:5px;
+                /* ======================================================
+                   BANCO DE FUNCIONÁRIOS — GRADE COMPACTA / ALINHADA
+                   ====================================================== */
+
+                div[class*="st-key-func_inline_header"]{
+                    background:#F7F9FC;
+                    border:1px solid #E1E7EF;
+                    border-radius:9px 9px 0 0;
+                    padding:8px 10px;
+                    margin-top:5px;
+                    margin-bottom:0;
                 }
 
+                div[class*="st-key-func_inline_header"] [data-testid="stHorizontalBlock"],
                 div[class*="st-key-func_inline_row_"] [data-testid="stHorizontalBlock"]{
                     align-items:center !important;
-                    gap:.45rem !important;
+                    gap:.55rem !important;
                 }
 
-                div[class*="st-key-func_inline_row_"] div[data-baseweb="select"] > div{
-                    min-height:36px !important;
-                    height:36px !important;
-                    border-radius:7px !important;
-                    font-size:11px !important;
-                }
-
-                div[class*="st-key-btn_inline_excluir_func_"] button{
-                    min-width:38px !important;
-                    width:38px !important;
-                    min-height:36px !important;
-                    height:36px !important;
-                    padding:0 !important;
-                    border-radius:8px !important;
-                    background:#FFF1F2 !important;
-                    border:1px solid #F8B4BE !important;
-                    color:#D92D20 !important;
-                    font-size:17px !important;
-                    box-shadow:none !important;
-                }
-
-                div[class*="st-key-btn_inline_excluir_func_"] button *{
-                    color:#D92D20 !important;
-                    -webkit-text-fill-color:#D92D20 !important;
-                }
-
-                div[class*="st-key-btn_inline_excluir_func_"] button:hover{
-                    background:#FEE2E2 !important;
-                    border-color:#F87171 !important;
-                }
-
-                .func-bank-head{
-                    display:grid;
-                    grid-template-columns:3.2fr 2.2fr 1.45fr 1.7fr .45fr;
-                    gap:.45rem;
-                    padding:7px 9px 6px;
-                    margin-top:4px;
-                    color:#748094;
-                    font-size:10px;
-                    font-weight:700;
+                .func-head-label{
+                    color:#64748B;
+                    font-size:9px;
+                    line-height:1;
+                    font-weight:800;
                     text-transform:uppercase;
-                    letter-spacing:.02em;
+                    letter-spacing:.035em;
+                    white-space:nowrap;
+                }
+
+                div[class*="st-key-func_inline_row_"]{
+                    background:#FFFFFF;
+                    border-left:1px solid #E1E7EF;
+                    border-right:1px solid #E1E7EF;
+                    border-bottom:1px solid #E7ECF2;
+                    padding:6px 10px;
+                    margin:0;
+                }
+
+                div[class*="st-key-func_inline_row_"]:last-of-type{
+                    border-radius:0 0 9px 9px;
+                }
+
+                div[class*="st-key-func_inline_row_"]:hover{
+                    background:#FAFCFF;
                 }
 
                 .func-inline-text{
-                    min-height:36px;
+                    height:36px;
                     display:flex;
                     align-items:center;
+                    min-width:0;
                     overflow:hidden;
                     white-space:nowrap;
                     text-overflow:ellipsis;
-                    color:#253247;
-                    font-size:11.5px;
+                    color:#27364D;
+                    font-size:11px;
+                    line-height:1.2;
+                }
+
+                .func-inline-name{
+                    font-weight:650;
+                    color:#172235;
                 }
 
                 .func-inline-value{
@@ -14502,192 +14643,330 @@ else:
                     color:#334155;
                 }
 
+                div[class*="st-key-func_inline_row_"] div[data-baseweb="select"] > div{
+                    min-height:36px !important;
+                    height:36px !important;
+                    border-radius:7px !important;
+                    border-color:#DCE3EC !important;
+                    background:#FFFFFF !important;
+                    font-size:10.5px !important;
+                    box-shadow:none !important;
+                }
+
+                div[class*="st-key-func_inline_row_"] div[data-baseweb="select"] span{
+                    font-size:10.5px !important;
+                }
+
+                div[class*="st-key-btn_inline_excluir_func_"]{
+                    display:flex !important;
+                    justify-content:center !important;
+                    align-items:center !important;
+                }
+
+                div[class*="st-key-btn_inline_excluir_func_"] button{
+                    width:34px !important;
+                    min-width:34px !important;
+                    height:34px !important;
+                    min-height:34px !important;
+                    padding:0 !important;
+                    border-radius:50% !important;
+                    background:#FFF2F3 !important;
+                    border:1px solid #F5C2C7 !important;
+                    color:#D92D20 !important;
+                    font-size:15px !important;
+                    line-height:1 !important;
+                    box-shadow:none !important;
+                }
+
+                div[class*="st-key-btn_inline_excluir_func_"] button:hover{
+                    background:#FFE4E6 !important;
+                    border-color:#F28B95 !important;
+                    transform:none !important;
+                }
+
+                div[class*="st-key-btn_inline_excluir_func_"] button *{
+                    color:#D92D20 !important;
+                    -webkit-text-fill-color:#D92D20 !important;
+                }
+
+                .func-bank-note{
+                    display:flex;
+                    align-items:center;
+                    gap:7px;
+                    margin:4px 0 8px;
+                    color:#8491A5;
+                    font-size:10px;
+                }
+
+                .func-delete-dot{
+                    display:inline-flex;
+                    align-items:center;
+                    justify-content:center;
+                    width:17px;
+                    height:17px;
+                    border-radius:50%;
+                    background:#FFE4E6;
+                    color:#D92D20;
+                    font-size:10px;
+                    font-weight:800;
+                }
+
                 @media(max-width:900px){
-                    .func-bank-head{
-                        display:none;
+                    div[class*="st-key-func_inline_header"]{
+                        display:none !important;
+                    }
+
+                    div[class*="st-key-func_inline_row_"]{
+                        border:1px solid #E1E7EF;
+                        border-radius:9px !important;
+                        margin-bottom:6px;
                     }
                 }
                 </style>
                 """)
 
-                st.caption(
-                    "A moradia é salva automaticamente ao selecionar. "
-                    "O símbolo ⛔ retira o funcionário da base operacional sem apagar o histórico."
-                )
-
-                # Evita renderizar dezenas de selectboxes de uma vez.
-                # Mantém a tela rápida mesmo com uma base grande.
-                ativos_ordenados = sorted(
-                    ativos_filtrados,
-                    key=lambda x: normalizar(
-                        x.get("nome")
-                    ),
-                )
-
-                TAMANHO_PAGINA_FUNC = 25
-                total_paginas_func = max(
-                    1,
-                    (
-                        len(ativos_ordenados)
-                        + TAMANHO_PAGINA_FUNC
-                        - 1
-                    )
-                    // TAMANHO_PAGINA_FUNC,
-                )
-
-                if total_paginas_func > 1:
-                    c_qtd_func, c_pag_func = st.columns(
-                        [3, 1]
-                    )
-
-                    with c_qtd_func:
-                        st.caption(
-                            f"{len(ativos_ordenados)} funcionário(s) encontrado(s)"
-                        )
-
-                    with c_pag_func:
-                        pagina_func = st.selectbox(
-                            "Página",
-                            list(
-                                range(
-                                    1,
-                                    total_paginas_func + 1,
-                                )
-                            ),
-                            key="pagina_banco_funcionarios",
-                        )
-                else:
-                    pagina_func = 1
-                    st.caption(
-                        f"{len(ativos_ordenados)} funcionário(s) encontrado(s)"
-                    )
-
-                inicio_func = (
-                    (pagina_func - 1)
-                    * TAMANHO_PAGINA_FUNC
-                )
-                fim_func = (
-                    inicio_func
-                    + TAMANHO_PAGINA_FUNC
-                )
-
-                ativos_pagina = ativos_ordenados[
-                    inicio_func:fim_func
-                ]
-
                 st.markdown(
                     """
-                    <div class="func-bank-head">
-                        <div>Nome</div>
-                        <div>Função</div>
-                        <div>Valor / custo</div>
-                        <div>Moradia</div>
-                        <div></div>
+                    <div class="func-bank-note">
+                        <span>A moradia salva automaticamente.</span>
+                        <span class="func-delete-dot">−</span>
+                        <span>retira o funcionário sem apagar o histórico.</span>
                     </div>
                     """,
                     unsafe_allow_html=True,
                 )
 
-                opcoes_moradia_inline = [
-                    "Não informado",
-                    *MORADIAS_COLAB,
-                ]
+                # Fragmento = excluir/trocar moradia não reroda Configurações inteira.
+                _decorador_fragmento_func = getattr(
+                    st,
+                    "fragment",
+                    lambda func: func,
+                )
 
-                for c in ativos_pagina:
-                    colab_id_inline = c.get("id")
-                    nome_inline = str(
-                        c.get("nome")
-                        or ""
-                    )
-                    funcao_inline = str(
-                        c.get("funcao")
-                        or "-"
-                    )
-                    valor_inline = formatar_reais(
-                        obter_valor_diaria_colaborador(
-                            c
+                @_decorador_fragmento_func
+                def _render_banco_funcionarios_inline(
+                    lista_filtrada,
+                ):
+                    # IDs removidos na sessão somem imediatamente da grade,
+                    # mesmo antes de qualquer rerun completo da página.
+                    excluidos_sessao = set(
+                        st.session_state.get(
+                            "_func_inline_excluidos",
+                            [],
                         )
                     )
 
-                    moradia_db = str(
-                        c.get("local_moradia")
-                        or ""
-                    ).strip()
+                    lista_visivel = [
+                        c
+                        for c in lista_filtrada
+                        if str(c.get("id"))
+                        not in excluidos_sessao
+                    ]
 
-                    moradia_atual_inline = (
-                        moradia_db
-                        if moradia_db
-                        in MORADIAS_COLAB
-                        else "Não informado"
+                    ativos_ordenados = sorted(
+                        lista_visivel,
+                        key=lambda x: normalizar(
+                            x.get("nome")
+                        ),
                     )
 
+                    # Menos widgets simultâneos = resposta muito mais rápida.
+                    TAMANHO_PAGINA_FUNC = 12
+
+                    total_paginas_func = max(
+                        1,
+                        (
+                            len(ativos_ordenados)
+                            + TAMANHO_PAGINA_FUNC
+                            - 1
+                        )
+                        // TAMANHO_PAGINA_FUNC,
+                    )
+
+                    c_info_func, c_pag_func = st.columns(
+                        [5.3, 1],
+                        vertical_alignment="bottom",
+                    )
+
+                    with c_info_func:
+                        st.caption(
+                            f"{len(ativos_ordenados)} funcionário(s) encontrado(s)"
+                        )
+
+                    with c_pag_func:
+                        if total_paginas_func > 1:
+                            pagina_func = st.selectbox(
+                                "Página",
+                                list(
+                                    range(
+                                        1,
+                                        total_paginas_func + 1,
+                                    )
+                                ),
+                                key="pagina_banco_funcionarios",
+                            )
+                        else:
+                            pagina_func = 1
+
+                    # Se exclusões reduzirem o número de páginas.
+                    pagina_func = min(
+                        int(pagina_func),
+                        total_paginas_func,
+                    )
+
+                    inicio_func = (
+                        (pagina_func - 1)
+                        * TAMANHO_PAGINA_FUNC
+                    )
+                    fim_func = (
+                        inicio_func
+                        + TAMANHO_PAGINA_FUNC
+                    )
+
+                    ativos_pagina = ativos_ordenados[
+                        inicio_func:fim_func
+                    ]
+
+                    # Cabeçalho usa o MESMO sistema de colunas das linhas.
                     with st.container(
-                        key=(
-                            "func_inline_row_"
-                            f"{colab_id_inline}"
-                        )
+                        key="func_inline_header"
                     ):
-                        r_nome, r_funcao, r_valor, r_moradia, r_excluir = st.columns(
-                            [3.2, 2.2, 1.45, 1.7, .45],
+                        h_nome, h_funcao, h_valor, h_moradia, h_excluir = st.columns(
+                            [3.15, 2.15, 1.35, 1.75, .42],
                             vertical_alignment="center",
                         )
 
-                        with r_nome:
+                        with h_nome:
                             st.markdown(
-                                (
-                                    '<div class="func-inline-text" '
-                                    f'title="{_html.escape(nome_inline)}">'
-                                    f'{_html.escape(nome_inline)}'
-                                    '</div>'
-                                ),
+                                '<div class="func-head-label">Nome</div>',
+                                unsafe_allow_html=True,
+                            )
+                        with h_funcao:
+                            st.markdown(
+                                '<div class="func-head-label">Função</div>',
+                                unsafe_allow_html=True,
+                            )
+                        with h_valor:
+                            st.markdown(
+                                '<div class="func-head-label">Valor / custo</div>',
+                                unsafe_allow_html=True,
+                            )
+                        with h_moradia:
+                            st.markdown(
+                                '<div class="func-head-label">Moradia</div>',
+                                unsafe_allow_html=True,
+                            )
+                        with h_excluir:
+                            st.markdown(
+                                '<div class="func-head-label"></div>',
                                 unsafe_allow_html=True,
                             )
 
-                        with r_funcao:
-                            st.markdown(
-                                (
-                                    '<div class="func-inline-text" '
-                                    f'title="{_html.escape(funcao_inline)}">'
-                                    f'{_html.escape(funcao_inline)}'
-                                    '</div>'
-                                ),
-                                unsafe_allow_html=True,
+                    opcoes_moradia_inline = [
+                        "Não informado",
+                        *MORADIAS_COLAB,
+                    ]
+
+                    for c in ativos_pagina:
+                        colab_id_inline = c.get("id")
+                        nome_inline = str(
+                            c.get("nome")
+                            or ""
+                        )
+                        funcao_inline = str(
+                            c.get("funcao")
+                            or "-"
+                        )
+                        valor_inline = formatar_reais(
+                            obter_valor_diaria_colaborador(
+                                c
+                            )
+                        )
+
+                        moradia_db = str(
+                            c.get("local_moradia")
+                            or ""
+                        ).strip()
+
+                        moradia_atual_inline = (
+                            moradia_db
+                            if moradia_db in MORADIAS_COLAB
+                            else "Não informado"
+                        )
+
+                        with st.container(
+                            key=(
+                                "func_inline_row_"
+                                f"{colab_id_inline}"
+                            )
+                        ):
+                            (
+                                r_nome,
+                                r_funcao,
+                                r_valor,
+                                r_moradia,
+                                r_excluir,
+                            ) = st.columns(
+                                [3.15, 2.15, 1.35, 1.75, .42],
+                                vertical_alignment="center",
                             )
 
-                        with r_valor:
-                            st.markdown(
-                                (
-                                    '<div class="func-inline-text '
-                                    'func-inline-value">'
-                                    f'{_html.escape(valor_inline)}'
-                                    '</div>'
-                                ),
-                                unsafe_allow_html=True,
-                            )
-
-                        with r_moradia:
-                            idx_moradia_inline = (
-                                opcoes_moradia_inline.index(
-                                    moradia_atual_inline
+                            with r_nome:
+                                st.markdown(
+                                    (
+                                        '<div class="func-inline-text '
+                                        'func-inline-name" '
+                                        f'title="{_html.escape(nome_inline)}">'
+                                        f'{_html.escape(nome_inline)}'
+                                        '</div>'
+                                    ),
+                                    unsafe_allow_html=True,
                                 )
-                            )
 
-                            moradia_nova_inline = st.selectbox(
-                                "Moradia",
-                                opcoes_moradia_inline,
-                                index=idx_moradia_inline,
-                                label_visibility="collapsed",
-                                key=(
-                                    "moradia_inline_func_"
-                                    f"{colab_id_inline}"
-                                ),
-                            )
+                            with r_funcao:
+                                st.markdown(
+                                    (
+                                        '<div class="func-inline-text" '
+                                        f'title="{_html.escape(funcao_inline)}">'
+                                        f'{_html.escape(funcao_inline)}'
+                                        '</div>'
+                                    ),
+                                    unsafe_allow_html=True,
+                                )
 
-                            if (
-                                moradia_nova_inline
-                                != moradia_atual_inline
-                            ):
-                                try:
+                            with r_valor:
+                                st.markdown(
+                                    (
+                                        '<div class="func-inline-text '
+                                        'func-inline-value">'
+                                        f'{_html.escape(valor_inline)}'
+                                        '</div>'
+                                    ),
+                                    unsafe_allow_html=True,
+                                )
+
+                            with r_moradia:
+                                idx_moradia_inline = (
+                                    opcoes_moradia_inline.index(
+                                        moradia_atual_inline
+                                    )
+                                )
+
+                                moradia_nova_inline = st.selectbox(
+                                    "Moradia",
+                                    opcoes_moradia_inline,
+                                    index=idx_moradia_inline,
+                                    label_visibility="collapsed",
+                                    key=(
+                                        "moradia_inline_func_"
+                                        f"{colab_id_inline}"
+                                    ),
+                                )
+
+                                if (
+                                    moradia_nova_inline
+                                    != moradia_atual_inline
+                                ):
                                     valor_moradia_db = (
                                         None
                                         if moradia_nova_inline
@@ -14695,113 +14974,98 @@ else:
                                         else moradia_nova_inline
                                     )
 
-                                    (
-                                        supabase.table(
-                                            "colaboradores"
-                                        )
-                                        .update({
-                                            "local_moradia": valor_moradia_db
-                                        })
-                                        .eq(
-                                            "id",
+                                    ok_moradia = (
+                                        _atualizar_colaborador_admin_rapido(
                                             colab_id_inline,
-                                        )
-                                        .execute()
-                                    )
-
-                                    limpar_cache_operacional()
-
-                                    registrar_auditoria_prod(
-                                        "colaboradores",
-                                        colab_id_inline,
-                                        "EDITAR_MORADIA",
-                                        "ADMIN",
-                                        antes={
-                                            "local_moradia": (
-                                                c.get(
-                                                    "local_moradia"
+                                            {
+                                                "local_moradia": valor_moradia_db
+                                            },
+                                            "EDITAR_MORADIA",
+                                            antes={
+                                                "local_moradia": (
+                                                    c.get(
+                                                        "local_moradia"
+                                                    )
                                                 )
-                                            )
-                                        },
-                                        depois={
-                                            "local_moradia": valor_moradia_db
-                                        },
-                                    )
-
-                                    st.session_state[
-                                        "msg_banco_funcionarios"
-                                    ] = (
-                                        f"Moradia de {nome_inline} "
-                                        "atualizada."
-                                    )
-                                    st.rerun()
-
-                                except Exception as e:
-                                    exibir_erro_amigavel(
-                                        "colaboradores",
-                                        "editar_moradia_inline",
-                                        e,
-                                        "Não foi possível atualizar a moradia.",
-                                    )
-
-                        with r_excluir:
-                            if st.button(
-                                "⛔",
-                                key=(
-                                    "btn_inline_excluir_func_"
-                                    f"{colab_id_inline}"
-                                ),
-                                help=(
-                                    f"Excluir {nome_inline} "
-                                    "da base operacional"
-                                ),
-                            ):
-                                try:
-                                    (
-                                        supabase.table(
-                                            "colaboradores"
+                                            },
                                         )
-                                        .update({
-                                            "ativo": False
-                                        })
-                                        .eq(
-                                            "id",
+                                    )
+
+                                    if ok_moradia:
+                                        st.toast(
+                                            "Moradia atualizada.",
+                                            icon="✅",
+                                        )
+                                    else:
+                                        st.error(
+                                            "Não foi possível atualizar a moradia."
+                                        )
+
+                            with r_excluir:
+                                if st.button(
+                                    "⛔",
+                                    key=(
+                                        "btn_inline_excluir_func_"
+                                        f"{colab_id_inline}"
+                                    ),
+                                    help=(
+                                        f"Retirar {nome_inline} "
+                                        "da base operacional"
+                                    ),
+                                ):
+                                    ok_excluir = (
+                                        _atualizar_colaborador_admin_rapido(
                                             colab_id_inline,
+                                            {
+                                                "ativo": False
+                                            },
+                                            "DESATIVAR",
+                                            antes={
+                                                "ativo": True,
+                                                "nome": nome_inline,
+                                            },
                                         )
-                                        .execute()
                                     )
 
-                                    limpar_cache_operacional()
+                                    if ok_excluir:
+                                        ids_excluidos = set(
+                                            st.session_state.get(
+                                                "_func_inline_excluidos",
+                                                [],
+                                            )
+                                        )
+                                        ids_excluidos.add(
+                                            str(colab_id_inline)
+                                        )
+                                        st.session_state[
+                                            "_func_inline_excluidos"
+                                        ] = list(
+                                            ids_excluidos
+                                        )
 
-                                    registrar_auditoria_prod(
-                                        "colaboradores",
-                                        colab_id_inline,
-                                        "DESATIVAR",
-                                        "ADMIN",
-                                        antes={
-                                            "ativo": True,
-                                            "nome": nome_inline,
-                                        },
-                                        depois={
-                                            "ativo": False
-                                        },
-                                    )
+                                        st.toast(
+                                            f"{nome_inline} retirado.",
+                                            icon="✅",
+                                        )
 
-                                    st.session_state[
-                                        "msg_banco_funcionarios"
-                                    ] = (
-                                        f"{nome_inline} foi retirado "
-                                        "da base operacional."
-                                    )
-                                    st.rerun()
+                                        # Em versões atuais do Streamlit, só
+                                        # este fragmento reroda; fallback usa
+                                        # rerun normal se necessário.
+                                        try:
+                                            st.rerun(
+                                                scope="fragment"
+                                            )
+                                        except TypeError:
+                                            st.rerun()
 
-                                except Exception as e:
-                                    exibir_erro_amigavel(
-                                        "colaboradores",
-                                        "excluir_funcionario_inline",
-                                        e,
-                                        "Não foi possível excluir o funcionário.",
-                                    )
+                                    else:
+                                        st.error(
+                                            "Não foi possível excluir o funcionário."
+                                        )
+
+                _render_banco_funcionarios_inline(
+                    ativos_filtrados
+                )
 
             else:
                 st.info(
@@ -14944,45 +15208,32 @@ else:
                             }
 
                             try:
-                                (
-                                    supabase.table(
-                                        "colaboradores"
+                                ok_edit = (
+                                    _atualizar_colaborador_admin_rapido(
+                                        colab_edicao.get("id"),
+                                        payload_edit,
+                                        "EDITAR",
+                                        antes={
+                                            "nome": colab_edicao.get(
+                                                "nome"
+                                            ),
+                                            "funcao": colab_edicao.get(
+                                                "funcao"
+                                            ),
+                                            "valor_diaria": colab_edicao.get(
+                                                "valor_diaria"
+                                            ),
+                                            "local_moradia": colab_edicao.get(
+                                                "local_moradia"
+                                            ),
+                                        },
                                     )
-                                    .update(payload_edit)
-                                    .eq(
-                                        "id",
-                                        colab_edicao.get(
-                                            "id"
-                                        ),
-                                    )
-                                    .execute()
                                 )
 
-                                limpar_cache_operacional()
-
-                                registrar_auditoria_prod(
-                                    "colaboradores",
-                                    colab_edicao.get(
-                                        "id"
-                                    ),
-                                    "EDITAR",
-                                    "ADMIN",
-                                    antes={
-                                        "nome": colab_edicao.get(
-                                            "nome"
-                                        ),
-                                        "funcao": colab_edicao.get(
-                                            "funcao"
-                                        ),
-                                        "valor_diaria": colab_edicao.get(
-                                            "valor_diaria"
-                                        ),
-                                        "local_moradia": colab_edicao.get(
-                                            "local_moradia"
-                                        ),
-                                    },
-                                    depois=payload_edit,
-                                )
+                                if not ok_edit:
+                                    raise RuntimeError(
+                                        "Falha ao atualizar colaborador."
+                                    )
 
                                 st.session_state[
                                     "msg_banco_funcionarios"
