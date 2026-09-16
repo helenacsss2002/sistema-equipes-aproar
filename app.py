@@ -14579,49 +14579,46 @@ else:
                    ====================================================== */
 
                 div[class*="st-key-func_inline_header"]{
-                    background:#F7F9FC;
-                    border:1px solid #E1E7EF;
-                    border-radius:9px 9px 0 0;
-                    padding:8px 10px;
-                    margin-top:5px;
-                    margin-bottom:0;
+                    background:transparent !important;
+                    border:none !important;
+                    border-bottom:1px solid #DDE4ED !important;
+                    border-radius:0 !important;
+                    padding:7px 8px 8px !important;
+                    margin:4px 0 4px !important;
                 }
 
                 div[class*="st-key-func_inline_header"] [data-testid="stHorizontalBlock"],
                 div[class*="st-key-func_inline_row_"] [data-testid="stHorizontalBlock"]{
                     align-items:center !important;
-                    gap:.55rem !important;
+                    gap:.35rem !important;
                 }
 
                 .func-head-label{
-                    color:#64748B;
-                    font-size:9px;
+                    color:#6B7890;
+                    font-size:8.5px;
                     line-height:1;
                     font-weight:800;
                     text-transform:uppercase;
-                    letter-spacing:.035em;
+                    letter-spacing:.04em;
                     white-space:nowrap;
                 }
 
                 div[class*="st-key-func_inline_row_"]{
-                    background:#FFFFFF;
-                    border-left:1px solid #E1E7EF;
-                    border-right:1px solid #E1E7EF;
-                    border-bottom:1px solid #E7ECF2;
-                    padding:6px 10px;
-                    margin:0;
-                }
-
-                div[class*="st-key-func_inline_row_"]:last-of-type{
-                    border-radius:0 0 9px 9px;
+                    background:#FFFFFF !important;
+                    border:1px solid #E3E8EF !important;
+                    border-radius:8px !important;
+                    padding:4px 8px !important;
+                    margin:0 0 5px !important;
+                    box-shadow:none !important;
                 }
 
                 div[class*="st-key-func_inline_row_"]:hover{
-                    background:#FAFCFF;
+                    background:#FBFCFE !important;
+                    border-color:#D5DDE8 !important;
                 }
 
                 .func-inline-text{
-                    height:36px;
+                    height:34px;
                     display:flex;
                     align-items:center;
                     min-width:0;
@@ -14629,23 +14626,23 @@ else:
                     white-space:nowrap;
                     text-overflow:ellipsis;
                     color:#27364D;
-                    font-size:11px;
-                    line-height:1.2;
+                    font-size:10.5px;
+                    line-height:1.15;
                 }
 
                 .func-inline-name{
-                    font-weight:650;
+                    font-weight:700;
                     color:#172235;
                 }
 
                 .func-inline-value{
-                    font-weight:650;
+                    font-weight:700;
                     color:#334155;
                 }
 
                 div[class*="st-key-func_inline_row_"] div[data-baseweb="select"] > div{
-                    min-height:36px !important;
-                    height:36px !important;
+                    min-height:34px !important;
+                    height:34px !important;
                     border-radius:7px !important;
                     border-color:#DCE3EC !important;
                     background:#FFFFFF !important;
@@ -14664,10 +14661,10 @@ else:
                 }
 
                 div[class*="st-key-btn_inline_excluir_func_"] button{
-                    width:34px !important;
-                    min-width:34px !important;
-                    height:34px !important;
-                    min-height:34px !important;
+                    width:32px !important;
+                    min-width:32px !important;
+                    height:32px !important;
+                    min-height:32px !important;
                     padding:0 !important;
                     border-radius:50% !important;
                     background:#FFF2F3 !important;
@@ -14698,6 +14695,45 @@ else:
                     font-size:10px;
                 }
 
+                .func-pager-label{
+                    height:32px;
+                    display:flex;
+                    align-items:center;
+                    justify-content:center;
+                    color:#56647A;
+                    font-size:10px;
+                    font-weight:700;
+                    white-space:nowrap;
+                }
+
+                div[class*="st-key-func_pager_prev"] button,
+                div[class*="st-key-func_pager_next"] button{
+                    width:32px !important;
+                    min-width:32px !important;
+                    height:32px !important;
+                    min-height:32px !important;
+                    padding:0 !important;
+                    border-radius:8px !important;
+                    background:#FFFFFF !important;
+                    border:1px solid #D8E0EA !important;
+                    color:#334155 !important;
+                    font-size:16px !important;
+                    font-weight:800 !important;
+                    box-shadow:none !important;
+                }
+
+                div[class*="st-key-func_pager_prev"] button:hover,
+                div[class*="st-key-func_pager_next"] button:hover{
+                    background:#F4F7FB !important;
+                    border-color:#C7D2E0 !important;
+                }
+
+                div[class*="st-key-func_pager_prev"] button:disabled,
+                div[class*="st-key-func_pager_next"] button:disabled{
+                    opacity:.35 !important;
+                    cursor:default !important;
+                }
+
                 .func-delete-dot{
                     display:inline-flex;
                     align-items:center;
@@ -14717,9 +14753,18 @@ else:
                     }
 
                     div[class*="st-key-func_inline_row_"]{
-                        border:1px solid #E1E7EF;
+                        border:1px solid #E1E7EF !important;
                         border-radius:9px !important;
-                        margin-bottom:6px;
+                        margin-bottom:6px !important;
+                        padding:6px !important;
+                    }
+
+                    .func-inline-text{
+                        font-size:9.8px !important;
+                    }
+
+                    .func-pager-label{
+                        font-size:9px !important;
                     }
                 }
                 </style>
@@ -14783,9 +14828,34 @@ else:
                         // TAMANHO_PAGINA_FUNC,
                     )
 
-                    c_info_func, c_pag_func = st.columns(
-                        [5.3, 1],
-                        vertical_alignment="bottom",
+                    # Página controlada por estado + setas.
+                    pagina_state_key = "_pagina_banco_funcionarios"
+
+                    if pagina_state_key not in st.session_state:
+                        st.session_state[pagina_state_key] = 1
+
+                    pagina_func = int(
+                        st.session_state.get(
+                            pagina_state_key,
+                            1,
+                        )
+                    )
+
+                    # Corrige automaticamente após exclusões/filtros.
+                    pagina_func = max(
+                        1,
+                        min(
+                            pagina_func,
+                            total_paginas_func,
+                        ),
+                    )
+                    st.session_state[
+                        pagina_state_key
+                    ] = pagina_func
+
+                    c_info_func, c_pager_func = st.columns(
+                        [5.2, 1.25],
+                        vertical_alignment="center",
                     )
 
                     with c_info_func:
@@ -14793,26 +14863,66 @@ else:
                             f"{len(ativos_ordenados)} funcionário(s) encontrado(s)"
                         )
 
-                    with c_pag_func:
-                        if total_paginas_func > 1:
-                            pagina_func = st.selectbox(
-                                "Página",
-                                list(
-                                    range(
-                                        1,
-                                        total_paginas_func + 1,
-                                    )
-                                ),
-                                key="pagina_banco_funcionarios",
-                            )
-                        else:
-                            pagina_func = 1
+                    with c_pager_func:
+                        p_prev, p_num, p_next = st.columns(
+                            [.7, 1.7, .7],
+                            vertical_alignment="center",
+                        )
 
-                    # Se exclusões reduzirem o número de páginas.
-                    pagina_func = min(
-                        int(pagina_func),
-                        total_paginas_func,
-                    )
+                        with p_prev:
+                            if st.button(
+                                "‹",
+                                disabled=(
+                                    pagina_func <= 1
+                                ),
+                                key="func_pager_prev",
+                                help="Página anterior",
+                            ):
+                                st.session_state[
+                                    pagina_state_key
+                                ] = max(
+                                    1,
+                                    pagina_func - 1,
+                                )
+                                try:
+                                    st.rerun(
+                                        scope="fragment"
+                                    )
+                                except TypeError:
+                                    st.rerun()
+
+                        with p_num:
+                            st.markdown(
+                                (
+                                    '<div class="func-pager-label">'
+                                    f'{pagina_func} / {total_paginas_func}'
+                                    '</div>'
+                                ),
+                                unsafe_allow_html=True,
+                            )
+
+                        with p_next:
+                            if st.button(
+                                "›",
+                                disabled=(
+                                    pagina_func
+                                    >= total_paginas_func
+                                ),
+                                key="func_pager_next",
+                                help="Próxima página",
+                            ):
+                                st.session_state[
+                                    pagina_state_key
+                                ] = min(
+                                    total_paginas_func,
+                                    pagina_func + 1,
+                                )
+                                try:
+                                    st.rerun(
+                                        scope="fragment"
+                                    )
+                                except TypeError:
+                                    st.rerun()
 
                     inicio_func = (
                         (pagina_func - 1)
@@ -14832,7 +14942,7 @@ else:
                         key="func_inline_header"
                     ):
                         h_nome, h_funcao, h_valor, h_moradia, h_excluir = st.columns(
-                            [3.15, 2.15, 1.35, 1.75, .42],
+                            [3.35, 2.25, 1.4, 1.65, .36],
                             vertical_alignment="center",
                         )
 
@@ -14907,7 +15017,7 @@ else:
                                 r_moradia,
                                 r_excluir,
                             ) = st.columns(
-                                [3.15, 2.15, 1.35, 1.75, .42],
+                                [3.35, 2.25, 1.4, 1.65, .36],
                                 vertical_alignment="center",
                             )
 
