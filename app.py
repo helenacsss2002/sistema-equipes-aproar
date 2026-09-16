@@ -2500,6 +2500,93 @@ except Exception as e:
     st.stop()
 
 
+@st.cache_resource
+def _garantir_estrutura_cadastros_admin():
+    """
+    Pequena migração compatível com a base atual.
+
+    - local_moradia passa a fazer parte do cadastro do colaborador;
+    - ativo é garantido para permitir exclusão lógica sem destruir histórico;
+    - obras deixam de ser únicas apenas pelo nome e passam a ser únicas por
+      nome + unidade;
+    - sequences são corrigidas caso uma importação antiga tenha avançado IDs
+      manualmente e deixado o serial para trás.
+    """
+    if DB_BACKEND != "NEON" or not hasattr(supabase, "_connect"):
+        return False
+
+    try:
+        with supabase._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    ALTER TABLE colaboradores
+                    ADD COLUMN IF NOT EXISTS local_moradia TEXT
+                    """
+                )
+
+                cur.execute(
+                    """
+                    ALTER TABLE colaboradores
+                    ADD COLUMN IF NOT EXISTS ativo BOOLEAN NOT NULL DEFAULT TRUE
+                    """
+                )
+
+                # O índice antigo impedia, por exemplo, uma obra com o mesmo
+                # nome em duas unidades diferentes.
+                cur.execute("DROP INDEX IF EXISTS uq_obras_nome")
+                cur.execute(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS uq_obras_nome_unidade
+                    ON obras (nome, unidade)
+                    """
+                )
+
+                # Corrige sequences somente quando estiverem atrás do maior ID.
+                for tabela in ("obras", "colaboradores"):
+                    cur.execute(
+                        f"SELECT COALESCE(MAX(id), 0) AS max_id FROM {tabela}"
+                    )
+                    row_max = cur.fetchone()
+                    max_id = int(
+                        (
+                            row_max.get("max_id")
+                            if isinstance(row_max, dict)
+                            else row_max[0]
+                        )
+                        or 0
+                    )
+
+                    cur.execute(
+                        f"SELECT last_value FROM {tabela}_id_seq"
+                    )
+                    row_seq = cur.fetchone()
+                    seq_last = int(
+                        (
+                            row_seq.get("last_value")
+                            if isinstance(row_seq, dict)
+                            else row_seq[0]
+                        )
+                        or 0
+                    )
+
+                    if seq_last < max_id:
+                        cur.execute(
+                            f"SELECT setval('{tabela}_id_seq', %s, true)",
+                            (max_id,),
+                        )
+
+                conn.commit()
+
+        return True
+
+    except Exception:
+        return False
+
+
+_garantir_estrutura_cadastros_admin()
+
+
 # --- LIMPEZA SELETIVA DE CACHE ---
 def limpar_cache_operacional():
     """
@@ -2507,7 +2594,9 @@ def limpar_cache_operacional():
     Não limpa o cache do Trello.
     """
     for nome_funcao in (
-        "buscar_obras", "buscar_colaboradores",
+        "buscar_obras",
+        "buscar_colaboradores",
+        "buscar_colaboradores_todos",
         "_buscar_convocacoes_intervalo",
     ):
         funcao = globals().get(nome_funcao)
@@ -2583,21 +2672,31 @@ def valor_diaria_por_tipo(tipo):
     return VALOR_DIARIA_AJUDANTE if normalizar(tipo) == "AJUDANTE" else VALOR_DIARIA_PROFISSIONAL
 
 def obter_valor_diaria_colaborador(colab):
-    """Aplica R$ 241,74 para profissional e R$ 182,34 para ajudante em todo o sistema."""
+    """
+    Usa o valor/custo cadastrado para o colaborador.
+
+    Só aplica os valores padrão de Profissional/Ajudante quando o cadastro
+    não possui um valor positivo.
+    """
     colab = colab or {}
+
     try:
-        valor_cadastrado = float(colab.get("valor_diaria") or 0.0)
+        valor_cadastrado = float(
+            colab.get("valor_diaria")
+            or 0.0
+        )
     except Exception:
         valor_cadastrado = 0.0
 
-    # Novos cadastros já persistem exatamente um dos dois valores oficiais.
-    if abs(valor_cadastrado - VALOR_DIARIA_PROFISSIONAL) < 0.01:
-        return VALOR_DIARIA_PROFISSIONAL
-    if abs(valor_cadastrado - VALOR_DIARIA_AJUDANTE) < 0.01:
-        return VALOR_DIARIA_AJUDANTE
+    if valor_cadastrado > 0:
+        return valor_cadastrado
 
-    # Compatibilidade com cadastros antigos (ex.: diária antiga de R$ 240,00).
-    return valor_diaria_por_tipo(inferir_tipo_colaborador(colab.get("funcao", "")))
+    return valor_diaria_por_tipo(
+        inferir_tipo_colaborador(
+            colab.get("funcao", "")
+        )
+    )
+
 
 def calcular_diaria_proporcional(status, valor_diaria_base):
     diaria = float(valor_diaria_base or VALOR_DIARIA_PROFISSIONAL)
@@ -3598,9 +3697,34 @@ def criar_ou_obter_colaborador_manual(nome, tipo, funcao_livre="", avulso=False)
 
     try:
         atuais = supabase.table("colaboradores").select("*").execute().data or []
-        existente = next((c for c in atuais if normalizar(c.get("nome", "")) == normalizar(nome_limpo)), None)
+        existente = next(
+            (
+                c for c in atuais
+                if normalizar(c.get("nome", ""))
+                == normalizar(nome_limpo)
+            ),
+            None,
+        )
+
         if existente:
-            return existente.get("id"), existente, "Cadastro existente localizado e reutilizado."
+            if existente.get("ativo", True) is False:
+                atualizado = (
+                    supabase.table("colaboradores")
+                    .update({"ativo": True})
+                    .eq("id", existente.get("id"))
+                    .execute()
+                    .data
+                    or []
+                )
+                limpar_cache_operacional()
+                if atualizado:
+                    existente = atualizado[0]
+
+            return (
+                existente.get("id"),
+                existente,
+                "Cadastro existente localizado e reutilizado.",
+            )
 
         funcao_texto = str(funcao_livre or "").strip()
         if avulso:
@@ -3629,19 +3753,26 @@ def gerar_excel_colaboradores(lista_colaboradores):
     ws.title = "Colaboradores"
 
     # Título e metadados
-    ws.merge_cells("A1:E1")
+    ws.merge_cells("A1:F1")
     ws["A1"] = "APROAR ENGENHARIA - BASE ATUALIZADA DE COLABORADORES"
     ws["A1"].font = Font(name="Arial", size=13, bold=True, color="FFFFFF")
     ws["A1"].fill = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
     ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
     ws.row_dimensions[1].height = 24
 
-    ws.merge_cells("A2:E2")
+    ws.merge_cells("A2:F2")
     ws["A2"] = f"Gerado em: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M')} | Total de colaboradores: {len(lista_colaboradores)}"
     ws["A2"].font = Font(name="Arial", size=9, italic=True, color="64748B")
     ws["A2"].alignment = Alignment(horizontal="left")
 
-    headers = ["Nome", "Função", "Categoria", "Valor da Diária (R$)", "Avulso"]
+    headers = [
+        "Nome",
+        "Função",
+        "Categoria",
+        "Valor / Custo Diário (R$)",
+        "Local de Moradia",
+        "Avulso",
+    ]
     linha_header = 4
     for col_idx, header in enumerate(headers, 1):
         cell = ws.cell(row=linha_header, column=col_idx, value=header)
@@ -3660,31 +3791,36 @@ def gerar_excel_colaboradores(lista_colaboradores):
     for row_idx, colab in enumerate(ordenados, linha_header + 1):
         funcao = str(colab.get("funcao") or "").strip()
         valor_diaria = obter_valor_diaria_colaborador(colab)
-        categoria = "Ajudante" if abs(valor_diaria - VALOR_DIARIA_AJUDANTE) < 0.01 else "Profissional"
-        avulso = "SIM" if normalizar(funcao).startswith("AVULSO -") else "NÃO"
+        categoria = inferir_tipo_colaborador(funcao)
+        avulso = (
+            "SIM"
+            if normalizar(funcao).startswith("AVULSO -")
+            else "NÃO"
+        )
 
         valores = [
             str(colab.get("nome") or "").strip(),
             funcao,
             categoria,
             valor_diaria,
+            str(colab.get("local_moradia") or "Não informado"),
             avulso,
         ]
         for col_idx, valor in enumerate(valores, 1):
             cell = ws.cell(row=row_idx, column=col_idx, value=valor)
             cell.font = Font(name="Arial", size=9)
             cell.border = borda
-            cell.alignment = Alignment(vertical="center", horizontal="left" if col_idx in [1, 2] else "center")
+            cell.alignment = Alignment(vertical="center", horizontal="left" if col_idx in [1, 2, 5] else "center")
             if col_idx == 4:
                 cell.number_format = 'R$ #,##0.00'
                 cell.alignment = Alignment(horizontal="right", vertical="center")
 
     fim = linha_header + len(ordenados)
     if fim >= linha_header:
-        ws.auto_filter.ref = f"A{linha_header}:E{fim}"
+        ws.auto_filter.ref = f"A{linha_header}:F{fim}"
     ws.freeze_panes = "A5"
 
-    larguras = {"A": 38, "B": 30, "C": 16, "D": 22, "E": 12}
+    larguras = {"A": 38, "B": 30, "C": 16, "D": 24, "E": 20, "F": 12}
     for coluna, largura in larguras.items():
         ws.column_dimensions[coluna].width = largura
 
@@ -4744,12 +4880,43 @@ def buscar_obras():
     except Exception: return []
 
 @st.cache_data(ttl=180, show_spinner=False)
-def buscar_colaboradores():
-    try: 
-        res = supabase.table("colaboradores").select("*").execute().data
+def buscar_colaboradores_todos():
+    try:
+        res = (
+            supabase.table("colaboradores")
+            .select("*")
+            .execute()
+            .data
+        )
         return res if res else []
-    except Exception: 
+    except Exception:
         return []
+
+
+@st.cache_data(ttl=180, show_spinner=False)
+def buscar_colaboradores():
+    """Base operacional: somente colaboradores ativos."""
+    try:
+        res = (
+            supabase.table("colaboradores")
+            .select("*")
+            .eq("ativo", True)
+            .execute()
+            .data
+        )
+        return res if res else []
+    except Exception:
+        # Compatibilidade caso o backend legado ainda não possua a coluna.
+        try:
+            res = (
+                supabase.table("colaboradores")
+                .select("*")
+                .execute()
+                .data
+            )
+            return res if res else []
+        except Exception:
+            return []
 
 # --- INDISPONIBILIDADES / FÉRIAS / ATESTADOS ---
 INDISP_UNIDADE = "__APROAR_INDISPONIBILIDADE__"
@@ -4876,11 +5043,35 @@ def excluir_indisponibilidade(registro_id):
 
 
 obras_todas = buscar_obras() or []
-obras = [o for o in obras_todas if not eh_registro_indisponibilidade(o)]
-colaboradores = buscar_colaboradores() or []
+obras = [
+    o
+    for o in obras_todas
+    if not eh_registro_indisponibilidade(o)
+]
 
-dict_colaboradores = {c['id']: c for c in colaboradores} if colaboradores else {}
-dict_obras = {o['id']: o for o in obras} if obras else {}
+colaboradores_todos = buscar_colaboradores_todos() or []
+colaboradores = [
+    c
+    for c in colaboradores_todos
+    if c.get("ativo", True) is not False
+]
+
+dict_colaboradores = (
+    {
+        c["id"]: c
+        for c in colaboradores_todos
+    }
+    if colaboradores_todos
+    else {}
+)
+dict_obras = (
+    {
+        o["id"]: o
+        for o in obras
+    }
+    if obras
+    else {}
+)
 
 ENGENHEIROS = ["EDUARDO", "GABRIEL", "GUSTAVO", "JOEL", "NETO", "PAULO", "SOARES", "VICTOR"]
 
@@ -13862,44 +14053,761 @@ else:
         
         with tab_cad_obra:
             st.markdown("**Cadastrar nova obra**")
+            st.caption(
+                "O mesmo nome pode existir em unidades diferentes. "
+                "Nome + unidade iguais não serão duplicados."
+            )
+
+            if st.session_state.get("msg_cadastro_obra_admin"):
+                st.success(
+                    st.session_state.pop(
+                        "msg_cadastro_obra_admin"
+                    )
+                )
+
             with st.form("form_cad_obra"):
-                nome_obra = st.text_input("Nome da Obra (Ex: 1863, 1383...):")
-                unidade_obra = st.text_input("Unidade (Ex: CENTRO, MUSEU, FIEC...):")
-                submit_obra = st.form_submit_button("Cadastrar Obra")
+                nome_obra = st.text_input(
+                    "Nome da Obra (Ex: 1863, 1383...):"
+                )
+                unidade_obra = st.text_input(
+                    "Unidade (Ex: CENTRO, MUSEU, FIEC...):"
+                )
+                submit_obra = st.form_submit_button(
+                    "Cadastrar Obra"
+                )
+
                 if submit_obra:
-                    if nome_obra and unidade_obra:
-                        supabase.table("obras").insert({"nome": nome_obra, "unidade": unidade_obra.upper()}).execute()
-                        limpar_cache_operacional()
-                        st.success("Obra cadastrada com sucesso!")
-                        st.rerun()
+                    nome_obra_limpo = " ".join(
+                        str(nome_obra or "").strip().split()
+                    ).upper()
+                    unidade_obra_limpa = " ".join(
+                        str(unidade_obra or "").strip().split()
+                    ).upper()
+
+                    if (
+                        not nome_obra_limpo
+                        or not unidade_obra_limpa
+                    ):
+                        st.warning(
+                            "Preencha nome e unidade."
+                        )
+
                     else:
-                        st.warning("Preencha todos os campos.")
+                        duplicada = next(
+                            (
+                                o for o in buscar_obras()
+                                if normalizar(
+                                    o.get("nome")
+                                )
+                                == normalizar(nome_obra_limpo)
+                                and normalizar(
+                                    o.get("unidade")
+                                )
+                                == normalizar(
+                                    unidade_obra_limpa
+                                )
+                            ),
+                            None,
+                        )
+
+                        if duplicada:
+                            st.info(
+                                "Essa obra já está cadastrada "
+                                "nessa unidade."
+                            )
+
+                        else:
+                            try:
+                                retorno_obra = (
+                                    supabase.table("obras")
+                                    .insert({
+                                        "nome": nome_obra_limpo,
+                                        "unidade": unidade_obra_limpa,
+                                    })
+                                    .execute()
+                                    .data
+                                    or []
+                                )
+
+                                limpar_cache_operacional()
+
+                                registrar_auditoria_prod(
+                                    "obra",
+                                    (
+                                        retorno_obra[0].get("id")
+                                        if retorno_obra
+                                        else ""
+                                    ),
+                                    "CRIAR",
+                                    "ADMIN",
+                                    depois={
+                                        "nome": nome_obra_limpo,
+                                        "unidade": unidade_obra_limpa,
+                                    },
+                                )
+
+                                st.session_state[
+                                    "msg_cadastro_obra_admin"
+                                ] = (
+                                    f"Obra {nome_obra_limpo} cadastrada "
+                                    f"em {unidade_obra_limpa}."
+                                )
+                                st.rerun()
+
+                            except Exception as e:
+                                # Nunca abre traceback vermelho para o usuário.
+                                exibir_erro_amigavel(
+                                    "obras",
+                                    "cadastrar_obra",
+                                    e,
+                                    (
+                                        "Não foi possível cadastrar a obra. "
+                                        "Se ela já existir, confira nome e unidade."
+                                    ),
+                                )
 
         with tab_cad_colab:
-            st.markdown("**Cadastrar novo colaborador**")
-            with st.form("form_cad_colab"):
-                nome_colab = st.text_input("Nome Completo:")
-                tipo_colab = st.selectbox("Categoria da diária:", ["Profissional", "Ajudante"], key="tipo_cad_colab")
-                funcao_colab = st.text_input("Função / Cargo:")
-                diaria_colab = valor_diaria_por_tipo(tipo_colab)
-                st.caption(f"Valor aplicado automaticamente: {formatar_reais(diaria_colab)}")
-                submit_colab = st.form_submit_button("Cadastrar Colaborador")
-                if submit_colab:
-                    if nome_colab:
-                        funcao_salva = limpar_funcao(funcao_colab) if funcao_colab.strip() else tipo_colab.upper()
+            MORADIAS_COLAB = [
+                "Fortaleza",
+                "Maracanaú",
+                "Caucaia",
+                "Horizonte",
+            ]
+
+            st.markdown("**Banco de funcionários**")
+            st.caption(
+                "Cadastre, consulte, edite ou retire colaboradores da base operacional. "
+                "Ao excluir, o cadastro fica inativo para preservar o histórico de apontamentos."
+            )
+
+            if st.session_state.get(
+                "msg_banco_funcionarios"
+            ):
+                st.success(
+                    st.session_state.pop(
+                        "msg_banco_funcionarios"
+                    )
+                )
+
+            # ------------------------------------------------------------
+            # NOVO CADASTRO
+            # ------------------------------------------------------------
+            with st.expander(
+                "Cadastrar novo funcionário",
+                expanded=False,
+            ):
+                with st.form(
+                    "form_banco_novo_funcionario"
+                ):
+                    nome_colab = st.text_input(
+                        "Nome completo"
+                    )
+                    funcao_colab = st.text_input(
+                        "Função"
+                    )
+
+                    c_valor, c_moradia = st.columns(2)
+
+                    with c_valor:
+                        valor_colab = st.number_input(
+                            "Valor / custo diário (R$)",
+                            min_value=0.01,
+                            value=float(
+                                VALOR_DIARIA_PROFISSIONAL
+                            ),
+                            step=0.01,
+                            format="%.2f",
+                        )
+
+                    with c_moradia:
+                        moradia_colab = st.selectbox(
+                            "Local de moradia",
+                            MORADIAS_COLAB,
+                        )
+
+                    submit_colab = (
+                        st.form_submit_button(
+                            "Cadastrar funcionário",
+                            type="primary",
+                            use_container_width=True,
+                        )
+                    )
+
+                    if submit_colab:
+                        nome_novo = " ".join(
+                            str(
+                                nome_colab
+                                or ""
+                            ).strip().split()
+                        ).upper()
+
+                        funcao_nova = limpar_funcao(
+                            funcao_colab
+                        )
+
+                        if not nome_novo:
+                            st.warning(
+                                "Informe o nome do funcionário."
+                            )
+
+                        elif not str(
+                            funcao_colab
+                            or ""
+                        ).strip():
+                            st.warning(
+                                "Informe a função do funcionário."
+                            )
+
+                        else:
+                            atuais_banco = (
+                                buscar_colaboradores_todos()
+                                or []
+                            )
+
+                            existente = next(
+                                (
+                                    c
+                                    for c in atuais_banco
+                                    if normalizar(
+                                        c.get("nome")
+                                    )
+                                    == normalizar(nome_novo)
+                                ),
+                                None,
+                            )
+
+                            payload_novo = {
+                                "nome": nome_novo,
+                                "funcao": funcao_nova,
+                                "valor_diaria": float(
+                                    valor_colab
+                                ),
+                                "local_moradia": moradia_colab,
+                                "ativo": True,
+                            }
+
+                            try:
+                                if existente:
+                                    (
+                                        supabase.table(
+                                            "colaboradores"
+                                        )
+                                        .update(payload_novo)
+                                        .eq(
+                                            "id",
+                                            existente.get("id"),
+                                        )
+                                        .execute()
+                                    )
+                                    mensagem = (
+                                        f"{nome_novo} já existia e "
+                                        "foi atualizado/reativado."
+                                    )
+                                    acao_audit = "REATIVAR_ATUALIZAR"
+                                    entidade_id = existente.get(
+                                        "id"
+                                    )
+                                else:
+                                    retorno = (
+                                        supabase.table(
+                                            "colaboradores"
+                                        )
+                                        .insert(payload_novo)
+                                        .execute()
+                                        .data
+                                        or []
+                                    )
+                                    mensagem = (
+                                        f"{nome_novo} cadastrado "
+                                        "com sucesso."
+                                    )
+                                    acao_audit = "CRIAR"
+                                    entidade_id = (
+                                        retorno[0].get("id")
+                                        if retorno
+                                        else ""
+                                    )
+
+                                limpar_cache_operacional()
+
+                                registrar_auditoria_prod(
+                                    "colaboradores",
+                                    entidade_id,
+                                    acao_audit,
+                                    "ADMIN",
+                                    depois=payload_novo,
+                                )
+
+                                st.session_state[
+                                    "msg_banco_funcionarios"
+                                ] = mensagem
+                                st.rerun()
+
+                            except Exception as e:
+                                exibir_erro_amigavel(
+                                    "colaboradores",
+                                    "cadastrar_funcionario",
+                                    e,
+                                    "Não foi possível salvar o funcionário.",
+                                )
+
+            # ------------------------------------------------------------
+            # BASE ATIVA
+            # ------------------------------------------------------------
+            base_admin = (
+                buscar_colaboradores_todos()
+                or []
+            )
+            ativos_admin = [
+                c
+                for c in base_admin
+                if c.get("ativo", True) is not False
+            ]
+            inativos_admin = [
+                c
+                for c in base_admin
+                if c.get("ativo", True) is False
+            ]
+
+            st.markdown("**Funcionários ativos**")
+
+            cf1, cf2 = st.columns(
+                [1.5, .8]
+            )
+
+            with cf1:
+                busca_funcionario = st.text_input(
+                    "Buscar",
+                    placeholder="Nome ou função...",
+                    key="busca_banco_funcionarios",
+                )
+
+            with cf2:
+                filtro_moradia = st.selectbox(
+                    "Moradia",
+                    ["Todas"] + MORADIAS_COLAB,
+                    key="filtro_moradia_banco",
+                )
+
+            ativos_filtrados = []
+
+            for colab in ativos_admin:
+                atende_busca = (
+                    not busca_funcionario.strip()
+                    or normalizar(
+                        busca_funcionario
+                    )
+                    in normalizar(
+                        f"{colab.get('nome','')} "
+                        f"{colab.get('funcao','')}"
+                    )
+                )
+
+                atende_moradia = (
+                    filtro_moradia == "Todas"
+                    or normalizar(
+                        colab.get(
+                            "local_moradia"
+                        )
+                        or ""
+                    )
+                    == normalizar(
+                        filtro_moradia
+                    )
+                )
+
+                if (
+                    atende_busca
+                    and atende_moradia
+                ):
+                    ativos_filtrados.append(
+                        colab
+                    )
+
+            if ativos_filtrados:
+                df_banco = pd.DataFrame([
+                    {
+                        "Nome": c.get("nome") or "",
+                        "Função": c.get("funcao") or "",
+                        "Valor / custo": formatar_reais(
+                            obter_valor_diaria_colaborador(
+                                c
+                            )
+                        ),
+                        "Moradia": (
+                            c.get("local_moradia")
+                            or "Não informado"
+                        ),
+                    }
+                    for c in sorted(
+                        ativos_filtrados,
+                        key=lambda x: normalizar(
+                            x.get("nome")
+                        ),
+                    )
+                ])
+
+                tabela_aproar(
+                    df_banco,
+                    key="tbl_banco_funcionarios_admin",
+                    altura_max=380,
+                )
+
+            else:
+                st.info(
+                    "Nenhum funcionário encontrado "
+                    "com os filtros selecionados."
+                )
+
+            # ------------------------------------------------------------
+            # EDITAR / EXCLUIR
+            # ------------------------------------------------------------
+            if ativos_admin:
+                st.markdown("**Editar cadastro**")
+
+                mapa_edicao = {
+                    (
+                        f"{c.get('nome')} · "
+                        f"{c.get('funcao') or '-'}"
+                    ): c
+                    for c in sorted(
+                        ativos_admin,
+                        key=lambda x: normalizar(
+                            x.get("nome")
+                        ),
+                    )
+                }
+
+                rotulo_edicao = st.selectbox(
+                    "Funcionário",
+                    list(
+                        mapa_edicao.keys()
+                    ),
+                    key="sel_editar_funcionario_admin",
+                )
+
+                colab_edicao = mapa_edicao[
+                    rotulo_edicao
+                ]
+
+                moradia_atual = str(
+                    colab_edicao.get(
+                        "local_moradia"
+                    )
+                    or ""
+                )
+
+                idx_moradia = (
+                    MORADIAS_COLAB.index(
+                        moradia_atual
+                    )
+                    if moradia_atual
+                    in MORADIAS_COLAB
+                    else 0
+                )
+
+                with st.form(
+                    "form_editar_funcionario_admin"
+                ):
+                    nome_edit = st.text_input(
+                        "Nome",
+                        value=str(
+                            colab_edicao.get(
+                                "nome"
+                            )
+                            or ""
+                        ),
+                    )
+
+                    funcao_edit = st.text_input(
+                        "Função",
+                        value=str(
+                            colab_edicao.get(
+                                "funcao"
+                            )
+                            or ""
+                        ),
+                    )
+
+                    ce1, ce2 = st.columns(2)
+
+                    with ce1:
+                        valor_edit = st.number_input(
+                            "Valor / custo diário (R$)",
+                            min_value=0.01,
+                            value=float(
+                                obter_valor_diaria_colaborador(
+                                    colab_edicao
+                                )
+                            ),
+                            step=0.01,
+                            format="%.2f",
+                        )
+
+                    with ce2:
+                        moradia_edit = st.selectbox(
+                            "Local de moradia",
+                            MORADIAS_COLAB,
+                            index=idx_moradia,
+                        )
+
+                    salvar_edicao = (
+                        st.form_submit_button(
+                            "Salvar alterações",
+                            type="primary",
+                            use_container_width=True,
+                        )
+                    )
+
+                    if salvar_edicao:
+                        nome_editado = " ".join(
+                            str(
+                                nome_edit
+                                or ""
+                            ).strip().split()
+                        ).upper()
+
+                        if not nome_editado:
+                            st.warning(
+                                "O nome não pode ficar vazio."
+                            )
+
+                        elif not str(
+                            funcao_edit
+                            or ""
+                        ).strip():
+                            st.warning(
+                                "A função não pode ficar vazia."
+                            )
+
+                        else:
+                            payload_edit = {
+                                "nome": nome_editado,
+                                "funcao": limpar_funcao(
+                                    funcao_edit
+                                ),
+                                "valor_diaria": float(
+                                    valor_edit
+                                ),
+                                "local_moradia": moradia_edit,
+                            }
+
+                            try:
+                                (
+                                    supabase.table(
+                                        "colaboradores"
+                                    )
+                                    .update(payload_edit)
+                                    .eq(
+                                        "id",
+                                        colab_edicao.get(
+                                            "id"
+                                        ),
+                                    )
+                                    .execute()
+                                )
+
+                                limpar_cache_operacional()
+
+                                registrar_auditoria_prod(
+                                    "colaboradores",
+                                    colab_edicao.get(
+                                        "id"
+                                    ),
+                                    "EDITAR",
+                                    "ADMIN",
+                                    antes={
+                                        "nome": colab_edicao.get(
+                                            "nome"
+                                        ),
+                                        "funcao": colab_edicao.get(
+                                            "funcao"
+                                        ),
+                                        "valor_diaria": colab_edicao.get(
+                                            "valor_diaria"
+                                        ),
+                                        "local_moradia": colab_edicao.get(
+                                            "local_moradia"
+                                        ),
+                                    },
+                                    depois=payload_edit,
+                                )
+
+                                st.session_state[
+                                    "msg_banco_funcionarios"
+                                ] = (
+                                    "Cadastro atualizado "
+                                    "com sucesso."
+                                )
+                                st.rerun()
+
+                            except Exception as e:
+                                exibir_erro_amigavel(
+                                    "colaboradores",
+                                    "editar_funcionario",
+                                    e,
+                                    "Não foi possível atualizar o cadastro.",
+                                )
+
+                with st.expander(
+                    "Excluir funcionário da base operacional",
+                    expanded=False,
+                ):
+                    st.caption(
+                        "O funcionário deixa de aparecer em convocações e apontamentos novos, "
+                        "mas o histórico antigo continua preservado."
+                    )
+
+                    confirmar_exclusao_func = st.checkbox(
+                        (
+                            "Confirmo a exclusão de "
+                            f"{colab_edicao.get('nome')}."
+                        ),
+                        key=(
+                            "confirmar_exclusao_func_"
+                            f"{colab_edicao.get('id')}"
+                        ),
+                    )
+
+                    if st.button(
+                        "Excluir funcionário",
+                        disabled=(
+                            not confirmar_exclusao_func
+                        ),
+                        use_container_width=True,
+                        key=(
+                            "btn_excluir_func_"
+                            f"{colab_edicao.get('id')}"
+                        ),
+                    ):
                         try:
-                            supabase.table("colaboradores").insert({
-                                "nome": nome_colab.strip().upper(),
-                                "funcao": funcao_salva,
-                                "valor_diaria": diaria_colab
-                            }).execute()
+                            (
+                                supabase.table(
+                                    "colaboradores"
+                                )
+                                .update({
+                                    "ativo": False
+                                })
+                                .eq(
+                                    "id",
+                                    colab_edicao.get(
+                                        "id"
+                                    ),
+                                )
+                                .execute()
+                            )
+
                             limpar_cache_operacional()
-                            st.success("Colaborador cadastrado com sucesso!")
+
+                            registrar_auditoria_prod(
+                                "colaboradores",
+                                colab_edicao.get(
+                                    "id"
+                                ),
+                                "DESATIVAR",
+                                "ADMIN",
+                                antes={
+                                    "ativo": True,
+                                    "nome": colab_edicao.get(
+                                        "nome"
+                                    ),
+                                },
+                                depois={
+                                    "ativo": False
+                                },
+                            )
+
+                            st.session_state[
+                                "msg_banco_funcionarios"
+                            ] = (
+                                f"{colab_edicao.get('nome')} "
+                                "foi retirado da base operacional."
+                            )
                             st.rerun()
-                        except Exception:
-                            st.error("Não foi possível cadastrar. Verifique se esse nome já existe.")
-                    else:
-                        st.warning("Informe o nome do colaborador.")
+
+                        except Exception as e:
+                            exibir_erro_amigavel(
+                                "colaboradores",
+                                "excluir_funcionario",
+                                e,
+                                "Não foi possível excluir o funcionário.",
+                            )
+
+            # ------------------------------------------------------------
+            # INATIVOS / RESTAURAR
+            # ------------------------------------------------------------
+            if inativos_admin:
+                with st.expander(
+                    f"Funcionários excluídos · {len(inativos_admin)}",
+                    expanded=False,
+                ):
+                    mapa_inativos = {
+                        (
+                            f"{c.get('nome')} · "
+                            f"{c.get('funcao') or '-'}"
+                        ): c
+                        for c in sorted(
+                            inativos_admin,
+                            key=lambda x: normalizar(
+                                x.get("nome")
+                            ),
+                        )
+                    }
+
+                    rotulo_inativo = st.selectbox(
+                        "Cadastro excluído",
+                        list(
+                            mapa_inativos.keys()
+                        ),
+                        key="sel_funcionario_inativo_admin",
+                    )
+
+                    colab_inativo = mapa_inativos[
+                        rotulo_inativo
+                    ]
+
+                    if st.button(
+                        "Restaurar funcionário",
+                        use_container_width=True,
+                        key=(
+                            "btn_restaurar_func_"
+                            f"{colab_inativo.get('id')}"
+                        ),
+                    ):
+                        try:
+                            (
+                                supabase.table(
+                                    "colaboradores"
+                                )
+                                .update({
+                                    "ativo": True
+                                })
+                                .eq(
+                                    "id",
+                                    colab_inativo.get(
+                                        "id"
+                                    ),
+                                )
+                                .execute()
+                            )
+
+                            limpar_cache_operacional()
+
+                            st.session_state[
+                                "msg_banco_funcionarios"
+                            ] = (
+                                f"{colab_inativo.get('nome')} "
+                                "foi restaurado."
+                            )
+                            st.rerun()
+
+                        except Exception as e:
+                            exibir_erro_amigavel(
+                                "colaboradores",
+                                "restaurar_funcionario",
+                                e,
+                                "Não foi possível restaurar o funcionário.",
+                            )
 
         with tab_import_colab:
             st.markdown("**Importar planilha de colaboradores**")
@@ -14098,6 +15006,13 @@ else:
                         "VALOR"
                     ])
                     col_avulso_auto = localizar_coluna_import(["AVULSO"])
+                    col_moradia_auto = localizar_coluna_import([
+                        "LOCAL DE MORADIA",
+                        "MORADIA",
+                        "CIDADE",
+                        "MUNICIPIO",
+                        "MUNICÍPIO",
+                    ])
 
                     c_imp1, c_imp2 = st.columns(2)
                     with c_imp1:
@@ -14137,6 +15052,19 @@ else:
                             index=idx_avulso,
                             key="map_avulso_import"
                         )
+
+                    opcoes_moradia = ["(não usar)"] + colunas
+                    idx_moradia_import = (
+                        opcoes_moradia.index(col_moradia_auto)
+                        if col_moradia_auto in colunas
+                        else 0
+                    )
+                    col_moradia_import = st.selectbox(
+                        "Coluna LOCAL DE MORADIA (opcional):",
+                        opcoes_moradia,
+                        index=idx_moradia_import,
+                        key="map_moradia_import",
+                    )
 
                     opcoes_valor = ["(selecione)"] + colunas
                     idx_valor = (
@@ -14301,6 +15229,28 @@ else:
 
                         funcao_salva = limpar_funcao(funcao_val)
 
+                        moradia_salva = ""
+                        if col_moradia_import != "(não usar)":
+                            bruto_moradia = linha.get(
+                                col_moradia_import
+                            )
+                            if not pd.isna(bruto_moradia):
+                                moradia_txt = normalizar(
+                                    bruto_moradia
+                                )
+
+                                mapa_moradias = {
+                                    "FORTALEZA": "Fortaleza",
+                                    "MARACANAU": "Maracanaú",
+                                    "CAUCAIA": "Caucaia",
+                                    "HORIZONTE": "Horizonte",
+                                }
+
+                                moradia_salva = mapa_moradias.get(
+                                    moradia_txt,
+                                    "",
+                                )
+
                         if col_valor_import == "(selecione)":
                             linhas_valor_invalido += 1
                             continue
@@ -14319,6 +15269,7 @@ else:
                             "funcao": funcao_salva,
                             "tipo": tipo_val,
                             "valor_diaria": diaria_salva,
+                            "local_moradia": moradia_salva,
                             "avulso": avulso_val,
                         }
 
@@ -14331,6 +15282,7 @@ else:
                                 "Função": r["funcao"],
                                 "Categoria": r["tipo"],
                                 "Valor do colaborador": formatar_reais(r["valor_diaria"]),
+                                "Moradia": r.get("local_moradia") or "Não informado",
                                 "Avulso": "SIM" if r["avulso"] else "NÃO",
                             }
                             for r in registros_import
@@ -14378,7 +15330,13 @@ else:
                                         "nome": reg["nome"],
                                         "funcao": reg["funcao"],
                                         "valor_diaria": reg["valor_diaria"],
+                                        "ativo": True,
                                     }
+
+                                    if reg.get("local_moradia"):
+                                        payload["local_moradia"] = reg[
+                                            "local_moradia"
+                                        ]
                                     try:
                                         if existente:
                                             supabase.table("colaboradores").update(payload).eq("id", existente["id"]).execute()
