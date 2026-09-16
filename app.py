@@ -15,6 +15,7 @@ import requests
 import openpyxl
 from zoneinfo import ZoneInfo
 import hmac
+import html as _html
 from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 
 # --- APROAR | FASE 1 DE PRODUÇÃO (migração não destrutiva) ---
