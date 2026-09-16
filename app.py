@@ -2738,9 +2738,11 @@ def _atualizar_colaborador_admin_rapido(
             return True
 
         except Exception:
-            return False
+            # Se o caminho otimizado falhar por qualquer incompatibilidade
+            # pontual do driver/estrutura, tenta o caminho normal abaixo.
+            pass
 
-    # Fallback compatível com backend legado.
+    # Fallback compatível com backend legado e também com Neon.
     try:
         (
             supabase.table("colaboradores")
@@ -14658,6 +14660,9 @@ else:
                     display:flex !important;
                     justify-content:center !important;
                     align-items:center !important;
+                    width:100% !important;
+                    min-width:36px !important;
+                    overflow:visible !important;
                 }
 
                 div[class*="st-key-btn_inline_excluir_func_"] button{
@@ -14792,6 +14797,17 @@ else:
                 def _render_banco_funcionarios_inline(
                     lista_filtrada,
                 ):
+                    mensagem_grade = st.session_state.pop(
+                        "_msg_grade_funcionarios",
+                        None,
+                    )
+                    if mensagem_grade:
+                        tipo_msg = mensagem_grade.get("tipo")
+                        texto_msg = mensagem_grade.get("texto", "")
+                        if tipo_msg == "erro":
+                            st.error(texto_msg)
+                        elif tipo_msg == "sucesso":
+                            st.success(texto_msg)
                     # IDs removidos na sessão somem imediatamente da grade,
                     # mesmo antes de qualquer rerun completo da página.
                     excluidos_sessao = set(
@@ -15102,14 +15118,27 @@ else:
                                     )
 
                                     if ok_moradia:
-                                        st.toast(
-                                            "Moradia atualizada.",
-                                            icon="✅",
-                                        )
+                                        st.session_state[
+                                            "_msg_grade_funcionarios"
+                                        ] = {
+                                            "tipo": "sucesso",
+                                            "texto": "Moradia atualizada.",
+                                        }
+                                        try:
+                                            st.rerun(scope="fragment")
+                                        except TypeError:
+                                            st.rerun()
                                     else:
-                                        st.error(
-                                            "Não foi possível atualizar a moradia."
-                                        )
+                                        st.session_state[
+                                            "_msg_grade_funcionarios"
+                                        ] = {
+                                            "tipo": "erro",
+                                            "texto": "Não foi possível atualizar a moradia.",
+                                        }
+                                        try:
+                                            st.rerun(scope="fragment")
+                                        except TypeError:
+                                            st.rerun()
 
                             with r_excluir:
                                 if st.button(
@@ -15153,25 +15182,33 @@ else:
                                             ids_excluidos
                                         )
 
-                                        st.toast(
-                                            f"{nome_inline} retirado.",
-                                            icon="✅",
+                                        st.session_state[
+                                            "msg_banco_funcionarios"
+                                        ] = (
+                                            f"{nome_inline} foi retirado "
+                                            "da base operacional."
                                         )
 
-                                        # Em versões atuais do Streamlit, só
-                                        # este fragmento reroda; fallback usa
-                                        # rerun normal se necessário.
-                                        try:
-                                            st.rerun(
-                                                scope="fragment"
-                                            )
-                                        except TypeError:
-                                            st.rerun()
+                                        # Após remover uma linha, fazemos rerun
+                                        # completo para o DOM da grade ser remontado
+                                        # corretamente. A operação de banco continua
+                                        # otimizada e rápida.
+                                        st.rerun()
 
                                     else:
-                                        st.error(
-                                            "Não foi possível excluir o funcionário."
-                                        )
+                                        st.session_state[
+                                            "_msg_grade_funcionarios"
+                                        ] = {
+                                            "tipo": "erro",
+                                            "texto": (
+                                                f"Não foi possível excluir "
+                                                f"{nome_inline}. Tente novamente."
+                                            ),
+                                        }
+                                        try:
+                                            st.rerun(scope="fragment")
+                                        except TypeError:
+                                            st.rerun()
 
                 _render_banco_funcionarios_inline(
                     ativos_filtrados
