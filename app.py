@@ -6832,7 +6832,7 @@ def _processar_registro_operacional(registro):
         "Custo c/ encargos (R$)": float(custo_encargos),
         "Extra (R$)": float(extra),
         "Adicional noturno (R$)": float(adicional_noturno),
-        "Acordo (R$)": float(acordo),
+        "Acordos / Bonificações (R$)": float(acordo),
         "Custo (R$)": float(total_controladoria),
         "Total Financeiro (R$)": float(total_financeiro),
         "Observação": obs_livre,
@@ -7207,7 +7207,7 @@ def ratear_registros_por_servico(registros):
                 "Custo c/ encargos (R$)": base_ctrl_rateada,
                 "Extra (R$)": extra_rateada,
                 "Adicional noturno (R$)": adicional_noturno_rateado,
-                "Acordo (R$)": acordo_rateado,
+                "Acordos / Bonificações (R$)": acordo_rateado,
                 "Total Financeiro (R$)": round(
                     base_fin_rateada
                     + extra_rateada
@@ -7495,7 +7495,7 @@ def render_dashboard_consulta(key_prefix="dash", engenheiro_fixo=None):
     cols = [
         "Data", "Engenheiro", "Unidade", "Serviço(s)", "Colaborador", "Status", "Tipo",
         "Custo c/ encargos (R$)", "Extra (R$)", "Adicional noturno (R$)",
-        "Acordo (R$)", "Custo (R$)"
+        "Acordos / Bonificações (R$)", "Custo (R$)"
     ]
     tabela_aproar(df[cols], key=f"{key_prefix}_tbl_detalhe")
 
@@ -7634,7 +7634,7 @@ def render_relatorio_visualizador(key_prefix="rel_view", engenheiro_fixo=None):
                 "Custo c/ encargos (R$)",
                 "Extra (R$)",
                 "Adicional noturno (R$)",
-                "Acordo (R$)",
+                "Acordos / Bonificações (R$)",
                 "Custo (R$)",
             ]
         ],
@@ -8043,10 +8043,10 @@ def incluir_multiplos_servicos_direto_apontamento(
     indisponiveis_map=None,
 ):
     """
-    Inclui 1 ou 2 serviços para o mesmo colaborador.
+    Inclui um ou vários serviços para o mesmo colaborador.
 
     Regras:
-    - Dois serviços no MESMO turno são permitidos e ficam no mesmo registro,
+    - Vários serviços no MESMO turno são permitidos e ficam no mesmo registro,
       para que a meia diária daquele turno seja rateada entre as obras.
     - Turnos compatíveis diferentes (Manhã + Tarde, etc.) viram registros separados.
     - Integral + outro turno diferente continua bloqueado.
@@ -8762,7 +8762,7 @@ def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
                     )
                 with p4:
                     valor_acordo = st.number_input(
-                        "Acordo (R$)",
+                        "Acordos / Bonificações (R$)",
                         min_value=0.0,
                         value=(float(conv.get("valor_acordo") or 0.0) if status_eh_presenca(status_sel) else 0.0),
                         step=10.0,
@@ -8981,7 +8981,7 @@ def carregar_dados_financeiro(data_inicio, data_fim):
                         "Base Financeiro (R$)": ("Base Financeiro (R$)", "sum"),
                         "Extra (R$)": ("Extra (R$)", "sum"),
                         "Adicional noturno (R$)": ("Adicional noturno (R$)", "sum"),
-                        "Acordo (R$)": ("Acordo (R$)", "sum"),
+                        "Acordos / Bonificações (R$)": ("Acordos / Bonificações (R$)", "sum"),
                         "Total a Pagar (R$)": ("Total Financeiro (R$)", "sum"),
                     },
                 )
@@ -9003,7 +9003,7 @@ def carregar_dados_financeiro(data_inicio, data_fim):
                     "Base Financeiro (R$)": round(float(row["Base Financeiro (R$)"]), 2),
                     "Extra (R$)": round(float(row["Extra (R$)"]), 2),
                     "Adicional noturno (R$)": round(float(row["Adicional noturno (R$)"]), 2),
-                    "Acordo (R$)": round(float(row["Acordo (R$)"]), 2),
+                    "Acordos / Bonificações (R$)": round(float(row["Acordos / Bonificações (R$)"]), 2),
                     "Total a Pagar (R$)": round(float(row["Total a Pagar (R$)"]), 2),
                 })
 
@@ -9038,7 +9038,7 @@ def resumir_pagamentos_financeiro(pagamentos):
     if not pagamentos:
         return pd.DataFrame(columns=[
             "Colaborador", "Função", "Unidades", "Dias/Lançamentos",
-            "Base (R$)", "Extra (R$)", "Adic. noturno (R$)", "Acordo (R$)", "Total a Pagar (R$)"
+            "Base (R$)", "Extra (R$)", "Adic. noturno (R$)", "Acordos / Bonificações (R$)", "Total a Pagar (R$)"
         ])
 
     df = pd.DataFrame(pagamentos)
@@ -9051,7 +9051,7 @@ def resumir_pagamentos_financeiro(pagamentos):
                 "Base (R$)": ("Base Financeiro (R$)", "sum"),
                 "Extra (R$)": ("Extra (R$)", "sum"),
                 "Adic. noturno (R$)": ("Adicional noturno (R$)", "sum"),
-                "Acordo (R$)": ("Acordo (R$)", "sum"),
+                "Acordos / Bonificações (R$)": ("Acordos / Bonificações (R$)", "sum"),
                 "Total a Pagar (R$)": ("Total a Pagar (R$)", "sum"),
             },
         )
@@ -9091,7 +9091,7 @@ def gerar_excel_financeiro(pagamentos, ausencias, data_inicio, data_fim, data_pa
     )
     headers_resumo = [
         "Colaborador", "Função", "Unidades", "Dias/Lançamentos",
-        "Base (R$)", "Extra (R$)", "Adic. noturno (R$)", "Acordo (R$)", "Total a Pagar (R$)"
+        "Base (R$)", "Extra (R$)", "Adic. noturno (R$)", "Acordos / Bonificações (R$)", "Total a Pagar (R$)"
     ]
     cabecalho_planilha(ws_resumo, "APROAR - RELATÓRIO FINANCEIRO", subtitulo, len(headers_resumo))
     for ci, nome in enumerate(headers_resumo, 1):
@@ -9113,7 +9113,7 @@ def gerar_excel_financeiro(pagamentos, ausencias, data_inicio, data_fim, data_pa
     headers_det = [
         "Data", "Colaborador", "Função", "Unidade", "Engenheiro", "Tipo",
         "Base Financeiro (R$)", "Extra (R$)", "Adicional noturno (R$)",
-        "Acordo (R$)", "Total a Pagar (R$)"
+        "Acordos / Bonificações (R$)", "Total a Pagar (R$)"
     ]
     cabecalho_planilha(ws_det, "DETALHAMENTO DE PAGAMENTOS", subtitulo, len(headers_det))
     for ci, nome in enumerate(headers_det, 1):
@@ -9184,7 +9184,7 @@ def gerar_pdf_financeiro(pagamentos, ausencias, data_inicio, data_fim, data_paga
     pdf.cell(0, 7, to_latin(f"TOTAL A PAGAR: {formatar_reais(total_pagar)}"), ln=True)
 
     widths = [52, 34, 40, 20, 24, 24, 27, 24, 31]
-    headers = ["Colaborador", "Função", "Unidade(s)", "Dias", "Base", "Extra", "Adic. not.", "Acordo", "Total"]
+    headers = ["Colaborador", "Função", "Unidade(s)", "Dias", "Base", "Extra", "Adic. not.", "Acordos / Bonificações", "Total"]
     pdf.set_font("Arial", "B", 7.5)
     for w, h in zip(widths, headers):
         pdf.cell(w, 6, to_latin(h), border=1, align="C")
@@ -9199,7 +9199,7 @@ def gerar_pdf_financeiro(pagamentos, ausencias, data_inicio, data_fim, data_paga
                 str(int(r["Dias/Lançamentos"])), formatar_reais(float(r["Base (R$)"])),
                 formatar_reais(float(r["Extra (R$)"])),
                 formatar_reais(float(r["Adic. noturno (R$)"])),
-                formatar_reais(float(r["Acordo (R$)"])),
+                formatar_reais(float(r["Acordos / Bonificações (R$)"])),
                 formatar_reais(float(r["Total a Pagar (R$)"])),
             ]
             aligns = ["L", "L", "L", "C", "R", "R", "R", "R", "R"]
@@ -11776,10 +11776,99 @@ elif modo_campo:
         st.markdown(
             '<div class="engm-section-title">Apontar equipe</div>'
             '<div class="engm-section-sub">'
-            'Status e serviço ficam visíveis. Extra, observação e 2º serviço ficam em “Mais opções”.'
+            'Campos compactos para celular. Você pode adicionar quantos serviços forem necessários e salvar tudo de uma vez.'
             '</div>',
             unsafe_allow_html=True,
         )
+
+        st.html("""
+        <style>
+        /* ==========================================================
+           V6.30 — APONTAMENTO MOBILE COMPACTO
+           ========================================================== */
+        div[class*="st-key-engm_point_card_"]{
+            padding:10px 11px !important;
+        }
+
+        div[class*="st-key-engm_point_card_"] [data-testid="stHorizontalBlock"]{
+            gap:.5rem !important;
+        }
+
+        div[class*="st-key-engm_point_card_"] label p,
+        div[class*="st-key-engm_inc_servico_"] label p{
+            font-size:10px !important;
+            line-height:1.15 !important;
+            margin-bottom:3px !important;
+        }
+
+        div[class*="st-key-engm_point_card_"] div[data-baseweb="select"] > div,
+        div[class*="st-key-engm_inc_servico_"] div[data-baseweb="select"] > div{
+            min-height:40px !important;
+            height:40px !important;
+            border-radius:8px !important;
+        }
+
+        div[class*="st-key-engm_point_card_"] input,
+        div[class*="st-key-engm_inc_servico_"] input{
+            min-height:38px !important;
+            height:38px !important;
+            font-size:12px !important;
+        }
+
+        div[class*="st-key-engm_point_card_"] [data-testid="stNumberInput"] button{
+            min-height:38px !important;
+            height:38px !important;
+            width:34px !important;
+        }
+
+        .engm-pay-summary{
+            margin:3px 0 1px;
+            padding:7px 9px;
+            border-radius:8px;
+            background:#F7F9FC;
+            border:1px solid #E4E9F0;
+            color:#738097;
+            font-size:9.5px;
+            line-height:1.35;
+        }
+
+        .engm-service-title{
+            margin:5px 0 3px;
+            color:#536176;
+            font-size:9px;
+            font-weight:800;
+            text-transform:uppercase;
+            letter-spacing:.035em;
+        }
+
+        div[class*="st-key-engm_add_serv_"] button,
+        div[class*="st-key-engm_rem_serv_"] button,
+        div[class*="st-key-engm_inc_add_serv"] button,
+        div[class*="st-key-engm_inc_rem_serv"] button{
+            min-height:34px !important;
+            height:34px !important;
+            padding:3px 8px !important;
+            font-size:10px !important;
+            border-radius:7px !important;
+        }
+
+        @media(max-width:560px){
+            div[class*="st-key-engm_point_card_"]{
+                padding:8px !important;
+            }
+
+            div[class*="st-key-engm_point_card_"] [data-testid="stHorizontalBlock"],
+            div[class*="st-key-engm_inc_servico_"] [data-testid="stHorizontalBlock"]{
+                gap:.35rem !important;
+            }
+
+            div[class*="st-key-engm_point_card_"] div[data-baseweb="select"] span,
+            div[class*="st-key-engm_inc_servico_"] div[data-baseweb="select"] span{
+                font-size:11px !important;
+            }
+        }
+        </style>
+        """)
 
         # Inclusão excepcional / retroativa.
         with st.expander(
@@ -11787,8 +11876,8 @@ elif modo_campo:
             expanded=False,
         ):
             st.caption(
-                "Use esta área para apontamento retroativo ou inclusão excepcional. "
-                "Você pode lançar um ou dois serviços para a mesma pessoa."
+                "Use para apontamento retroativo ou inclusão excepcional. "
+                "Adicione quantos serviços forem necessários e salve tudo de uma vez."
             )
 
             tipo_inc = st.radio(
@@ -11814,15 +11903,12 @@ elif modo_campo:
 
                 nome_inc = st.selectbox(
                     "Colaborador",
-                    ["— Selecione —"]
-                    + list(labels_inc.keys()),
+                    ["— Selecione —"] + list(labels_inc.keys()),
                     key="engm_inc_colab",
                 )
 
                 if nome_inc != "— Selecione —":
-                    colaborador_id_inc = labels_inc.get(
-                        nome_inc
-                    )
+                    colaborador_id_inc = labels_inc.get(nome_inc)
                     nome_exibicao_inc = nome_inc
 
             else:
@@ -11836,7 +11922,7 @@ elif modo_campo:
 
                 with c_av1:
                     tipo_diaria_inc = st.selectbox(
-                        "Categoria da diária",
+                        "Categoria",
                         ["Profissional", "Ajudante"],
                         key="engm_inc_avulso_tipo",
                     )
@@ -11856,194 +11942,263 @@ elif modo_campo:
                 }
             )
 
-            # Para inclusão excepcional, continua sendo possível escolher unidade
-            # em qualquer data anterior. O status de atraso do SEBRAE é tratado
-            # separadamente na hora de salvar (janela até 09:29 do dia seguinte).
             eh_retroativo = data_apont < hoje_campo
+            pode_escolher_unidade_inc = (
+                eh_retroativo
+                or not unidade_apont_campo
+            )
 
-            # Se existe uma unidade convocada hoje, ela continua sendo a padrão.
-            # Em retroativo (ou sem convocação) o engenheiro pode escolher qualquer
-            # unidade válida para conseguir lançar o serviço.
-            if eh_retroativo or not unidade_apont_campo:
-                unidade_inc_1 = (
-                    st.selectbox(
-                        "Unidade do 1º serviço",
-                        unidades_retro,
-                        key="engm_inc_unidade_1",
+            qtd_inc_key = "_engm_inc_qtd_servicos"
+            if qtd_inc_key not in st.session_state:
+                st.session_state[qtd_inc_key] = 1
+
+            qtd_servicos_inc = max(
+                1,
+                int(
+                    st.session_state.get(
+                        qtd_inc_key,
+                        1,
                     )
-                    if unidades_retro
-                    else ""
-                )
-            else:
-                unidade_inc_1 = unidade_apont_campo
-                st.caption(
-                    f"Unidade do serviço: {unidade_inc_1}"
-                )
-
-            obras_inc_1 = (
-                obras_reais_da_unidade(
-                    unidade_inc_1
-                )
-                if unidade_inc_1
-                else []
+                ),
             )
 
-            mapa_inc_1 = {
-                o.get("nome"): o.get("id")
-                for o in obras_inc_1
-            }
-
-            st.markdown("**1º serviço**")
-
-            s1c1, s1c2 = st.columns(
-                [1.55, .65]
+            b_inc1, b_inc2, b_inc3 = st.columns(
+                [1.35, 1.35, 2.3],
+                vertical_alignment="center",
             )
 
-            with s1c1:
-                obra_inc_1 = st.selectbox(
-                    "Obra / Serviço",
-                    ["— Selecione —"]
-                    + list(mapa_inc_1.keys()),
-                    key="engm_inc_obra_1",
-                )
-
-            with s1c2:
-                turno_inc_1 = st.selectbox(
-                    "Turno",
-                    [
-                        "Manhã",
-                        "Tarde",
-                        "Noite",
-                        "Integral",
-                    ],
-                    key="engm_inc_turno_1",
-                )
-
-            adicionar_segundo = st.checkbox(
-                "Adicionar 2º serviço",
-                key="engm_inc_tem_segundo",
-            )
-
-            unidade_inc_2 = unidade_inc_1
-            obra_inc_2 = "— Nenhum —"
-            turno_inc_2 = "Tarde"
-            mapa_inc_2 = {}
-
-            if adicionar_segundo:
-                st.markdown("**2º serviço**")
-
-                if eh_retroativo or not unidade_apont_campo:
-                    idx_unid_2 = (
-                        unidades_retro.index(unidade_inc_1)
-                        if unidade_inc_1 in unidades_retro
-                        else 0
+            with b_inc1:
+                if st.button(
+                    "+ Adicionar serviço",
+                    key="engm_inc_add_serv",
+                    use_container_width=True,
+                ):
+                    st.session_state[qtd_inc_key] = (
+                        qtd_servicos_inc + 1
                     )
+                    st.rerun()
 
-                    unidade_inc_2 = (
-                        st.selectbox(
-                            "Unidade do 2º serviço",
-                            unidades_retro,
-                            index=idx_unid_2,
-                            key="engm_inc_unidade_2",
+            with b_inc2:
+                if st.button(
+                    "− Remover último",
+                    key="engm_inc_rem_serv",
+                    use_container_width=True,
+                    disabled=qtd_servicos_inc <= 1,
+                ):
+                    idx_rem = qtd_servicos_inc
+                    for prefix in (
+                        "engm_inc_unidade_",
+                        "engm_inc_obra_",
+                        "engm_inc_turno_",
+                    ):
+                        st.session_state.pop(
+                            f"{prefix}{idx_rem}",
+                            None,
                         )
-                        if unidades_retro
-                        else ""
-                    )
-                else:
-                    unidade_inc_2 = unidade_apont_campo
 
-                obras_inc_2 = (
-                    obras_reais_da_unidade(
-                        unidade_inc_2
+                    st.session_state[qtd_inc_key] = max(
+                        1,
+                        qtd_servicos_inc - 1,
                     )
-                    if unidade_inc_2
-                    else []
+                    st.rerun()
+
+            with b_inc3:
+                st.caption(
+                    f"{qtd_servicos_inc} serviço(s) no apontamento"
                 )
 
-                mapa_inc_2 = {
-                    o.get("nome"): o.get("id")
-                    for o in obras_inc_2
-                }
+            servicos_inc_ui = []
 
-                s2c1, s2c2 = st.columns(
-                    [1.55, .65]
-                )
-
-                with s2c1:
-                    obra_inc_2 = st.selectbox(
-                        "Obra / Serviço",
-                        ["— Selecione —"]
-                        + list(mapa_inc_2.keys()),
-                        key="engm_inc_obra_2",
+            for idx_serv in range(
+                1,
+                qtd_servicos_inc + 1,
+            ):
+                with st.container(
+                    border=True,
+                    key=f"engm_inc_servico_{idx_serv}",
+                ):
+                    st.markdown(
+                        (
+                            '<div class="engm-service-title">'
+                            f'Serviço {idx_serv}'
+                            '</div>'
+                        ),
+                        unsafe_allow_html=True,
                     )
 
-                with s2c2:
-                    turno_inc_2 = st.selectbox(
-                        "Turno",
-                        [
-                            "Manhã",
-                            "Tarde",
-                            "Noite",
-                            "Integral",
-                        ],
-                        index=1,
-                        key="engm_inc_turno_2",
-                    )
+                    if pode_escolher_unidade_inc:
+                        unidade_default = (
+                            unidade_apont_campo
+                            if unidade_apont_campo in unidades_retro
+                            else (
+                                unidades_retro[0]
+                                if unidades_retro
+                                else ""
+                            )
+                        )
+
+                        key_uni = (
+                            f"engm_inc_unidade_{idx_serv}"
+                        )
+
+                        if (
+                            key_uni not in st.session_state
+                            and unidade_default
+                        ):
+                            st.session_state[key_uni] = unidade_default
+
+                        c_uni, c_turno = st.columns(
+                            [1.25, .75]
+                        )
+
+                        with c_uni:
+                            unidade_inc = (
+                                st.selectbox(
+                                    "Unidade",
+                                    unidades_retro,
+                                    key=key_uni,
+                                )
+                                if unidades_retro
+                                else ""
+                            )
+
+                        with c_turno:
+                            turno_inc = st.selectbox(
+                                "Turno",
+                                [
+                                    "Manhã",
+                                    "Tarde",
+                                    "Noite",
+                                    "Integral",
+                                ],
+                                key=(
+                                    f"engm_inc_turno_{idx_serv}"
+                                ),
+                            )
+
+                        obras_inc = (
+                            obras_reais_da_unidade(
+                                unidade_inc
+                            )
+                            if unidade_inc
+                            else []
+                        )
+
+                        mapa_inc = {
+                            o.get("nome"): o.get("id")
+                            for o in obras_inc
+                        }
+
+                        obra_inc = st.selectbox(
+                            "Obra / Serviço",
+                            ["— Selecione —"]
+                            + list(mapa_inc.keys()),
+                            key=(
+                                f"engm_inc_obra_{idx_serv}"
+                            ),
+                        )
+
+                    else:
+                        unidade_inc = unidade_apont_campo
+                        obras_inc = (
+                            obras_reais_da_unidade(
+                                unidade_inc
+                            )
+                            if unidade_inc
+                            else []
+                        )
+
+                        mapa_inc = {
+                            o.get("nome"): o.get("id")
+                            for o in obras_inc
+                        }
+
+                        c_obra, c_turno = st.columns(
+                            [1.55, .65]
+                        )
+
+                        with c_obra:
+                            obra_inc = st.selectbox(
+                                "Obra / Serviço",
+                                ["— Selecione —"]
+                                + list(mapa_inc.keys()),
+                                key=(
+                                    f"engm_inc_obra_{idx_serv}"
+                                ),
+                            )
+
+                        with c_turno:
+                            turno_inc = st.selectbox(
+                                "Turno",
+                                [
+                                    "Manhã",
+                                    "Tarde",
+                                    "Noite",
+                                    "Integral",
+                                ],
+                                key=(
+                                    f"engm_inc_turno_{idx_serv}"
+                                ),
+                            )
+
+                    servicos_inc_ui.append({
+                        "idx": idx_serv,
+                        "unidade": unidade_inc,
+                        "obra": obra_inc,
+                        "turno": turno_inc,
+                        "mapa": mapa_inc,
+                    })
 
             if st.button(
                 "Adicionar ao apontamento",
                 use_container_width=True,
+                type="primary",
                 key="engm_inc_btn",
             ):
-                if not unidade_inc_1:
-                    st.warning(
-                        "Selecione a unidade do 1º serviço."
+                erros_inc = []
+                servicos_inc = []
+                obras_ids_inc = []
+
+                for item_inc in servicos_inc_ui:
+                    idx_serv = item_inc["idx"]
+
+                    if not item_inc["unidade"]:
+                        erros_inc.append(
+                            f"Serviço {idx_serv}: selecione a unidade."
+                        )
+                        continue
+
+                    if item_inc["obra"] not in item_inc["mapa"]:
+                        erros_inc.append(
+                            f"Serviço {idx_serv}: selecione a obra/serviço."
+                        )
+                        continue
+
+                    obra_id_inc = item_inc["mapa"][
+                        item_inc["obra"]
+                    ]
+
+                    if str(obra_id_inc) in {
+                        str(x)
+                        for x in obras_ids_inc
+                    }:
+                        erros_inc.append(
+                            f"Serviço {idx_serv}: esta obra já foi adicionada."
+                        )
+                        continue
+
+                    obras_ids_inc.append(
+                        obra_id_inc
                     )
 
-                elif obra_inc_1 not in mapa_inc_1:
-                    st.warning(
-                        "Selecione a obra/serviço principal."
-                    )
+                    servicos_inc.append({
+                        "obra_id": obra_id_inc,
+                        "turno": item_inc["turno"],
+                    })
 
-                elif (
-                    adicionar_segundo
-                    and not unidade_inc_2
-                ):
-                    st.warning(
-                        "Selecione a unidade do 2º serviço."
-                    )
-
-                elif (
-                    adicionar_segundo
-                    and obra_inc_2 not in mapa_inc_2
-                ):
-                    st.warning(
-                        "Selecione a 2ª obra/serviço."
-                    )
-
-                elif (
-                    adicionar_segundo
-                    and str(mapa_inc_2.get(obra_inc_2))
-                    == str(mapa_inc_1.get(obra_inc_1))
-                ):
-                    st.warning(
-                        "O 2º serviço deve ser diferente do 1º."
-                    )
-
-                elif (
-                    adicionar_segundo
-                    and turno_inc_1 != turno_inc_2
-                    and turnos_se_sobrepoem(
-                        turno_inc_1,
-                        turno_inc_2,
-                    )
-                ):
-                    st.warning(
-                        "Esses turnos se sobrepõem. "
-                        "Se os dois serviços ocorreram no mesmo período, "
-                        "selecione o mesmo turno nos dois. "
-                        "Caso contrário, escolha períodos compatíveis."
-                    )
+                if erros_inc:
+                    for erro_inc in erros_inc:
+                        st.warning(erro_inc)
 
                 else:
                     if tipo_inc == "Avulso":
@@ -12085,23 +12240,6 @@ elif modo_campo:
                             )
 
                     else:
-                        servicos_inc = [
-                            {
-                                "obra_id": mapa_inc_1[
-                                    obra_inc_1
-                                ],
-                                "turno": turno_inc_1,
-                            }
-                        ]
-
-                        if adicionar_segundo:
-                            servicos_inc.append({
-                                "obra_id": mapa_inc_2[
-                                    obra_inc_2
-                                ],
-                                "turno": turno_inc_2,
-                            })
-
                         try:
                             existentes_todos_data = (
                                 _buscar_convocacoes_intervalo(
@@ -12115,6 +12253,7 @@ elif modo_campo:
                             existentes_todos_data = []
 
                         indisp_map_apont = {}
+
                         try:
                             for _ind in (
                                 _carregar_indisponibilidades_disponibilidade()
@@ -12166,13 +12305,35 @@ elif modo_campo:
 
                         if ok:
                             limpar_cache_convocacoes()
+
+                            # Volta o formulário para 1 serviço após salvar.
+                            for idx_limpa in range(
+                                1,
+                                qtd_servicos_inc + 1,
+                            ):
+                                for prefix in (
+                                    "engm_inc_unidade_",
+                                    "engm_inc_obra_",
+                                    "engm_inc_turno_",
+                                ):
+                                    st.session_state.pop(
+                                        f"{prefix}{idx_limpa}",
+                                        None,
+                                    )
+
+                            st.session_state[
+                                qtd_inc_key
+                            ] = 1
+
                             st.session_state[
                                 "_engm_success_message"
                             ] = (
                                 f"✓ Apontamento salvo com sucesso · "
-                                f"{nome_exibicao_inc}."
+                                f"{nome_exibicao_inc} · "
+                                f"{len(servicos_inc)} serviço(s)."
                             )
                             st.rerun()
+
                         else:
                             st.warning(msg)
 
@@ -12474,7 +12635,10 @@ elif modo_campo:
                         outras_convs
                     )
 
-                    with st.container(border=True):
+                    with st.container(
+                        border=True,
+                        key=f"engm_point_card_{c_id}",
+                    ):
                         st.markdown(
                             f"""
                             <div class="engm-person-head">
@@ -12495,12 +12659,27 @@ elif modo_campo:
                             unsafe_allow_html=True,
                         )
 
-                        status_sel = st.selectbox(
-                            "Status",
-                            OPCOES_STATUS_PRESENCA,
-                            index=idx_status,
-                            key=f"engm_st_{c_id}",
+                        c_status, c_periodo = st.columns(
+                            [1.12, .88]
                         )
+
+                        with c_status:
+                            status_sel = st.selectbox(
+                                "Status",
+                                OPCOES_STATUS_PRESENCA,
+                                index=idx_status,
+                                key=f"engm_st_{c_id}",
+                            )
+
+                        with c_periodo:
+                            periodo_principal = st.selectbox(
+                                "Período",
+                                periodos_servico,
+                                index=periodos_servico.index(
+                                    periodo_principal_atual
+                                ),
+                                key=f"engm_periodo_{c_id}",
+                            )
 
                         obra_sel = st.selectbox(
                             "Obra / Serviço",
@@ -12509,116 +12688,233 @@ elif modo_campo:
                             key=f"engm_obra_{c_id}",
                         )
 
-                        periodo_principal = st.selectbox(
-                            "Período no serviço",
-                            periodos_servico,
-                            index=periodos_servico.index(
-                                periodo_principal_atual
-                            ),
-                            key=f"engm_periodo_{c_id}",
-                        )
+                        servicos_adicionais_editados = []
 
-                        segundo_servico = "— Nenhum —"
-                        segundo_periodo = "Tarde"
-
-                        # Pagamento fica visível no card principal para reduzir cliques.
+                        # Pagamento compacto: 2 campos por linha sempre que possível.
                         tipo_key = f"engm_tipo_diaria_{c_id}"
                         custo_key = f"engm_custo_pago_{c_id}"
                         adicional_noturno_key = f"engm_adicional_noturno_{c_id}"
+
                         tipo_atual_pag = tipo_diaria_registro(conv)
                         custo_atual_pag = custo_pago_total_registro(conv)
-                        adicional_noturno_atual = valor_adicional_noturno_registro(conv)
-                        eh_sebrae_card = eh_unidade_sebrae(unidade)
+                        adicional_noturno_atual = (
+                            valor_adicional_noturno_registro(conv)
+                        )
+                        eh_sebrae_card = eh_unidade_sebrae(
+                            unidade
+                        )
 
                         if eh_sebrae_card:
                             st.session_state[tipo_key] = "Diária"
                         elif tipo_key not in st.session_state:
-                            st.session_state[tipo_key] = tipo_atual_pag
+                            st.session_state[tipo_key] = (
+                                tipo_atual_pag
+                            )
 
                         if custo_key not in st.session_state:
                             st.session_state[custo_key] = (
                                 custo_atual_pag
                                 if custo_atual_pag > 0
                                 else valor_limpo_por_tipo_diaria(
-                                    "Diária" if eh_sebrae_card else tipo_atual_pag
+                                    (
+                                        "Diária"
+                                        if eh_sebrae_card
+                                        else tipo_atual_pag
+                                    )
                                 )
                             )
 
-                        if adicional_noturno_key not in st.session_state:
-                            st.session_state[adicional_noturno_key] = (
-                                adicional_noturno_atual
-                                if adicional_noturno_atual > 0
-                                else (
-                                    VALOR_ADICIONAL_NOTURNO_SEBRAE
-                                    if eh_sebrae_card
-                                    else 0.0
+                        def _ajustar_custo_mobile(
+                            _tipo_key=tipo_key,
+                            _custo_key=custo_key,
+                        ):
+                            st.session_state[
+                                _custo_key
+                            ] = valor_limpo_por_tipo_diaria(
+                                st.session_state.get(
+                                    _tipo_key,
+                                    "Diária",
                                 )
                             )
 
-                        def _ajustar_custo_mobile(_tipo_key=tipo_key, _custo_key=custo_key):
-                            st.session_state[_custo_key] = valor_limpo_por_tipo_diaria(
-                                st.session_state.get(_tipo_key, "Diária")
-                            )
+                        pg1, pg2 = st.columns(
+                            [1, 1.12]
+                        )
 
-                        pg1, pg2 = st.columns([1, 1.2])
                         with pg1:
                             tipo_diaria_sel = st.selectbox(
-                                "Diária / Meia diária",
+                                "Diária / Meia",
                                 TIPOS_DIARIA,
                                 key=tipo_key,
                                 on_change=_ajustar_custo_mobile,
                                 disabled=eh_sebrae_card,
                                 help=(
-                                    "No SEBRAE a jornada 17h–02h é sempre uma diária integral."
+                                    "No SEBRAE, 17h–02h é sempre diária integral."
                                     if eh_sebrae_card
                                     else None
                                 ),
                             )
+
                         with pg2:
                             custo_pago_total = st.number_input(
                                 "Custo + Extra (R$)",
                                 min_value=0.0,
                                 step=10.0,
-                                disabled=not status_eh_presenca(status_sel),
+                                disabled=(
+                                    not status_eh_presenca(
+                                        status_sel
+                                    )
+                                ),
                                 key=custo_key,
                                 help=(
-                                    "Diária inicia em R$ 120,00; meia diária em R$ 60,00. "
-                                    "Edite este total somente quando houver extra."
+                                    "Base: R$ 120 na diária e R$ 60 na meia. "
+                                    "Aumente apenas quando houver extra."
                                 ),
                             )
 
-                        pg3, pg4 = st.columns(2)
-                        with pg3:
-                            valor_adicional_noturno = st.number_input(
-                                "Adicional noturno (R$)",
-                                min_value=0.0,
-                                step=10.0,
-                                disabled=not status_eh_presenca(status_sel),
-                                key=adicional_noturno_key,
-                                help=(
-                                    "No SEBRAE o padrão é R$ 90,00. "
-                                    "Esse valor não é Extra."
-                                ),
+                        if eh_sebrae_card:
+                            if (
+                                adicional_noturno_key
+                                not in st.session_state
+                            ):
+                                st.session_state[
+                                    adicional_noturno_key
+                                ] = (
+                                    adicional_noturno_atual
+                                    if adicional_noturno_atual > 0
+                                    else VALOR_ADICIONAL_NOTURNO_SEBRAE
+                                )
+
+                            pg3, pg4 = st.columns(2)
+
+                            with pg3:
+                                valor_adicional_noturno = (
+                                    st.number_input(
+                                        "Adic. noturno (R$)",
+                                        min_value=0.0,
+                                        step=10.0,
+                                        disabled=(
+                                            not status_eh_presenca(
+                                                status_sel
+                                            )
+                                        ),
+                                        key=(
+                                            adicional_noturno_key
+                                        ),
+                                        help=(
+                                            "SEBRAE: padrão R$ 90,00. "
+                                            "É separado de Extra."
+                                        ),
+                                    )
+                                )
+
+                            with pg4:
+                                valor_acordo = st.number_input(
+                                    "Acordos / Bonificações (R$)",
+                                    min_value=0.0,
+                                    value=(
+                                        float(
+                                            conv.get(
+                                                "valor_acordo"
+                                            )
+                                            or 0.0
+                                        )
+                                        if status_eh_presenca(
+                                            status_sel
+                                        )
+                                        else 0.0
+                                    ),
+                                    step=10.0,
+                                    disabled=(
+                                        not status_eh_presenca(
+                                            status_sel
+                                        )
+                                    ),
+                                    key=(
+                                        f"engm_acordo_{c_id}"
+                                    ),
+                                )
+
+                        else:
+                            # Fora do SEBRAE, este campo nem aparece.
+                            valor_adicional_noturno = 0.0
+                            st.session_state.pop(
+                                adicional_noturno_key,
+                                None,
                             )
 
-                        with pg4:
                             valor_acordo = st.number_input(
-                                "Acordo (R$)",
+                                "Acordos / Bonificações (R$)",
                                 min_value=0.0,
-                                value=(float(conv.get("valor_acordo") or 0.0) if status_eh_presenca(status_sel) else 0.0),
+                                value=(
+                                    float(
+                                        conv.get(
+                                            "valor_acordo"
+                                        )
+                                        or 0.0
+                                    )
+                                    if status_eh_presenca(
+                                        status_sel
+                                    )
+                                    else 0.0
+                                ),
                                 step=10.0,
-                                disabled=not status_eh_presenca(status_sel),
-                                key=f"engm_acordo_{c_id}",
-                                help="Bonificação/acordo adicional, separado de Extra e do adicional noturno.",
+                                disabled=(
+                                    not status_eh_presenca(
+                                        status_sel
+                                    )
+                                ),
+                                key=(
+                                    f"engm_acordo_{c_id}"
+                                ),
+                                help=(
+                                    "Bonificação ou acordo adicional."
+                                ),
                             )
 
-                        _base_prev = valor_limpo_por_tipo_diaria(tipo_diaria_sel)
-                        _extra_prev = max(0.0, float(custo_pago_total) - _base_prev) if status_eh_presenca(status_sel) else 0.0
-                        st.caption(
-                            f"Base: {formatar_reais(_base_prev)} · "
-                            f"Extra: {formatar_reais(_extra_prev)} · "
-                            f"Adic. noturno: {formatar_reais(valor_adicional_noturno)} · "
-                            f"Acordo: {formatar_reais(valor_acordo)}"
+                        _base_prev = (
+                            valor_limpo_por_tipo_diaria(
+                                tipo_diaria_sel
+                            )
+                        )
+
+                        _extra_prev = (
+                            max(
+                                0.0,
+                                float(
+                                    custo_pago_total
+                                )
+                                - _base_prev,
+                            )
+                            if status_eh_presenca(
+                                status_sel
+                            )
+                            else 0.0
+                        )
+
+                        resumo_pag = (
+                            f"Base {formatar_reais(_base_prev)} · "
+                            f"Extra {formatar_reais(_extra_prev)}"
+                        )
+
+                        if eh_sebrae_card:
+                            resumo_pag += (
+                                f" · Noturno "
+                                f"{formatar_reais(valor_adicional_noturno)}"
+                            )
+
+                        resumo_pag += (
+                            f" · Acordos/Bonificações "
+                            f"{formatar_reais(valor_acordo)}"
+                        )
+
+                        st.markdown(
+                            (
+                                '<div class="engm-pay-summary">'
+                                f'{_html.escape(resumo_pag)}'
+                                '</div>'
+                            ),
+                            unsafe_allow_html=True,
                         )
 
                         if eh_sebrae_card:
@@ -12641,62 +12937,220 @@ elif modo_campo:
                                 not tem_conv_separada
                                 and contexto_eh_principal
                             ):
-                                opcoes_adic = [
-                                    "— Nenhum —"
-                                ] + list(
-                                    mapa_obras.keys()
-                                )
-                                adic_atual = (
-                                    adicionais_unidade_atual[0].get(
-                                        "servico"
-                                    )
-                                    if adicionais_unidade_atual
-                                    else "— Nenhum —"
-                                )
-                                idx_adic = (
-                                    opcoes_adic.index(
-                                        adic_atual
-                                    )
-                                    if adic_atual
-                                    in opcoes_adic
-                                    else 0
-                                )
-
-                                segundo_servico = st.selectbox(
-                                    "2º serviço na mesma unidade",
-                                    opcoes_adic,
-                                    index=idx_adic,
-                                    key=f"engm_seg_serv_{c_id}",
-                                )
-
-                                periodo_adic_atual = (
-                                    adicionais_unidade_atual[0].get(
-                                        "periodo",
-                                        "Tarde",
-                                    )
-                                    if adicionais_unidade_atual
-                                    else "Tarde"
+                                qtd_adic_key = (
+                                    f"_engm_qtd_adic_{c_id}"
                                 )
 
                                 if (
-                                    periodo_adic_atual
-                                    not in periodos_servico
+                                    qtd_adic_key
+                                    not in st.session_state
                                 ):
-                                    periodo_adic_atual = "Outro"
+                                    st.session_state[
+                                        qtd_adic_key
+                                    ] = len(
+                                        adicionais_unidade_atual
+                                    )
 
-                                segundo_periodo = st.selectbox(
-                                    "Período do 2º serviço",
-                                    periodos_servico,
-                                    index=periodos_servico.index(
-                                        periodo_adic_atual
+                                qtd_adic = max(
+                                    0,
+                                    int(
+                                        st.session_state.get(
+                                            qtd_adic_key,
+                                            0,
+                                        )
                                     ),
-                                    key=f"engm_seg_periodo_{c_id}",
                                 )
+
+                                ca1, ca2, ca3 = st.columns(
+                                    [1.25, 1.25, 1.5],
+                                    vertical_alignment="center",
+                                )
+
+                                with ca1:
+                                    if st.button(
+                                        "+ Adicionar serviço",
+                                        key=(
+                                            f"engm_add_serv_{c_id}"
+                                        ),
+                                        use_container_width=True,
+                                    ):
+                                        st.session_state[
+                                            qtd_adic_key
+                                        ] = qtd_adic + 1
+                                        st.rerun()
+
+                                with ca2:
+                                    if st.button(
+                                        "− Remover último",
+                                        key=(
+                                            f"engm_rem_serv_{c_id}"
+                                        ),
+                                        use_container_width=True,
+                                        disabled=(
+                                            qtd_adic <= 0
+                                        ),
+                                    ):
+                                        idx_rem = qtd_adic
+                                        st.session_state.pop(
+                                            (
+                                                f"engm_adic_obra_"
+                                                f"{c_id}_{idx_rem}"
+                                            ),
+                                            None,
+                                        )
+                                        st.session_state.pop(
+                                            (
+                                                f"engm_adic_periodo_"
+                                                f"{c_id}_{idx_rem}"
+                                            ),
+                                            None,
+                                        )
+
+                                        st.session_state[
+                                            qtd_adic_key
+                                        ] = max(
+                                            0,
+                                            qtd_adic - 1,
+                                        )
+                                        st.rerun()
+
+                                with ca3:
+                                    st.caption(
+                                        (
+                                            f"{qtd_adic} serviço(s) "
+                                            "adicional(is)"
+                                        )
+                                    )
+
+                                opcoes_adic = (
+                                    ["— Selecione —"]
+                                    + list(
+                                        mapa_obras.keys()
+                                    )
+                                )
+
+                                for idx_adic in range(
+                                    1,
+                                    qtd_adic + 1,
+                                ):
+                                    existente_adic = (
+                                        adicionais_unidade_atual[
+                                            idx_adic - 1
+                                        ]
+                                        if (
+                                            idx_adic - 1
+                                            < len(
+                                                adicionais_unidade_atual
+                                            )
+                                        )
+                                        else {}
+                                    )
+
+                                    servico_atual_adic = str(
+                                        existente_adic.get(
+                                            "servico"
+                                        )
+                                        or ""
+                                    )
+
+                                    periodo_atual_adic = str(
+                                        existente_adic.get(
+                                            "periodo"
+                                        )
+                                        or "Tarde"
+                                    )
+
+                                    if (
+                                        periodo_atual_adic
+                                        not in periodos_servico
+                                    ):
+                                        periodo_atual_adic = (
+                                            "Outro"
+                                        )
+
+                                    key_obra_adic = (
+                                        f"engm_adic_obra_"
+                                        f"{c_id}_{idx_adic}"
+                                    )
+
+                                    key_periodo_adic = (
+                                        f"engm_adic_periodo_"
+                                        f"{c_id}_{idx_adic}"
+                                    )
+
+                                    if (
+                                        key_obra_adic
+                                        not in st.session_state
+                                        and servico_atual_adic
+                                        in opcoes_adic
+                                    ):
+                                        st.session_state[
+                                            key_obra_adic
+                                        ] = (
+                                            servico_atual_adic
+                                        )
+
+                                    if (
+                                        key_periodo_adic
+                                        not in st.session_state
+                                    ):
+                                        st.session_state[
+                                            key_periodo_adic
+                                        ] = (
+                                            periodo_atual_adic
+                                        )
+
+                                    st.markdown(
+                                        (
+                                            '<div class="engm-service-title">'
+                                            f'Serviço adicional {idx_adic}'
+                                            '</div>'
+                                        ),
+                                        unsafe_allow_html=True,
+                                    )
+
+                                    ad_c1, ad_c2 = st.columns(
+                                        [1.55, .65]
+                                    )
+
+                                    with ad_c1:
+                                        obra_adic_sel = (
+                                            st.selectbox(
+                                                "Obra / Serviço",
+                                                opcoes_adic,
+                                                key=(
+                                                    key_obra_adic
+                                                ),
+                                                label_visibility=(
+                                                    "collapsed"
+                                                ),
+                                            )
+                                        )
+
+                                    with ad_c2:
+                                        periodo_adic_sel = (
+                                            st.selectbox(
+                                                "Período",
+                                                periodos_servico,
+                                                key=(
+                                                    key_periodo_adic
+                                                ),
+                                                label_visibility=(
+                                                    "collapsed"
+                                                ),
+                                            )
+                                        )
+
+                                    servicos_adicionais_editados.append({
+                                        "servico": obra_adic_sel,
+                                        "periodo": periodo_adic_sel,
+                                    })
+
                             else:
                                 if not contexto_eh_principal:
                                     st.caption(
-                                        "Este é um serviço adicional do mesmo turno. "
-                                        "Ele está vinculado ao mesmo apontamento."
+                                        "Este card representa um serviço adicional "
+                                        "de outra unidade e está vinculado ao mesmo apontamento."
                                     )
                                 else:
                                     st.caption(
@@ -12711,8 +13165,7 @@ elif modo_campo:
                         "obra_sel": obra_sel,
                         "status_sel": status_sel,
                         "periodo_principal": periodo_principal,
-                        "segundo_servico": segundo_servico,
-                        "segundo_periodo": segundo_periodo,
+                        "servicos_adicionais_editados": servicos_adicionais_editados,
                         "tem_conv_separada": tem_conv_separada,
                         "tipo_diaria_sel": tipo_diaria_sel,
                         "custo_pago_total": custo_pago_total,
@@ -12732,7 +13185,7 @@ elif modo_campo:
                     "Salvar equipe",
                     type="primary",
                     use_container_width=True,
-                    key="engm_salvar_equipe_v627",
+                    key="engm_salvar_equipe_v630",
                 )
 
             if salvar_todos:
@@ -12752,14 +13205,44 @@ elif modo_campo:
                             f"{nome_pessoa}: selecione a obra/serviço."
                         )
 
-                    if (
-                        item["segundo_servico"]
-                        == item["obra_sel"]
-                        and item["segundo_servico"]
-                        != "— Nenhum —"
+                    obras_usadas = {
+                        str(item["obra_sel"])
+                    }
+
+                    for idx_adic, adic in enumerate(
+                        item[
+                            "servicos_adicionais_editados"
+                        ],
+                        start=1,
                     ):
-                        erros_validacao.append(
-                            f"{nome_pessoa}: o 2º serviço deve ser diferente do principal."
+                        servico_adic = str(
+                            adic.get("servico")
+                            or ""
+                        )
+
+                        if (
+                            servico_adic
+                            not in item["mapa_obras"]
+                        ):
+                            erros_validacao.append(
+                                (
+                                    f"{nome_pessoa}: selecione a obra do "
+                                    f"serviço adicional {idx_adic}."
+                                )
+                            )
+                            continue
+
+                        if servico_adic in obras_usadas:
+                            erros_validacao.append(
+                                (
+                                    f"{nome_pessoa}: o serviço "
+                                    f"'{servico_adic}' está repetido."
+                                )
+                            )
+                            continue
+
+                        obras_usadas.add(
+                            servico_adic
                         )
 
                 if erros_validacao:
@@ -12786,60 +13269,61 @@ elif modo_campo:
                         ]
 
                         if item["contexto_eh_principal"]:
-                            # Preserva outros adicionais da mesma unidade que
-                            # não estão sendo editados pelo seletor opcional.
-                            adicionais_mesma_unidade = [
-                                dict(x)
-                                for x in item[
-                                    "adicionais_unidade_atual"
-                                ]
-                            ]
+                            # A lista da tela representa TODOS os serviços
+                            # adicionais desta unidade. Assim é possível adicionar
+                            # 2, 3, 4... serviços e salvar tudo junto.
+                            adicionais_mesma_unidade = []
 
-                            if (
-                                not item["tem_conv_separada"]
-                                and item["segundo_servico"]
-                                in item["mapa_obras"]
-                            ):
-                                _obra_adic_id = item[
-                                    "mapa_obras"
-                                ][item["segundo_servico"]]
-                                _obra_adic = dict_obras.get(
-                                    _obra_adic_id,
-                                    {},
-                                )
-
-                                novo_adicional = {
-                                    "servico": item[
-                                        "segundo_servico"
-                                    ],
-                                    "periodo": item[
-                                        "segundo_periodo"
-                                    ],
-                                    "obra_id": str(
-                                        _obra_adic_id
-                                        or ""
-                                    ),
-                                    "unidade": str(
-                                        _obra_adic.get(
-                                            "unidade"
+                            if not item["tem_conv_separada"]:
+                                for adic_edit in item[
+                                    "servicos_adicionais_editados"
+                                ]:
+                                    nome_adic = str(
+                                        adic_edit.get(
+                                            "servico"
                                         )
-                                        or item[
-                                            "unidade_contexto"
-                                        ]
                                         or ""
-                                    ),
-                                }
+                                    )
 
-                                # Substitui o primeiro adicional editável da
-                                # unidade; preserva os demais, se existirem.
-                                if adicionais_mesma_unidade:
-                                    adicionais_mesma_unidade[0] = (
-                                        novo_adicional
+                                    if (
+                                        nome_adic
+                                        not in item[
+                                            "mapa_obras"
+                                        ]
+                                    ):
+                                        continue
+
+                                    _obra_adic_id = item[
+                                        "mapa_obras"
+                                    ][nome_adic]
+
+                                    _obra_adic = dict_obras.get(
+                                        _obra_adic_id,
+                                        {},
                                     )
-                                else:
-                                    adicionais_mesma_unidade.append(
-                                        novo_adicional
-                                    )
+
+                                    adicionais_mesma_unidade.append({
+                                        "servico": nome_adic,
+                                        "periodo": str(
+                                            adic_edit.get(
+                                                "periodo"
+                                            )
+                                            or "Outro"
+                                        ),
+                                        "obra_id": str(
+                                            _obra_adic_id
+                                            or ""
+                                        ),
+                                        "unidade": str(
+                                            _obra_adic.get(
+                                                "unidade"
+                                            )
+                                            or item[
+                                                "unidade_contexto"
+                                            ]
+                                            or ""
+                                        ),
+                                    })
 
                             adicionais.extend(
                                 adicionais_mesma_unidade
@@ -12929,7 +13413,12 @@ elif modo_campo:
                         valor_extra_final = max(0.0, custo_pago_final - base_limpa_final) if presente_final else 0.0
                         valor_adicional_noturno_final = (
                             float(item["valor_adicional_noturno"])
-                            if presente_final
+                            if (
+                                presente_final
+                                and eh_unidade_sebrae(
+                                    item["unidade_contexto"]
+                                )
+                            )
                             else 0.0
                         )
                         valor_acordo_final = float(item["valor_acordo"]) if presente_final else 0.0
@@ -14026,7 +14515,7 @@ elif modo_financeiro:
             st.info("Nenhum pagamento foi lançado neste ciclo.")
         else:
             resumo_view = resumo_fin.copy()
-            for _c in ["Base (R$)", "Extra (R$)", "Adic. noturno (R$)", "Acordo (R$)", "Total a Pagar (R$)"]:
+            for _c in ["Base (R$)", "Extra (R$)", "Adic. noturno (R$)", "Acordos / Bonificações (R$)", "Total a Pagar (R$)"]:
                 if _c in resumo_view.columns:
                     resumo_view[_c.replace(" (R$)", "")] = resumo_view[_c].apply(formatar_reais)
                     resumo_view = resumo_view.drop(columns=[_c])
@@ -14036,13 +14525,13 @@ elif modo_financeiro:
             detalhe_extra_view = pd.DataFrame(pagamentos_fin)[[
                 "Data", "Colaborador", "Função", "Unidade", "Engenheiro", "Tipo",
                 "Base Financeiro (R$)", "Extra (R$)", "Adicional noturno (R$)",
-                "Acordo (R$)", "Total a Pagar (R$)"
+                "Acordos / Bonificações (R$)", "Total a Pagar (R$)"
             ]].copy()
             for _c in [
                 "Base Financeiro (R$)",
                 "Extra (R$)",
                 "Adicional noturno (R$)",
-                "Acordo (R$)",
+                "Acordos / Bonificações (R$)",
                 "Total a Pagar (R$)",
             ]:
                 detalhe_extra_view[_c.replace(" (R$)", "")] = detalhe_extra_view[_c].apply(formatar_reais)
@@ -15177,7 +15666,7 @@ else:
                                 ("Custo c/ encargos", 27, "C"),
                                 ("Extra", 18, "C"),
                                 ("Adic. not.", 20, "C"),
-                                ("Acordo", 18, "C"),
+                                ("Acordos / Bonificações", 18, "C"),
                                 ("Observação", 22, "L"),
                             ]
 
@@ -15224,7 +15713,7 @@ else:
                                     (formatar_reais(float(row["Custo c/ encargos (R$)"])), 27, "C"),
                                     (formatar_reais(float(row["Extra (R$)"])), 18, "C"),
                                     (formatar_reais(float(row["Adicional noturno (R$)"])), 20, "C"),
-                                    (formatar_reais(float(row["Acordo (R$)"])), 18, "C"),
+                                    (formatar_reais(float(row["Acordos / Bonificações (R$)"])), 18, "C"),
                                     (str(row.get("Observação", ""))[:14], 22, "L"),
                                 ]
 
@@ -15449,7 +15938,7 @@ else:
                                     "Custo c/ Encargos (R$)",
                                     "Extra (R$)",
                                     "Adicional Noturno (R$)",
-                                    "Acordo (R$)",
+                                    "Acordos / Bonificações (R$)",
                                     "Custo Controladoria (R$)",
                                     "Observação",
                                 ]
@@ -15510,7 +15999,7 @@ else:
                                         float(r["Custo c/ encargos (R$)"]),
                                         float(r["Extra (R$)"]),
                                         float(r.get("Adicional noturno (R$)") or 0.0),
-                                        float(r["Acordo (R$)"]),
+                                        float(r["Acordos / Bonificações (R$)"]),
                                         celula_custo_formula,
                                         r["Observação"],
                                     ]
