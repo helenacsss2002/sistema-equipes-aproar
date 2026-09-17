@@ -5564,9 +5564,44 @@ RESPONSAVEIS_UNIDADES_TEAMS = {
     ],
 }
 
-SUPERVISORES_TEAMS = list(
-    RESPONSAVEIS_UNIDADES_TEAMS.keys()
+OBSERVADORES_TEAMS = [
+    "PAULO",
+    "HELENA",
+]
+
+SUPERVISORES_TEAMS = (
+    list(RESPONSAVEIS_UNIDADES_TEAMS.keys())
+    + OBSERVADORES_TEAMS
 )
+
+
+def _responsavel_por_unidade_teams(unidade):
+    alvo = normalizar(unidade or "")
+
+    for supervisor, unidades in (
+        RESPONSAVEIS_UNIDADES_TEAMS.items()
+    ):
+        if any(
+            normalizar(u) == alvo
+            for u in unidades
+        ):
+            return supervisor
+
+    return "SEM RESPONSÁVEL"
+
+
+def _todas_unidades_responsaveis_teams():
+    unidades = []
+
+    for lista in RESPONSAVEIS_UNIDADES_TEAMS.values():
+        for unidade in lista:
+            if normalizar(unidade) not in {
+                normalizar(u)
+                for u in unidades
+            }:
+                unidades.append(unidade)
+
+    return unidades
 
 def _carregar_pendentes_responsavel_teams(
     cur,
@@ -5574,11 +5609,52 @@ def _carregar_pendentes_responsavel_teams(
     hoje_ref,
 ):
     """
-    Pendências atrasadas cobradas pelo responsável oficial da UNIDADE,
-    independentemente de quem criou originalmente a convocação.
+    Retorna apontamentos atrasados.
+
+    Supervisores operacionais:
+        recebem apenas as unidades sob sua responsabilidade.
+
+    PAULO e HELENA:
+        recebem TODAS as pendências quando estiverem ativos/configurados.
     """
+    supervisor = str(
+        supervisor
+        or ""
+    ).strip().upper()
+
+    if supervisor in OBSERVADORES_TEAMS:
+        cur.execute(
+            """
+            SELECT
+                c.id,
+                c.data,
+                c.turno,
+                c.engenheiro,
+                col.nome AS colaborador,
+                o.unidade,
+                o.nome AS obra_atual
+            FROM convocacoes c
+            JOIN colaboradores col
+              ON col.id = c.colaborador_id
+            JOIN obras o
+              ON o.id = c.obra_id
+            WHERE c.data < %s
+              AND UPPER(COALESCE(o.nome, '')) LIKE UPPER(%s)
+            ORDER BY
+                c.data ASC,
+                o.unidade ASC,
+                col.nome ASC
+            """,
+            (
+                hoje_ref,
+                "A DEFINIR NO APONTAMENTO%",
+            ),
+        )
+
+        return cur.fetchall() or []
+
     unidades = RESPONSAVEIS_UNIDADES_TEAMS.get(
-        str(supervisor).upper(),
+        supervisor,
         [],
     )
 
@@ -5611,7 +5687,10 @@ def _carregar_pendentes_responsavel_teams(
         (
             hoje_ref,
             "A DEFINIR NO APONTAMENTO%",
-            [str(u).strip().upper() for u in unidades],
+            [
+                str(u).strip().upper()
+                for u in unidades
+            ],
         ),
     )
 
@@ -16822,6 +16901,8 @@ else:
 
             st.info(
                 "A cobrança é direcionada pelo responsável oficial de cada unidade. "
+                "Se PAULO ou HELENA estiverem ativos e com e-mail configurado, "
+                "eles recebem uma cópia com TODAS as pendências. "
                 "O botão manual não substitui nem bloqueia as cobranças automáticas."
             )
 
@@ -16957,7 +17038,9 @@ else:
                     )
 
                     unidades_eng = (
-                        RESPONSAVEIS_UNIDADES_TEAMS.get(
+                        ["TODAS AS UNIDADES"]
+                        if eng in OBSERVADORES_TEAMS
+                        else RESPONSAVEIS_UNIDADES_TEAMS.get(
                             eng,
                             [],
                         )
@@ -17129,10 +17212,14 @@ else:
                 df_responsaveis = pd.DataFrame([
                     {
                         "Supervisor": eng,
-                        "Unidades": " · ".join(
-                            RESPONSAVEIS_UNIDADES_TEAMS[
-                                eng
-                            ]
+                        "Unidades": (
+                            "TODAS AS UNIDADES · CÓPIA"
+                            if eng in OBSERVADORES_TEAMS
+                            else " · ".join(
+                                RESPONSAVEIS_UNIDADES_TEAMS[
+                                    eng
+                                ]
+                            )
                         ),
                     }
                     for eng in SUPERVISORES_TEAMS
@@ -17143,6 +17230,178 @@ else:
                     key="tbl_responsaveis_unidades_teams",
                     altura_max=260,
                 )
+
+                st.markdown("---")
+                st.markdown(
+                    "**Apontamentos atrasados e destinatários**"
+                )
+                st.caption(
+                    "Esta prévia mostra quem receberia a cobrança se ela fosse enviada agora."
+                )
+
+                try:
+                    agora_preview = datetime.datetime.now(
+                        ZoneInfo("America/Fortaleza")
+                    )
+                    hoje_preview = agora_preview.date()
+
+                    with supabase._connect() as conn:
+                        with conn.cursor() as cur:
+                            # PAULO/HELENA usam a visão completa de pendências.
+                            pendentes_preview = (
+                                _carregar_pendentes_responsavel_teams(
+                                    cur,
+                                    "PAULO",
+                                    hoje_preview,
+                                )
+                            )
+
+                    ativos_com_email = {
+                        eng
+                        for eng, cfg in mapa_cfg_teams.items()
+                        if cfg.get("ativo")
+                        and str(
+                            cfg.get("email_teams")
+                            or ""
+                        ).strip()
+                    }
+
+                    observadores_ativos = [
+                        obs
+                        for obs in OBSERVADORES_TEAMS
+                        if obs in ativos_com_email
+                    ]
+
+                    linhas_preview = []
+
+                    for item in pendentes_preview:
+                        if isinstance(item, dict):
+                            data_ref = item.get("data")
+                            turno_ref = item.get("turno")
+                            colaborador_ref = (
+                                item.get("colaborador")
+                                or ""
+                            )
+                            unidade_ref = (
+                                item.get("unidade")
+                                or "SEM UNIDADE"
+                            )
+                        else:
+                            data_ref = item[1]
+                            turno_ref = item[2]
+                            colaborador_ref = item[4]
+                            unidade_ref = (
+                                item[5]
+                                or "SEM UNIDADE"
+                            )
+
+                        responsavel_ref = (
+                            _responsavel_por_unidade_teams(
+                                unidade_ref
+                            )
+                        )
+
+                        destinatarios_ref = []
+
+                        if (
+                            responsavel_ref
+                            in ativos_com_email
+                        ):
+                            destinatarios_ref.append(
+                                responsavel_ref
+                            )
+
+                        for observador in observadores_ativos:
+                            if observador not in destinatarios_ref:
+                                destinatarios_ref.append(
+                                    observador
+                                )
+
+                        linhas_preview.append({
+                            "Data": (
+                                data_ref.strftime("%d/%m/%Y")
+                                if hasattr(
+                                    data_ref,
+                                    "strftime",
+                                )
+                                else str(
+                                    data_ref
+                                    or ""
+                                )
+                            ),
+                            "Unidade": unidade_ref,
+                            "Colaborador": colaborador_ref,
+                            "Turno": turno_ref or "-",
+                            "Responsável": responsavel_ref,
+                            "Será enviado para": (
+                                " · ".join(
+                                    destinatarios_ref
+                                )
+                                if destinatarios_ref
+                                else "SEM DESTINATÁRIO ATIVO"
+                            ),
+                        })
+
+                    if linhas_preview:
+                        df_preview_teams = pd.DataFrame(
+                            linhas_preview
+                        )
+
+                        qtd_sem_destino = int(
+                            (
+                                df_preview_teams[
+                                    "Será enviado para"
+                                ]
+                                == "SEM DESTINATÁRIO ATIVO"
+                            ).sum()
+                        )
+
+                        c_prev1, c_prev2, c_prev3 = st.columns(3)
+
+                        with c_prev1:
+                            st.metric(
+                                "Apontamentos atrasados",
+                                len(
+                                    df_preview_teams
+                                ),
+                            )
+
+                        with c_prev2:
+                            st.metric(
+                                "Unidades afetadas",
+                                int(
+                                    df_preview_teams[
+                                        "Unidade"
+                                    ].nunique()
+                                ),
+                            )
+
+                        with c_prev3:
+                            st.metric(
+                                "Sem destinatário ativo",
+                                qtd_sem_destino,
+                            )
+
+                        tabela_aproar(
+                            df_preview_teams,
+                            key="tbl_preview_cobrancas_teams",
+                            altura_max=420,
+                        )
+
+                        st.caption(
+                            "PAULO e HELENA aparecem em todas as linhas "
+                            "somente quando estiverem Ativos e com e-mail Teams preenchido."
+                        )
+
+                    else:
+                        st.success(
+                            "Não há apontamentos atrasados neste momento."
+                        )
+
+                except Exception as e:
+                    st.warning(
+                        "Não foi possível carregar a prévia dos apontamentos atrasados."
+                    )
 
                 st.markdown("---")
                 st.markdown(
@@ -17313,7 +17572,8 @@ else:
                 st.markdown("---")
                 st.caption(
                     "Automático: dias úteis às 09:30 e 15:00. "
-                    "Manual: disponível a qualquer momento pelo botão Cobrar agora."
+                    "Manual: disponível a qualquer momento pelo botão Cobrar agora. "
+                    "PAULO e HELENA recebem todas as pendências apenas se estiverem ativos."
                 )
 
         with tab_limpeza:
