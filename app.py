@@ -2504,6 +2504,11 @@ except Exception as e:
     st.stop()
 
 
+# Valor disponível também durante as migrações iniciais do banco.
+# A mesma constante é reafirmada mais abaixo junto às demais regras do SEBRAE.
+VALOR_ADICIONAL_NOTURNO_SEBRAE = 90.00
+
+
 @st.cache_resource
 def _garantir_estrutura_cadastros_admin():
     """
@@ -2766,48 +2771,93 @@ def _garantir_estrutura_cadastros_admin():
                 # ------------------------------------------------------------
                 # MIGRAÇÃO ESPECIAL SEBRAE — adicional noturno legado
                 # ------------------------------------------------------------
-                # Historicamente, o adicional noturno de R$ 90,00 do SEBRAE
-                # era lançado em valor_extra. A partir desta versão ele passa
-                # a ter coluna própria, sem perder nenhum valor antigo.
+                # O SEBRAE trabalha no período 17h–02h e essa jornada continua
+                # sendo uma diária integral.
                 #
-                # Só migramos exatamente R$ 90,00 e apenas SEBRAE para não
-                # reclassificar extras reais de outras unidades.
+                # Antes da criação do campo próprio, o adicional noturno de
+                # R$ 90,00 era lançado junto com "Extra". Por isso:
+                #
+                #   Extra  90,00 -> Extra   0,00 + Noturno 90,00
+                #   Extra 137,56 -> Extra  47,56 + Noturno 90,00
+                #   Extra 185,12 -> Extra  95,12 + Noturno 90,00
+                #   Extra   0,00 -> Extra   0,00 + Noturno 90,00
+                #
+                # A condição valor_adicional_noturno = 0 deixa a migração
+                # idempotente: ela não duplica os R$ 90 ao reiniciar o app.
                 cur.execute(
                     f"""
                     UPDATE convocacoes AS v
-                       SET valor_adicional_noturno = {VALOR_ADICIONAL_NOTURNO_SEBRAE},
-                           valor_extra = 0,
-                           custo_pago = GREATEST(
-                               0,
-                               COALESCE(v.custo_pago, 0)
-                               - {VALOR_ADICIONAL_NOTURNO_SEBRAE}
-                           ),
-                           tipo_diaria = 'Diária',
-                           custo_encargos_base = COALESCE(
-                               NULLIF(c.valor_diaria, 0),
+                       SET valor_adicional_noturno =
+                               {VALOR_ADICIONAL_NOTURNO_SEBRAE},
+
+                           valor_extra =
                                CASE
-                                   WHEN UPPER(COALESCE(c.funcao, ''))
-                                        LIKE ANY(
-                                            ARRAY[
-                                                '%AJUDANTE%',
-                                                '%AUXILIAR%',
-                                                '%SERVENTE%'
-                                            ]
-                                        )
-                                       THEN 182.34
-                                   ELSE 241.74
-                               END
-                           )
+                                   WHEN COALESCE(v.valor_extra, 0)
+                                        >= {VALOR_ADICIONAL_NOTURNO_SEBRAE}
+                                       THEN GREATEST(
+                                           0,
+                                           COALESCE(v.valor_extra, 0)
+                                           - {VALOR_ADICIONAL_NOTURNO_SEBRAE}
+                                       )
+                                   ELSE COALESCE(v.valor_extra, 0)
+                               END,
+
+                           custo_pago =
+                               CASE
+                                   WHEN COALESCE(v.valor_extra, 0)
+                                        >= {VALOR_ADICIONAL_NOTURNO_SEBRAE}
+                                       THEN GREATEST(
+                                           CASE
+                                               WHEN COALESCE(
+                                                   NULLIF(v.tipo_diaria, ''),
+                                                   'Diária'
+                                               ) = 'Meia diária'
+                                                   THEN 60.00
+                                               ELSE 120.00
+                                           END,
+                                           COALESCE(v.custo_pago, 0)
+                                           - {VALOR_ADICIONAL_NOTURNO_SEBRAE}
+                                       )
+                                   ELSE COALESCE(
+                                       v.custo_pago,
+                                       120.00
+                                   )
+                               END,
+
+                           tipo_diaria = 'Diária',
+
+                           custo_encargos_base =
+                               COALESCE(
+                                   NULLIF(c.valor_diaria, 0),
+                                   CASE
+                                       WHEN UPPER(
+                                           COALESCE(c.funcao, '')
+                                       ) LIKE ANY(
+                                           ARRAY[
+                                               '%AJUDANTE%',
+                                               '%AUXILIAR%',
+                                               '%SERVENTE%'
+                                           ]
+                                       )
+                                           THEN 182.34
+                                       ELSE 241.74
+                                   END
+                               )
+
                       FROM obras AS o,
                            colaboradores AS c
+
                      WHERE o.id = v.obra_id
                        AND c.id = v.colaborador_id
-                       AND UPPER(TRIM(COALESCE(o.unidade, ''))) = 'SEBRAE'
-                       AND COALESCE(v.valor_adicional_noturno, 0) = 0
-                       AND ABS(
-                           COALESCE(v.valor_extra, 0)
-                           - {VALOR_ADICIONAL_NOTURNO_SEBRAE}
-                       ) < 0.01
+                       AND UPPER(
+                           TRIM(
+                               COALESCE(o.unidade, '')
+                           )
+                       ) = 'SEBRAE'
+                       AND COALESCE(
+                           v.valor_adicional_noturno,
+                           0
+                       ) = 0
                        AND v.status IN (
                            'Presente (Integral)',
                            'Presente (Só Manhã)',
@@ -2824,19 +2874,56 @@ def _garantir_estrutura_cadastros_admin():
                     """
                     UPDATE apontamentos AS a
                        SET valor_adicional_noturno =
-                               COALESCE(v.valor_adicional_noturno, 0),
+                               COALESCE(
+                                   v.valor_adicional_noturno,
+                                   0
+                               ),
                            valor_extra =
-                               COALESCE(v.valor_extra, 0),
+                               COALESCE(
+                                   v.valor_extra,
+                                   0
+                               ),
                            custo_pago =
-                               COALESCE(v.custo_pago, 0),
+                               COALESCE(
+                                   v.custo_pago,
+                                   0
+                               ),
                            tipo_diaria =
-                               COALESCE(v.tipo_diaria, 'Diária'),
+                               COALESCE(
+                                   v.tipo_diaria,
+                                   'Diária'
+                               ),
                            custo_encargos_base =
-                               COALESCE(v.custo_encargos_base, 0)
+                               COALESCE(
+                                   v.custo_encargos_base,
+                                   0
+                               )
                       FROM convocacoes AS v
-                     WHERE CAST(a.convocacao_id AS TEXT) = CAST(v.id AS TEXT)
-                       AND COALESCE(v.valor_adicional_noturno, 0) > 0
-                       AND COALESCE(a.valor_adicional_noturno, 0) = 0
+                     WHERE CAST(
+                               a.convocacao_id AS TEXT
+                           ) = CAST(
+                               v.id AS TEXT
+                           )
+                       AND COALESCE(
+                           v.valor_adicional_noturno,
+                           0
+                       ) > 0
+                       AND (
+                           COALESCE(
+                               a.valor_adicional_noturno,
+                               0
+                           ) = 0
+                           OR ABS(
+                               COALESCE(
+                                   a.valor_extra,
+                                   0
+                               )
+                               - COALESCE(
+                                   v.valor_extra,
+                                   0
+                               )
+                           ) > 0.005
+                       )
                     """
                 )
 
@@ -7222,7 +7309,20 @@ def ratear_registros_por_servico(registros):
                     + acordo_rateado,
                     2,
                 ),
-                "Observação": " | ".join(dict.fromkeys(serv["observacoes"])),
+                "Observação": (
+                    " | ".join(
+                        dict.fromkeys(
+                            serv["observacoes"]
+                        )
+                    )
+                    or (
+                        "Jornada noturna 17h–02h"
+                        if eh_unidade_sebrae(
+                            serv["unidade"]
+                        )
+                        else ""
+                    )
+                ),
                 "_colaborador_id": colaborador_id,
             })
 
@@ -15749,46 +15849,118 @@ else:
                             pdf.set_text_color(0, 0, 0)
                             pdf.ln(3)
 
+                            # A4 paisagem: 277 mm úteis com margens padrão.
+                            # Cabeçalhos longos usam 2 linhas para não invadir
+                            # a coluna vizinha.
                             cabecalhos = [
                                 ("Data", 18, "C"),
-                                ("Colaborador", 40, "L"),
-                                ("Função", 27, "L"),
-                                ("Engenheiro", 24, "C"),
-                                ("Status", 27, "C"),
-                                ("Tipo", 19, "C"),
-                                ("Custo c/ encargos", 27, "C"),
+                                ("Colaborador", 42, "L"),
+                                ("Função", 28, "L"),
+                                ("Engenheiro", 23, "C"),
+                                ("Status", 25, "C"),
+                                ("Tipo", 18, "C"),
+                                ("Custo c/\nencargos", 29, "C"),
                                 ("Extra", 18, "C"),
-                                ("Adic. not.", 20, "C"),
-                                ("Acordos / Bonificações", 18, "C"),
-                                ("Observação", 22, "L"),
+                                ("Adic.\nnoturno", 21, "C"),
+                                ("Acordos /\nBonificações", 28, "C"),
+                                ("Observação", 27, "L"),
                             ]
 
+                            altura_header = 10
+                            y_header = pdf.get_y()
+                            x_header = pdf.get_x()
+
+                            pdf.set_fill_color(
+                                244,
+                                246,
+                                249,
+                            )
+                            pdf.set_text_color(
+                                30,
+                                41,
+                                59,
+                            )
                             pdf.set_font(
                                 "Arial",
                                 "B",
-                                8,
+                                7,
                             )
-                            for idx, (
+
+                            x_atual = x_header
+
+                            for (
                                 titulo,
                                 largura,
                                 alinhamento,
-                            ) in enumerate(cabecalhos):
-                                pdf.cell(
-                                    largura,
-                                    6,
-                                    to_latin(titulo),
-                                    border=1,
-                                    align=alinhamento,
-                                    ln=(
-                                        idx
-                                        == len(cabecalhos) - 1
-                                    ),
+                            ) in cabecalhos:
+                                pdf.set_xy(
+                                    x_atual,
+                                    y_header,
                                 )
 
+                                pdf.rect(
+                                    x_atual,
+                                    y_header,
+                                    largura,
+                                    altura_header,
+                                    style="DF",
+                                )
+
+                                linhas_titulo = str(
+                                    titulo
+                                ).split("\n")
+
+                                if len(linhas_titulo) == 1:
+                                    pdf.set_xy(
+                                        x_atual,
+                                        y_header + 2,
+                                    )
+                                    pdf.cell(
+                                        largura,
+                                        6,
+                                        to_latin(
+                                            linhas_titulo[0]
+                                        ),
+                                        border=0,
+                                        align=alinhamento,
+                                    )
+                                else:
+                                    pdf.set_xy(
+                                        x_atual,
+                                        y_header + 1,
+                                    )
+
+                                    for linha_header in linhas_titulo:
+                                        pdf.cell(
+                                            largura,
+                                            4,
+                                            to_latin(
+                                                linha_header
+                                            ),
+                                            border=0,
+                                            align=alinhamento,
+                                            ln=True,
+                                        )
+                                        pdf.set_x(
+                                            x_atual
+                                        )
+
+                                x_atual += largura
+
+                            pdf.set_xy(
+                                x_header,
+                                y_header
+                                + altura_header,
+                            )
+                            pdf.set_text_color(
+                                0,
+                                0,
+                                0,
+                            )
                             pdf.set_font(
                                 "Arial",
                                 "",
-                                7.5,
+                                7.2,
                             )
 
                             for _, row in df_obra.iterrows():
@@ -15798,16 +15970,98 @@ else:
                                         18,
                                         "C",
                                     ),
-                                    (str(row["Colaborador"])[:20], 40, "L"),
-                                    (str(row["Função"])[:14], 27, "L"),
-                                    (str(row["Engenheiro"])[:12], 24, "C"),
-                                    (str(row["Status"])[:13], 27, "C"),
-                                    (str(row.get("Tipo", ""))[:10], 19, "C"),
-                                    (formatar_reais(float(row["Custo c/ encargos (R$)"])), 27, "C"),
-                                    (formatar_reais(float(row["Extra (R$)"])), 18, "C"),
-                                    (formatar_reais(float(row["Adicional noturno (R$)"])), 20, "C"),
-                                    (formatar_reais(float(row["Acordos / Bonificações (R$)"])), 18, "C"),
-                                    (str(row.get("Observação", ""))[:14], 22, "L"),
+                                    (
+                                        str(
+                                            row["Colaborador"]
+                                        )[:22],
+                                        42,
+                                        "L",
+                                    ),
+                                    (
+                                        str(
+                                            row["Função"]
+                                        )[:15],
+                                        28,
+                                        "L",
+                                    ),
+                                    (
+                                        str(
+                                            row["Engenheiro"]
+                                        )[:11],
+                                        23,
+                                        "C",
+                                    ),
+                                    (
+                                        str(
+                                            row["Status"]
+                                        )[:12],
+                                        25,
+                                        "C",
+                                    ),
+                                    (
+                                        str(
+                                            row.get(
+                                                "Tipo",
+                                                "",
+                                            )
+                                        )[:9],
+                                        18,
+                                        "C",
+                                    ),
+                                    (
+                                        formatar_reais(
+                                            float(
+                                                row[
+                                                    "Custo c/ encargos (R$)"
+                                                ]
+                                            )
+                                        ),
+                                        29,
+                                        "C",
+                                    ),
+                                    (
+                                        formatar_reais(
+                                            float(
+                                                row[
+                                                    "Extra (R$)"
+                                                ]
+                                            )
+                                        ),
+                                        18,
+                                        "C",
+                                    ),
+                                    (
+                                        formatar_reais(
+                                            float(
+                                                row[
+                                                    "Adicional noturno (R$)"
+                                                ]
+                                            )
+                                        ),
+                                        21,
+                                        "C",
+                                    ),
+                                    (
+                                        formatar_reais(
+                                            float(
+                                                row[
+                                                    "Acordos / Bonificações (R$)"
+                                                ]
+                                            )
+                                        ),
+                                        28,
+                                        "C",
+                                    ),
+                                    (
+                                        str(
+                                            row.get(
+                                                "Observação",
+                                                "",
+                                            )
+                                        )[:17],
+                                        27,
+                                        "L",
+                                    ),
                                 ]
 
                                 for idx, (
@@ -15839,14 +16093,14 @@ else:
                                 9,
                             )
                             pdf.cell(
-                                227,
+                                235,
                                 7,
                                 to_latin("TOTAL DA OBRA:"),
                                 border=0,
                                 align="R",
                             )
                             pdf.cell(
-                                44,
+                                42,
                                 7,
                                 to_latin(
                                     formatar_reais(
