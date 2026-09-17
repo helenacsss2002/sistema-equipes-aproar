@@ -2,7 +2,7 @@ import os
 import sys
 import html
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 import psycopg
@@ -18,6 +18,75 @@ PORTAL_URL = os.getenv(
     "PORTAL_SUPERVISOR_URL",
     "https://apontamentos-aproar.streamlit.app/?eng",
 ).strip()
+
+RESPONSAVEIS_UNIDADES = {
+    "EDUARDO": [
+        "BARRA DO CEARÁ",
+    ],
+    "SOARES": [
+        "HORIZONTE",
+        "SEBRAE",
+    ],
+    "JOEL": [
+        "COLISEU",
+        "UNIFOR",
+    ],
+    "GABRIEL": [
+        "FIEC",
+        "PARANGABA",
+        "APARTAMENTO 701",
+    ],
+    "VICTOR": [
+        "CENTRO",
+        "MUSEU",
+    ],
+    "NETO": [
+        "MARACANAÚ",
+    ],
+}
+
+OBSERVADORES_GERAIS = {
+    "PAULO",
+    "HELENA",
+}
+
+SUPERVISORES_ATIVOS = (
+    set(RESPONSAVEIS_UNIDADES.keys())
+    | OBSERVADORES_GERAIS
+)
+
+HORA_LIMITE_SEBRAE = time(9, 30)
+
+
+def pendencia_esta_atrasada(item, agora):
+    """
+    Regra da cobrança:
+    - demais unidades: só cobra serviço de data anterior;
+    - SEBRAE: serviço 17h–02h pode ser apontado na madrugada do dia seguinte
+      e só passa a atraso às 09:30.
+    """
+    data_servico = item.get("data")
+    unidade = str(
+        item.get("unidade")
+        or ""
+    ).strip().upper()
+
+    if data_servico is None:
+        return False
+
+    if data_servico >= agora.date():
+        return False
+
+    if unidade == "SEBRAE":
+        dia_seguinte = (
+            data_servico
+            + timedelta(days=1)
+        )
+
+        if agora.date() == dia_seguinte:
+            return agora.time() >= HORA_LIMITE_SEBRAE
+
+    return True
 
 
 def slot_atual() -> str:
@@ -62,6 +131,16 @@ def garantir_estrutura(cur):
 
 
 def carregar_destinatarios(cur):
+    # Gustavo permanece apenas no histórico, nunca em novos envios.
+    cur.execute(
+        """
+        UPDATE engenheiros_teams
+           SET ativo = FALSE,
+               atualizado_em = NOW()
+         WHERE UPPER(engenheiro) = 'GUSTAVO'
+        """
+    )
+
     cur.execute(
         """
         SELECT engenheiro, email_teams
@@ -71,7 +150,18 @@ def carregar_destinatarios(cur):
         ORDER BY engenheiro
         """
     )
-    return cur.fetchall() or []
+
+    rows = cur.fetchall() or []
+
+    return [
+        row
+        for row in rows
+        if str(
+            row["engenheiro"]
+            or ""
+        ).strip().upper()
+        in SUPERVISORES_ATIVOS
+    ]
 
 
 def ja_enviado(cur, hoje, slot, engenheiro):
@@ -90,13 +180,74 @@ def ja_enviado(cur, hoje, slot, engenheiro):
     return bool(row and str(row["status"]).upper() == "ENVIADA")
 
 
-def carregar_pendentes(cur, engenheiro, hoje):
+def carregar_pendentes(cur, engenheiro, hoje, agora=None):
     """
-    Usa a mesma ideia do painel: convocação ainda ligada à obra placeholder
-    significa que o apontamento/serviço ainda não foi concluído.
+    Pendências para cobrança.
 
-    Somente datas anteriores a hoje são cobradas.
+    Supervisores operacionais:
+        recebem somente suas unidades.
+
+    PAULO e HELENA:
+        recebem TODAS as pendências quando estiverem ativos.
     """
+    engenheiro = str(
+        engenheiro
+        or ""
+    ).strip().upper()
+
+    agora = agora or datetime.now(TZ)
+
+    def _filtrar(rows):
+        return [
+            row
+            for row in (rows or [])
+            if pendencia_esta_atrasada(
+                row,
+                agora,
+            )
+        ]
+
+    if engenheiro in OBSERVADORES_GERAIS:
+        cur.execute(
+            """
+            SELECT
+                c.id,
+                c.data,
+                c.turno,
+                c.engenheiro,
+                col.nome AS colaborador,
+                o.unidade,
+                o.nome AS obra_atual
+            FROM convocacoes c
+            JOIN colaboradores col
+              ON col.id = c.colaborador_id
+            JOIN obras o
+              ON o.id = c.obra_id
+            WHERE c.data < %s
+              AND UPPER(COALESCE(o.nome, '')) LIKE UPPER(%s)
+            ORDER BY
+                c.data ASC,
+                o.unidade ASC,
+                col.nome ASC
+            """,
+            (
+                hoje,
+                f"{PLACEHOLDER_PREFIX}%",
+            ),
+        )
+
+        return _filtrar(
+            cur.fetchall() or []
+        )
+
+    unidades = RESPONSAVEIS_UNIDADES.get(
+        engenheiro,
+        [],
+    )
+
+    if not unidades:
+        return []
+
     cur.execute(
         """
         SELECT
@@ -112,18 +263,27 @@ def carregar_pendentes(cur, engenheiro, hoje):
           ON col.id = c.colaborador_id
         JOIN obras o
           ON o.id = c.obra_id
-        WHERE UPPER(COALESCE(c.engenheiro, '')) = UPPER(%s)
-          AND c.data < %s
+        WHERE c.data < %s
           AND UPPER(COALESCE(o.nome, '')) LIKE UPPER(%s)
-        ORDER BY c.data ASC, o.unidade ASC, col.nome ASC
+          AND UPPER(TRIM(COALESCE(o.unidade, ''))) = ANY(%s)
+        ORDER BY
+            c.data ASC,
+            o.unidade ASC,
+            col.nome ASC
         """,
         (
-            engenheiro,
             hoje,
             f"{PLACEHOLDER_PREFIX}%",
+            [
+                str(u).strip().upper()
+                for u in unidades
+            ],
         ),
     )
-    return cur.fetchall() or []
+
+    return _filtrar(
+        cur.fetchall() or []
+    )
 
 
 def montar_mensagem(engenheiro, pendentes, slot):
@@ -255,7 +415,7 @@ def main():
                     pulados += 1
                     continue
 
-                pendentes = carregar_pendentes(cur, engenheiro, hoje)
+                pendentes = carregar_pendentes(cur, engenheiro, hoje, agora=agora)
 
                 if not pendentes:
                     print(f"- {engenheiro}: sem apontamentos atrasados.")
