@@ -2470,6 +2470,9 @@ def _secret_opcional(nome):
 
 
 DATABASE_URL = _secret_opcional("DATABASE_URL")
+TEAMS_COBRANCA_WEBHOOK_URL = _secret_opcional(
+    "TEAMS_COBRANCA_WEBHOOK_URL"
+)
 DB_BACKEND = "NEON" if DATABASE_URL else "SUPABASE"
 
 
@@ -2630,6 +2633,17 @@ def _garantir_estrutura_cobrancas_teams():
                     """
                     CREATE INDEX IF NOT EXISTS idx_cobrancas_teams_enviado_em
                     ON cobrancas_teams (enviado_em DESC)
+                    """
+                )
+
+                # Gustavo foi desligado: preservamos histórico,
+                # mas ele deixa de receber novas cobranças.
+                cur.execute(
+                    """
+                    UPDATE engenheiros_teams
+                       SET ativo = FALSE,
+                           atualizado_em = NOW()
+                     WHERE UPPER(engenheiro) = 'GUSTAVO'
                     """
                 )
 
@@ -5498,7 +5512,15 @@ dict_obras = (
     else {}
 )
 
-ENGENHEIROS = ["EDUARDO", "GABRIEL", "GUSTAVO", "JOEL", "NETO", "PAULO", "SOARES", "VICTOR"]
+ENGENHEIROS = [
+    "EDUARDO",
+    "GABRIEL",
+    "JOEL",
+    "NETO",
+    "PAULO",
+    "SOARES",
+    "VICTOR",
+]
 
 UNIDADES_APROAR = [
     "BARRA DO CEARÁ",
@@ -5511,7 +5533,324 @@ UNIDADES_APROAR = [
     "FIEC",
     "UNIFOR",
     "SEBRAE",
+    "PARANGABA",
+    "APARTAMENTO 701",
 ]
+
+# Responsáveis oficiais usados nas cobranças automáticas e manuais.
+RESPONSAVEIS_UNIDADES_TEAMS = {
+    "EDUARDO": [
+        "BARRA DO CEARÁ",
+    ],
+    "SOARES": [
+        "HORIZONTE",
+        "SEBRAE",
+    ],
+    "JOEL": [
+        "COLISEU",
+        "UNIFOR",
+    ],
+    "GABRIEL": [
+        "FIEC",
+        "PARANGABA",
+        "APARTAMENTO 701",
+    ],
+    "VICTOR": [
+        "CENTRO",
+        "MUSEU",
+    ],
+    "NETO": [
+        "MARACANAÚ",
+    ],
+}
+
+SUPERVISORES_TEAMS = list(
+    RESPONSAVEIS_UNIDADES_TEAMS.keys()
+)
+
+def _carregar_pendentes_responsavel_teams(
+    cur,
+    supervisor,
+    hoje_ref,
+):
+    """
+    Pendências atrasadas cobradas pelo responsável oficial da UNIDADE,
+    independentemente de quem criou originalmente a convocação.
+    """
+    unidades = RESPONSAVEIS_UNIDADES_TEAMS.get(
+        str(supervisor).upper(),
+        [],
+    )
+
+    if not unidades:
+        return []
+
+    cur.execute(
+        """
+        SELECT
+            c.id,
+            c.data,
+            c.turno,
+            c.engenheiro,
+            col.nome AS colaborador,
+            o.unidade,
+            o.nome AS obra_atual
+        FROM convocacoes c
+        JOIN colaboradores col
+          ON col.id = c.colaborador_id
+        JOIN obras o
+          ON o.id = c.obra_id
+        WHERE c.data < %s
+          AND UPPER(COALESCE(o.nome, '')) LIKE UPPER(%s)
+          AND UPPER(TRIM(COALESCE(o.unidade, ''))) = ANY(%s)
+        ORDER BY
+            c.data ASC,
+            o.unidade ASC,
+            col.nome ASC
+        """,
+        (
+            hoje_ref,
+            "A DEFINIR NO APONTAMENTO%",
+            [str(u).strip().upper() for u in unidades],
+        ),
+    )
+
+    return cur.fetchall() or []
+
+
+def _montar_mensagem_cobranca_manual_teams(
+    supervisor,
+    pendentes,
+):
+    grupos = {}
+
+    for item in pendentes:
+        if isinstance(item, dict):
+            data_ref = item.get("data")
+            unidade = item.get("unidade") or "SEM UNIDADE"
+        else:
+            data_ref = item[1]
+            unidade = item[5] or "SEM UNIDADE"
+
+        chave = (data_ref, unidade)
+        grupos[chave] = grupos.get(chave, 0) + 1
+
+    linhas = []
+
+    for (data_ref, unidade), qtd in sorted(
+        grupos.items(),
+        key=lambda x: (
+            str(x[0][0]),
+            str(x[0][1]),
+        ),
+    ):
+        data_txt = (
+            data_ref.strftime("%d/%m")
+            if hasattr(data_ref, "strftime")
+            else str(data_ref)
+        )
+
+        termo = (
+            "colaborador"
+            if qtd == 1
+            else "colaboradores"
+        )
+
+        linhas.append(
+            f"• {data_txt} · "
+            f"{_html.escape(str(unidade))} · "
+            f"{qtd} {termo}"
+        )
+
+    if len(linhas) > 8:
+        restante = len(linhas) - 8
+        linhas = (
+            linhas[:8]
+            + [f"• + {restante} grupo(s) pendente(s)"]
+        )
+
+    total = len(pendentes)
+    termo_total = (
+        "apontamento atrasado"
+        if total == 1
+        else "apontamentos atrasados"
+    )
+
+    portal_url = (
+        "https://apontamentos-aproar.streamlit.app/?eng"
+    )
+
+    return (
+        "<b>APROAR · Apontamentos pendentes</b><br><br>"
+        f"{_html.escape(supervisor.title())}, existem "
+        f"<b>{total} {termo_total}</b> que ainda precisam "
+        "ser regularizados.<br>"
+        "<span style='color:#6b7280'>Cobrança manual</span>"
+        "<br><br>"
+        + "<br>".join(linhas)
+        + "<br><br>"
+        "Favor regularizar no <b>Portal do Supervisor</b>: "
+        f"<a href='{portal_url}'>abrir apontamentos</a>."
+    )
+
+
+def _cobrar_supervisor_teams_agora(
+    supervisor,
+    email_teams,
+):
+    """
+    Envia uma cobrança manual sem interferir nas execuções automáticas
+    das 09:30 e 15:00.
+    """
+    supervisor = str(
+        supervisor or ""
+    ).strip().upper()
+
+    email_teams = str(
+        email_teams or ""
+    ).strip()
+
+    if not email_teams:
+        return False, "Informe o e-mail Teams deste supervisor."
+
+    if not TEAMS_COBRANCA_WEBHOOK_URL:
+        return (
+            False,
+            "O webhook do Teams ainda não está configurado "
+            "nos Secrets do Streamlit.",
+        )
+
+    if DB_BACKEND != "NEON":
+        return (
+            False,
+            "A cobrança manual está disponível com Neon/PostgreSQL.",
+        )
+
+    agora = datetime.datetime.now(
+        ZoneInfo("America/Fortaleza")
+    )
+    hoje_ref = agora.date()
+
+    try:
+        with supabase._connect() as conn:
+            with conn.cursor() as cur:
+                pendentes = (
+                    _carregar_pendentes_responsavel_teams(
+                        cur,
+                        supervisor,
+                        hoje_ref,
+                    )
+                )
+
+                if not pendentes:
+                    return (
+                        True,
+                        f"{supervisor}: não há apontamentos atrasados "
+                        "nas unidades sob sua responsabilidade.",
+                    )
+
+                mensagem = (
+                    _montar_mensagem_cobranca_manual_teams(
+                        supervisor,
+                        pendentes,
+                    )
+                )
+
+                payload = {
+                    "recipient": email_teams,
+                    "engineer": supervisor,
+                    "slot": "MANUAL",
+                    "pendingCount": len(pendentes),
+                    "message": mensagem,
+                    "portalUrl": (
+                        "https://apontamentos-aproar.streamlit.app/?eng"
+                    ),
+                }
+
+                resposta = requests.post(
+                    TEAMS_COBRANCA_WEBHOOK_URL,
+                    json=payload,
+                    timeout=20,
+                )
+
+                sucesso = (
+                    200
+                    <= resposta.status_code
+                    < 300
+                )
+
+                horario_log = (
+                    "MANUAL "
+                    + agora.strftime("%H:%M:%S")
+                )
+
+                cur.execute(
+                    """
+                    INSERT INTO cobrancas_teams (
+                        data_execucao,
+                        horario,
+                        engenheiro,
+                        email_teams,
+                        qtd_pendentes,
+                        mensagem,
+                        status,
+                        resposta_http,
+                        enviado_em
+                    )
+                    VALUES (
+                        %s,%s,%s,%s,%s,%s,%s,%s,NOW()
+                    )
+                    ON CONFLICT (
+                        data_execucao,
+                        horario,
+                        engenheiro
+                    )
+                    DO UPDATE SET
+                        email_teams = EXCLUDED.email_teams,
+                        qtd_pendentes = EXCLUDED.qtd_pendentes,
+                        mensagem = EXCLUDED.mensagem,
+                        status = EXCLUDED.status,
+                        resposta_http = EXCLUDED.resposta_http,
+                        enviado_em = NOW()
+                    """,
+                    (
+                        hoje_ref,
+                        horario_log,
+                        supervisor,
+                        email_teams,
+                        len(pendentes),
+                        mensagem,
+                        (
+                            "ENVIADA"
+                            if sucesso
+                            else "ERRO"
+                        ),
+                        resposta.status_code,
+                    ),
+                )
+
+                conn.commit()
+
+        if sucesso:
+            return (
+                True,
+                f"Cobrança enviada para {supervisor}: "
+                f"{len(pendentes)} apontamento(s) atrasado(s).",
+            )
+
+        return (
+            False,
+            f"O Teams respondeu com HTTP "
+            f"{resposta.status_code}.",
+        )
+
+    except Exception as exc:
+        return (
+            False,
+            "Não foi possível enviar a cobrança agora. "
+            f"Detalhe: {str(exc)[:140]}",
+        )
+
 
 # --- DISPONIBILIDADE — V4.1 (carregamento leve e robusto) -------------------
 @st.cache_data(ttl=45, show_spinner=False)
@@ -16473,30 +16812,42 @@ else:
                     st.warning("A planilha está vazia ou não pôde ser interpretada.")
 
         with tab_teams:
-            st.markdown("**Cobranças automáticas de apontamentos no Teams**")
+            st.markdown(
+                "**Cobranças de apontamentos no Teams**"
+            )
             st.caption(
-                "O robô cobra somente apontamentos atrasados (datas anteriores a hoje). "
-                "As verificações ficam programadas para 09:30 e 15:00. "
-                "Se o engenheiro já regularizou, a segunda cobrança não é enviada."
+                "O automático continua programado para 09:30 e 15:00. "
+                "Além disso, você pode cobrar qualquer supervisor manualmente."
             )
 
             st.info(
-                "Preencha o e-mail corporativo/Teams de cada engenheiro. "
-                "O envio automático usa um Workflow do Teams/Power Automate e um agendador externo, "
-                "então continua funcionando mesmo que ninguém esteja com o Streamlit aberto."
+                "A cobrança é direcionada pelo responsável oficial de cada unidade. "
+                "O botão manual não substitui nem bloqueia as cobranças automáticas."
             )
+
+            if not TEAMS_COBRANCA_WEBHOOK_URL:
+                st.warning(
+                    "Para usar o botão manual, adicione também "
+                    "`TEAMS_COBRANCA_WEBHOOK_URL` nos Secrets do Streamlit "
+                    "com a mesma URL já salva no GitHub."
+                )
 
             if DB_BACKEND != "NEON":
                 st.warning(
-                    "A configuração automática desta rotina foi preparada para o Neon/PostgreSQL."
+                    "A configuração automática desta rotina foi preparada "
+                    "para o Neon/PostgreSQL."
                 )
+
             else:
                 try:
                     with supabase._connect() as conn:
                         with conn.cursor() as cur:
                             cur.execute(
                                 """
-                                SELECT engenheiro, email_teams, ativo
+                                SELECT
+                                    engenheiro,
+                                    email_teams,
+                                    ativo
                                 FROM engenheiros_teams
                                 ORDER BY engenheiro
                                 """
@@ -16504,110 +16855,299 @@ else:
                             rows_cfg = cur.fetchall() or []
 
                     mapa_cfg_teams = {}
+
                     for row in rows_cfg:
                         if isinstance(row, dict):
-                            eng = str(row.get("engenheiro") or "").strip().upper()
+                            eng = str(
+                                row.get("engenheiro")
+                                or ""
+                            ).strip().upper()
+
                             mapa_cfg_teams[eng] = {
-                                "email_teams": str(row.get("email_teams") or "").strip(),
-                                "ativo": bool(row.get("ativo", True)),
+                                "email_teams": str(
+                                    row.get("email_teams")
+                                    or ""
+                                ).strip(),
+                                "ativo": bool(
+                                    row.get("ativo", True)
+                                ),
                             }
+
                         else:
-                            eng = str(row[0] or "").strip().upper()
+                            eng = str(
+                                row[0]
+                                or ""
+                            ).strip().upper()
+
                             mapa_cfg_teams[eng] = {
-                                "email_teams": str(row[1] or "").strip(),
+                                "email_teams": str(
+                                    row[1]
+                                    or ""
+                                ).strip(),
                                 "ativo": bool(row[2]),
                             }
 
                 except Exception:
                     mapa_cfg_teams = {}
 
-                if st.session_state.get("msg_cfg_teams"):
-                    st.success(st.session_state.pop("msg_cfg_teams"))
-
-                with st.form("form_config_teams_engenheiros"):
-                    st.markdown("**Destinatários**")
-                    st.caption(
-                        "Deixe desativado quem não deve receber cobrança automática."
+                if st.session_state.get(
+                    "msg_cfg_teams"
+                ):
+                    st.success(
+                        st.session_state.pop(
+                            "msg_cfg_teams"
+                        )
                     )
 
-                    configs_teams_form = []
-
-                    for eng in ENGENHEIROS:
-                        atual = mapa_cfg_teams.get(eng, {})
-                        c_nome, c_email, c_ativo = st.columns(
-                            [1.2, 3.4, .75],
-                            vertical_alignment="center",
-                        )
-
-                        with c_nome:
-                            st.markdown(f"**{eng}**")
-
-                        with c_email:
-                            email_eng = st.text_input(
-                                f"E-mail Teams · {eng}",
-                                value=atual.get("email_teams", ""),
-                                placeholder="nome@aproar.com.br",
-                                label_visibility="collapsed",
-                                key=f"teams_email_{eng}",
-                            )
-
-                        with c_ativo:
-                            ativo_eng = st.checkbox(
-                                "Ativo",
-                                value=atual.get(
-                                    "ativo",
-                                    False if eng == "PAULO" else True,
-                                ),
-                                key=f"teams_ativo_{eng}",
-                            )
-
-                        configs_teams_form.append(
-                            (eng, email_eng.strip(), bool(ativo_eng))
-                        )
-
-                    salvar_cfg_teams = st.form_submit_button(
-                        "Salvar destinatários",
-                        type="primary",
-                        use_container_width=True,
+                if st.session_state.get(
+                    "msg_cobranca_manual_teams"
+                ):
+                    msg_manual = st.session_state.pop(
+                        "msg_cobranca_manual_teams"
                     )
 
-                    if salvar_cfg_teams:
-                        try:
-                            with supabase._connect() as conn:
-                                with conn.cursor() as cur:
-                                    for eng, email_eng, ativo_eng in configs_teams_form:
-                                        cur.execute(
-                                            """
-                                            INSERT INTO engenheiros_teams
-                                                (engenheiro, email_teams, ativo, atualizado_em)
-                                            VALUES
-                                                (%s, %s, %s, NOW())
-                                            ON CONFLICT (engenheiro)
-                                            DO UPDATE SET
-                                                email_teams = EXCLUDED.email_teams,
-                                                ativo = EXCLUDED.ativo,
-                                                atualizado_em = NOW()
-                                            """,
-                                            (eng, email_eng or None, ativo_eng),
-                                        )
+                    if msg_manual.get("ok"):
+                        st.success(
+                            msg_manual.get("texto")
+                        )
+                    else:
+                        st.error(
+                            msg_manual.get("texto")
+                        )
 
-                                conn.commit()
+                st.markdown("**Supervisores e unidades**")
+                st.caption(
+                    "Ativo controla somente a cobrança automática. "
+                    "O botão Cobrar agora funciona manualmente."
+                )
 
-                            st.session_state["msg_cfg_teams"] = (
-                                "Destinatários do Teams salvos com sucesso."
-                            )
+                configs_teams_form = []
+
+                st.html("""
+                <style>
+                div[class*="st-key-btn_cobrar_teams_"] button{
+                    min-height:34px !important;
+                    padding:4px 10px !important;
+                    font-size:10px !important;
+                    font-weight:700 !important;
+                    border-radius:7px !important;
+                    white-space:nowrap !important;
+                }
+
+                .teams-resp-name{
+                    font-size:12px;
+                    font-weight:800;
+                    color:#172235;
+                    line-height:1.2;
+                }
+
+                .teams-resp-units{
+                    margin-top:3px;
+                    color:#7A879A;
+                    font-size:9.5px;
+                    line-height:1.35;
+                }
+                </style>
+                """)
+
+                for eng in SUPERVISORES_TEAMS:
+                    atual = mapa_cfg_teams.get(
+                        eng,
+                        {},
+                    )
+
+                    unidades_eng = (
+                        RESPONSAVEIS_UNIDADES_TEAMS.get(
+                            eng,
+                            [],
+                        )
+                    )
+
+                    (
+                        c_nome,
+                        c_email,
+                        c_ativo,
+                        c_cobrar,
+                    ) = st.columns(
+                        [2.25, 3.35, .75, 1.05],
+                        vertical_alignment="center",
+                    )
+
+                    with c_nome:
+                        st.markdown(
+                            (
+                                '<div class="teams-resp-name">'
+                                f'{_html.escape(eng)}'
+                                '</div>'
+                                '<div class="teams-resp-units">'
+                                + " · ".join(
+                                    _html.escape(u)
+                                    for u in unidades_eng
+                                )
+                                + '</div>'
+                            ),
+                            unsafe_allow_html=True,
+                        )
+
+                    with c_email:
+                        email_eng = st.text_input(
+                            f"E-mail Teams · {eng}",
+                            value=atual.get(
+                                "email_teams",
+                                "",
+                            ),
+                            placeholder="nome@aproar.com.br",
+                            label_visibility="collapsed",
+                            key=f"teams_email_{eng}",
+                        )
+
+                    with c_ativo:
+                        ativo_eng = st.checkbox(
+                            "Ativo",
+                            value=atual.get(
+                                "ativo",
+                                True,
+                            ),
+                            key=f"teams_ativo_{eng}",
+                        )
+
+                    with c_cobrar:
+                        if st.button(
+                            "Cobrar agora",
+                            key=f"btn_cobrar_teams_{eng}",
+                            use_container_width=True,
+                            disabled=(
+                                not str(
+                                    email_eng
+                                    or ""
+                                ).strip()
+                            ),
+                        ):
+                            with st.spinner(
+                                f"Enviando para {eng}..."
+                            ):
+                                ok_manual, texto_manual = (
+                                    _cobrar_supervisor_teams_agora(
+                                        eng,
+                                        email_eng,
+                                    )
+                                )
+
+                            st.session_state[
+                                "msg_cobranca_manual_teams"
+                            ] = {
+                                "ok": ok_manual,
+                                "texto": texto_manual,
+                            }
                             st.rerun()
 
-                        except Exception as e:
-                            exibir_erro_amigavel(
-                                "teams",
-                                "salvar_destinatarios",
-                                e,
-                                "Não foi possível salvar os destinatários do Teams.",
-                            )
+                    configs_teams_form.append(
+                        (
+                            eng,
+                            str(
+                                email_eng
+                                or ""
+                            ).strip(),
+                            bool(ativo_eng),
+                        )
+                    )
+
+                if st.button(
+                    "Salvar destinatários",
+                    type="primary",
+                    use_container_width=True,
+                    key="btn_salvar_destinatarios_teams",
+                ):
+                    try:
+                        with supabase._connect() as conn:
+                            with conn.cursor() as cur:
+                                for (
+                                    eng,
+                                    email_eng,
+                                    ativo_eng,
+                                ) in configs_teams_form:
+                                    cur.execute(
+                                        """
+                                        INSERT INTO engenheiros_teams
+                                            (
+                                                engenheiro,
+                                                email_teams,
+                                                ativo,
+                                                atualizado_em
+                                            )
+                                        VALUES
+                                            (%s, %s, %s, NOW())
+                                        ON CONFLICT (engenheiro)
+                                        DO UPDATE SET
+                                            email_teams = EXCLUDED.email_teams,
+                                            ativo = EXCLUDED.ativo,
+                                            atualizado_em = NOW()
+                                        """,
+                                        (
+                                            eng,
+                                            email_eng or None,
+                                            ativo_eng,
+                                        ),
+                                    )
+
+                                # Segurança adicional:
+                                # Gustavo permanece inativo se existir no histórico.
+                                cur.execute(
+                                    """
+                                    UPDATE engenheiros_teams
+                                       SET ativo = FALSE,
+                                           atualizado_em = NOW()
+                                     WHERE UPPER(engenheiro) = 'GUSTAVO'
+                                    """
+                                )
+
+                            conn.commit()
+
+                        st.session_state[
+                            "msg_cfg_teams"
+                        ] = (
+                            "Destinatários do Teams salvos com sucesso."
+                        )
+                        st.rerun()
+
+                    except Exception as e:
+                        exibir_erro_amigavel(
+                            "teams",
+                            "salvar_destinatarios",
+                            e,
+                            (
+                                "Não foi possível salvar os "
+                                "destinatários do Teams."
+                            ),
+                        )
 
                 st.markdown("---")
-                st.markdown("**Histórico recente de cobranças**")
+                st.markdown(
+                    "**Responsáveis cadastrados**"
+                )
+
+                df_responsaveis = pd.DataFrame([
+                    {
+                        "Supervisor": eng,
+                        "Unidades": " · ".join(
+                            RESPONSAVEIS_UNIDADES_TEAMS[
+                                eng
+                            ]
+                        ),
+                    }
+                    for eng in SUPERVISORES_TEAMS
+                ])
+
+                tabela_aproar(
+                    df_responsaveis,
+                    key="tbl_responsaveis_unidades_teams",
+                    altura_max=260,
+                )
+
+                st.markdown("---")
+                st.markdown(
+                    "**Histórico recente de cobranças**"
+                )
 
                 try:
                     with supabase._connect() as conn:
@@ -16624,76 +17164,156 @@ else:
                                     enviado_em
                                 FROM cobrancas_teams
                                 ORDER BY enviado_em DESC
-                                LIMIT 30
+                                LIMIT 40
                                 """
                             )
                             logs_teams = cur.fetchall() or []
 
                     linhas_logs = []
+
                     for row in logs_teams:
                         if isinstance(row, dict):
-                            data_exec = row.get("data_execucao")
-                            enviado_em = row.get("enviado_em")
+                            data_exec = row.get(
+                                "data_execucao"
+                            )
+                            enviado_em = row.get(
+                                "enviado_em"
+                            )
+
+                            horario = str(
+                                row.get("horario")
+                                or ""
+                            )
+
                             linhas_logs.append({
                                 "Data": (
-                                    data_exec.strftime("%d/%m/%Y")
-                                    if hasattr(data_exec, "strftime")
-                                    else str(data_exec or "")
+                                    data_exec.strftime(
+                                        "%d/%m/%Y"
+                                    )
+                                    if hasattr(
+                                        data_exec,
+                                        "strftime",
+                                    )
+                                    else str(
+                                        data_exec
+                                        or ""
+                                    )
                                 ),
-                                "Horário": row.get("horario") or "",
-                                "Engenheiro": row.get("engenheiro") or "",
-                                "Pendentes": row.get("qtd_pendentes") or 0,
-                                "Status": row.get("status") or "",
+                                "Envio": (
+                                    horario
+                                    if not horario.startswith(
+                                        "MANUAL "
+                                    )
+                                    else horario
+                                ),
+                                "Supervisor": (
+                                    row.get(
+                                        "engenheiro"
+                                    )
+                                    or ""
+                                ),
+                                "Pendentes": (
+                                    row.get(
+                                        "qtd_pendentes"
+                                    )
+                                    or 0
+                                ),
+                                "Status": (
+                                    row.get("status")
+                                    or ""
+                                ),
                                 "Enviado em": (
-                                    enviado_em.astimezone(ZoneInfo("America/Fortaleza")).strftime("%d/%m %H:%M")
-                                    if hasattr(enviado_em, "astimezone")
-                                    else str(enviado_em or "")
+                                    enviado_em.astimezone(
+                                        ZoneInfo(
+                                            "America/Fortaleza"
+                                        )
+                                    ).strftime(
+                                        "%d/%m %H:%M"
+                                    )
+                                    if hasattr(
+                                        enviado_em,
+                                        "astimezone",
+                                    )
+                                    else str(
+                                        enviado_em
+                                        or ""
+                                    )
                                 ),
                             })
+
                         else:
-                            data_exec, horario, eng, email, qtd, status, enviado_em = row
+                            (
+                                data_exec,
+                                horario,
+                                eng,
+                                email,
+                                qtd,
+                                status,
+                                enviado_em,
+                            ) = row
+
                             linhas_logs.append({
                                 "Data": (
-                                    data_exec.strftime("%d/%m/%Y")
-                                    if hasattr(data_exec, "strftime")
-                                    else str(data_exec or "")
+                                    data_exec.strftime(
+                                        "%d/%m/%Y"
+                                    )
+                                    if hasattr(
+                                        data_exec,
+                                        "strftime",
+                                    )
+                                    else str(
+                                        data_exec
+                                        or ""
+                                    )
                                 ),
-                                "Horário": horario or "",
-                                "Engenheiro": eng or "",
+                                "Envio": horario or "",
+                                "Supervisor": eng or "",
                                 "Pendentes": qtd or 0,
                                 "Status": status or "",
                                 "Enviado em": (
-                                    enviado_em.astimezone(ZoneInfo("America/Fortaleza")).strftime("%d/%m %H:%M")
-                                    if hasattr(enviado_em, "astimezone")
-                                    else str(enviado_em or "")
+                                    enviado_em.astimezone(
+                                        ZoneInfo(
+                                            "America/Fortaleza"
+                                        )
+                                    ).strftime(
+                                        "%d/%m %H:%M"
+                                    )
+                                    if hasattr(
+                                        enviado_em,
+                                        "astimezone",
+                                    )
+                                    else str(
+                                        enviado_em
+                                        or ""
+                                    )
                                 ),
                             })
 
                     if linhas_logs:
                         tabela_aproar(
-                            pd.DataFrame(linhas_logs),
-                            key="tbl_logs_cobrancas_teams",
+                            pd.DataFrame(
+                                linhas_logs
+                            ),
+                            key=(
+                                "tbl_logs_cobrancas_teams"
+                            ),
                             altura_max=330,
                         )
+
                     else:
                         st.caption(
-                            "Ainda não há cobranças registradas. Elas aparecerão aqui após o primeiro envio automático."
+                            "Ainda não há cobranças registradas."
                         )
 
                 except Exception:
-                    st.caption("Histórico de cobranças ainda indisponível.")
+                    st.caption(
+                        "Histórico de cobranças ainda indisponível."
+                    )
 
                 st.markdown("---")
-                st.markdown("**Como ficará a cobrança**")
-                st.markdown(
-                    """
-                    > **APROAR · Apontamentos pendentes**  
-                    > Eduardo, existem **3 apontamentos atrasados** que ainda precisam ser regularizados.  
-                    > • 16/09 · BARRA DO CEARÁ · 2 colaboradores  
-                    > • 15/09 · UNIFOR · 1 colaborador  
-                    >  
-                    > Favor regularizar no **Portal do Supervisor**.
-                    """
+                st.caption(
+                    "Automático: dias úteis às 09:30 e 15:00. "
+                    "Manual: disponível a qualquer momento pelo botão Cobrar agora."
                 )
 
         with tab_limpeza:
