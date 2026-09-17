@@ -1,1 +1,48 @@
 
+name: Cobrar apontamentos no Teams
+
+on:
+  schedule:
+    # Fortaleza = UTC-3
+    # 09:30 Fortaleza = 12:30 UTC
+    - cron: "30 12 * * 1-5"
+    # 15:00 Fortaleza = 18:00 UTC
+    - cron: "0 18 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      slot:
+        description: "Horário lógico da cobrança"
+        required: false
+        type: choice
+        options:
+          - "09:30"
+          - "15:00"
+
+jobs:
+  cobrar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Baixar repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Instalar dependências
+        run: pip install "psycopg[binary]>=3.2" "requests>=2.31"
+
+      - name: Cobrar apontamentos pendentes
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TEAMS_COBRANCA_WEBHOOK_URL: ${{ secrets.TEAMS_COBRANCA_WEBHOOK_URL }}
+          PORTAL_SUPERVISOR_URL: https://apontamentos-aproar.streamlit.app/?eng
+          MANUAL_SLOT: ${{ github.event.inputs.slot }}
+        run: |
+          if [ -n "$MANUAL_SLOT" ]; then
+            export COBRANCA_SLOT="$MANUAL_SLOT"
+          fi
+          python cobrar_apontamentos_teams.py
