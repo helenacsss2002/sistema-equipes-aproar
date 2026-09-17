@@ -2636,6 +2636,51 @@ def limpar_cache_colaboradores():
                 pass
 
 
+def _get_conexao_admin_rapida():
+    """
+    Mantém uma conexão Neon reutilizável durante a sessão do usuário.
+
+    Isso reduz principalmente o tempo de:
+    - excluir funcionário;
+    - trocar moradia;
+    - editar cadastro.
+    """
+    if (
+        DB_BACKEND != "NEON"
+        or not hasattr(supabase, "_connect")
+    ):
+        return None
+
+    chave = "_conn_admin_colaboradores"
+
+    conn = st.session_state.get(chave)
+
+    try:
+        if conn is not None and not getattr(conn, "closed", True):
+            return conn
+    except Exception:
+        pass
+
+    try:
+        conn = supabase._connect()
+        st.session_state[chave] = conn
+        return conn
+    except Exception:
+        st.session_state.pop(chave, None)
+        return None
+
+
+def _descartar_conexao_admin_rapida():
+    chave = "_conn_admin_colaboradores"
+    conn = st.session_state.pop(chave, None)
+
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 def _atualizar_colaborador_admin_rapido(
     colaborador_id,
     campos,
@@ -2643,10 +2688,12 @@ def _atualizar_colaborador_admin_rapido(
     antes=None,
 ):
     """
-    UPDATE administrativo rápido.
+    UPDATE administrativo otimizado.
 
-    No Neon, atualização + auditoria usam a MESMA conexão/transação.
-    Isso reduz bastante o tempo percebido para excluir ou alterar moradia.
+    - reutiliza a conexão PostgreSQL da sessão;
+    - UPDATE + auditoria na mesma transação;
+    - limpa apenas o cache de colaboradores;
+    - se a conexão estiver velha, reconecta automaticamente.
     """
     campos_permitidos = {
         "ativo",
@@ -2665,12 +2712,14 @@ def _atualizar_colaborador_admin_rapido(
     if not payload:
         return False
 
-    if (
-        DB_BACKEND == "NEON"
-        and hasattr(supabase, "_connect")
-    ):
-        try:
-            with supabase._connect() as conn:
+    if DB_BACKEND == "NEON":
+        for _tentativa in range(2):
+            conn = _get_conexao_admin_rapida()
+
+            if conn is None:
+                break
+
+            try:
                 with conn.cursor() as cur:
                     atribuicoes = ", ".join(
                         f"{campo} = %s"
@@ -2690,17 +2739,34 @@ def _atualizar_colaborador_admin_rapido(
                         tuple(valores),
                     )
 
-                    # Auditoria sem abrir uma segunda conexão.
-                    # SAVEPOINT impede que uma falha de auditoria cancele o UPDATE.
+                    # Auditoria na mesma conexão.
                     try:
-                        cur.execute("SAVEPOINT audit_colab_inline")
+                        cur.execute(
+                            "SAVEPOINT audit_colab_inline"
+                        )
+
                         cur.execute(
                             """
                             INSERT INTO auditoria
-                                (entidade, entidade_id, acao, usuario,
-                                 antes, depois, contexto)
+                                (
+                                    entidade,
+                                    entidade_id,
+                                    acao,
+                                    usuario,
+                                    antes,
+                                    depois,
+                                    contexto
+                                )
                             VALUES
-                                (%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s::jsonb)
+                                (
+                                    %s,
+                                    %s,
+                                    %s,
+                                    %s,
+                                    %s::jsonb,
+                                    %s::jsonb,
+                                    %s::jsonb
+                                )
                             """,
                             (
                                 "colaboradores",
@@ -2714,13 +2780,17 @@ def _atualizar_colaborador_admin_rapido(
                                 ),
                                 _json_db(payload),
                                 _json_db({
-                                    "origem": "banco_funcionarios_inline"
+                                    "origem": (
+                                        "banco_funcionarios_inline"
+                                    )
                                 }),
                             ),
                         )
+
                         cur.execute(
                             "RELEASE SAVEPOINT audit_colab_inline"
                         )
+
                     except Exception:
                         try:
                             cur.execute(
@@ -2733,16 +2803,18 @@ def _atualizar_colaborador_admin_rapido(
                             pass
 
                 conn.commit()
+                limpar_cache_colaboradores()
+                return True
 
-            limpar_cache_colaboradores()
-            return True
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
 
-        except Exception:
-            # Se o caminho otimizado falhar por qualquer incompatibilidade
-            # pontual do driver/estrutura, tenta o caminho normal abaixo.
-            pass
+                _descartar_conexao_admin_rapida()
 
-    # Fallback compatível com backend legado e também com Neon.
+    # Fallback compatível.
     try:
         (
             supabase.table("colaboradores")
@@ -2764,6 +2836,7 @@ def _atualizar_colaborador_admin_rapido(
                 "origem": "banco_funcionarios_inline"
             },
         )
+
         return True
 
     except Exception:
@@ -14804,10 +14877,16 @@ else:
                     if mensagem_grade:
                         tipo_msg = mensagem_grade.get("tipo")
                         texto_msg = mensagem_grade.get("texto", "")
+
                         if tipo_msg == "erro":
-                            st.error(texto_msg)
+                            st.error(
+                                texto_msg,
+                                icon="⚠️",
+                            )
                         elif tipo_msg == "sucesso":
-                            st.success(texto_msg)
+                            st.caption(
+                                f"✓ {texto_msg}"
+                            )
                     # IDs removidos na sessão somem imediatamente da grade,
                     # mesmo antes de qualquer rerun completo da página.
                     excluidos_sessao = set(
@@ -14885,27 +14964,30 @@ else:
                             vertical_alignment="center",
                         )
 
+                        def _pagina_anterior_func():
+                            atual = int(
+                                st.session_state.get(
+                                    pagina_state_key,
+                                    1,
+                                )
+                            )
+                            st.session_state[
+                                pagina_state_key
+                            ] = max(
+                                1,
+                                atual - 1,
+                            )
+
                         with p_prev:
-                            if st.button(
+                            st.button(
                                 "‹",
                                 disabled=(
                                     pagina_func <= 1
                                 ),
                                 key="func_pager_prev",
                                 help="Página anterior",
-                            ):
-                                st.session_state[
-                                    pagina_state_key
-                                ] = max(
-                                    1,
-                                    pagina_func - 1,
-                                )
-                                try:
-                                    st.rerun(
-                                        scope="fragment"
-                                    )
-                                except TypeError:
-                                    st.rerun()
+                                on_click=_pagina_anterior_func,
+                            )
 
                         with p_num:
                             st.markdown(
@@ -14917,8 +14999,22 @@ else:
                                 unsafe_allow_html=True,
                             )
 
+                        def _proxima_pagina_func():
+                            atual = int(
+                                st.session_state.get(
+                                    pagina_state_key,
+                                    1,
+                                )
+                            )
+                            st.session_state[
+                                pagina_state_key
+                            ] = min(
+                                total_paginas_func,
+                                atual + 1,
+                            )
+
                         with p_next:
-                            if st.button(
+                            st.button(
                                 "›",
                                 disabled=(
                                     pagina_func
@@ -14926,19 +15022,8 @@ else:
                                 ),
                                 key="func_pager_next",
                                 help="Próxima página",
-                            ):
-                                st.session_state[
-                                    pagina_state_key
-                                ] = min(
-                                    total_paginas_func,
-                                    pagina_func + 1,
-                                )
-                                try:
-                                    st.rerun(
-                                        scope="fragment"
-                                    )
-                                except TypeError:
-                                    st.rerun()
+                                on_click=_proxima_pagina_func,
+                            )
 
                     inicio_func = (
                         (pagina_func - 1)
@@ -15078,70 +15163,127 @@ else:
                                     )
                                 )
 
-                                moradia_nova_inline = st.selectbox(
-                                    "Moradia",
-                                    opcoes_moradia_inline,
-                                    index=idx_moradia_inline,
-                                    label_visibility="collapsed",
-                                    key=(
-                                        "moradia_inline_func_"
-                                        f"{colab_id_inline}"
-                                    ),
+                                chave_moradia = (
+                                    "moradia_inline_func_"
+                                    f"{colab_id_inline}"
                                 )
 
-                                if (
-                                    moradia_nova_inline
-                                    != moradia_atual_inline
+                                def _salvar_moradia_inline(
+                                    _colab_id=colab_id_inline,
+                                    _nome=nome_inline,
+                                    _chave=chave_moradia,
+                                    _antes=c.get("local_moradia"),
                                 ):
-                                    valor_moradia_db = (
-                                        None
-                                        if moradia_nova_inline
-                                        == "Não informado"
-                                        else moradia_nova_inline
+                                    nova = st.session_state.get(
+                                        _chave,
+                                        "Não informado",
                                     )
 
-                                    ok_moradia = (
+                                    valor_db = (
+                                        None
+                                        if nova == "Não informado"
+                                        else nova
+                                    )
+
+                                    ok = (
                                         _atualizar_colaborador_admin_rapido(
-                                            colab_id_inline,
+                                            _colab_id,
                                             {
-                                                "local_moradia": valor_moradia_db
+                                                "local_moradia": valor_db
                                             },
                                             "EDITAR_MORADIA",
                                             antes={
-                                                "local_moradia": (
-                                                    c.get(
-                                                        "local_moradia"
-                                                    )
-                                                )
+                                                "local_moradia": _antes
                                             },
                                         )
                                     )
 
-                                    if ok_moradia:
+                                    st.session_state[
+                                        "_msg_grade_funcionarios"
+                                    ] = {
+                                        "tipo": (
+                                            "sucesso"
+                                            if ok
+                                            else "erro"
+                                        ),
+                                        "texto": (
+                                            f"Moradia de {_nome} atualizada."
+                                            if ok
+                                            else (
+                                                "Não foi possível atualizar "
+                                                f"a moradia de {_nome}."
+                                            )
+                                        ),
+                                    }
+
+                                st.selectbox(
+                                    "Moradia",
+                                    opcoes_moradia_inline,
+                                    index=idx_moradia_inline,
+                                    label_visibility="collapsed",
+                                    key=chave_moradia,
+                                    on_change=_salvar_moradia_inline,
+                                )
+
+                            with r_excluir:
+                                def _excluir_funcionario_inline(
+                                    _colab_id=colab_id_inline,
+                                    _nome=nome_inline,
+                                ):
+                                    ok = (
+                                        _atualizar_colaborador_admin_rapido(
+                                            _colab_id,
+                                            {
+                                                "ativo": False
+                                            },
+                                            "DESATIVAR",
+                                            antes={
+                                                "ativo": True,
+                                                "nome": _nome,
+                                            },
+                                        )
+                                    )
+
+                                    if ok:
+                                        ids_excluidos = set(
+                                            st.session_state.get(
+                                                "_func_inline_excluidos",
+                                                [],
+                                            )
+                                        )
+
+                                        ids_excluidos.add(
+                                            str(_colab_id)
+                                        )
+
+                                        st.session_state[
+                                            "_func_inline_excluidos"
+                                        ] = list(
+                                            ids_excluidos
+                                        )
+
                                         st.session_state[
                                             "_msg_grade_funcionarios"
                                         ] = {
                                             "tipo": "sucesso",
-                                            "texto": "Moradia atualizada.",
+                                            "texto": (
+                                                f"{_nome} foi retirado "
+                                                "da base operacional."
+                                            ),
                                         }
-                                        try:
-                                            st.rerun(scope="fragment")
-                                        except TypeError:
-                                            st.rerun()
+
                                     else:
                                         st.session_state[
                                             "_msg_grade_funcionarios"
                                         ] = {
                                             "tipo": "erro",
-                                            "texto": "Não foi possível atualizar a moradia.",
+                                            "texto": (
+                                                "Não foi possível excluir "
+                                                f"{_nome}. Tente novamente."
+                                            ),
                                         }
-                                        try:
-                                            st.rerun(scope="fragment")
-                                        except TypeError:
-                                            st.rerun()
 
-                            with r_excluir:
-                                if st.button(
+                                st.button(
                                     "⛔",
                                     key=(
                                         "btn_inline_excluir_func_"
@@ -15151,64 +15293,8 @@ else:
                                         f"Retirar {nome_inline} "
                                         "da base operacional"
                                     ),
-                                ):
-                                    ok_excluir = (
-                                        _atualizar_colaborador_admin_rapido(
-                                            colab_id_inline,
-                                            {
-                                                "ativo": False
-                                            },
-                                            "DESATIVAR",
-                                            antes={
-                                                "ativo": True,
-                                                "nome": nome_inline,
-                                            },
-                                        )
-                                    )
-
-                                    if ok_excluir:
-                                        ids_excluidos = set(
-                                            st.session_state.get(
-                                                "_func_inline_excluidos",
-                                                [],
-                                            )
-                                        )
-                                        ids_excluidos.add(
-                                            str(colab_id_inline)
-                                        )
-                                        st.session_state[
-                                            "_func_inline_excluidos"
-                                        ] = list(
-                                            ids_excluidos
-                                        )
-
-                                        st.session_state[
-                                            "msg_banco_funcionarios"
-                                        ] = (
-                                            f"{nome_inline} foi retirado "
-                                            "da base operacional."
-                                        )
-
-                                        # Após remover uma linha, fazemos rerun
-                                        # completo para o DOM da grade ser remontado
-                                        # corretamente. A operação de banco continua
-                                        # otimizada e rápida.
-                                        st.rerun()
-
-                                    else:
-                                        st.session_state[
-                                            "_msg_grade_funcionarios"
-                                        ] = {
-                                            "tipo": "erro",
-                                            "texto": (
-                                                f"Não foi possível excluir "
-                                                f"{nome_inline}. Tente novamente."
-                                            ),
-                                        }
-                                        try:
-                                            st.rerun(scope="fragment")
-                                        except TypeError:
-                                            st.rerun()
+                                    on_click=_excluir_funcionario_inline,
+                                )
 
                 _render_banco_funcionarios_inline(
                     ativos_filtrados
