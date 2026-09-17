@@ -2536,6 +2536,225 @@ def _garantir_estrutura_cadastros_admin():
                     """
                 )
 
+                # Campos financeiros do apontamento. Mantemos também em
+                # convocacoes porque os relatórios operacionais já usam esta
+                # tabela como leitura rápida/compatível.
+                for _tabela_fin in ("convocacoes", "apontamentos"):
+                    cur.execute(
+                        f"""
+                        ALTER TABLE IF EXISTS {_tabela_fin}
+                        ADD COLUMN IF NOT EXISTS tipo_diaria TEXT
+                        """
+                    )
+                    cur.execute(
+                        f"""
+                        ALTER TABLE IF EXISTS {_tabela_fin}
+                        ADD COLUMN IF NOT EXISTS custo_pago NUMERIC(12,2)
+                        """
+                    )
+                    cur.execute(
+                        f"""
+                        ALTER TABLE IF EXISTS {_tabela_fin}
+                        ADD COLUMN IF NOT EXISTS valor_acordo NUMERIC(12,2) NOT NULL DEFAULT 0
+                        """
+                    )
+                    cur.execute(
+                        f"""
+                        ALTER TABLE IF EXISTS {_tabela_fin}
+                        ADD COLUMN IF NOT EXISTS custo_encargos_base NUMERIC(12,2)
+                        """
+                    )
+
+                # ------------------------------------------------------------
+                # MIGRAÇÃO AUTOMÁTICA DOS APONTAMENTOS ANTIGOS
+                # ------------------------------------------------------------
+                # Os relatórios atuais leem "convocacoes" como fonte rápida.
+                # Por isso migramos convocacoes E apontamentos.
+                #
+                # O antigo "valor_extra" continua sendo tratado como EXTRA.
+                # Para o Financeiro acrescentamos a base líquida (120/60).
+                # Para a Controladoria congelamos o custo cadastrado do
+                # colaborador no momento desta migração.
+                #
+                # A migração é idempotente: só atua onde os campos novos
+                # ainda estão NULL. Recarregar o app não duplica valores.
+                _status_meia_sql = (
+                    "'Presente (Só Manhã)', "
+                    "'Presente (Só Tarde)', "
+                    "'Saída Antecipada'"
+                )
+
+                _status_presenca_sql = (
+                    "'Presente (Integral)', "
+                    "'Presente (Só Manhã)', "
+                    "'Presente (Só Tarde)', "
+                    "'Saída Antecipada'"
+                )
+
+                # 1) CONVOCACOES — é a fonte usada pelos relatórios atuais.
+                cur.execute(
+                    f"""
+                    UPDATE convocacoes AS v
+                       SET tipo_diaria =
+                               COALESCE(
+                                   NULLIF(v.tipo_diaria, ''),
+                                   CASE
+                                       WHEN v.status IN ({_status_meia_sql})
+                                           THEN 'Meia diária'
+                                       ELSE 'Diária'
+                                   END
+                               ),
+
+                           custo_pago =
+                               CASE
+                                   WHEN v.status IN ({_status_presenca_sql})
+                                       THEN
+                                           (
+                                               CASE
+                                                   WHEN v.status IN ({_status_meia_sql})
+                                                       THEN 60.00
+                                                   ELSE 120.00
+                                               END
+                                           )
+                                           + GREATEST(
+                                               COALESCE(v.valor_extra, 0),
+                                               0
+                                           )
+                                   ELSE 0
+                               END,
+
+                           valor_acordo =
+                               COALESCE(
+                                   v.valor_acordo,
+                                   0
+                               ),
+
+                           custo_encargos_base =
+                               CASE
+                                   WHEN v.status IN ({_status_presenca_sql})
+                                       THEN
+                                           ROUND(
+                                               (
+                                                   COALESCE(
+                                                       NULLIF(c.valor_diaria, 0),
+                                                       CASE
+                                                           WHEN UPPER(
+                                                               COALESCE(c.funcao, '')
+                                                           ) LIKE ANY(
+                                                               ARRAY[
+                                                                   '%AJUDANTE%',
+                                                                   '%AUXILIAR%',
+                                                                   '%SERVENTE%'
+                                                               ]
+                                                           )
+                                                               THEN 182.34
+                                                           ELSE 241.74
+                                                       END
+                                                   )
+                                                   *
+                                                   CASE
+                                                       WHEN v.status IN ({_status_meia_sql})
+                                                           THEN 0.5
+                                                       ELSE 1.0
+                                                   END
+                                               )::numeric,
+                                               2
+                                           )
+                                   ELSE 0
+                               END
+                      FROM colaboradores AS c
+                     WHERE c.id = v.colaborador_id
+                       AND (
+                           v.custo_pago IS NULL
+                           OR v.custo_encargos_base IS NULL
+                           OR v.tipo_diaria IS NULL
+                           OR TRIM(COALESCE(v.tipo_diaria, '')) = ''
+                       )
+                    """
+                )
+
+                # 2) APONTAMENTOS — preserva a mesma regra na tabela estruturada.
+                cur.execute(
+                    f"""
+                    UPDATE apontamentos AS a
+                       SET tipo_diaria =
+                               COALESCE(
+                                   NULLIF(a.tipo_diaria, ''),
+                                   CASE
+                                       WHEN a.status IN ({_status_meia_sql})
+                                           THEN 'Meia diária'
+                                       ELSE 'Diária'
+                                   END
+                               ),
+
+                           custo_pago =
+                               CASE
+                                   WHEN a.status IN ({_status_presenca_sql})
+                                       THEN
+                                           (
+                                               CASE
+                                                   WHEN a.status IN ({_status_meia_sql})
+                                                       THEN 60.00
+                                                   ELSE 120.00
+                                               END
+                                           )
+                                           + GREATEST(
+                                               COALESCE(a.valor_extra, 0),
+                                               0
+                                           )
+                                   ELSE 0
+                               END,
+
+                           valor_acordo =
+                               COALESCE(
+                                   a.valor_acordo,
+                                   0
+                               ),
+
+                           custo_encargos_base =
+                               CASE
+                                   WHEN a.status IN ({_status_presenca_sql})
+                                       THEN
+                                           ROUND(
+                                               (
+                                                   COALESCE(
+                                                       NULLIF(c.valor_diaria, 0),
+                                                       CASE
+                                                           WHEN UPPER(
+                                                               COALESCE(c.funcao, '')
+                                                           ) LIKE ANY(
+                                                               ARRAY[
+                                                                   '%AJUDANTE%',
+                                                                   '%AUXILIAR%',
+                                                                   '%SERVENTE%'
+                                                               ]
+                                                           )
+                                                               THEN 182.34
+                                                           ELSE 241.74
+                                                       END
+                                                   )
+                                                   *
+                                                   CASE
+                                                       WHEN a.status IN ({_status_meia_sql})
+                                                           THEN 0.5
+                                                       ELSE 1.0
+                                                   END
+                                               )::numeric,
+                                               2
+                                           )
+                                   ELSE 0
+                               END
+                      FROM colaboradores AS c
+                     WHERE c.id = a.colaborador_id
+                       AND (
+                           a.custo_pago IS NULL
+                           OR a.custo_encargos_base IS NULL
+                           OR a.tipo_diaria IS NULL
+                           OR TRIM(COALESCE(a.tipo_diaria, '')) = ''
+                       )
+                    """
+                )
+
                 # O índice antigo impedia, por exemplo, uma obra com o mesmo
                 # nome em duas unidades diferentes.
                 cur.execute("DROP INDEX IF EXISTS uq_obras_nome")
@@ -3101,6 +3320,125 @@ def get_cor_funcao(funcao):
 VALOR_DIARIA_PROFISSIONAL = 241.74
 VALOR_DIARIA_AJUDANTE = 182.34
 
+# Pagamento líquido ao colaborador (Financeiro).
+# O custo com encargos da Controladoria vem do cadastro/importação individual.
+VALOR_LIMPO_DIARIA = 120.00
+VALOR_LIMPO_MEIA_DIARIA = 60.00
+TIPOS_DIARIA = ["Diária", "Meia diária"]
+
+
+def normalizar_tipo_diaria(valor):
+    bruto = normalizar(valor or "")
+    if "MEIA" in bruto:
+        return "Meia diária"
+    return "Diária"
+
+
+def valor_limpo_por_tipo_diaria(tipo_diaria):
+    return (
+        VALOR_LIMPO_MEIA_DIARIA
+        if normalizar_tipo_diaria(tipo_diaria) == "Meia diária"
+        else VALOR_LIMPO_DIARIA
+    )
+
+
+def fracao_encargos_por_tipo_diaria(tipo_diaria):
+    return 0.5 if normalizar_tipo_diaria(tipo_diaria) == "Meia diária" else 1.0
+
+
+def tipo_diaria_registro(registro):
+    valor = str((registro or {}).get("tipo_diaria") or "").strip()
+    if valor:
+        return normalizar_tipo_diaria(valor)
+
+    # Compatibilidade com apontamentos antigos.
+    status = normalizar_status_operacional((registro or {}).get("status") or "")
+    if status in [
+        "Presente (Só Manhã)",
+        "Presente (Só Tarde)",
+        "Saída Antecipada",
+    ]:
+        return "Meia diária"
+    return "Diária"
+
+
+def custo_pago_total_registro(registro):
+    """Valor líquido base + extra; Acordo fica separado."""
+    registro = registro or {}
+    if not status_eh_presenca(
+        normalizar_status_operacional(registro.get("status") or "")
+    ):
+        return 0.0
+
+    valor = registro.get("custo_pago")
+    if valor not in (None, ""):
+        try:
+            return max(0.0, float(valor))
+        except Exception:
+            pass
+
+    # Legado: base limpa conforme diária/meia + extra antigo.
+    base = valor_limpo_por_tipo_diaria(tipo_diaria_registro(registro))
+    try:
+        extra = max(0.0, float(registro.get("valor_extra") or 0.0))
+    except Exception:
+        extra = 0.0
+    return base + extra
+
+
+def valor_extra_registro(registro):
+    """Extra real derivado do campo editável Custo + Extra."""
+    registro = registro or {}
+    if not status_eh_presenca(
+        normalizar_status_operacional(registro.get("status") or "")
+    ):
+        return 0.0
+
+    base = valor_limpo_por_tipo_diaria(tipo_diaria_registro(registro))
+    total = custo_pago_total_registro(registro)
+    return round(max(0.0, total - base), 2)
+
+
+def valor_acordo_registro(registro):
+    registro = registro or {}
+    if not status_eh_presenca(
+        normalizar_status_operacional(registro.get("status") or "")
+    ):
+        return 0.0
+    try:
+        return max(0.0, float(registro.get("valor_acordo") or 0.0))
+    except Exception:
+        return 0.0
+
+
+def custo_encargos_base_registro(registro, colab=None):
+    """
+    Custo da Controladoria ANTES de extra/acordo.
+
+    Para novos apontamentos usamos snapshot salvo no momento do apontamento.
+    Para registros antigos, usamos o valor individual atualmente cadastrado.
+    """
+    registro = registro or {}
+    if not status_eh_presenca(
+        normalizar_status_operacional(registro.get("status") or "")
+    ):
+        return 0.0
+
+    snap = registro.get("custo_encargos_base")
+    if snap not in (None, ""):
+        try:
+            return max(0.0, float(snap))
+        except Exception:
+            pass
+
+    valor_diario = obter_valor_diaria_colaborador(colab or {})
+    return round(
+        float(valor_diario)
+        * fracao_encargos_por_tipo_diaria(tipo_diaria_registro(registro)),
+        2,
+    )
+
+
 def inferir_tipo_colaborador(funcao):
     """Classifica cadastros antigos quando a diária ainda não está nos novos valores fixos."""
     f = normalizar(funcao or "")
@@ -3111,12 +3449,7 @@ def valor_diaria_por_tipo(tipo):
     return VALOR_DIARIA_AJUDANTE if normalizar(tipo) == "AJUDANTE" else VALOR_DIARIA_PROFISSIONAL
 
 def obter_valor_diaria_colaborador(colab):
-    """
-    Usa o valor/custo cadastrado para o colaborador.
-
-    Só aplica os valores padrão de Profissional/Ajudante quando o cadastro
-    não possui um valor positivo.
-    """
+    """Custo diário com encargos cadastrado/importado para o colaborador."""
     colab = colab or {}
 
     try:
@@ -3127,14 +3460,7 @@ def obter_valor_diaria_colaborador(colab):
     except Exception:
         valor_cadastrado = 0.0
 
-    if valor_cadastrado > 0:
-        return valor_cadastrado
-
-    return valor_diaria_por_tipo(
-        inferir_tipo_colaborador(
-            colab.get("funcao", "")
-        )
-    )
+    return valor_cadastrado if valor_cadastrado > 0 else 0.0
 
 
 def calcular_diaria_proporcional(status, valor_diaria_base):
@@ -3758,8 +4084,10 @@ def excluir_indisponibilidade_estruturada(registro_id, usuario="PAULO"):
 def salvar_apontamento_estruturado(
     convocacao, data_servico, engenheiro, status, valor_extra, observacao_livre,
     obra_principal_id, periodo_principal, servicos_adicionais=None,
+    tipo_diaria=None, custo_pago=None, valor_acordo=0.0,
+    custo_encargos_base=None,
 ):
-    """Dual-write do apontamento nas tabelas novas, mantendo a convocação legada intacta."""
+    """Dual-write do apontamento estruturado + dados Financeiro/Controladoria."""
     if not schema_producao_disponivel():
         return False
     try:
@@ -3767,14 +4095,20 @@ def salvar_apontamento_estruturado(
         colab_id = str(convocacao.get("colaborador_id") or "")
         retroativo = bool(agora_aproar().date() > data_servico)
         obra_principal = dict_obras.get(obra_principal_id, {}) if "dict_obras" in globals() else {}
+        tipo_diaria = normalizar_tipo_diaria(tipo_diaria or tipo_diaria_registro(convocacao))
+        custo_pago = float(custo_pago or 0.0)
+        valor_acordo = float(valor_acordo or 0.0)
+        custo_encargos_base = float(custo_encargos_base or 0.0)
+
         with supabase._connect() as conn:
             with conn.cursor() as cur:
                 cur.execute(
                     """
                     INSERT INTO apontamentos (
                         convocacao_id, data_servico, colaborador_id, engenheiro, status,
-                        valor_extra, observacao, apontado_em, apontado_por, retroativo, atualizado_em
-                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,NOW(),%s,%s,NOW())
+                        valor_extra, observacao, apontado_em, apontado_por, retroativo, atualizado_em,
+                        tipo_diaria, custo_pago, valor_acordo, custo_encargos_base
+                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,NOW(),%s,%s,NOW(),%s,%s,%s,%s)
                     ON CONFLICT (convocacao_id) DO UPDATE SET
                         data_servico = EXCLUDED.data_servico,
                         colaborador_id = EXCLUDED.colaborador_id,
@@ -3784,11 +4118,16 @@ def salvar_apontamento_estruturado(
                         observacao = EXCLUDED.observacao,
                         apontado_por = EXCLUDED.apontado_por,
                         retroativo = EXCLUDED.retroativo,
+                        tipo_diaria = EXCLUDED.tipo_diaria,
+                        custo_pago = EXCLUDED.custo_pago,
+                        valor_acordo = EXCLUDED.valor_acordo,
+                        custo_encargos_base = EXCLUDED.custo_encargos_base,
                         atualizado_em = NOW()
                     """,
                     (
                         conv_id, data_servico, colab_id, str(engenheiro), str(status),
                         float(valor_extra or 0), str(observacao_livre or ""), str(engenheiro), retroativo,
+                        tipo_diaria, custo_pago, valor_acordo, custo_encargos_base,
                     ),
                 )
 
@@ -3826,9 +4165,17 @@ def salvar_apontamento_estruturado(
         registrar_auditoria_prod(
             "apontamento", conv_id, "SALVAR", engenheiro,
             depois={
-                "data_servico": data_servico, "status": status, "valor_extra": valor_extra,
-                "obra_principal_id": str(obra_principal_id), "periodo_principal": periodo_principal,
-                "servicos_adicionais": servicos_adicionais or [], "retroativo": retroativo,
+                "data_servico": data_servico,
+                "status": status,
+                "tipo_diaria": tipo_diaria,
+                "custo_pago": custo_pago,
+                "valor_extra": valor_extra,
+                "valor_acordo": valor_acordo,
+                "custo_encargos_base": custo_encargos_base,
+                "obra_principal_id": str(obra_principal_id),
+                "periodo_principal": periodo_principal,
+                "servicos_adicionais": servicos_adicionais or [],
+                "retroativo": retroativo,
             },
         )
         return True
@@ -6240,9 +6587,12 @@ def _processar_registro_operacional(registro):
     obra = dict_obras.get(registro.get("obra_id"), {"unidade": "GERAL", "nome": "Desconhecida"})
     colab = dict_colaboradores.get(registro.get("colaborador_id"), {"nome": "Desconhecido", "funcao": "-"})
     status = normalizar_status_operacional(registro.get("status"))
-    diaria = calcular_diaria_proporcional(status, obter_valor_diaria_colaborador(colab))
-    extra_bruta = float(registro.get("valor_extra") or 0.0)
-    extra = extra_bruta if status_eh_presenca(status) else 0.0
+    tipo_diaria = tipo_diaria_registro(registro)
+    custo_encargos = custo_encargos_base_registro(registro, colab)
+    extra = valor_extra_registro(registro)
+    acordo = valor_acordo_registro(registro)
+    total_controladoria = (custo_encargos + extra + acordo) if status_eh_presenca(status) else 0.0
+    total_financeiro = (custo_pago_total_registro(registro) + acordo) if status_eh_presenca(status) else 0.0
     meta = obter_metadata_operacional(registro.get("observacao") or "")
     _, obs_livre = decompor_observacao_operacional(registro.get("observacao") or "")
     return {
@@ -6254,9 +6604,12 @@ def _processar_registro_operacional(registro):
         "Colaborador": str(colab.get("nome") or "Desconhecido"),
         "Função": str(colab.get("funcao") or "-"),
         "Status": status,
-        "Diária (R$)": float(diaria),
-        "Extra (R$)": extra,
-        "Custo (R$)": float(diaria + extra),
+        "Tipo": tipo_diaria,
+        "Custo c/ encargos (R$)": float(custo_encargos),
+        "Extra (R$)": float(extra),
+        "Acordo (R$)": float(acordo),
+        "Custo (R$)": float(total_controladoria),
+        "Total Financeiro (R$)": float(total_financeiro),
         "Observação": obs_livre,
         "Convocação após 16h": bool(meta.get("convocacao_atrasada")),
         "Apontamento atrasado": bool(meta.get("apontamento_atrasado")),
@@ -6443,71 +6796,73 @@ def _servicos_do_registro_relatorio(registro):
 
 def ratear_registros_por_servico(registros):
     """
-    Retorna uma linha por colaborador/data/serviço com a diária corretamente
-    distribuída entre os serviços executados.
+    Rateia custos por serviço preservando duas visões:
 
-    Exemplos:
-      - Só manhã + 1 serviço = 1/2 diária nesse serviço.
-      - Só manhã + 2 serviços = 1/4 diária em cada serviço.
-      - Manhã em 2 serviços + tarde em 1 = 1/4 + 1/4 + 1/2.
-      - Obras podem ser da mesma unidade ou de unidades diferentes.
+    Financeiro = Base líquida (120/60) + Extra + Acordo.
+    Controladoria = Custo individual com encargos + Extra + Acordo.
+
+    Se a mesma meia-diária tiver 2 serviços na mesma manhã, a base é dividida
+    entre eles; não é duplicada.
     """
     grupos = {}
 
     for registro in registros or []:
         data = str(registro.get("data") or "")
-        colaborador_id = str(
-            registro.get("colaborador_id")
-            or ""
-        )
-        chave_grupo = (data, colaborador_id)
-        grupos.setdefault(chave_grupo, []).append(registro)
+        colaborador_id = str(registro.get("colaborador_id") or "")
+        grupos.setdefault((data, colaborador_id), []).append(registro)
 
     linhas = []
 
     for (data, colaborador_id), regs in grupos.items():
-        colab = dict_colaboradores.get(
-            regs[0].get("colaborador_id"),
-            {},
-        )
-        valor_diaria = float(
-            obter_valor_diaria_colaborador(colab)
-        )
+        colab = dict_colaboradores.get(regs[0].get("colaborador_id"), {})
 
-        # Orçamento diário por bloco de presença.
-        orcamento_blocos = {}
-        for reg in regs:
-            for bloco, peso in _blocos_presenca_registro_relatorio(reg).items():
-                orcamento_blocos[bloco] = max(
-                    float(orcamento_blocos.get(bloco, 0.0)),
-                    float(peso),
-                )
-
-        # Serviços únicos do dia, preservando de qual registro vieram.
         servicos = {}
-        extras_por_servico = {}
+        extra_por_servico = {}
+        acordo_por_servico = {}
+        tipos_por_servico = {}
+
+        # Orçamentos monetários por bloco M/T/N. MAX impede duplicar a mesma
+        # meia-diária quando existem dois registros no mesmo bloco.
+        base_fin_bloco = {}
+        base_ctrl_bloco = {}
 
         for reg in regs:
+            status_reg = normalizar_status_operacional(reg.get("status"))
             itens_reg = _servicos_do_registro_relatorio(reg)
-            status_reg = normalizar_status_operacional(
-                reg.get("status")
-            )
-            extra_reg = (
-                float(reg.get("valor_extra") or 0.0)
-                if status_eh_presenca(status_reg)
-                else 0.0
-            )
+            if not itens_reg:
+                continue
 
-            # Extra não pode ser repetida ao expandir um mesmo registro.
-            extra_por_item = (
-                extra_reg / len(itens_reg)
-                if itens_reg
-                else 0.0
-            )
+            tipo_reg = tipo_diaria_registro(reg)
+            presente = status_eh_presenca(status_reg)
+            base_fin_reg = valor_limpo_por_tipo_diaria(tipo_reg) if presente else 0.0
+            base_ctrl_reg = custo_encargos_base_registro(reg, colab) if presente else 0.0
+            extra_reg = valor_extra_registro(reg) if presente else 0.0
+            acordo_reg = valor_acordo_registro(reg) if presente else 0.0
 
-            _, obs_livre = decompor_observacao_operacional(
-                reg.get("observacao") or ""
-            )
+            # Descobre os blocos reais do registro a partir dos períodos dos serviços.
+            blocos_reg = []
+            for item in itens_reg:
+                periodo_item = normalizar_turno_convocacao(
+                    item.get("periodo") or turno_da_convocacao(reg)
+                )
+                for bloco in _peso_periodo_relatorio(periodo_item).keys():
+                    if bloco not in blocos_reg:
+                        blocos_reg.append(bloco)
+
+            if not blocos_reg:
+                blocos_reg = list(_blocos_presenca_registro_relatorio(reg).keys()) or ["M"]
+
+            # A opção Diária/Meia diária é a fonte do valor. Os blocos servem
+            # somente para não duplicar e para distribuir o custo entre serviços.
+            parte_fin_bloco = base_fin_reg / len(blocos_reg) if blocos_reg else 0.0
+            parte_ctrl_bloco = base_ctrl_reg / len(blocos_reg) if blocos_reg else 0.0
+            for bloco in blocos_reg:
+                base_fin_bloco[bloco] = max(float(base_fin_bloco.get(bloco, 0.0)), float(parte_fin_bloco))
+                base_ctrl_bloco[bloco] = max(float(base_ctrl_bloco.get(bloco, 0.0)), float(parte_ctrl_bloco))
+
+            extra_por_item = extra_reg / len(itens_reg) if itens_reg else 0.0
+            acordo_por_item = acordo_reg / len(itens_reg) if itens_reg else 0.0
+            _, obs_livre = decompor_observacao_operacional(reg.get("observacao") or "")
 
             for item in itens_reg:
                 chave_serv = (
@@ -6515,7 +6870,6 @@ def ratear_registros_por_servico(registros):
                     normalizar(item.get("obra") or ""),
                     normalizar(item.get("unidade") or ""),
                 )
-
                 atual = servicos.setdefault(
                     chave_serv,
                     {
@@ -6526,119 +6880,66 @@ def ratear_registros_por_servico(registros):
                         "engenheiros": set(),
                         "status": [],
                         "observacoes": [],
+                        "blocos": set(),
                     },
                 )
 
-                periodo = normalizar_turno_convocacao(
-                    item.get("periodo") or turno_da_convocacao(reg)
-                )
+                periodo = normalizar_turno_convocacao(item.get("periodo") or turno_da_convocacao(reg))
                 atual["periodos"].add(periodo)
-                atual["engenheiros"].add(
-                    str(reg.get("engenheiro") or "N/A")
-                )
+                atual["engenheiros"].add(str(reg.get("engenheiro") or "N/A"))
                 atual["status"].append(status_reg)
-
+                atual["blocos"].update(_peso_periodo_relatorio(periodo).keys())
                 if obs_livre:
                     atual["observacoes"].append(obs_livre)
 
-                extras_por_servico[chave_serv] = (
-                    float(extras_por_servico.get(chave_serv, 0.0))
-                    + extra_por_item
-                )
+                extra_por_servico[chave_serv] = float(extra_por_servico.get(chave_serv, 0.0)) + extra_por_item
+                acordo_por_servico[chave_serv] = float(acordo_por_servico.get(chave_serv, 0.0)) + acordo_por_item
+                tipos_por_servico.setdefault(chave_serv, []).append(tipo_reg)
 
-        # Se não há serviço real, não há o que atribuir no relatório por obra.
         if not servicos:
             continue
 
-        # Quais serviços participam de cada bloco (M/T/N).
-        servicos_por_bloco = {
-            bloco: []
-            for bloco in orcamento_blocos.keys()
-        }
+        # Distribui cada orçamento de bloco entre os serviços que realmente
+        # participaram daquele bloco.
+        base_fin_por_servico = {chave: 0.0 for chave in servicos}
+        base_ctrl_por_servico = {chave: 0.0 for chave in servicos}
 
-        for chave_serv, serv in servicos.items():
-            blocos_serv = set()
-            for periodo in serv["periodos"]:
-                blocos_serv.update(
-                    _peso_periodo_relatorio(periodo).keys()
-                )
-
-            for bloco in servicos_por_bloco:
-                if bloco in blocos_serv:
-                    servicos_por_bloco[bloco].append(chave_serv)
-
-        rateio_fracao = {
-            chave: 0.0
-            for chave in servicos.keys()
-        }
-
-        # Divide cada meia-diária/diária noturna entre os serviços daquele bloco.
-        for bloco, peso_bloco in orcamento_blocos.items():
-            participantes = list(
-                dict.fromkeys(
-                    servicos_por_bloco.get(bloco)
-                    or []
-                )
-            )
-
-            # Compatibilidade com registros antigos sem período confiável.
+        blocos_todos = set(base_fin_bloco) | set(base_ctrl_bloco)
+        for bloco in blocos_todos:
+            participantes = [
+                chave
+                for chave, serv in servicos.items()
+                if bloco in serv.get("blocos", set())
+            ]
             if not participantes:
                 participantes = list(servicos.keys())
-
             if not participantes:
                 continue
 
-            parte = float(peso_bloco) / len(participantes)
-            for chave_serv in participantes:
-                rateio_fracao[chave_serv] += parte
-
-        # Segurança: garante que 100% do valor remunerável seja atribuído.
-        total_esperado = sum(
-            float(x)
-            for x in orcamento_blocos.values()
-        )
-        total_rateado = sum(
-            float(x)
-            for x in rateio_fracao.values()
-        )
-        residual = max(0.0, total_esperado - total_rateado)
-
-        if residual > 0.000001 and servicos:
-            parte_residual = residual / len(servicos)
-            for chave_serv in rateio_fracao:
-                rateio_fracao[chave_serv] += parte_residual
+            parte_fin = float(base_fin_bloco.get(bloco, 0.0)) / len(participantes)
+            parte_ctrl = float(base_ctrl_bloco.get(bloco, 0.0)) / len(participantes)
+            for chave in participantes:
+                base_fin_por_servico[chave] += parte_fin
+                base_ctrl_por_servico[chave] += parte_ctrl
 
         for chave_serv, serv in servicos.items():
-            diaria_rateada = round(
-                valor_diaria
-                * float(rateio_fracao.get(chave_serv, 0.0)),
-                2,
-            )
-            extra_rateada = round(
-                float(extras_por_servico.get(chave_serv, 0.0)),
-                2,
-            )
+            base_fin_rateada = round(float(base_fin_por_servico.get(chave_serv, 0.0)), 2)
+            base_ctrl_rateada = round(float(base_ctrl_por_servico.get(chave_serv, 0.0)), 2)
+            extra_rateada = round(float(extra_por_servico.get(chave_serv, 0.0)), 2)
+            acordo_rateado = round(float(acordo_por_servico.get(chave_serv, 0.0)), 2)
 
             periodos = sorted(
                 serv["periodos"],
-                key=lambda p: {
-                    "Manhã": 1,
-                    "Tarde": 2,
-                    "Noite": 3,
-                    "Integral": 4,
-                }.get(p, 9),
+                key=lambda p: {"Manhã": 1, "Tarde": 2, "Noite": 3, "Integral": 4}.get(p, 9),
             )
-
-            statuses = [
-                s for s in serv["status"]
-                if s
-            ]
+            statuses = [s for s in serv["status"] if s]
             status_exibido = (
                 statuses[0]
-                if statuses
-                and len(set(statuses)) == 1
+                if statuses and len(set(statuses)) == 1
                 else " / ".join(dict.fromkeys(statuses))
             )
+            tipos_unicos = list(dict.fromkeys(tipos_por_servico.get(chave_serv, [])))
+            tipo_exibido = tipos_unicos[0] if len(tipos_unicos) == 1 else " / ".join(tipos_unicos)
 
             linhas.append({
                 "Data": data,
@@ -6646,27 +6947,19 @@ def ratear_registros_por_servico(registros):
                 "Obra": serv["obra"],
                 "Unidade": serv["unidade"],
                 "Período do serviço": " + ".join(periodos),
-                "Engenheiro": " / ".join(
-                    sorted(serv["engenheiros"])
-                ),
-                "Colaborador": str(
-                    colab.get("nome")
-                    or "Desconhecido"
-                ),
-                "Função": str(
-                    colab.get("funcao")
-                    or "-"
-                ),
+                "Engenheiro": " / ".join(sorted(serv["engenheiros"])),
+                "Colaborador": str(colab.get("nome") or "Desconhecido"),
+                "Função": str(colab.get("funcao") or "-"),
                 "Status": status_exibido,
-                "Diária (R$)": diaria_rateada,
+                "Tipo": tipo_exibido,
+                "Base Financeiro (R$)": base_fin_rateada,
+                "Custo + Extra (R$)": round(base_fin_rateada + extra_rateada, 2),
+                "Custo c/ encargos (R$)": base_ctrl_rateada,
                 "Extra (R$)": extra_rateada,
-                "Custo (R$)": round(
-                    diaria_rateada + extra_rateada,
-                    2,
-                ),
-                "Observação": " | ".join(
-                    dict.fromkeys(serv["observacoes"])
-                ),
+                "Acordo (R$)": acordo_rateado,
+                "Total Financeiro (R$)": round(base_fin_rateada + extra_rateada + acordo_rateado, 2),
+                "Custo (R$)": round(base_ctrl_rateada + extra_rateada + acordo_rateado, 2),
+                "Observação": " | ".join(dict.fromkeys(serv["observacoes"])),
                 "_colaborador_id": colaborador_id,
             })
 
@@ -6923,7 +7216,10 @@ def render_dashboard_consulta(key_prefix="dash", engenheiro_fixo=None):
             st.bar_chart(por_eng.set_index("Engenheiro")["Custo (R$)"], use_container_width=True)
 
     titulo_secao_aproar("Detalhamento", "Registros que compõem os totais acima.")
-    cols = ["Data", "Engenheiro", "Unidade", "Serviço(s)", "Colaborador", "Status", "Diária (R$)", "Extra (R$)", "Custo (R$)"]
+    cols = [
+        "Data", "Engenheiro", "Unidade", "Serviço(s)", "Colaborador", "Status", "Tipo",
+        "Custo c/ encargos (R$)", "Extra (R$)", "Acordo (R$)", "Custo (R$)"
+    ]
     tabela_aproar(df[cols], key=f"{key_prefix}_tbl_detalhe")
 
     # Excel sob demanda: antes era montado em todo rerun, mesmo sem download.
@@ -7057,8 +7353,10 @@ def render_relatorio_visualizador(key_prefix="rel_view", engenheiro_fixo=None):
                 "Período do serviço",
                 "Colaborador",
                 "Status",
-                "Diária (R$)",
+                "Tipo",
+                "Custo c/ encargos (R$)",
                 "Extra (R$)",
+                "Acordo (R$)",
                 "Custo (R$)",
             ]
         ],
@@ -8047,7 +8345,7 @@ def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
             elif data_apont < agora_aproar().date() and not meta_atual.get("apontado_em"):
                 st.warning("🟧 Este apontamento é retroativo. Ao salvar, o atraso será registrado.")
 
-            with st.form(key=f"{key_prefix}_form_{c_id}"):
+            with st.container():
                 f1, f2 = st.columns([1, 1.7])
                 with f1:
                     status_sel = st.selectbox("Status", OPCOES_STATUS_PRESENCA, index=idx_st, key=f"{key_prefix}_st_{c_id}")
@@ -8094,20 +8392,61 @@ def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
                         + (f" Outra alocação: {detalhe_aloc}." if detalhe_aloc else "")
                     )
 
-                d1, d2 = st.columns([1, 2])
-                with d1:
-                    val_extra = st.number_input(
-                        "Extra (R$)",
+                tipo_key = f"{key_prefix}_tipo_diaria_{c_id}"
+                custo_key = f"{key_prefix}_custo_pago_{c_id}"
+                tipo_atual = tipo_diaria_registro(conv)
+                custo_atual = custo_pago_total_registro(conv)
+
+                if tipo_key not in st.session_state:
+                    st.session_state[tipo_key] = tipo_atual
+                if custo_key not in st.session_state:
+                    st.session_state[custo_key] = (
+                        custo_atual
+                        if custo_atual > 0
+                        else valor_limpo_por_tipo_diaria(tipo_atual)
+                    )
+
+                def _ajustar_custo_desktop(_tipo_key=tipo_key, _custo_key=custo_key):
+                    st.session_state[_custo_key] = valor_limpo_por_tipo_diaria(
+                        st.session_state.get(_tipo_key, "Diária")
+                    )
+
+                p1, p2, p3 = st.columns([1, 1.25, 1])
+                with p1:
+                    tipo_diaria_sel = st.selectbox(
+                        "Diária / Meia diária",
+                        TIPOS_DIARIA,
+                        key=tipo_key,
+                        on_change=_ajustar_custo_desktop,
+                    )
+                with p2:
+                    custo_pago_total = st.number_input(
+                        "Custo + Extra (R$)",
                         min_value=0.0,
-                        value=(float(conv.get("valor_extra") or 0.0) if status_eh_presenca(status_sel) else 0.0),
                         step=10.0,
                         disabled=not status_eh_presenca(status_sel),
-                        key=f"{key_prefix}_extra_{c_id}",
-                        help="Extra é valor adicional. O colaborador continua contando como presente.",
+                        key=custo_key,
+                        help="Valor efetivamente pago antes do Acordo. Diária inicia em R$ 120,00 e meia diária em R$ 60,00.",
                     )
-                with d2:
-                    obs_nova = st.text_input("Observação / justificativa", value=obs_livre, key=f"{key_prefix}_obs_{c_id}")
-                salvar = st.form_submit_button("💾 SALVAR APONTAMENTO", type="primary", use_container_width=True)
+                with p3:
+                    valor_acordo = st.number_input(
+                        "Acordo (R$)",
+                        min_value=0.0,
+                        value=(float(conv.get("valor_acordo") or 0.0) if status_eh_presenca(status_sel) else 0.0),
+                        step=10.0,
+                        disabled=not status_eh_presenca(status_sel),
+                        key=f"{key_prefix}_acordo_{c_id}",
+                    )
+
+                base_limpa_preview = valor_limpo_por_tipo_diaria(tipo_diaria_sel)
+                extra_preview = max(0.0, float(custo_pago_total) - base_limpa_preview) if status_eh_presenca(status_sel) else 0.0
+                st.caption(
+                    f"Base Financeiro: {formatar_reais(base_limpa_preview)} · "
+                    f"Extra calculado: {formatar_reais(extra_preview)} · "
+                    f"Acordo: {formatar_reais(valor_acordo)}"
+                )
+                obs_nova = st.text_input("Observação / justificativa", value=obs_livre, key=f"{key_prefix}_obs_{c_id}")
+                salvar = st.button("💾 SALVAR APONTAMENTO", type="primary", use_container_width=True, key=f"{key_prefix}_salvar_{c_id}")
 
             if salvar:
                 if obra_sel not in mapa_obras:
@@ -8130,11 +8469,29 @@ def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
                     )
                     nova_obs = montar_observacao_operacional(turno, obs_nova, meta)
                     try:
-                        valor_extra_final = float(val_extra) if status_eh_presenca(status_sel) else 0.0
+                        presente_final = status_eh_presenca(status_sel)
+                        tipo_diaria_final = normalizar_tipo_diaria(tipo_diaria_sel)
+                        base_limpa_final = valor_limpo_por_tipo_diaria(tipo_diaria_final)
+                        custo_pago_final = float(custo_pago_total) if presente_final else 0.0
+                        valor_extra_final = max(0.0, custo_pago_final - base_limpa_final) if presente_final else 0.0
+                        valor_acordo_final = float(valor_acordo) if presente_final else 0.0
+                        custo_encargos_final = (
+                            round(
+                                obter_valor_diaria_colaborador(colab)
+                                * fracao_encargos_por_tipo_diaria(tipo_diaria_final),
+                                2,
+                            )
+                            if presente_final
+                            else 0.0
+                        )
                         supabase.table("convocacoes").update({
                             "obra_id": mapa_obras[obra_sel],
                             "status": status_sel,
+                            "tipo_diaria": tipo_diaria_final,
+                            "custo_pago": custo_pago_final,
                             "valor_extra": valor_extra_final,
+                            "valor_acordo": valor_acordo_final,
+                            "custo_encargos_base": custo_encargos_final,
                             "observacao": nova_obs,
                         }).eq("id", c_id).execute()
                         salvar_apontamento_estruturado(
@@ -8147,6 +8504,10 @@ def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
                             mapa_obras[obra_sel],
                             periodo_principal,
                             adicionais,
+                            tipo_diaria=tipo_diaria_final,
+                            custo_pago=custo_pago_final,
+                            valor_acordo=valor_acordo_final,
+                            custo_encargos_base=custo_encargos_final,
                         )
                         limpar_cache_operacional()
                         st.success(f"Apontamento de {colab.get('nome','-')} salvo.")
@@ -8248,78 +8609,108 @@ def listar_ciclos_financeiros(qtd=26):
 
 
 def carregar_dados_financeiro(data_inicio, data_fim):
-    """Busca convocações do período e prepara extras e faltas/atestados sem expor Obra/Serviço."""
-    # Reutiliza o cache curto compartilhado com Dashboard/Relatórios/Indicadores.
+    """Retorna pagamentos líquidos e ausências do período."""
     registros = _buscar_convocacoes_intervalo(data_inicio, data_fim)
+    linhas_rateadas = ratear_registros_por_servico(registros)
 
-    extras = []
+    pagamentos = []
+    if linhas_rateadas:
+        df = pd.DataFrame(linhas_rateadas)
+        df = df[df["Total Financeiro (R$)"] > 0].copy()
+        if not df.empty:
+            agrupados = (
+                df.groupby(
+                    ["Data", "_colaborador_id", "Colaborador", "Função"],
+                    dropna=False,
+                )
+                .agg(
+                    Unidades=("Unidade", lambda s: ", ".join(sorted(set(str(v) for v in s if str(v).strip())))),
+                    Engenheiros=("Engenheiro", lambda s: " / ".join(sorted(set(str(v) for v in s if str(v).strip())))),
+                    Tipo=("Tipo", lambda s: " / ".join(dict.fromkeys(str(v) for v in s if str(v).strip()))),
+                    **{
+                        "Base Financeiro (R$)": ("Base Financeiro (R$)", "sum"),
+                        "Extra (R$)": ("Extra (R$)", "sum"),
+                        "Acordo (R$)": ("Acordo (R$)", "sum"),
+                        "Total a Pagar (R$)": ("Total Financeiro (R$)", "sum"),
+                    },
+                )
+                .reset_index()
+            )
+            for _, row in agrupados.iterrows():
+                try:
+                    data_br = datetime.date.fromisoformat(str(row["Data"])).strftime("%d/%m/%Y")
+                except Exception:
+                    data_br = str(row["Data"])
+                pagamentos.append({
+                    "Data": data_br,
+                    "Data ISO": str(row["Data"]),
+                    "Colaborador": row["Colaborador"],
+                    "Função": row["Função"],
+                    "Unidade": row["Unidades"],
+                    "Engenheiro": row["Engenheiros"],
+                    "Tipo": row["Tipo"],
+                    "Base Financeiro (R$)": round(float(row["Base Financeiro (R$)"]), 2),
+                    "Extra (R$)": round(float(row["Extra (R$)"]), 2),
+                    "Acordo (R$)": round(float(row["Acordo (R$)"]), 2),
+                    "Total a Pagar (R$)": round(float(row["Total a Pagar (R$)"]), 2),
+                })
+
     ausencias = []
     for row in registros:
+        status = normalizar_status_operacional(row.get("status") or "")
+        if status not in ["Falta", "Atestado"]:
+            continue
         obra = dict_obras.get(row.get("obra_id"), {})
         colab = dict_colaboradores.get(row.get("colaborador_id"), {})
-        unidade = str(obra.get("unidade") or "NÃO IDENTIFICADA")
-        nome = str(colab.get("nome") or "NÃO IDENTIFICADO")
-        funcao = str(colab.get("funcao") or "-")
-        status = normalizar_status_operacional(row.get("status") or "")
         data_iso = str(row.get("data") or "")
         try:
             data_br = datetime.date.fromisoformat(data_iso).strftime("%d/%m/%Y")
         except Exception:
             data_br = data_iso
-        try:
-            valor_extra = float(row.get("valor_extra") or 0.0)
-        except Exception:
-            valor_extra = 0.0
-
-        base = {
+        ausencias.append({
             "Data": data_br,
             "Data ISO": data_iso,
-            "Colaborador": nome,
-            "Função": funcao,
-            "Unidade": unidade,
+            "Colaborador": str(colab.get("nome") or "NÃO IDENTIFICADO"),
+            "Função": str(colab.get("funcao") or "-"),
+            "Unidade": str(obra.get("unidade") or "NÃO IDENTIFICADA"),
             "Engenheiro": str(row.get("engenheiro") or "N/A"),
             "Status": status,
-        }
+        })
 
-        # Financeiro considera como extra qualquer valor lançado pelo engenheiro,
-        # independentemente do status do apontamento.
-        if valor_extra > 0 and status_eh_presenca(status):
-            item_extra = dict(base)
-            item_extra["Valor Extra (R$)"] = valor_extra
-            extras.append(item_extra)
-
-        if status in ["Falta", "Atestado"]:
-            ausencias.append(dict(base))
-
-    extras.sort(key=lambda x: (x.get("Data ISO", ""), normalizar(x.get("Colaborador", ""))))
+    pagamentos.sort(key=lambda x: (x.get("Data ISO", ""), normalizar(x.get("Colaborador", ""))))
     ausencias.sort(key=lambda x: (x.get("Data ISO", ""), normalizar(x.get("Colaborador", ""))))
-    return extras, ausencias
+    return pagamentos, ausencias
 
 
-def resumir_extras_financeiro(extras):
-    """Consolida as extras por colaborador para o pagamento semanal."""
-    if not extras:
-        return pd.DataFrame(columns=["Colaborador", "Função", "Unidades", "Lançamentos", "Total Extra (R$)"])
+def resumir_pagamentos_financeiro(pagamentos):
+    if not pagamentos:
+        return pd.DataFrame(columns=[
+            "Colaborador", "Função", "Unidades", "Dias/Lançamentos",
+            "Base (R$)", "Extra (R$)", "Acordo (R$)", "Total a Pagar (R$)"
+        ])
 
-    df = pd.DataFrame(extras)
-    resumo = (
+    df = pd.DataFrame(pagamentos)
+    return (
         df.groupby(["Colaborador", "Função"], dropna=False)
         .agg(
             Unidades=("Unidade", lambda s: ", ".join(sorted(set(str(v) for v in s if str(v).strip())))),
-            Lançamentos=("Valor Extra (R$)", "size"),
-            **{"Total Extra (R$)": ("Valor Extra (R$)", "sum")}
+            **{
+                "Dias/Lançamentos": ("Data", "size"),
+                "Base (R$)": ("Base Financeiro (R$)", "sum"),
+                "Extra (R$)": ("Extra (R$)", "sum"),
+                "Acordo (R$)": ("Acordo (R$)", "sum"),
+                "Total a Pagar (R$)": ("Total a Pagar (R$)", "sum"),
+            },
         )
         .reset_index()
-        .sort_values(by=["Total Extra (R$)", "Colaborador"], ascending=[False, True])
+        .sort_values(by=["Total a Pagar (R$)", "Colaborador"], ascending=[False, True])
     )
-    return resumo
 
 
-def gerar_excel_financeiro(extras, ausencias, data_inicio, data_fim, data_pagamento):
-    """Gera relatório financeiro semanal em Excel."""
+def gerar_excel_financeiro(pagamentos, ausencias, data_inicio, data_fim, data_pagamento):
     wb = openpyxl.Workbook()
     ws_resumo = wb.active
-    ws_resumo.title = "Resumo Extras"
+    ws_resumo.title = "Resumo Pagamentos"
 
     fill_titulo = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
     fill_header = PatternFill(start_color="2563EB", end_color="2563EB", fill_type="solid")
@@ -8339,118 +8730,123 @@ def gerar_excel_financeiro(extras, ausencias, data_inicio, data_fim, data_pagame
         ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=total_colunas)
         ws.cell(2, 1, subtitulo).font = Font(name="Arial", size=9, italic=True, color="64748B")
 
-    resumo = resumir_extras_financeiro(extras)
-    total_extra = sum(float(x.get("Valor Extra (R$)") or 0) for x in extras)
+    resumo = resumir_pagamentos_financeiro(pagamentos)
+    total_pagar = sum(float(x.get("Total a Pagar (R$)") or 0) for x in pagamentos)
     subtitulo = (
         f"Ciclo: {data_inicio.strftime('%d/%m/%Y')} a {data_fim.strftime('%d/%m/%Y')} | "
-        f"Pagamento: {data_pagamento.strftime('%d/%m/%Y')} | Total: {formatar_reais(total_extra)}"
+        f"Pagamento: {data_pagamento.strftime('%d/%m/%Y')} | Total: {formatar_reais(total_pagar)}"
     )
-    cabecalho_planilha(ws_resumo, "APROAR - RELATÓRIO SEMANAL DE EXTRAS", subtitulo, 5)
-    headers_resumo = ["Colaborador", "Função", "Unidades", "Lançamentos", "Total Extra (R$)"]
+    headers_resumo = [
+        "Colaborador", "Função", "Unidades", "Dias/Lançamentos",
+        "Base (R$)", "Extra (R$)", "Acordo (R$)", "Total a Pagar (R$)"
+    ]
+    cabecalho_planilha(ws_resumo, "APROAR - RELATÓRIO FINANCEIRO", subtitulo, len(headers_resumo))
     for ci, nome in enumerate(headers_resumo, 1):
         cell = ws_resumo.cell(4, ci, nome)
         cell.font = font_header
         cell.fill = fill_header
         cell.alignment = Alignment(horizontal="center")
     for ri, (_, r) in enumerate(resumo.iterrows(), 5):
-        vals = [r["Colaborador"], r["Função"], r["Unidades"], int(r["Lançamentos"]), float(r["Total Extra (R$)"])]
+        vals = [r[h] for h in headers_resumo]
         for ci, val in enumerate(vals, 1):
             cell = ws_resumo.cell(ri, ci, val)
             cell.border = borda
             cell.font = Font(name="Arial", size=9)
-            if ci == 5:
+            if "(R$)" in headers_resumo[ci-1]:
                 cell.number_format = 'R$ #,##0.00'
     ws_resumo.freeze_panes = "A5"
-    for col, largura in {"A": 38, "B": 28, "C": 38, "D": 14, "E": 20}.items():
-        ws_resumo.column_dimensions[col].width = largura
 
-    ws_det = wb.create_sheet("Detalhe Extras")
-    cabecalho_planilha(ws_det, "DETALHAMENTO DE EXTRAS", subtitulo, 6)
-    headers_det = ["Data", "Colaborador", "Função", "Unidade", "Engenheiro", "Valor Extra (R$)"]
+    ws_det = wb.create_sheet("Detalhe Pagamentos")
+    headers_det = [
+        "Data", "Colaborador", "Função", "Unidade", "Engenheiro", "Tipo",
+        "Base Financeiro (R$)", "Extra (R$)", "Acordo (R$)", "Total a Pagar (R$)"
+    ]
+    cabecalho_planilha(ws_det, "DETALHAMENTO DE PAGAMENTOS", subtitulo, len(headers_det))
     for ci, nome in enumerate(headers_det, 1):
         cell = ws_det.cell(4, ci, nome)
         cell.font = font_header
         cell.fill = fill_header
         cell.alignment = Alignment(horizontal="center")
-    for ri, item in enumerate(extras, 5):
-        vals = [item["Data"], item["Colaborador"], item["Função"], item["Unidade"], item["Engenheiro"], item["Valor Extra (R$)"]]
+    for ri, item in enumerate(pagamentos, 5):
+        vals = [item.get(h, "") for h in headers_det]
         for ci, val in enumerate(vals, 1):
             cell = ws_det.cell(ri, ci, val)
             cell.border = borda
             cell.font = Font(name="Arial", size=9)
-            if ci == 6:
+            if "(R$)" in headers_det[ci-1]:
                 cell.number_format = 'R$ #,##0.00'
     ws_det.freeze_panes = "A5"
-    for col, largura in {"A": 14, "B": 38, "C": 28, "D": 28, "E": 18, "F": 20}.items():
-        ws_det.column_dimensions[col].width = largura
 
     ws_aus = wb.create_sheet("Faltas e Atestados")
+    headers_aus = ["Data", "Colaborador", "Função", "Unidade", "Status", "Engenheiro"]
     cabecalho_planilha(
         ws_aus,
         "FALTAS E ATESTADOS DO CICLO",
         f"Período: {data_inicio.strftime('%d/%m/%Y')} a {data_fim.strftime('%d/%m/%Y')}",
-        6
+        len(headers_aus),
     )
-    headers_aus = ["Data", "Colaborador", "Função", "Unidade", "Status", "Engenheiro"]
     for ci, nome in enumerate(headers_aus, 1):
         cell = ws_aus.cell(4, ci, nome)
         cell.font = font_header
         cell.fill = fill_header
         cell.alignment = Alignment(horizontal="center")
     for ri, item in enumerate(ausencias, 5):
-        vals = [item["Data"], item["Colaborador"], item["Função"], item["Unidade"], item["Status"], item["Engenheiro"]]
-        for ci, val in enumerate(vals, 1):
-            cell = ws_aus.cell(ri, ci, val)
+        for ci, h in enumerate(headers_aus, 1):
+            cell = ws_aus.cell(ri, ci, item.get(h, ""))
             cell.border = borda
             cell.font = Font(name="Arial", size=9)
-    ws_aus.freeze_panes = "A5"
-    for col, largura in {"A": 14, "B": 38, "C": 28, "D": 28, "E": 16, "F": 18}.items():
-        ws_aus.column_dimensions[col].width = largura
+
+    for ws in wb.worksheets:
+        for col in ws.columns:
+            letter = openpyxl.utils.get_column_letter(col[0].column)
+            max_len = max([len(str(c.value or "")) for c in col] + [10])
+            ws.column_dimensions[letter].width = min(max_len + 3, 38)
 
     buffer = io.BytesIO()
     wb.save(buffer)
     return buffer.getvalue()
 
 
-def gerar_pdf_financeiro(extras, ausencias, data_inicio, data_fim, data_pagamento):
-    """Gera um relatório financeiro compacto em PDF, sem Obra/Serviço."""
+def gerar_pdf_financeiro(pagamentos, ausencias, data_inicio, data_fim, data_pagamento):
     pdf = FPDF(orientation="L")
     pdf.set_auto_page_break(auto=True, margin=12)
     pdf.add_page()
     pdf.set_font("Arial", "B", 14)
-    pdf.cell(0, 9, to_latin("APROAR - RELATÓRIO FINANCEIRO SEMANAL"), ln=True, align="C")
+    pdf.cell(0, 9, to_latin("APROAR - RELATÓRIO FINANCEIRO"), ln=True, align="C")
     pdf.set_font("Arial", "", 9)
     pdf.cell(
         0, 7,
         to_latin(
-            f"Ciclo de extras: {data_inicio.strftime('%d/%m/%Y')} a {data_fim.strftime('%d/%m/%Y')} | "
+            f"Período: {data_inicio.strftime('%d/%m/%Y')} a {data_fim.strftime('%d/%m/%Y')} | "
             f"Pagamento previsto: {data_pagamento.strftime('%d/%m/%Y')}"
         ),
         ln=True, align="C"
     )
     pdf.ln(3)
 
-    resumo = resumir_extras_financeiro(extras)
-    total_extra = sum(float(x.get("Valor Extra (R$)") or 0) for x in extras)
+    resumo = resumir_pagamentos_financeiro(pagamentos)
+    total_pagar = sum(float(x.get("Total a Pagar (R$)") or 0) for x in pagamentos)
     pdf.set_font("Arial", "B", 11)
-    pdf.cell(0, 7, to_latin(f"EXTRAS - TOTAL A PAGAR: {formatar_reais(total_extra)}"), ln=True)
+    pdf.cell(0, 7, to_latin(f"TOTAL A PAGAR: {formatar_reais(total_pagar)}"), ln=True)
 
-    widths = [72, 48, 72, 28, 36]
-    headers = ["Colaborador", "Função", "Unidade(s)", "Lanç.", "Total"]
-    pdf.set_font("Arial", "B", 8)
+    widths = [58, 38, 48, 23, 28, 28, 28, 34]
+    headers = ["Colaborador", "Função", "Unidade(s)", "Dias", "Base", "Extra", "Acordo", "Total"]
+    pdf.set_font("Arial", "B", 7.5)
     for w, h in zip(widths, headers):
         pdf.cell(w, 6, to_latin(h), border=1, align="C")
     pdf.ln()
-    pdf.set_font("Arial", "", 8)
+    pdf.set_font("Arial", "", 7.5)
     if resumo.empty:
-        pdf.cell(sum(widths), 6, to_latin("Nenhuma extra lançada neste ciclo."), border=1, ln=True)
+        pdf.cell(sum(widths), 6, to_latin("Nenhum pagamento lançado neste ciclo."), border=1, ln=True)
     else:
         for _, r in resumo.iterrows():
             vals = [
-                str(r["Colaborador"])[:34], str(r["Função"])[:22], str(r["Unidades"])[:33],
-                str(int(r["Lançamentos"])), formatar_reais(float(r["Total Extra (R$)"]))
+                str(r["Colaborador"])[:29], str(r["Função"])[:18], str(r["Unidades"])[:23],
+                str(int(r["Dias/Lançamentos"])), formatar_reais(float(r["Base (R$)"])),
+                formatar_reais(float(r["Extra (R$)"])), formatar_reais(float(r["Acordo (R$)"])),
+                formatar_reais(float(r["Total a Pagar (R$)"])),
             ]
-            aligns = ["L", "L", "L", "C", "R"]
+            aligns = ["L", "L", "L", "C", "R", "R", "R", "R"]
             for w, v, a in zip(widths, vals, aligns):
                 pdf.cell(w, 6, to_latin(v), border=1, align=a)
             pdf.ln()
@@ -8473,12 +8869,11 @@ def gerar_pdf_financeiro(extras, ausencias, data_inicio, data_fim, data_pagament
                 item["Data"], item["Colaborador"][:32], item["Função"][:20],
                 item["Unidade"][:20], item["Status"], item["Engenheiro"][:18]
             ]
-            aligns = ["C", "L", "L", "L", "C", "C"]
-            for w, v, a in zip(widths2, vals, aligns):
-                pdf.cell(w, 6, to_latin(v), border=1, align=a)
+            for w, v in zip(widths2, vals):
+                pdf.cell(w, 6, to_latin(v), border=1)
             pdf.ln()
 
-    return pdf.output(dest="S").encode("latin1")
+    return bytes(pdf.output(dest="S").encode("latin1"))
 
 # --- ACESSO POR PERFIL -------------------------------------------------------
 # Controladoria e Financeiro usam senha.
@@ -10213,17 +10608,22 @@ elif modo_campo:
                                 UPDATE convocacoes
                                    SET obra_id = %s,
                                        status = %s,
+                                       tipo_diaria = %s,
+                                       custo_pago = %s,
                                        valor_extra = %s,
+                                       valor_acordo = %s,
+                                       custo_encargos_base = %s,
                                        observacao = %s
                                  WHERE id = %s
                                 """,
                                 (
                                     item["obra_id_final"],
                                     item["status"],
-                                    float(
-                                        item["valor_extra_final"]
-                                        or 0
-                                    ),
+                                    item["tipo_diaria_final"],
+                                    float(item["custo_pago_final"] or 0),
+                                    float(item["valor_extra_final"] or 0),
+                                    float(item["valor_acordo_final"] or 0),
+                                    float(item["custo_encargos_final"] or 0),
                                     item["nova_obs"],
                                     conv_id,
                                 ),
@@ -10237,9 +10637,10 @@ elif modo_campo:
                                 INSERT INTO apontamentos (
                                     convocacao_id, data_servico, colaborador_id,
                                     engenheiro, status, valor_extra, observacao,
-                                    apontado_em, apontado_por, retroativo, atualizado_em
+                                    apontado_em, apontado_por, retroativo, atualizado_em,
+                                    tipo_diaria, custo_pago, valor_acordo, custo_encargos_base
                                 )
-                                VALUES (%s,%s,%s,%s,%s,%s,%s,NOW(),%s,%s,NOW())
+                                VALUES (%s,%s,%s,%s,%s,%s,%s,NOW(),%s,%s,NOW(),%s,%s,%s,%s)
                                 ON CONFLICT (convocacao_id) DO UPDATE SET
                                     data_servico = EXCLUDED.data_servico,
                                     colaborador_id = EXCLUDED.colaborador_id,
@@ -10249,6 +10650,10 @@ elif modo_campo:
                                     observacao = EXCLUDED.observacao,
                                     apontado_por = EXCLUDED.apontado_por,
                                     retroativo = EXCLUDED.retroativo,
+                                    tipo_diaria = EXCLUDED.tipo_diaria,
+                                    custo_pago = EXCLUDED.custo_pago,
+                                    valor_acordo = EXCLUDED.valor_acordo,
+                                    custo_encargos_base = EXCLUDED.custo_encargos_base,
                                     atualizado_em = NOW()
                                 """,
                                 (
@@ -10257,16 +10662,14 @@ elif modo_campo:
                                     colab_id,
                                     str(engenheiro),
                                     str(item["status"]),
-                                    float(
-                                        item["valor_extra_final"]
-                                        or 0
-                                    ),
-                                    str(
-                                        item["obs_livre"]
-                                        or ""
-                                    ),
+                                    float(item["valor_extra_final"] or 0),
+                                    str(item["obs_livre"] or ""),
                                     str(engenheiro),
                                     retroativo,
+                                    item["tipo_diaria_final"],
+                                    float(item["custo_pago_final"] or 0),
+                                    float(item["valor_acordo_final"] or 0),
+                                    float(item["custo_encargos_final"] or 0),
                                 ),
                             )
 
@@ -10395,7 +10798,11 @@ elif modo_campo:
                                     _json_db({
                                         "data_servico": data_servico,
                                         "status": item["status"],
+                                        "tipo_diaria": item["tipo_diaria_final"],
+                                        "custo_pago": item["custo_pago_final"],
                                         "valor_extra": item["valor_extra_final"],
+                                        "valor_acordo": item["valor_acordo_final"],
+                                        "custo_encargos_base": item["custo_encargos_final"],
                                         "obra_principal_id": str(
                                             item["obra_id_final"]
                                         ),
@@ -10431,16 +10838,14 @@ elif modo_campo:
                     "convocacoes"
                 ).update(
                     {
-                        "obra_id": item[
-                            "obra_id_final"
-                        ],
+                        "obra_id": item["obra_id_final"],
                         "status": item["status"],
-                        "valor_extra": item[
-                            "valor_extra_final"
-                        ],
-                        "observacao": item[
-                            "nova_obs"
-                        ],
+                        "tipo_diaria": item["tipo_diaria_final"],
+                        "custo_pago": item["custo_pago_final"],
+                        "valor_extra": item["valor_extra_final"],
+                        "valor_acordo": item["valor_acordo_final"],
+                        "custo_encargos_base": item["custo_encargos_final"],
+                        "observacao": item["nova_obs"],
                     }
                 ).eq(
                     "id",
@@ -10457,6 +10862,10 @@ elif modo_campo:
                     item["obra_id_final"],
                     item["periodo_principal"],
                     item["adicionais"],
+                    tipo_diaria=item["tipo_diaria_final"],
+                    custo_pago=item["custo_pago_final"],
+                    valor_acordo=item["valor_acordo_final"],
+                    custo_encargos_base=item["custo_encargos_final"],
                 )
 
                 salvos += 1
@@ -11494,7 +11903,7 @@ elif modo_campo:
 
             dados_form = {}
 
-            with st.form("engm_form_apontamentos"):
+            with st.container():
                 for conv in render_campo:
                     c_id = conv.get("id")
                     colab = dict_colaboradores.get(
@@ -11742,25 +12151,69 @@ elif modo_campo:
                         segundo_servico = "— Nenhum —"
                         segundo_periodo = "Tarde"
 
+                        # Pagamento fica visível no card principal para reduzir cliques.
+                        tipo_key = f"engm_tipo_diaria_{c_id}"
+                        custo_key = f"engm_custo_pago_{c_id}"
+                        tipo_atual_pag = tipo_diaria_registro(conv)
+                        custo_atual_pag = custo_pago_total_registro(conv)
+
+                        if tipo_key not in st.session_state:
+                            st.session_state[tipo_key] = tipo_atual_pag
+                        if custo_key not in st.session_state:
+                            st.session_state[custo_key] = (
+                                custo_atual_pag
+                                if custo_atual_pag > 0
+                                else valor_limpo_por_tipo_diaria(tipo_atual_pag)
+                            )
+
+                        def _ajustar_custo_mobile(_tipo_key=tipo_key, _custo_key=custo_key):
+                            st.session_state[_custo_key] = valor_limpo_por_tipo_diaria(
+                                st.session_state.get(_tipo_key, "Diária")
+                            )
+
+                        pg1, pg2 = st.columns([1, 1.2])
+                        with pg1:
+                            tipo_diaria_sel = st.selectbox(
+                                "Diária / Meia diária",
+                                TIPOS_DIARIA,
+                                key=tipo_key,
+                                on_change=_ajustar_custo_mobile,
+                            )
+                        with pg2:
+                            custo_pago_total = st.number_input(
+                                "Custo + Extra (R$)",
+                                min_value=0.0,
+                                step=10.0,
+                                disabled=not status_eh_presenca(status_sel),
+                                key=custo_key,
+                                help=(
+                                    "Diária inicia em R$ 120,00; meia diária em R$ 60,00. "
+                                    "Edite este total quando houver extra."
+                                ),
+                            )
+
+                        valor_acordo = st.number_input(
+                            "Acordo (R$)",
+                            min_value=0.0,
+                            value=(float(conv.get("valor_acordo") or 0.0) if status_eh_presenca(status_sel) else 0.0),
+                            step=10.0,
+                            disabled=not status_eh_presenca(status_sel),
+                            key=f"engm_acordo_{c_id}",
+                            help="Bonificação/acordo adicional, separado do Custo + Extra.",
+                        )
+
+                        _base_prev = valor_limpo_por_tipo_diaria(tipo_diaria_sel)
+                        _extra_prev = max(0.0, float(custo_pago_total) - _base_prev) if status_eh_presenca(status_sel) else 0.0
+                        st.caption(
+                            f"Base: {formatar_reais(_base_prev)} · "
+                            f"Extra: {formatar_reais(_extra_prev)} · "
+                            f"Acordo: {formatar_reais(valor_acordo)}"
+                        )
+
                         with st.expander(
                             "Mais opções",
                             expanded=False,
                         ):
-                            val_extra = st.number_input(
-                                "Extra (R$)",
-                                min_value=0.0,
-                                value=float(
-                                    conv.get("valor_extra")
-                                    or 0.0
-                                ),
-                                step=10.0,
-                                key=f"engm_extra_{c_id}",
-                                help=(
-                                    "Se o status for falta ou atestado, "
-                                    "o extra será salvo como zero."
-                                ),
-                            )
-
                             obs_nova = st.text_input(
                                 "Observação / justificativa",
                                 value=obs_livre,
@@ -11844,7 +12297,9 @@ elif modo_campo:
                         "segundo_servico": segundo_servico,
                         "segundo_periodo": segundo_periodo,
                         "tem_conv_separada": tem_conv_separada,
-                        "val_extra": val_extra,
+                        "tipo_diaria_sel": tipo_diaria_sel,
+                        "custo_pago_total": custo_pago_total,
+                        "valor_acordo": valor_acordo,
                         "obs_nova": obs_nova,
                         "turno_conv": turno_conv,
                         "contexto_eh_principal": contexto_eh_principal,
@@ -11855,10 +12310,11 @@ elif modo_campo:
                         "unidade_contexto": unidade,
                     }
 
-                salvar_todos = st.form_submit_button(
+                salvar_todos = st.button(
                     "Salvar equipe",
                     type="primary",
                     use_container_width=True,
+                    key="engm_salvar_equipe_v627",
                 )
 
             if salvar_todos:
@@ -12043,11 +12499,19 @@ elif modo_campo:
                             meta,
                         )
 
-                        valor_extra_final = (
-                            float(item["val_extra"])
-                            if status_eh_presenca(
-                                item["status_sel"]
+                        presente_final = status_eh_presenca(item["status_sel"])
+                        tipo_diaria_final = normalizar_tipo_diaria(item["tipo_diaria_sel"])
+                        base_limpa_final = valor_limpo_por_tipo_diaria(tipo_diaria_final)
+                        custo_pago_final = float(item["custo_pago_total"]) if presente_final else 0.0
+                        valor_extra_final = max(0.0, custo_pago_final - base_limpa_final) if presente_final else 0.0
+                        valor_acordo_final = float(item["valor_acordo"]) if presente_final else 0.0
+                        custo_encargos_final = (
+                            round(
+                                obter_valor_diaria_colaborador(item["colab"])
+                                * fracao_encargos_por_tipo_diaria(tipo_diaria_final),
+                                2,
                             )
+                            if presente_final
                             else 0.0
                         )
 
@@ -12057,9 +12521,11 @@ elif modo_campo:
                             "status": item[
                                 "status_sel"
                             ],
-                            "valor_extra_final": (
-                                valor_extra_final
-                            ),
+                            "tipo_diaria_final": tipo_diaria_final,
+                            "custo_pago_final": custo_pago_final,
+                            "valor_extra_final": valor_extra_final,
+                            "valor_acordo_final": valor_acordo_final,
+                            "custo_encargos_final": custo_encargos_final,
                             "obs_livre": item[
                                 "obs_nova"
                             ],
@@ -13082,7 +13548,11 @@ elif modo_financeiro:
             _limpar_acesso()
             st.query_params.clear()
             st.rerun()
-    st.caption("Conferência semanal de extras, faltas e atestados. As extras são fechadas em ciclos de terça-feira a segunda-feira.")
+    st.caption(
+        "Conferência semanal do valor efetivamente pago: diária/meia diária + extra + acordo. "
+        "Apontamentos antigos também são convertidos para esta regra. "
+        "Ciclo de terça-feira a segunda-feira."
+    )
 
     ciclos_fin = listar_ciclos_financeiros(26)
     mapa_ciclos_fin = {c["rotulo"]: c for c in ciclos_fin}
@@ -13105,38 +13575,42 @@ elif modo_financeiro:
     cf2.metric("FIM", data_fim_fin.strftime("%d/%m/%Y"))
     cf3.metric("PAGAMENTO", data_pag_fin.strftime("%d/%m/%Y"))
 
-    extras_fin, ausencias_fin = carregar_dados_financeiro(data_ini_fin, data_fim_fin)
-    total_extra_fin = sum(float(x.get("Valor Extra (R$)") or 0.0) for x in extras_fin)
-    nomes_extra_fin = {normalizar(x.get("Colaborador", "")) for x in extras_fin}
+    pagamentos_fin, ausencias_fin = carregar_dados_financeiro(data_ini_fin, data_fim_fin)
+    total_pagar_fin = sum(float(x.get("Total a Pagar (R$)") or 0.0) for x in pagamentos_fin)
+    nomes_pag_fin = {normalizar(x.get("Colaborador", "")) for x in pagamentos_fin}
     total_faltas_fin = sum(1 for x in ausencias_fin if x.get("Status") == "Falta")
     total_atest_fin = sum(1 for x in ausencias_fin if x.get("Status") == "Atestado")
 
     tab_fin_extra, tab_fin_aus, tab_fin_rel = st.tabs([
-        "💸 EXTRAS", "🚫 FALTAS / ATESTADOS", "📄 RELATÓRIO"
+        "💸 PAGAMENTOS", "🚫 FALTAS / ATESTADOS", "📄 RELATÓRIO"
     ])
 
     with tab_fin_extra:
         fm1, fm2, fm3 = st.columns(3)
-        fm1.metric("TOTAL A PAGAR", formatar_reais(total_extra_fin))
-        fm2.metric("COLABORADORES", len(nomes_extra_fin))
-        fm3.metric("LANÇAMENTOS", len(extras_fin))
+        fm1.metric("TOTAL A PAGAR", formatar_reais(total_pagar_fin))
+        fm2.metric("COLABORADORES", len(nomes_pag_fin))
+        fm3.metric("LANÇAMENTOS", len(pagamentos_fin))
 
         st.markdown("### Consolidado por colaborador")
-        resumo_fin = resumir_extras_financeiro(extras_fin)
+        resumo_fin = resumir_pagamentos_financeiro(pagamentos_fin)
         if resumo_fin.empty:
-            st.info("Nenhuma extra foi lançada neste ciclo.")
+            st.info("Nenhum pagamento foi lançado neste ciclo.")
         else:
             resumo_view = resumo_fin.copy()
-            resumo_view["Total Extra"] = resumo_view["Total Extra (R$)"].apply(formatar_reais)
-            resumo_view = resumo_view.drop(columns=["Total Extra (R$)"])
+            for _c in ["Base (R$)", "Extra (R$)", "Acordo (R$)", "Total a Pagar (R$)"]:
+                if _c in resumo_view.columns:
+                    resumo_view[_c.replace(" (R$)", "")] = resumo_view[_c].apply(formatar_reais)
+                    resumo_view = resumo_view.drop(columns=[_c])
             tabela_aproar(resumo_view, key="tbl_fin_resumo")
 
             st.markdown("### Detalhamento por dia")
-            detalhe_extra_view = pd.DataFrame(extras_fin)[[
-                "Data", "Colaborador", "Função", "Unidade", "Engenheiro", "Valor Extra (R$)"
+            detalhe_extra_view = pd.DataFrame(pagamentos_fin)[[
+                "Data", "Colaborador", "Função", "Unidade", "Engenheiro", "Tipo",
+                "Base Financeiro (R$)", "Extra (R$)", "Acordo (R$)", "Total a Pagar (R$)"
             ]].copy()
-            detalhe_extra_view["Valor Extra"] = detalhe_extra_view["Valor Extra (R$)"].apply(formatar_reais)
-            detalhe_extra_view = detalhe_extra_view.drop(columns=["Valor Extra (R$)"])
+            for _c in ["Base Financeiro (R$)", "Extra (R$)", "Acordo (R$)", "Total a Pagar (R$)"]:
+                detalhe_extra_view[_c.replace(" (R$)", "")] = detalhe_extra_view[_c].apply(formatar_reais)
+                detalhe_extra_view = detalhe_extra_view.drop(columns=[_c])
             tabela_aproar(detalhe_extra_view, key="tbl_fin_detalhe")
 
     with tab_fin_aus:
@@ -13171,22 +13645,22 @@ elif modo_financeiro:
         st.markdown("### Relatório do ciclo")
         st.write(
             f"Período **{data_ini_fin.strftime('%d/%m/%Y')} a {data_fim_fin.strftime('%d/%m/%Y')}** • "
-            f"Pagamento das extras em **{data_pag_fin.strftime('%d/%m/%Y')}**."
+            f"Pagamento previsto em **{data_pag_fin.strftime('%d/%m/%Y')}**."
         )
         st.info(
-            f"Total de extras: {formatar_reais(total_extra_fin)} • "
+            f"Total a pagar: {formatar_reais(total_pagar_fin)} • "
             f"Faltas: {total_faltas_fin} • Atestados: {total_atest_fin}"
         )
 
-        excel_fin = gerar_excel_financeiro(extras_fin, ausencias_fin, data_ini_fin, data_fim_fin, data_pag_fin)
-        pdf_fin = gerar_pdf_financeiro(extras_fin, ausencias_fin, data_ini_fin, data_fim_fin, data_pag_fin)
+        excel_fin = gerar_excel_financeiro(pagamentos_fin, ausencias_fin, data_ini_fin, data_fim_fin, data_pag_fin)
+        pdf_fin = gerar_pdf_financeiro(pagamentos_fin, ausencias_fin, data_ini_fin, data_fim_fin, data_pag_fin)
 
         fr1, fr2 = st.columns(2)
         with fr1:
             st.download_button(
                 "📊 BAIXAR RELATÓRIO EXCEL",
                 data=excel_fin,
-                file_name=f"financeiro_extras_{data_ini_fin.strftime('%d-%m-%Y')}_a_{data_fim_fin.strftime('%d-%m-%Y')}.xlsx",
+                file_name=f"financeiro_pagamentos_{data_ini_fin.strftime('%d-%m-%Y')}_a_{data_fim_fin.strftime('%d-%m-%Y')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
                 key="download_fin_excel"
@@ -13195,7 +13669,7 @@ elif modo_financeiro:
             st.download_button(
                 "📄 BAIXAR RELATÓRIO PDF",
                 data=pdf_fin,
-                file_name=f"financeiro_extras_{data_ini_fin.strftime('%d-%m-%Y')}_a_{data_fim_fin.strftime('%d-%m-%Y')}.pdf",
+                file_name=f"financeiro_pagamentos_{data_ini_fin.strftime('%d-%m-%Y')}_a_{data_fim_fin.strftime('%d-%m-%Y')}.pdf",
                 mime="application/pdf",
                 use_container_width=True,
                 key="download_fin_pdf"
@@ -14089,7 +14563,7 @@ else:
     elif menu_escolhido == "📊 RELATÓRIOS":
         cabecalho_pagina_aproar(
             "Relatórios",
-            "Fechamento de custos, apontamentos e exportações por período.",
+            "Controladoria: custo com encargos por colaborador + Extra + Acordo, rateado por obra/serviço.",
             categoria="ANÁLISE E FECHAMENTO",
         )
         
@@ -14218,7 +14692,7 @@ else:
                                 0,
                                 9,
                                 txt=to_latin(
-                                    "APROAR - RELATÓRIO DE CUSTOS"
+                                    "APROAR - RELATÓRIO DA CONTROLADORIA"
                                 ),
                                 ln=True,
                                 align="C",
@@ -14256,15 +14730,16 @@ else:
                             pdf.ln(3)
 
                             cabecalhos = [
-                                ("Data", 22, "C"),
-                                ("Colaborador", 53, "L"),
-                                ("Função", 36, "L"),
-                                ("Engenheiro", 30, "C"),
-                                ("Status", 37, "C"),
-                                ("Turno/Período", 27, "C"),
-                                ("Diária", 24, "C"),
-                                ("Extra", 22, "C"),
-                                ("Observação", 27, "L"),
+                                ("Data", 20, "C"),
+                                ("Colaborador", 46, "L"),
+                                ("Função", 31, "L"),
+                                ("Engenheiro", 27, "C"),
+                                ("Status", 31, "C"),
+                                ("Tipo", 22, "C"),
+                                ("Custo c/ encargos", 30, "C"),
+                                ("Extra", 20, "C"),
+                                ("Acordo", 20, "C"),
+                                ("Observação", 24, "L"),
                             ]
 
                             pdf.set_font(
@@ -14299,58 +14774,18 @@ else:
                                 valores = [
                                     (
                                         str(row["Data"]),
-                                        22,
+                                        20,
                                         "C",
                                     ),
-                                    (
-                                        str(row["Colaborador"])[:26],
-                                        53,
-                                        "L",
-                                    ),
-                                    (
-                                        str(row["Função"])[:18],
-                                        36,
-                                        "L",
-                                    ),
-                                    (
-                                        str(row["Engenheiro"])[:14],
-                                        30,
-                                        "C",
-                                    ),
-                                    (
-                                        str(row["Status"])[:18],
-                                        37,
-                                        "C",
-                                    ),
-                                    (
-                                        str(
-                                            row[
-                                                "Período do serviço"
-                                            ]
-                                        )[:14],
-                                        27,
-                                        "C",
-                                    ),
-                                    (
-                                        f"R$ {float(row['Diária (R$)']):.2f}",
-                                        24,
-                                        "C",
-                                    ),
-                                    (
-                                        f"R$ {float(row['Extra (R$)']):.2f}",
-                                        22,
-                                        "C",
-                                    ),
-                                    (
-                                        str(
-                                            row.get(
-                                                "Observação",
-                                                "",
-                                            )
-                                        )[:18],
-                                        27,
-                                        "L",
-                                    ),
+                                    (str(row["Colaborador"])[:23], 46, "L"),
+                                    (str(row["Função"])[:16], 31, "L"),
+                                    (str(row["Engenheiro"])[:13], 27, "C"),
+                                    (str(row["Status"])[:15], 31, "C"),
+                                    (str(row.get("Tipo", ""))[:12], 22, "C"),
+                                    (formatar_reais(float(row["Custo c/ encargos (R$)"])), 30, "C"),
+                                    (formatar_reais(float(row["Extra (R$)"])), 20, "C"),
+                                    (formatar_reais(float(row["Acordo (R$)"])), 20, "C"),
+                                    (str(row.get("Observação", ""))[:16], 24, "L"),
                                 ]
 
                                 for idx, (
@@ -14410,7 +14845,7 @@ else:
                             label="📥 Baixar PDF Gerado",
                             data=pdf_output,
                             file_name=(
-                                f"relatorio_custos_"
+                                f"relatorio_controladoria_"
                                 f"{data_inicio_rel.strftime('%d-%m-%Y')}"
                                 f"_a_"
                                 f"{data_fim_rel.strftime('%d-%m-%Y')}.pdf"
@@ -14449,12 +14884,12 @@ else:
                         cores_engenheiros = {
                             "VICTOR": "E0F2FE",
                             "EDUARDO": "DCFCE7",
-                            "GUSTAVO": "FEF9C3",
                             "JOEL": "F3E8FF",
                             "NETO": "FFEDD5",
                             "SOARES": "FFE4E6",
                             "GABRIEL": "CCFBF1",
                             "PAULO": "F1F5F9",
+                            "HELENA": "DBEAFE",
                         }
 
                         wb = openpyxl.Workbook()
@@ -14557,7 +14992,7 @@ else:
                                     ),
                                 ).font = font_obra_hdr
 
-                                for c_idx in range(1, 10):
+                                for c_idx in range(1, 11):
                                     ws.cell(
                                         row=current_row,
                                         column=c_idx,
@@ -14570,10 +15005,11 @@ else:
                                     "Função",
                                     "Engenheiro Resp.",
                                     "Status",
-                                    "Turno / Período",
-                                    "Diária Rateada (R$)",
+                                    "Tipo",
+                                    "Custo c/ Encargos (R$)",
                                     "Extra (R$)",
-                                    "Custo Total (R$)",
+                                    "Acordo (R$)",
+                                    "Custo Controladoria (R$)",
                                     "Observação",
                                 ]
 
@@ -14621,7 +15057,7 @@ else:
                                     )
 
                                     celula_custo_formula = (
-                                        f"=F{current_row}+G{current_row}"
+                                        f"=F{current_row}+G{current_row}+H{current_row}"
                                     )
 
                                     linha_dados = [
@@ -14629,9 +15065,10 @@ else:
                                         r["Função"],
                                         r["Engenheiro"],
                                         r["Status"],
-                                        r["Período do serviço"],
-                                        float(r["Diária (R$)"]),
+                                        r.get("Tipo", ""),
+                                        float(r["Custo c/ encargos (R$)"]),
                                         float(r["Extra (R$)"]),
+                                        float(r["Acordo (R$)"]),
                                         celula_custo_formula,
                                         r["Observação"],
                                     ]
@@ -14652,7 +15089,7 @@ else:
                                         c_cell.border = borda_fina
                                         c_cell.fill = fill_engenheiro
 
-                                        if c_idx in [6, 7, 8]:
+                                        if c_idx in [6, 7, 8, 9]:
                                             c_cell.number_format = (
                                                 'R$ #,##0.00'
                                             )
@@ -14672,7 +15109,7 @@ else:
 
                                 ws.cell(
                                     row=current_row,
-                                    column=7,
+                                    column=8,
                                     value="TOTAL DA OBRA:",
                                 ).font = Font(
                                     name="Arial",
@@ -14681,17 +15118,17 @@ else:
                                 )
                                 ws.cell(
                                     row=current_row,
-                                    column=7,
+                                    column=8,
                                 ).alignment = Alignment(
                                     horizontal="right"
                                 )
 
                                 celula_subtotal = ws.cell(
                                     row=current_row,
-                                    column=8,
+                                    column=9,
                                     value=(
-                                        f"=SUM(H{inicio_dados_obra}:"
-                                        f"H{fim_dados_obra})"
+                                        f"=SUM(I{inicio_dados_obra}:"
+                                        f"I{fim_dados_obra})"
                                     ),
                                 )
                                 celula_subtotal.font = Font(
@@ -14744,7 +15181,7 @@ else:
                             ),
                             data=buffer.getvalue(),
                             file_name=(
-                                f"apontamentos_rateados_"
+                                f"controladoria_rateada_"
                                 f"{data_inicio_rel.strftime('%d-%m-%Y')}"
                                 f"_a_"
                                 f"{data_fim_rel.strftime('%d-%m-%Y')}.xlsx"
@@ -15059,7 +15496,7 @@ else:
 
                     with c_valor:
                         valor_colab = st.number_input(
-                            "Valor / custo diário (R$)",
+                            "Custo diário c/ encargos (R$)",
                             min_value=0.01,
                             value=float(
                                 VALOR_DIARIA_PROFISSIONAL
@@ -16148,7 +16585,7 @@ else:
 
                     with ce1:
                         valor_edit = st.number_input(
-                            "Valor / custo diário (R$)",
+                            "Custo diário c/ encargos (R$)",
                             min_value=0.01,
                             value=float(
                                 obter_valor_diaria_colaborador(
@@ -16592,7 +17029,7 @@ else:
                         else 0
                     )
                     col_valor_import = st.selectbox(
-                        "Coluna VALOR DO COLABORADOR (obrigatória):",
+                        "Coluna CUSTO DIÁRIO C/ ENCARGOS (obrigatória):",
                         opcoes_valor,
                         index=idx_valor,
                         key="map_valor_import",
@@ -16800,7 +17237,7 @@ else:
                                 "Nome": r["nome"],
                                 "Função": r["funcao"],
                                 "Categoria": r["tipo"],
-                                "Valor do colaborador": formatar_reais(r["valor_diaria"]),
+                                "Custo diário c/ encargos": formatar_reais(r["valor_diaria"]),
                                 "Moradia": r.get("local_moradia") or "Não informado",
                                 "Avulso": "SIM" if r["avulso"] else "NÃO",
                             }
