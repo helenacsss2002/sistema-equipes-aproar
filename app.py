@@ -2681,6 +2681,153 @@ def _descartar_conexao_admin_rapida():
             pass
 
 
+def _salvar_moradias_em_lote_admin(alteracoes):
+    """
+    Salva várias mudanças de moradia de uma vez.
+
+    alteracoes:
+        {
+            colaborador_id: {
+                "antes": <valor anterior>,
+                "depois": <valor novo>,
+                "nome": <nome>
+            }
+        }
+
+    No Neon, todas as alterações + auditorias usam UMA única transação.
+    """
+    alteracoes = dict(alteracoes or {})
+
+    if not alteracoes:
+        return True, 0
+
+    if DB_BACKEND == "NEON":
+        for _tentativa in range(2):
+            conn = _get_conexao_admin_rapida()
+
+            if conn is None:
+                break
+
+            try:
+                with conn.cursor() as cur:
+                    for colaborador_id, info in alteracoes.items():
+                        depois = info.get("depois")
+                        antes = info.get("antes")
+
+                        cur.execute(
+                            """
+                            UPDATE colaboradores
+                               SET local_moradia = %s,
+                                   atualizado_em = NOW()
+                             WHERE id = %s
+                            """,
+                            (
+                                depois,
+                                colaborador_id,
+                            ),
+                        )
+
+                        # Auditoria na mesma conexão/transação.
+                        try:
+                            cur.execute(
+                                "SAVEPOINT audit_moradia_lote"
+                            )
+
+                            cur.execute(
+                                """
+                                INSERT INTO auditoria
+                                    (
+                                        entidade,
+                                        entidade_id,
+                                        acao,
+                                        usuario,
+                                        antes,
+                                        depois,
+                                        contexto
+                                    )
+                                VALUES
+                                    (
+                                        %s,
+                                        %s,
+                                        %s,
+                                        %s,
+                                        %s::jsonb,
+                                        %s::jsonb,
+                                        %s::jsonb
+                                    )
+                                """,
+                                (
+                                    "colaboradores",
+                                    str(colaborador_id),
+                                    "EDITAR_MORADIA",
+                                    "ADMIN",
+                                    _json_db({
+                                        "local_moradia": antes
+                                    }),
+                                    _json_db({
+                                        "local_moradia": depois
+                                    }),
+                                    _json_db({
+                                        "origem": (
+                                            "banco_funcionarios_lote"
+                                        )
+                                    }),
+                                ),
+                            )
+
+                            cur.execute(
+                                "RELEASE SAVEPOINT audit_moradia_lote"
+                            )
+
+                        except Exception:
+                            try:
+                                cur.execute(
+                                    "ROLLBACK TO SAVEPOINT audit_moradia_lote"
+                                )
+                                cur.execute(
+                                    "RELEASE SAVEPOINT audit_moradia_lote"
+                                )
+                            except Exception:
+                                pass
+
+                conn.commit()
+                limpar_cache_colaboradores()
+                return True, len(alteracoes)
+
+            except Exception:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+
+                _descartar_conexao_admin_rapida()
+
+    # Fallback compatível com backend legado.
+    salvos = 0
+
+    try:
+        for colaborador_id, info in alteracoes.items():
+            (
+                supabase.table("colaboradores")
+                .update({
+                    "local_moradia": info.get("depois")
+                })
+                .eq(
+                    "id",
+                    colaborador_id,
+                )
+                .execute()
+            )
+
+            salvos += 1
+
+        limpar_cache_colaboradores()
+        return True, salvos
+
+    except Exception:
+        return False, salvos
+
+
 def _atualizar_colaborador_admin_rapido(
     colaborador_id,
     campos,
@@ -14812,6 +14959,38 @@ else:
                     cursor:default !important;
                 }
 
+                div[class*="st-key-btn_salvar_moradias_lote"] button{
+                    min-height:38px !important;
+                    border-radius:8px !important;
+                    background:#2F64E8 !important;
+                    border-color:#2F64E8 !important;
+                    color:#FFFFFF !important;
+                    font-size:10.5px !important;
+                    font-weight:750 !important;
+                    box-shadow:none !important;
+                }
+
+                div[class*="st-key-btn_salvar_moradias_lote"] button *{
+                    color:#FFFFFF !important;
+                    -webkit-text-fill-color:#FFFFFF !important;
+                }
+
+                div[class*="st-key-btn_salvar_moradias_lote"] button:disabled{
+                    background:#D9E1EC !important;
+                    border-color:#D9E1EC !important;
+                    color:#8D99AA !important;
+                    opacity:1 !important;
+                }
+
+                .func-pending-changes{
+                    min-height:38px;
+                    display:flex;
+                    align-items:center;
+                    color:#6B7890;
+                    font-size:10px;
+                    font-weight:650;
+                }
+
                 .func-delete-dot{
                     display:inline-flex;
                     align-items:center;
@@ -14851,7 +15030,7 @@ else:
                 st.markdown(
                     """
                     <div class="func-bank-note">
-                        <span>A moradia salva automaticamente.</span>
+                        <span>Escolha as moradias que quiser e clique em <b>Salvar alterações</b>.</span>
                         <span class="func-delete-dot">−</span>
                         <span>retira o funcionário sem apagar o histórico.</span>
                     </div>
@@ -15078,6 +15257,16 @@ else:
                         *MORADIAS_COLAB,
                     ]
 
+                    # Baseline da sessão: após salvar em lote, não dependemos
+                    # de um rerun completo para saber o valor já persistido.
+                    baseline_key = "_moradia_baseline_funcionarios"
+                    baseline_moradias = st.session_state.setdefault(
+                        baseline_key,
+                        {},
+                    )
+
+                    alteracoes_moradia_pagina = {}
+
                     for c in ativos_pagina:
                         colab_id_inline = c.get("id")
                         nome_inline = str(
@@ -15157,10 +15346,30 @@ else:
                                 )
 
                             with r_moradia:
+                                colab_id_str = str(
+                                    colab_id_inline
+                                )
+
+                                # Primeiro acesso: usa o valor do banco como base.
+                                if colab_id_str not in baseline_moradias:
+                                    baseline_moradias[
+                                        colab_id_str
+                                    ] = moradia_atual_inline
+
+                                moradia_base_inline = (
+                                    baseline_moradias.get(
+                                        colab_id_str,
+                                        moradia_atual_inline,
+                                    )
+                                )
+
                                 idx_moradia_inline = (
                                     opcoes_moradia_inline.index(
-                                        moradia_atual_inline
+                                        moradia_base_inline
                                     )
+                                    if moradia_base_inline
+                                    in opcoes_moradia_inline
+                                    else 0
                                 )
 
                                 chave_moradia = (
@@ -15168,62 +15377,39 @@ else:
                                     f"{colab_id_inline}"
                                 )
 
-                                def _salvar_moradia_inline(
-                                    _colab_id=colab_id_inline,
-                                    _nome=nome_inline,
-                                    _chave=chave_moradia,
-                                    _antes=c.get("local_moradia"),
-                                ):
-                                    nova = st.session_state.get(
-                                        _chave,
-                                        "Não informado",
-                                    )
-
-                                    valor_db = (
-                                        None
-                                        if nova == "Não informado"
-                                        else nova
-                                    )
-
-                                    ok = (
-                                        _atualizar_colaborador_admin_rapido(
-                                            _colab_id,
-                                            {
-                                                "local_moradia": valor_db
-                                            },
-                                            "EDITAR_MORADIA",
-                                            antes={
-                                                "local_moradia": _antes
-                                            },
-                                        )
-                                    )
-
-                                    st.session_state[
-                                        "_msg_grade_funcionarios"
-                                    ] = {
-                                        "tipo": (
-                                            "sucesso"
-                                            if ok
-                                            else "erro"
-                                        ),
-                                        "texto": (
-                                            f"Moradia de {_nome} atualizada."
-                                            if ok
-                                            else (
-                                                "Não foi possível atualizar "
-                                                f"a moradia de {_nome}."
-                                            )
-                                        ),
-                                    }
-
-                                st.selectbox(
+                                moradia_selecionada = st.selectbox(
                                     "Moradia",
                                     opcoes_moradia_inline,
                                     index=idx_moradia_inline,
                                     label_visibility="collapsed",
                                     key=chave_moradia,
-                                    on_change=_salvar_moradia_inline,
                                 )
+
+                                if (
+                                    moradia_selecionada
+                                    != moradia_base_inline
+                                ):
+                                    alteracoes_moradia_pagina[
+                                        colab_id_inline
+                                    ] = {
+                                        "antes": (
+                                            None
+                                            if moradia_base_inline
+                                            == "Não informado"
+                                            else moradia_base_inline
+                                        ),
+                                        "depois": (
+                                            None
+                                            if moradia_selecionada
+                                            == "Não informado"
+                                            else moradia_selecionada
+                                        ),
+                                        "depois_label": (
+                                            moradia_selecionada
+                                        ),
+                                        "nome": nome_inline,
+                                    }
+
 
                             with r_excluir:
                                 def _excluir_funcionario_inline(
@@ -15262,6 +15448,22 @@ else:
                                             ids_excluidos
                                         )
 
+                                        st.session_state.get(
+                                            "_moradia_baseline_funcionarios",
+                                            {},
+                                        ).pop(
+                                            str(_colab_id),
+                                            None,
+                                        )
+
+                                        st.session_state.pop(
+                                            (
+                                                "moradia_inline_func_"
+                                                f"{_colab_id}"
+                                            ),
+                                            None,
+                                        )
+
                                         st.session_state[
                                             "_msg_grade_funcionarios"
                                         ] = {
@@ -15295,6 +15497,91 @@ else:
                                     ),
                                     on_click=_excluir_funcionario_inline,
                                 )
+
+
+                    # -----------------------------------------------------
+                    # SALVAR MORADIAS EM LOTE
+                    # -----------------------------------------------------
+                    qtd_alteracoes = len(
+                        alteracoes_moradia_pagina
+                    )
+
+                    c_pendencias_moradia, c_salvar_moradia = st.columns(
+                        [4.2, 1.6],
+                        vertical_alignment="center",
+                    )
+
+                    with c_pendencias_moradia:
+                        if qtd_alteracoes:
+                            st.markdown(
+                                (
+                                    '<div class="func-pending-changes">'
+                                    f'{qtd_alteracoes} alteração(ões) pendente(s)'
+                                    '</div>'
+                                ),
+                                unsafe_allow_html=True,
+                            )
+                        else:
+                            st.markdown(
+                                (
+                                    '<div class="func-pending-changes">'
+                                    'Nenhuma alteração pendente'
+                                    '</div>'
+                                ),
+                                unsafe_allow_html=True,
+                            )
+
+                    with c_salvar_moradia:
+                        salvar_moradias = st.button(
+                            "Salvar alterações",
+                            type="primary",
+                            use_container_width=True,
+                            disabled=(
+                                qtd_alteracoes == 0
+                            ),
+                            key="btn_salvar_moradias_lote",
+                        )
+
+                    if salvar_moradias:
+                        ok_lote, qtd_salvas = (
+                            _salvar_moradias_em_lote_admin(
+                                alteracoes_moradia_pagina
+                            )
+                        )
+
+                        if ok_lote:
+                            # Atualiza o baseline da sessão imediatamente.
+                            for _cid, _info in (
+                                alteracoes_moradia_pagina.items()
+                            ):
+                                baseline_moradias[
+                                    str(_cid)
+                                ] = _info.get(
+                                    "depois_label",
+                                    "Não informado",
+                                )
+
+                            st.session_state[
+                                "_msg_grade_funcionarios"
+                            ] = {
+                                "tipo": "sucesso",
+                                "texto": (
+                                    f"{qtd_salvas} moradia(s) "
+                                    "salva(s) com sucesso."
+                                ),
+                            }
+
+                        else:
+                            st.session_state[
+                                "_msg_grade_funcionarios"
+                            ] = {
+                                "tipo": "erro",
+                                "texto": (
+                                    "Não foi possível salvar todas "
+                                    "as alterações de moradia."
+                                ),
+                            }
+
 
                 _render_banco_funcionarios_inline(
                     ativos_filtrados
