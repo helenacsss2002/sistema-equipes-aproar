@@ -45,8 +45,14 @@ RESPONSAVEIS_UNIDADES = {
     ],
 }
 
-SUPERVISORES_ATIVOS = set(
-    RESPONSAVEIS_UNIDADES.keys()
+OBSERVADORES_GERAIS = {
+    "PAULO",
+    "HELENA",
+}
+
+SUPERVISORES_ATIVOS = (
+    set(RESPONSAVEIS_UNIDADES.keys())
+    | OBSERVADORES_GERAIS
 )
 
 
@@ -143,13 +149,52 @@ def ja_enviado(cur, hoje, slot, engenheiro):
 
 def carregar_pendentes(cur, engenheiro, hoje):
     """
-    Cobra o supervisor responsável oficial pela UNIDADE.
+    Pendências para cobrança.
 
-    Isso evita depender de quem criou originalmente a convocação:
-    a pendência da Barra vai para Eduardo; UNIFOR vai para Joel etc.
+    Supervisores operacionais:
+        recebem somente suas unidades.
+
+    PAULO e HELENA:
+        recebem TODAS as pendências quando estiverem ativos.
     """
+    engenheiro = str(
+        engenheiro
+        or ""
+    ).strip().upper()
+
+    if engenheiro in OBSERVADORES_GERAIS:
+        cur.execute(
+            """
+            SELECT
+                c.id,
+                c.data,
+                c.turno,
+                c.engenheiro,
+                col.nome AS colaborador,
+                o.unidade,
+                o.nome AS obra_atual
+            FROM convocacoes c
+            JOIN colaboradores col
+              ON col.id = c.colaborador_id
+            JOIN obras o
+              ON o.id = c.obra_id
+            WHERE c.data < %s
+              AND UPPER(COALESCE(o.nome, '')) LIKE UPPER(%s)
+            ORDER BY
+                c.data ASC,
+                o.unidade ASC,
+                col.nome ASC
+            """,
+            (
+                hoje,
+                f"{PLACEHOLDER_PREFIX}%",
+            ),
+        )
+
+        return cur.fetchall() or []
+
     unidades = RESPONSAVEIS_UNIDADES.get(
-        str(engenheiro).strip().upper(),
+        engenheiro,
         [],
     )
 
