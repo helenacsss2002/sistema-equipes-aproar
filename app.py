@@ -8966,7 +8966,40 @@ def carregar_dados_financeiro(data_inicio, data_fim):
     pagamentos = []
     if linhas_rateadas:
         df = pd.DataFrame(linhas_rateadas)
-        df = df[df["Total Financeiro (R$)"] > 0].copy()
+
+        # O Relatório Financeiro é um relatório de pagamentos excepcionais:
+        # não deve listar toda a equipe que teve somente a diária normal.
+        #
+        # Entra no relatório quem tiver pelo menos UM destes valores:
+        # - Extra;
+        # - Adicional noturno;
+        # - Acordos / Bonificações.
+        #
+        # Depois de entrar no relatório, a Base Financeiro continua compondo
+        # o Total a Pagar, conforme a regra financeira já definida.
+        df = df[
+            (
+                pd.to_numeric(
+                    df["Extra (R$)"],
+                    errors="coerce",
+                ).fillna(0.0) > 0.005
+            )
+            |
+            (
+                pd.to_numeric(
+                    df["Adicional noturno (R$)"],
+                    errors="coerce",
+                ).fillna(0.0) > 0.005
+            )
+            |
+            (
+                pd.to_numeric(
+                    df["Acordos / Bonificações (R$)"],
+                    errors="coerce",
+                ).fillna(0.0) > 0.005
+            )
+        ].copy()
+
         if not df.empty:
             agrupados = (
                 df.groupby(
@@ -9098,7 +9131,11 @@ def gerar_excel_financeiro(pagamentos, ausencias, data_inicio, data_fim, data_pa
         cell = ws_resumo.cell(4, ci, nome)
         cell.font = font_header
         cell.fill = fill_header
-        cell.alignment = Alignment(horizontal="center")
+        cell.alignment = Alignment(
+            horizontal="center",
+            vertical="center",
+            wrap_text=True,
+        )
     for ri, (_, r) in enumerate(resumo.iterrows(), 5):
         vals = [r[h] for h in headers_resumo]
         for ci, val in enumerate(vals, 1):
@@ -9120,7 +9157,11 @@ def gerar_excel_financeiro(pagamentos, ausencias, data_inicio, data_fim, data_pa
         cell = ws_det.cell(4, ci, nome)
         cell.font = font_header
         cell.fill = fill_header
-        cell.alignment = Alignment(horizontal="center")
+        cell.alignment = Alignment(
+            horizontal="center",
+            vertical="center",
+            wrap_text=True,
+        )
     for ri, item in enumerate(pagamentos, 5):
         vals = [item.get(h, "") for h in headers_det]
         for ci, val in enumerate(vals, 1):
@@ -9143,7 +9184,11 @@ def gerar_excel_financeiro(pagamentos, ausencias, data_inicio, data_fim, data_pa
         cell = ws_aus.cell(4, ci, nome)
         cell.font = font_header
         cell.fill = fill_header
-        cell.alignment = Alignment(horizontal="center")
+        cell.alignment = Alignment(
+            horizontal="center",
+            vertical="center",
+            wrap_text=True,
+        )
     for ri, item in enumerate(ausencias, 5):
         for ci, h in enumerate(headers_aus, 1):
             cell = ws_aus.cell(ri, ci, item.get(h, ""))
@@ -9153,8 +9198,25 @@ def gerar_excel_financeiro(pagamentos, ausencias, data_inicio, data_fim, data_pa
     for ws in wb.worksheets:
         for col in ws.columns:
             letter = openpyxl.utils.get_column_letter(col[0].column)
-            max_len = max([len(str(c.value or "")) for c in col] + [10])
-            ws.column_dimensions[letter].width = min(max_len + 3, 38)
+            max_len = max(
+                [len(str(c.value or "")) for c in col]
+                + [10]
+            )
+            ws.column_dimensions[letter].width = min(
+                max_len + 3,
+                38,
+            )
+
+    # Ajustes específicos das colunas longas do Financeiro.
+    if "Resumo Pagamentos" in wb.sheetnames:
+        ws_resumo.column_dimensions["H"].width = 24
+        ws_resumo.column_dimensions["I"].width = 19
+        ws_resumo.row_dimensions[4].height = 30
+
+    if "Detalhe Pagamentos" in wb.sheetnames:
+        ws_det.column_dimensions["J"].width = 24
+        ws_det.column_dimensions["K"].width = 19
+        ws_det.row_dimensions[4].height = 30
 
     buffer = io.BytesIO()
     wb.save(buffer)
@@ -9183,20 +9245,42 @@ def gerar_pdf_financeiro(pagamentos, ausencias, data_inicio, data_fim, data_paga
     pdf.set_font("Arial", "B", 11)
     pdf.cell(0, 7, to_latin(f"TOTAL A PAGAR: {formatar_reais(total_pagar)}"), ln=True)
 
-    widths = [52, 34, 40, 20, 24, 24, 27, 24, 31]
-    headers = ["Colaborador", "Função", "Unidade(s)", "Dias", "Base", "Extra", "Adic. not.", "Acordos / Bonificações", "Total"]
+    # A4 paisagem: larguras compactas para evitar estouro do cabeçalho.
+    widths = [47, 31, 35, 15, 22, 22, 24, 32, 27]
+    headers = [
+        "Colaborador",
+        "Função",
+        "Unidade(s)",
+        "Dias",
+        "Base",
+        "Extra",
+        "Adic. not.",
+        "Acordos / Bonif.",
+        "Total",
+    ]
     pdf.set_font("Arial", "B", 7.5)
     for w, h in zip(widths, headers):
         pdf.cell(w, 6, to_latin(h), border=1, align="C")
     pdf.ln()
     pdf.set_font("Arial", "", 7.5)
     if resumo.empty:
-        pdf.cell(sum(widths), 6, to_latin("Nenhum pagamento lançado neste ciclo."), border=1, ln=True)
+        pdf.cell(
+            sum(widths),
+            6,
+            to_latin(
+                "Nenhum Extra, Adicional noturno ou Acordo / Bonificação lançado neste ciclo."
+            ),
+            border=1,
+            ln=True,
+        )
     else:
         for _, r in resumo.iterrows():
             vals = [
-                str(r["Colaborador"])[:29], str(r["Função"])[:18], str(r["Unidades"])[:23],
-                str(int(r["Dias/Lançamentos"])), formatar_reais(float(r["Base (R$)"])),
+                str(r["Colaborador"])[:27],
+                str(r["Função"])[:17],
+                str(r["Unidades"])[:20],
+                str(int(r["Dias/Lançamentos"])),
+                formatar_reais(float(r["Base (R$)"])),
                 formatar_reais(float(r["Extra (R$)"])),
                 formatar_reais(float(r["Adic. noturno (R$)"])),
                 formatar_reais(float(r["Acordos / Bonificações (R$)"])),
@@ -14467,8 +14551,10 @@ elif modo_financeiro:
             st.query_params.clear()
             st.rerun()
     st.caption(
-        "Conferência semanal do valor efetivamente pago: diária/meia diária + extra + adicional noturno + acordo. "
-        "Apontamentos antigos também são convertidos para esta regra. "
+        "Conferência semanal de pagamentos adicionais. "
+        "O Financeiro exibe somente colaboradores que tiveram Extra, Adicional noturno "
+        "ou Acordos / Bonificações no ciclo. Para esses colaboradores, o total considera "
+        "a base líquida da diária/meia diária + os adicionais. "
         "Ciclo de terça-feira a segunda-feira."
     )
 
@@ -14500,7 +14586,7 @@ elif modo_financeiro:
     total_atest_fin = sum(1 for x in ausencias_fin if x.get("Status") == "Atestado")
 
     tab_fin_extra, tab_fin_aus, tab_fin_rel = st.tabs([
-        "💸 PAGAMENTOS", "🚫 FALTAS / ATESTADOS", "📄 RELATÓRIO"
+        "💸 EXTRAS / ADICIONAIS", "🚫 FALTAS / ATESTADOS", "📄 RELATÓRIO"
     ])
 
     with tab_fin_extra:
@@ -14512,7 +14598,10 @@ elif modo_financeiro:
         st.markdown("### Consolidado por colaborador")
         resumo_fin = resumir_pagamentos_financeiro(pagamentos_fin)
         if resumo_fin.empty:
-            st.info("Nenhum pagamento foi lançado neste ciclo.")
+            st.info(
+                "Nenhum Extra, Adicional noturno ou Acordo / Bonificação "
+                "foi lançado neste ciclo."
+            )
         else:
             resumo_view = resumo_fin.copy()
             for _c in ["Base (R$)", "Extra (R$)", "Adic. noturno (R$)", "Acordos / Bonificações (R$)", "Total a Pagar (R$)"]:
@@ -14571,6 +14660,10 @@ elif modo_financeiro:
         st.write(
             f"Período **{data_ini_fin.strftime('%d/%m/%Y')} a {data_fim_fin.strftime('%d/%m/%Y')}** • "
             f"Pagamento previsto em **{data_pag_fin.strftime('%d/%m/%Y')}**."
+        )
+        st.caption(
+            "Este relatório não lista colaboradores que tiveram somente a diária normal. "
+            "Entram apenas aqueles com Extra, Adicional noturno ou Acordos / Bonificações."
         )
         st.info(
             f"Total a pagar: {formatar_reais(total_pagar_fin)} • "
