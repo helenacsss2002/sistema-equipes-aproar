@@ -58,12 +58,28 @@ SUPERVISORES_ATIVOS = (
 HORA_LIMITE_SEBRAE = time(9, 30)
 
 
-def pendencia_esta_atrasada(item, agora):
+def pendencia_entra_no_slot(
+    item,
+    agora,
+    slot,
+):
     """
-    Regra da cobrança:
-    - demais unidades: só cobra serviço de data anterior;
-    - SEBRAE: serviço 17h–02h pode ser apontado na madrugada do dia seguinte
-      e só passa a atraso às 09:30.
+    Janelas automáticas.
+
+    DEMAIS UNIDADES
+    ----------------
+    Serviço em D:
+      D    16:00
+      D+1  09:30
+      D+1  15:00
+
+    SEBRAE
+    ------
+    Serviço em D:
+      D    21:00  -> único lembrete automático.
+
+    Depois dessas janelas, a pendência continua disponível no sistema
+    para conferência e cobrança MANUAL, mas não recebe spam automático.
     """
     data_servico = item.get("data")
     unidade = str(
@@ -74,30 +90,56 @@ def pendencia_esta_atrasada(item, agora):
     if data_servico is None:
         return False
 
-    if data_servico >= agora.date():
-        return False
+    hoje = agora.date()
+    ontem = hoje - timedelta(days=1)
 
-    if unidade == "SEBRAE":
-        dia_seguinte = (
-            data_servico
-            + timedelta(days=1)
+    if slot == "16:00":
+        return (
+            unidade != "SEBRAE"
+            and data_servico == hoje
         )
 
-        if agora.date() == dia_seguinte:
-            return agora.time() >= HORA_LIMITE_SEBRAE
+    if slot in {
+        "09:30",
+        "15:00",
+    }:
+        return (
+            unidade != "SEBRAE"
+            and data_servico == ontem
+        )
 
-    return True
+    if slot == "21:00":
+        return (
+            unidade == "SEBRAE"
+            and data_servico == hoje
+        )
+
+    return False
 
 
 def slot_atual() -> str:
-    manual = os.getenv("COBRANCA_SLOT", "").strip()
-    if manual in {"09:30", "15:00"}:
+    manual = os.getenv(
+        "COBRANCA_SLOT",
+        "",
+    ).strip()
+
+    if manual in {
+        "09:30",
+        "15:00",
+        "16:00",
+        "21:00",
+    }:
         return manual
 
     agora = datetime.now(TZ)
-    # O workflow agenda uma execução de manhã e outra à tarde.
-    # Mesmo se o GitHub atrasar alguns minutos, a execução continua no slot correto.
-    return "09:30" if agora.hour < 12 else "15:00"
+
+    if agora.hour < 12:
+        return "09:30"
+    if agora.hour < 16:
+        return "15:00"
+    if agora.hour < 21:
+        return "16:00"
+    return "21:00"
 
 
 def garantir_estrutura(cur):
@@ -180,76 +222,73 @@ def ja_enviado(cur, hoje, slot, engenheiro):
     return bool(row and str(row["status"]).upper() == "ENVIADA")
 
 
-def carregar_pendentes(cur, engenheiro, hoje, agora=None):
+def carregar_pendentes(
+    cur,
+    engenheiro,
+    hoje,
+    agora=None,
+    slot=None,
+):
     """
-    Pendências para cobrança.
-
-    Supervisores operacionais:
-        recebem somente suas unidades.
-
-    PAULO e HELENA:
-        recebem TODAS as pendências quando estiverem ativos.
+    Retorna somente as pendências que pertencem à janela automática atual.
     """
     engenheiro = str(
         engenheiro
         or ""
     ).strip().upper()
 
-    agora = agora or datetime.now(TZ)
+    agora = (
+        agora
+        or datetime.now(TZ)
+    )
+    slot = (
+        slot
+        or slot_atual()
+    )
 
     def _filtrar(rows):
         return [
             row
-            for row in (rows or [])
-            if pendencia_esta_atrasada(
+            for row in (
+                rows
+                or []
+            )
+            if pendencia_entra_no_slot(
                 row,
                 agora,
+                slot,
             )
         ]
 
-    if engenheiro in OBSERVADORES_GERAIS:
-        cur.execute(
-            """
-            SELECT
-                c.id,
-                c.data,
-                c.turno,
-                c.engenheiro,
-                col.nome AS colaborador,
-                o.unidade,
-                o.nome AS obra_atual
-            FROM convocacoes c
-            JOIN colaboradores col
-              ON col.id = c.colaborador_id
-            JOIN obras o
-              ON o.id = c.obra_id
-            WHERE c.data < %s
-              AND UPPER(COALESCE(o.nome, '')) LIKE UPPER(%s)
-            ORDER BY
-                c.data ASC,
-                o.unidade ASC,
-                col.nome ASC
-            """,
-            (
-                hoje,
-                f"{PLACEHOLDER_PREFIX}%",
-            ),
+    where_unidade = ""
+    params_unidade = []
+
+    if engenheiro not in OBSERVADORES_GERAIS:
+        unidades = (
+            RESPONSAVEIS_UNIDADES.get(
+                engenheiro,
+                [],
+            )
         )
 
-        return _filtrar(
-            cur.fetchall() or []
-        )
+        if not unidades:
+            return []
 
-    unidades = RESPONSAVEIS_UNIDADES.get(
-        engenheiro,
-        [],
-    )
+        where_unidade = """
+          AND UPPER(
+                TRIM(
+                    COALESCE(o.unidade, '')
+                )
+              ) = ANY(%s)
+        """
 
-    if not unidades:
-        return []
+        params_unidade = [[
+            str(u).strip().upper()
+            for u in unidades
+        ]]
 
     cur.execute(
-        """
+        f"""
         SELECT
             c.id,
             c.data,
@@ -263,26 +302,27 @@ def carregar_pendentes(cur, engenheiro, hoje, agora=None):
           ON col.id = c.colaborador_id
         JOIN obras o
           ON o.id = c.obra_id
-        WHERE c.data < %s
-          AND UPPER(COALESCE(o.nome, '')) LIKE UPPER(%s)
-          AND UPPER(TRIM(COALESCE(o.unidade, ''))) = ANY(%s)
+        WHERE c.data BETWEEN %s AND %s
+          AND UPPER(
+                COALESCE(o.nome, '')
+              ) LIKE UPPER(%s)
+          {where_unidade}
         ORDER BY
             c.data ASC,
             o.unidade ASC,
             col.nome ASC
         """,
         (
+            hoje - timedelta(days=1),
             hoje,
             f"{PLACEHOLDER_PREFIX}%",
-            [
-                str(u).strip().upper()
-                for u in unidades
-            ],
+            *params_unidade,
         ),
     )
 
     return _filtrar(
-        cur.fetchall() or []
+        cur.fetchall()
+        or []
     )
 
 
@@ -304,9 +344,25 @@ def montar_mensagem(engenheiro, pendentes, slot):
     if len(linhas) > max_linhas:
         linhas_visiveis.append(f"• + {len(linhas) - max_linhas} grupo(s) pendente(s)")
 
-    etapa = "1ª cobrança do dia" if slot == "09:30" else "2ª cobrança do dia"
+    if slot == "16:00":
+        etapa = "Cobrança do próprio dia · 16:00"
+        titulo_status = "pendente"
+    elif slot == "09:30":
+        etapa = "Cobrança do dia seguinte · 09:30"
+        titulo_status = "atrasado"
+    elif slot == "15:00":
+        etapa = "Última cobrança automática · 15:00"
+        titulo_status = "atrasado"
+    else:
+        etapa = "Lembrete único SEBRAE · 21:00"
+        titulo_status = "pendente"
+
     total = len(pendentes)
-    termo = "apontamento atrasado" if total == 1 else "apontamentos atrasados"
+    termo = (
+        f"apontamento {titulo_status}"
+        if total == 1
+        else f"apontamentos {titulo_status}s"
+    )
 
     corpo_linhas = "<br>".join(linhas_visiveis)
 
@@ -415,10 +471,16 @@ def main():
                     pulados += 1
                     continue
 
-                pendentes = carregar_pendentes(cur, engenheiro, hoje, agora=agora)
+                pendentes = carregar_pendentes(
+                    cur,
+                    engenheiro,
+                    hoje,
+                    agora=agora,
+                    slot=slot,
+                )
 
                 if not pendentes:
-                    print(f"- {engenheiro}: sem apontamentos atrasados.")
+                    print(f"- {engenheiro}: sem pendências para este horário.")
                     sem_pendencia += 1
                     continue
 
