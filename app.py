@@ -15993,7 +15993,7 @@ else:
     elif menu_escolhido == "📊 RELATÓRIOS":
         cabecalho_pagina_aproar(
             "Relatórios",
-            "Controladoria: custo cadastrado/importado na planilha do colaborador + Extra + Adicional noturno + Acordos/Bonificações. No SEBRAE, o adicional noturno é sempre R$ 90,00 por colaborador presente.",
+            "Controladoria: custo cadastrado/importado na planilha do colaborador + Extra + Adicional noturno + Acordos/Bonificações. O Total de cada colaborador é a soma desses valores. No SEBRAE, o adicional noturno é sempre R$ 90,00 por colaborador presente.",
             categoria="ANÁLISE E FECHAMENTO",
         )
         
@@ -16025,8 +16025,39 @@ else:
         with col_r1:
             eng_relatorio = st.selectbox("Engenheiro:", ["TODOS OS ENGENHEIROS"] + ENGENHEIROS, key="eng_rel")
         with col_r2:
-            obras_rel_lista = sorted(list(set([o['nome'] for o in obras]))) if obras else []
-            obra_relatorio = st.selectbox("Filtro por Obra:", ["TODAS AS OBRAS"] + obras_rel_lista, key="obra_rel")
+            # "A DEFINIR NO APONTAMENTO - UNIDADE" é apenas um registro técnico
+            # interno. Ele não deve aparecer para o usuário como obra real.
+            obras_rel_lista = (
+                sorted(
+                    {
+                        str(o.get("nome") or "").strip()
+                        for o in obras
+                        if str(o.get("nome") or "").strip()
+                        and not eh_obra_placeholder(o)
+                    }
+                )
+                if obras
+                else []
+            )
+
+            opcoes_obras_rel = [
+                "TODAS AS OBRAS",
+                *obras_rel_lista,
+            ]
+
+            # Se a sessão ainda estiver com um placeholder selecionado de uma
+            # versão anterior, volta automaticamente para "TODAS AS OBRAS".
+            if (
+                st.session_state.get("obra_rel")
+                not in opcoes_obras_rel
+            ):
+                st.session_state["obra_rel"] = "TODAS AS OBRAS"
+
+            obra_relatorio = st.selectbox(
+                "Filtro por Obra:",
+                opcoes_obras_rel,
+                key="obra_rel",
+            )
 
         eng_rel_filtro = None if eng_relatorio == "TODOS OS ENGENHEIROS" else eng_relatorio
         obra_id_filtro = None
@@ -16163,17 +16194,18 @@ else:
                             # Cabeçalhos longos usam 2 linhas para não invadir
                             # a coluna vizinha.
                             cabecalhos = [
-                                ("Data", 18, "C"),
-                                ("Colaborador", 42, "L"),
-                                ("Função", 28, "L"),
-                                ("Engenheiro", 23, "C"),
-                                ("Status", 25, "C"),
-                                ("Tipo", 18, "C"),
-                                ("Custo c/\nencargos", 29, "C"),
-                                ("Extra", 18, "C"),
-                                ("Adic.\nnoturno", 21, "C"),
-                                ("Acordos /\nBonificações", 28, "C"),
-                                ("Observação", 27, "L"),
+                                ("Data", 16, "C"),
+                                ("Colaborador", 37, "L"),
+                                ("Função", 24, "L"),
+                                ("Engenheiro", 20, "C"),
+                                ("Status", 22, "C"),
+                                ("Tipo", 15, "C"),
+                                ("Custo c/\nencargos", 25, "C"),
+                                ("Extra", 16, "C"),
+                                ("Adic.\nnoturno", 18, "C"),
+                                ("Acordos /\nBonificações", 23, "C"),
+                                ("Total", 20, "C"),
+                                ("Observação", 21, "L"),
                             ]
 
                             altura_header = 10
@@ -16277,35 +16309,35 @@ else:
                                 valores = [
                                     (
                                         str(row["Data"]),
-                                        18,
+                                        16,
                                         "C",
                                     ),
                                     (
                                         str(
                                             row["Colaborador"]
-                                        )[:22],
-                                        42,
+                                        )[:20],
+                                        37,
                                         "L",
                                     ),
                                     (
                                         str(
                                             row["Função"]
-                                        )[:15],
-                                        28,
+                                        )[:13],
+                                        24,
                                         "L",
                                     ),
                                     (
                                         str(
                                             row["Engenheiro"]
-                                        )[:11],
-                                        23,
+                                        )[:10],
+                                        20,
                                         "C",
                                     ),
                                     (
                                         str(
                                             row["Status"]
-                                        )[:12],
-                                        25,
+                                        )[:11],
+                                        22,
                                         "C",
                                     ),
                                     (
@@ -16314,8 +16346,8 @@ else:
                                                 "Tipo",
                                                 "",
                                             )
-                                        )[:9],
-                                        18,
+                                        )[:8],
+                                        15,
                                         "C",
                                     ),
                                     (
@@ -16326,7 +16358,7 @@ else:
                                                 ]
                                             )
                                         ),
-                                        29,
+                                        25,
                                         "C",
                                     ),
                                     (
@@ -16337,7 +16369,7 @@ else:
                                                 ]
                                             )
                                         ),
-                                        18,
+                                        16,
                                         "C",
                                     ),
                                     (
@@ -16348,7 +16380,7 @@ else:
                                                 ]
                                             )
                                         ),
-                                        21,
+                                        18,
                                         "C",
                                     ),
                                     (
@@ -16359,7 +16391,18 @@ else:
                                                 ]
                                             )
                                         ),
-                                        28,
+                                        23,
+                                        "C",
+                                    ),
+                                    (
+                                        formatar_reais(
+                                            float(
+                                                row[
+                                                    "Custo (R$)"
+                                                ]
+                                            )
+                                        ),
+                                        20,
                                         "C",
                                     ),
                                     (
@@ -16368,8 +16411,8 @@ else:
                                                 "Observação",
                                                 "",
                                             )
-                                        )[:17],
-                                        27,
+                                        )[:13],
+                                        21,
                                         "L",
                                     ),
                                 ]
@@ -16403,14 +16446,14 @@ else:
                                 9,
                             )
                             pdf.cell(
-                                235,
+                                257,
                                 7,
                                 to_latin("TOTAL DA OBRA:"),
                                 border=0,
                                 align="R",
                             )
                             pdf.cell(
-                                42,
+                                20,
                                 7,
                                 to_latin(
                                     formatar_reais(
@@ -16596,7 +16639,7 @@ else:
                                     "Extra (R$)",
                                     "Adicional Noturno (R$)",
                                     "Acordos / Bonificações (R$)",
-                                    "Custo Controladoria (R$)",
+                                    "Total (R$)",
                                     "Observação",
                                 ]
 
