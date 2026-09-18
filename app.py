@@ -3927,6 +3927,7 @@ def _salvar_moradias_em_lote_admin(alteracoes):
         return False, salvos
 
 
+
 def _atualizar_colaborador_admin_rapido(
     colaborador_id,
     campos,
@@ -3934,11 +3935,11 @@ def _atualizar_colaborador_admin_rapido(
     antes=None,
 ):
     """
-    Atualiza o cadastro do colaborador de forma confiável.
+    Atualiza o cadastro pelo ID fixo do colaborador.
 
-    O ID do colaborador é a referência fixa da edição; portanto o próprio
-    nome pode ser alterado sem perder o vínculo. No Neon, a gravação é feita
-    diretamente por SQL e a auditoria não bloqueia a atualização caso falhe.
+    No Neon, resolve o registro por CAST(id AS TEXT) para evitar qualquer
+    diferença entre ID inteiro/UUID/string e atualiza somente colunas que
+    realmente existem na tabela. Depois confirma a gravação no banco.
     """
     campos_permitidos = {
         "ativo",
@@ -3955,74 +3956,84 @@ def _atualizar_colaborador_admin_rapido(
         if k in campos_permitidos
     }
 
-    if not payload or colaborador_id is None:
+    colaborador_id_txt = str(colaborador_id or "").strip()
+    st.session_state.pop("_erro_edicao_colaborador", None)
+
+    if not payload or not colaborador_id_txt:
+        st.session_state["_erro_edicao_colaborador"] = (
+            "Cadastro sem ID válido ou sem alterações para salvar."
+        )
         return False
 
     if DB_BACKEND == "NEON" and hasattr(supabase, "_connect"):
         try:
             with supabase._connect() as conn:
                 with conn.cursor() as cur:
+                    # Descobre as colunas reais da tabela. Isso evita que uma
+                    # instalação antiga que ainda não tenha uma coluna opcional
+                    # bloqueie a edição inteira.
+                    cur.execute(
+                        """
+                        SELECT column_name
+                          FROM information_schema.columns
+                         WHERE table_schema = current_schema()
+                           AND table_name = 'colaboradores'
+                        """
+                    )
+                    colunas_existentes = {
+                        str((row.get("column_name") if isinstance(row, dict) else row[0]) or "")
+                        for row in cur.fetchall()
+                    }
+
+                    payload_sql = {
+                        k: v
+                        for k, v in payload.items()
+                        if k in colunas_existentes
+                    }
+
+                    if not payload_sql:
+                        st.session_state["_erro_edicao_colaborador"] = (
+                            "Nenhum dos campos editáveis foi encontrado na tabela colaboradores."
+                        )
+                        return False
+
                     atribuicoes = ", ".join(
                         f'{_identificador_sql(campo)} = %s'
-                        for campo in payload.keys()
+                        for campo in payload_sql.keys()
                     )
-                    valores = list(payload.values()) + [colaborador_id]
+                    valores = list(payload_sql.values())
+
+                    # atualizado_em entra apenas se a coluna existir.
+                    if "atualizado_em" in colunas_existentes:
+                        atribuicoes += ', "atualizado_em" = NOW()'
 
                     cur.execute(
                         f"""
                         UPDATE colaboradores
                            SET {atribuicoes}
-                         WHERE id = %s
-                        RETURNING id
+                         WHERE CAST(id AS TEXT) = %s
+                        RETURNING *
                         """,
-                        tuple(valores),
+                        tuple(valores + [colaborador_id_txt]),
                     )
-                    atualizado = cur.fetchone()
 
-                    if not atualizado:
+                    registro = cur.fetchone()
+
+                    if not registro:
                         conn.rollback()
+                        st.session_state["_erro_edicao_colaborador"] = (
+                            "O funcionário não foi localizado pelo ID atual."
+                        )
                         return False
 
-                    # Atualiza o carimbo de data somente se a coluna existir.
-                    try:
-                        cur.execute(
-                            """
-                            UPDATE colaboradores
-                               SET atualizado_em = NOW()
-                             WHERE id = %s
-                            """,
-                            (colaborador_id,),
-                        )
-                    except Exception:
-                        # Não deixa uma coluna opcional impedir a edição.
-                        try:
-                            conn.rollback()
-                        except Exception:
-                            pass
-                        # Reexecuta a alteração principal em transação limpa.
-                        with conn.cursor() as cur2:
-                            cur2.execute(
-                                f"""
-                                UPDATE colaboradores
-                                   SET {atribuicoes}
-                                 WHERE id = %s
-                                RETURNING id
-                                """,
-                                tuple(valores),
-                            )
-                            atualizado = cur2.fetchone()
-                            if not atualizado:
-                                return False
-
-                    conn.commit()
+                conn.commit()
 
             limpar_cache_colaboradores()
 
-            # Auditoria é secundária e não pode desfazer uma edição válida.
             try:
                 registrar_auditoria_prod(
                     "colaboradores",
-                    colaborador_id,
+                    colaborador_id_txt,
                     acao,
                     "ADMIN",
                     antes=antes,
@@ -4034,10 +4045,21 @@ def _atualizar_colaborador_admin_rapido(
 
             return True
 
-        except Exception:
-            # Se o caminho direto falhar, tenta o adaptador compatível abaixo.
-            pass
+        except Exception as e:
+            detalhe = str(e).strip()
+            if "unique" in detalhe.lower() or "duplicate" in detalhe.lower():
+                mensagem = (
+                    "Já existe outro funcionário com algum dado que precisa ser único. "
+                    "Confira principalmente o nome do cadastro."
+                )
+            else:
+                mensagem = (
+                    "O banco recusou a alteração. "
+                    + (detalhe[:220] if detalhe else "Erro não identificado.")
+                )
+            st.session_state["_erro_edicao_colaborador"] = mensagem
 
+    # Fallback compatível com Supabase/REST.
     try:
         resposta = (
             supabase.table("colaboradores")
@@ -4047,42 +4069,19 @@ def _atualizar_colaborador_admin_rapido(
         )
 
         dados = list(getattr(resposta, "data", None) or [])
-        if dados:
-            registro = dados[0]
-        else:
-            verificacao = (
-                supabase.table("colaboradores")
-                .select("id,nome,funcao,valor_diaria,local_moradia,ativo")
-                .eq("id", colaborador_id)
-                .execute()
-                .data
-                or []
+        if not dados:
+            st.session_state["_erro_edicao_colaborador"] = (
+                "O banco não confirmou nenhuma linha atualizada."
             )
-            if not verificacao:
-                return False
-            registro = verificacao[0]
-
-        if "nome" in payload and normalizar(registro.get("nome")) != normalizar(payload.get("nome")):
             return False
 
         limpar_cache_colaboradores()
-
-        try:
-            registrar_auditoria_prod(
-                "colaboradores",
-                colaborador_id,
-                acao,
-                "ADMIN",
-                antes=antes,
-                depois=payload,
-                contexto={"origem": "banco_funcionarios_inline"},
-            )
-        except Exception:
-            pass
-
         return True
 
-    except Exception:
+    except Exception as e:
+        st.session_state["_erro_edicao_colaborador"] = (
+            "Falha ao salvar o cadastro: " + str(e)[:220]
+        )
         return False
 
 
@@ -19908,8 +19907,12 @@ else:
                                 )
 
                                 if not ok_edit:
+                                    detalhe_edicao = st.session_state.get(
+                                        "_erro_edicao_colaborador",
+                                        "Falha ao atualizar colaborador.",
+                                    )
                                     raise RuntimeError(
-                                        "Falha ao atualizar colaborador."
+                                        detalhe_edicao
                                     )
 
                                 for _k in (
