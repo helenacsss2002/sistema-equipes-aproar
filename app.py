@@ -2590,6 +2590,12 @@ def _garantir_estrutura_cadastros_admin():
                     cur.execute(
                         f"""
                         ALTER TABLE IF EXISTS {_tabela_fin}
+                        ADD COLUMN IF NOT EXISTS custo_pago_definido_financeiro BOOLEAN NOT NULL DEFAULT FALSE
+                        """
+                    )
+                    cur.execute(
+                        f"""
+                        ALTER TABLE IF EXISTS {_tabela_fin}
                         ADD COLUMN IF NOT EXISTS valor_acordo NUMERIC(12,2) NOT NULL DEFAULT 0
                         """
                     )
@@ -4135,13 +4141,13 @@ VALOR_LIMPO_MEIA_DIARIA = VALOR_FIN_MEIA_PROFISSIONAL
 TIPOS_DIARIA = ["Diária", "Meia diária"]
 
 # Regras de prazo/cobrança:
-# - Demais unidades: o apontamento do dia deve estar concluído até 16:00.
+# - Demais unidades: 16:00 é lembrete preventivo; atraso começa às 09:30 de D+1.
 # - SEBRAE: jornada 17h–02h continua sendo DIÁRIA INTEGRAL;
 #   o apontamento pode ser concluído até 09:29 do dia seguinte sem atraso.
 # - Para o Teams, o SEBRAE recebe apenas UM lembrete automático às 21:00
 #   do próprio dia do serviço. Depois disso continua visível para cobrança manual.
 VALOR_ADICIONAL_NOTURNO_SEBRAE = 90.00
-HORA_LIMITE_APONTAMENTO_GERAL = datetime.time(16, 0)
+HORA_LEMBRETE_TEAMS_GERAL = datetime.time(16, 0)
 HORA_LIMITE_APONTAMENTO_SEBRAE = datetime.time(9, 30)
 HORA_LEMBRETE_TEAMS_SEBRAE = datetime.time(21, 0)
 
@@ -4160,63 +4166,36 @@ def apontamento_esta_atrasado(
 
     DEMAIS UNIDADES
     ----------------
-    O apontamento do serviço do dia D deve ser concluído até 16:00 de D.
-    Portanto:
-      - D antes de 16:00 -> ainda no prazo;
-      - D a partir de 16:00 -> atrasado;
-      - D+1 em diante -> atrasado.
+    O apontamento pertence ao dia D e deve ser feito no próprio dia.
+    Às 16:00 de D há uma cobrança preventiva, mas ele continua PENDENTE.
+    A tolerância termina às 09:30 de D+1:
+      - D inteiro -> PENDENTE;
+      - D+1 até 09:29 -> PENDENTE, em tolerância;
+      - D+1 a partir de 09:30 -> ATRASADO;
+      - depois de D+1 -> ATRASADO.
 
     SEBRAE
     ------
-    Como a jornada é 17h–02h, o apontamento de D pode ser concluído
-    até 09:29 de D+1 sem ser marcado como atraso.
-    O lembrete do Teams às 21:00 de D é apenas uma cobrança preventiva
-    e não muda essa regra operacional.
+    Jornada 17h–02h: o apontamento de D pode ser concluído até 09:29 de D+1.
+    Às 09:30 de D+1 passa a ATRASADO. O lembrete das 21:00 de D é preventivo.
     """
     agora = agora or agora_aproar()
 
-    if not isinstance(
-        data_servico,
-        datetime.date,
-    ):
+    if not isinstance(data_servico, datetime.date):
         try:
-            data_servico = (
-                datetime.date.fromisoformat(
-                    str(data_servico)
-                )
-            )
+            data_servico = datetime.date.fromisoformat(str(data_servico))
         except Exception:
             return False
 
-    if agora.date() < data_servico:
+    if agora.date() <= data_servico:
         return False
 
-    if eh_unidade_sebrae(unidade):
-        if agora.date() == data_servico:
-            return False
+    dia_seguinte = data_servico + datetime.timedelta(days=1)
 
-        dia_seguinte = (
-            data_servico
-            + datetime.timedelta(days=1)
-        )
+    if agora.date() == dia_seguinte:
+        return agora.time() >= datetime.time(9, 30)
 
-        if agora.date() == dia_seguinte:
-            return (
-                agora.time()
-                >= HORA_LIMITE_APONTAMENTO_SEBRAE
-            )
-
-        return agora.date() > dia_seguinte
-
-    # Demais unidades.
-    if agora.date() == data_servico:
-        return (
-            agora.time()
-            >= HORA_LIMITE_APONTAMENTO_GERAL
-        )
-
-    return agora.date() > data_servico
-
+    return agora.date() > dia_seguinte
 
 def pendencia_teams_esta_atrasada(
     data_servico,
@@ -4241,30 +4220,22 @@ def proxima_cobranca_automatica_teams(
     agora=None,
 ):
     """
-    Retorna a próxima janela automática prevista para uma pendência.
+    Próxima janela automática.
 
     Demais unidades:
-      D 16:00
-      D+1 09:30
-      D+1 15:00
-      depois: somente manual
+      D    16:00  -> lembrete preventivo; ainda PENDENTE
+      D+1  09:30  -> cobrança em ATRASO
+      depois      -> somente manual
 
     SEBRAE:
-      D 21:00 (único automático)
-      depois: somente manual
+      D    21:00  -> lembrete preventivo
+      depois      -> somente manual; às 09:30 de D+1 já é ATRASADO
     """
     agora = agora or agora_aproar()
 
-    if not isinstance(
-        data_servico,
-        datetime.date,
-    ):
+    if not isinstance(data_servico, datetime.date):
         try:
-            data_servico = (
-                datetime.date.fromisoformat(
-                    str(data_servico)
-                )
-            )
+            data_servico = datetime.date.fromisoformat(str(data_servico))
         except Exception:
             return "Somente manual"
 
@@ -4280,26 +4251,18 @@ def proxima_cobranca_automatica_teams(
             return "Automático de 21:00 já passou"
         return "Somente manual"
 
-    # Demais unidades.
     if data_servico == hoje:
-        if agora.time() < datetime.time(16, 0):
+        if agora.time() < HORA_LEMBRETE_TEAMS_GERAL:
             return "Hoje · 16:00"
         return "Amanhã · 09:30"
 
-    dia_seguinte = (
-        data_servico
-        + datetime.timedelta(days=1)
-    )
-
+    dia_seguinte = data_servico + datetime.timedelta(days=1)
     if hoje == dia_seguinte:
         if agora.time() < datetime.time(9, 30):
             return "Hoje · 09:30"
-        if agora.time() < datetime.time(15, 0):
-            return "Hoje · 15:00"
-        return "Último automático já passou"
+        return "Automático de 09:30 já passou"
 
     return "Somente manual"
-
 
 def situacao_pendencia_teams(
     data_servico,
@@ -4427,17 +4390,24 @@ def valor_controladoria_padrao_colaborador(
     colab,
     tipo_diaria,
 ):
-    valor_cheio = (
-        VALOR_DIARIA_AJUDANTE
-        if categoria_diaria_colaborador(
-            colab
+    """
+    Base da Controladoria = valor diário cadastrado/importado do colaborador.
+    Se a planilha não trouxer valor, usa o padrão da categoria apenas como fallback.
+    """
+    valor_cheio = obter_valor_diaria_colaborador(colab or {})
+
+    if valor_cheio <= 0:
+        valor_cheio = (
+            VALOR_DIARIA_AJUDANTE
+            if categoria_diaria_colaborador(
+                colab
+            )
+            == "Ajudante"
+            else VALOR_DIARIA_PROFISSIONAL
         )
-        == "Ajudante"
-        else VALOR_DIARIA_PROFISSIONAL
-    )
 
     return round(
-        valor_cheio
+        float(valor_cheio)
         * (
             0.5
             if normalizar_tipo_diaria(
@@ -4666,6 +4636,14 @@ def valor_diaria_financeiro_registro(
         "custo_pago"
     )
 
+    # Quando o Financeiro já confirmou o valor, até R$ 0,00 é explícito.
+    if bool(registro.get("custo_pago_definido_financeiro")):
+        try:
+            return round(max(0.0, float(valor or 0.0)), 2)
+        except Exception:
+            return 0.0
+
+    # Compatibilidade com lançamentos legados que já tinham custo positivo.
     if valor not in (
         None,
         "",
@@ -7594,7 +7572,7 @@ def _cobrar_supervisor_teams_agora(
 ):
     """
     Envia uma cobrança manual sem interferir nas execuções automáticas
-    das 09:30 e 15:00.
+    das 09:30.
     """
     supervisor = str(
         supervisor or ""
@@ -9220,7 +9198,7 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
     df_prazos = pd.DataFrame(linhas).sort_values("Engenheiro")
 
     titulo_secao_aproar("Cumprimento por engenheiro", "Convocações e apontamentos realizados dentro e fora do prazo.")
-    st.caption("Convocação atrasada = feita após 16h para o próximo dia útil. Apontamento atrasado = salvo em dia posterior ao serviço. Os dois atrasos são medidos separadamente.")
+    st.caption("Convocação atrasada = feita após 16h para o próximo dia útil. Apontamento atrasado = pendente a partir de 09:30 do dia seguinte ao serviço. Os dois atrasos são medidos separadamente.")
     tabela_aproar(df_prazos, key=f"{key_prefix}_tbl_prazos")
 
     # Detalhamento clicável/selecionável das datas que geraram atraso.
@@ -10146,70 +10124,28 @@ def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
                     )
 
                 tipo_key = f"{key_prefix}_tipo_diaria_{c_id}"
-                diaria_key = f"{key_prefix}_custo_pago_{c_id}"
                 extra_key = f"{key_prefix}_valor_extra_{c_id}"
                 adicional_noturno_key = (
                     f"{key_prefix}_adicional_noturno_{c_id}"
                 )
 
-                tipo_atual = tipo_diaria_registro(
-                    conv
-                )
-                diaria_atual = (
-                    valor_diaria_financeiro_registro(
-                        conv,
-                        colab,
-                    )
-                )
-                extra_atual = valor_extra_registro(
-                    conv
-                )
+                tipo_atual = tipo_diaria_registro(conv)
+                extra_atual = valor_extra_registro(conv)
                 adicional_noturno_atual = (
-                    valor_adicional_noturno_registro(
-                        conv
-                    )
+                    valor_adicional_noturno_registro(conv)
                 )
-                eh_sebrae_card = eh_unidade_sebrae(
-                    unidade
-                )
+                eh_sebrae_card = eh_unidade_sebrae(unidade)
 
                 if eh_sebrae_card:
-                    st.session_state[
-                        tipo_key
-                    ] = "Diária"
+                    st.session_state[tipo_key] = "Diária"
                 elif tipo_key not in st.session_state:
-                    st.session_state[
-                        tipo_key
-                    ] = tipo_atual
-
-                if diaria_key not in st.session_state:
-                    st.session_state[
-                        diaria_key
-                    ] = (
-                        diaria_atual
-                        if diaria_atual > 0
-                        else valor_financeiro_padrao_colaborador(
-                            colab,
-                            (
-                                "Diária"
-                                if eh_sebrae_card
-                                else tipo_atual
-                            ),
-                        )
-                    )
+                    st.session_state[tipo_key] = tipo_atual
 
                 if extra_key not in st.session_state:
-                    st.session_state[
-                        extra_key
-                    ] = extra_atual
+                    st.session_state[extra_key] = extra_atual
 
-                if (
-                    adicional_noturno_key
-                    not in st.session_state
-                ):
-                    st.session_state[
-                        adicional_noturno_key
-                    ] = (
+                if adicional_noturno_key not in st.session_state:
+                    st.session_state[adicional_noturno_key] = (
                         adicional_noturno_atual
                         if adicional_noturno_atual > 0
                         else (
@@ -10219,169 +10155,78 @@ def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
                         )
                     )
 
-                def _ajustar_diaria_desktop(
-                    _tipo_key=tipo_key,
-                    _diaria_key=diaria_key,
-                    _colab=colab,
-                ):
-                    st.session_state[
-                        _diaria_key
-                    ] = (
-                        valor_financeiro_padrao_colaborador(
-                            _colab,
-                            st.session_state.get(
-                                _tipo_key,
-                                "Diária",
-                            ),
-                        )
-                    )
-
-                categoria_txt = (
-                    categoria_diaria_colaborador(
-                        colab
-                    )
-                )
+                categoria_txt = categoria_diaria_colaborador(colab)
 
                 if eh_sebrae_card:
-                    p1, p2, p3, p4, p5 = st.columns(
-                        [1, 1, 1, 1, 1.2]
-                    )
+                    p1, p2, p3, p4 = st.columns([1, 1, 1, 1.2])
                 else:
-                    p1, p2, p3, p5 = st.columns(
-                        [1, 1, 1, 1.2]
-                    )
-                    p4 = None
+                    p1, p2, p4 = st.columns([1, 1, 1.2])
+                    p3 = None
 
                 with p1:
                     tipo_diaria_sel = st.selectbox(
                         "Diária / Meia diária",
                         TIPOS_DIARIA,
                         key=tipo_key,
-                        on_change=_ajustar_diaria_desktop,
                         disabled=eh_sebrae_card,
+                        help=(
+                            "Define a fração do custo cadastrado/importado do colaborador "
+                            "usada pela Controladoria."
+                        ),
                     )
 
                 with p2:
-                    valor_diaria_financeiro = (
-                        st.number_input(
-                            "Diária (R$)",
-                            min_value=0.0,
-                            step=10.0,
-                            disabled=(
-                                not status_eh_presenca(
-                                    status_sel
-                                )
-                            ),
-                            key=diaria_key,
-                            help=(
-                                "Valor efetivamente pago pela diária. "
-                                "Pode ser alterado; ex.: R$ 150."
-                            ),
-                        )
-                    )
-
-                with p3:
                     valor_extra = st.number_input(
                         "Extra (R$)",
                         min_value=0.0,
                         step=10.0,
-                        disabled=(
-                            not status_eh_presenca(
-                                status_sel
-                            )
-                        ),
+                        disabled=(not status_eh_presenca(status_sel)),
                         key=extra_key,
-                        help=(
-                            "Horas extras, produção ou outro valor "
-                            "que não faça parte da diária."
-                        ),
                     )
 
                 if eh_sebrae_card:
-                    with p4:
-                        valor_adicional_noturno = (
-                            st.number_input(
-                                "Adic. noturno (R$)",
-                                min_value=0.0,
-                                step=10.0,
-                                disabled=(
-                                    not status_eh_presenca(
-                                        status_sel
-                                    )
-                                ),
-                                key=(
-                                    adicional_noturno_key
-                                ),
-                            )
+                    with p3:
+                        valor_adicional_noturno = st.number_input(
+                            "Adic. noturno (R$)",
+                            min_value=0.0,
+                            step=10.0,
+                            disabled=(not status_eh_presenca(status_sel)),
+                            key=adicional_noturno_key,
                         )
                 else:
                     valor_adicional_noturno = 0.0
 
-                with p5:
+                with p4:
                     valor_acordo = st.number_input(
                         "Acordos / Bonificações (R$)",
                         min_value=0.0,
                         value=(
-                            float(
-                                conv.get(
-                                    "valor_acordo"
-                                )
-                                or 0.0
-                            )
-                            if status_eh_presenca(
-                                status_sel
-                            )
+                            float(conv.get("valor_acordo") or 0.0)
+                            if status_eh_presenca(status_sel)
                             else 0.0
                         ),
                         step=10.0,
-                        disabled=(
-                            not status_eh_presenca(
-                                status_sel
-                            )
-                        ),
-                        key=(
-                            f"{key_prefix}_acordo_{c_id}"
-                        ),
+                        disabled=(not status_eh_presenca(status_sel)),
+                        key=f"{key_prefix}_acordo_{c_id}",
                     )
 
                 custo_ctrl_preview = (
-                    valor_controladoria_padrao_colaborador(
-                        colab,
-                        tipo_diaria_sel,
-                    )
-                    if status_eh_presenca(
-                        status_sel
-                    )
-                    else 0.0
-                )
-
-                total_fin_preview = (
-                    float(
-                        valor_diaria_financeiro
-                    )
-                    + float(valor_extra)
-                    + float(
-                        valor_adicional_noturno
-                    )
-                    + float(valor_acordo)
-                    if status_eh_presenca(
-                        status_sel
-                    )
+                    valor_controladoria_padrao_colaborador(colab, tipo_diaria_sel)
+                    if status_eh_presenca(status_sel)
                     else 0.0
                 )
 
                 st.caption(
-                    f"{categoria_txt} · "
-                    f"Diária {formatar_reais(valor_diaria_financeiro)} · "
+                    f"{categoria_txt} · Controladoria base "
+                    f"{formatar_reais(custo_ctrl_preview)} · "
                     f"Extra {formatar_reais(valor_extra)}"
                     + (
                         f" · Noturno {formatar_reais(valor_adicional_noturno)}"
                         if eh_sebrae_card
                         else ""
                     )
-                    + f" · Acordos/Bonificações {formatar_reais(valor_acordo)} "
-                    f"· Financeiro {formatar_reais(total_fin_preview)} "
-                    f"· Controladoria base {formatar_reais(custo_ctrl_preview)}"
+                    + f" · Acordos/Bonificações {formatar_reais(valor_acordo)}. "
+                    "O valor-base efetivamente pago é definido pelo Financeiro."
                 )
 
                 if eh_sebrae_card:
@@ -10421,9 +10266,7 @@ def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
                             else normalizar_tipo_diaria(tipo_diaria_sel)
                         )
                         custo_pago_final = (
-                            float(
-                                valor_diaria_financeiro
-                            )
+                            float(conv.get("custo_pago") or 0.0)
                             if presente_final
                             else 0.0
                         )
@@ -10574,6 +10417,115 @@ def listar_ciclos_financeiros(qtd=26):
     return ciclos
 
 
+def carregar_bases_financeiro(data_inicio, data_fim):
+    """Uma linha por colaborador/dia presente para o Financeiro definir a base efetivamente paga."""
+    registros = _buscar_convocacoes_intervalo(data_inicio, data_fim) or []
+    grupos = {}
+
+    for reg in registros:
+        status = normalizar_status_operacional(reg.get("status") or "")
+        if not status_eh_presenca(status):
+            continue
+
+        cid = str(reg.get("colaborador_id") or "").strip()
+        data_iso = str(reg.get("data") or "").strip()
+        if not cid or not data_iso:
+            continue
+
+        chave = (data_iso, cid)
+        grupo = grupos.setdefault(chave, {"registros": [], "tipos": []})
+        grupo["registros"].append(reg)
+        grupo["tipos"].append(tipo_diaria_registro(reg))
+
+    saida = []
+    for (data_iso, cid), grupo in sorted(grupos.items()):
+        regs = grupo["registros"]
+        colab = dict_colaboradores.get(cid, {}) or dict_colaboradores.get(regs[0].get("colaborador_id"), {})
+        tipos = list(dict.fromkeys(grupo["tipos"]))
+        tipo = tipos[0] if len(tipos) == 1 else " / ".join(tipos)
+
+        explicitos = [r for r in regs if bool(r.get("custo_pago_definido_financeiro"))]
+        if explicitos:
+            base_atual = sum(max(0.0, float(r.get("custo_pago") or 0.0)) for r in explicitos)
+            definido = True
+        else:
+            tipo_base = "Meia diária" if all(normalizar_tipo_diaria(t) == "Meia diária" for t in tipos) else "Diária"
+            base_atual = valor_financeiro_padrao_colaborador(colab, tipo_base)
+            definido = False
+
+        unidades = set()
+        engenheiros = set()
+        for r in regs:
+            obra = dict_obras.get(r.get("obra_id"), {})
+            if obra.get("unidade"):
+                unidades.add(str(obra.get("unidade")))
+            if r.get("engenheiro"):
+                engenheiros.add(str(r.get("engenheiro")))
+
+        try:
+            data_br = datetime.date.fromisoformat(data_iso).strftime("%d/%m/%Y")
+        except Exception:
+            data_br = data_iso
+
+        saida.append({
+            "Data": data_br,
+            "Data ISO": data_iso,
+            "Colaborador ID": cid,
+            "Colaborador": str(colab.get("nome") or "NÃO IDENTIFICADO"),
+            "Função": str(colab.get("funcao") or "-"),
+            "Tipo": tipo,
+            "Unidade": " / ".join(sorted(unidades)) or "-",
+            "Engenheiro": " / ".join(sorted(engenheiros)) or "-",
+            "Base atual (R$)": round(float(base_atual), 2),
+            "Definido pelo Financeiro": definido,
+            "IDs": [str(r.get("id")) for r in regs if r.get("id")],
+        })
+
+    return saida
+
+
+def salvar_base_financeiro_lancamento(item, valor, usuario="FINANCEIRO"):
+    """Grava uma única base por colaborador/dia, sem duplicar quando há várias convocações."""
+    ids = [str(x) for x in (item.get("IDs") or []) if str(x).strip()]
+    if not ids:
+        return False, "Nenhum apontamento encontrado para atualizar."
+
+    valor = round(max(0.0, float(valor or 0.0)), 2)
+
+    try:
+        # O primeiro registro carrega a base; os demais ficam explicitamente zerados.
+        # Isso preserva o total do dia mesmo quando há mais de uma convocação.
+        for idx, conv_id in enumerate(ids):
+            valor_reg = valor if idx == 0 else 0.0
+            supabase.table("convocacoes").update({
+                "custo_pago": valor_reg,
+                "custo_pago_definido_financeiro": True,
+            }).eq("id", conv_id).execute()
+
+            if schema_producao_disponivel():
+                try:
+                    with supabase._connect() as conn:
+                        with conn.cursor() as cur:
+                            cur.execute(
+                                """
+                                UPDATE apontamentos
+                                   SET custo_pago = %s,
+                                       custo_pago_definido_financeiro = TRUE,
+                                       atualizado_em = NOW()
+                                 WHERE convocacao_id = %s
+                                """,
+                                (valor_reg, conv_id),
+                            )
+                            conn.commit()
+                except Exception:
+                    pass
+
+        limpar_cache_operacional()
+        return True, "Valor-base atualizado pelo Financeiro."
+    except Exception as exc:
+        return False, f"Não foi possível atualizar o valor-base: {str(exc)[:120]}"
+
+
 def carregar_dados_financeiro(data_inicio, data_fim):
     """Retorna pagamentos líquidos e ausências do período."""
     registros = _buscar_convocacoes_intervalo(data_inicio, data_fim)
@@ -10666,6 +10618,7 @@ def carregar_dados_financeiro(data_inicio, data_fim):
                     "Data": data_br,
                     "Data ISO": str(row["Data"]),
                     "Colaborador": row["Colaborador"],
+                    "_colaborador_id": str(row["_colaborador_id"]),
                     "Função": row["Função"],
                     "Unidade": row["Unidades"],
                     "Engenheiro": row["Engenheiros"],
@@ -15029,263 +14982,109 @@ elif modo_campo:
 
                         servicos_adicionais_editados = []
 
-                        # Pagamento compacto:
-                        # diária, extra e acordos ficam separados.
+                        # Apontamento operacional:
+                        # o supervisor escolhe Diária/Meia e informa apenas adicionais.
+                        # A base paga (120/60, 80/40 ou outro valor acordado) é do Financeiro.
                         tipo_key = f"engm_tipo_diaria_{c_id}"
-                        diaria_key = f"engm_custo_pago_{c_id}"
                         extra_key = f"engm_valor_extra_{c_id}"
-                        adicional_noturno_key = (
-                            f"engm_adicional_noturno_{c_id}"
-                        )
+                        adicional_noturno_key = f"engm_adicional_noturno_{c_id}"
 
-                        tipo_atual_pag = tipo_diaria_registro(
-                            conv
-                        )
-                        diaria_atual_pag = (
-                            valor_diaria_financeiro_registro(
-                                conv,
-                                colab,
-                            )
-                        )
-                        extra_atual_pag = (
-                            valor_extra_registro(
-                                conv
-                            )
-                        )
-                        adicional_noturno_atual = (
-                            valor_adicional_noturno_registro(
-                                conv
-                            )
-                        )
-                        eh_sebrae_card = eh_unidade_sebrae(
-                            unidade
-                        )
+                        tipo_atual_pag = tipo_diaria_registro(conv)
+                        extra_atual_pag = valor_extra_registro(conv)
+                        adicional_noturno_atual = valor_adicional_noturno_registro(conv)
+                        eh_sebrae_card = eh_unidade_sebrae(unidade)
 
                         if eh_sebrae_card:
-                            st.session_state[
-                                tipo_key
-                            ] = "Diária"
+                            st.session_state[tipo_key] = "Diária"
                         elif tipo_key not in st.session_state:
-                            st.session_state[
-                                tipo_key
-                            ] = tipo_atual_pag
-
-                        if diaria_key not in st.session_state:
-                            st.session_state[
-                                diaria_key
-                            ] = (
-                                diaria_atual_pag
-                                if diaria_atual_pag > 0
-                                else valor_financeiro_padrao_colaborador(
-                                    colab,
-                                    (
-                                        "Diária"
-                                        if eh_sebrae_card
-                                        else tipo_atual_pag
-                                    ),
-                                )
-                            )
+                            st.session_state[tipo_key] = tipo_atual_pag
 
                         if extra_key not in st.session_state:
-                            st.session_state[
-                                extra_key
-                            ] = extra_atual_pag
+                            st.session_state[extra_key] = extra_atual_pag
 
-                        def _ajustar_diaria_mobile(
-                            _tipo_key=tipo_key,
-                            _diaria_key=diaria_key,
-                            _colab=colab,
-                        ):
-                            st.session_state[
-                                _diaria_key
-                            ] = (
-                                valor_financeiro_padrao_colaborador(
-                                    _colab,
-                                    st.session_state.get(
-                                        _tipo_key,
-                                        "Diária",
-                                    ),
-                                )
-                            )
+                        if eh_sebrae_card:
+                            pgt1, pgt2, pgt3 = st.columns([.8, .82, .94])
+                        else:
+                            pgt1, pgt2 = st.columns([.82, 1.0])
+                            pgt3 = None
 
-                        pg1, pg2 = st.columns(
-                            [.86, 1.0]
-                        )
-
-                        with pg1:
+                        with pgt1:
                             tipo_diaria_sel = st.selectbox(
                                 "Diária / Meia",
                                 TIPOS_DIARIA,
                                 key=tipo_key,
-                                on_change=_ajustar_diaria_mobile,
                                 disabled=eh_sebrae_card,
+                                help=(
+                                    "Usa o valor diário cadastrado/importado do colaborador "
+                                    "para a Controladoria."
+                                ),
                             )
 
-                        with pg2:
-                            valor_diaria_financeiro = (
-                                st.number_input(
-                                    "Diária (R$)",
-                                    min_value=0.0,
-                                    step=10.0,
-                                    disabled=(
-                                        not status_eh_presenca(
-                                            status_sel
-                                        )
-                                    ),
-                                    key=diaria_key,
-                                )
-                            )
-
-                        pg3, pg4 = st.columns([.96, .96])
-
-                        with pg3:
+                        with pgt2:
                             valor_extra = st.number_input(
                                 "Extra (R$)",
                                 min_value=0.0,
                                 step=10.0,
-                                disabled=(
-                                    not status_eh_presenca(
-                                        status_sel
-                                    )
-                                ),
+                                disabled=(not status_eh_presenca(status_sel)),
                                 key=extra_key,
                             )
 
                         if eh_sebrae_card:
-                            if (
-                                adicional_noturno_key
-                                not in st.session_state
-                            ):
-                                st.session_state[
-                                    adicional_noturno_key
-                                ] = (
+                            if adicional_noturno_key not in st.session_state:
+                                st.session_state[adicional_noturno_key] = (
                                     adicional_noturno_atual
                                     if adicional_noturno_atual > 0
                                     else VALOR_ADICIONAL_NOTURNO_SEBRAE
                                 )
-
-                            with pg4:
-                                valor_adicional_noturno = (
-                                    st.number_input(
-                                        "Adic. noturno (R$)",
-                                        min_value=0.0,
-                                        step=10.0,
-                                        disabled=(
-                                            not status_eh_presenca(
-                                                status_sel
-                                            )
-                                        ),
-                                        key=(
-                                            adicional_noturno_key
-                                        ),
-                                    )
+                            with pgt3:
+                                valor_adicional_noturno = st.number_input(
+                                    "Adic. noturno (R$)",
+                                    min_value=0.0,
+                                    step=10.0,
+                                    disabled=(not status_eh_presenca(status_sel)),
+                                    key=adicional_noturno_key,
                                 )
-
-                            valor_acordo = st.number_input(
-                                "Acordos / Bonificações (R$)",
-                                min_value=0.0,
-                                value=(
-                                    float(
-                                        conv.get(
-                                            "valor_acordo"
-                                        )
-                                        or 0.0
-                                    )
-                                    if status_eh_presenca(
-                                        status_sel
-                                    )
-                                    else 0.0
-                                ),
-                                step=10.0,
-                                disabled=(
-                                    not status_eh_presenca(
-                                        status_sel
-                                    )
-                                ),
-                                key=(
-                                    f"engm_acordo_{c_id}"
-                                ),
-                            )
-
                         else:
                             valor_adicional_noturno = 0.0
-                            st.session_state.pop(
-                                adicional_noturno_key,
-                                None,
-                            )
+                            st.session_state.pop(adicional_noturno_key, None)
 
-                            with pg4:
-                                valor_acordo = st.number_input(
-                                    "Acordos / Bonificações (R$)",
-                                    min_value=0.0,
-                                    value=(
-                                        float(
-                                            conv.get(
-                                                "valor_acordo"
-                                            )
-                                            or 0.0
-                                        )
-                                        if status_eh_presenca(
-                                            status_sel
-                                        )
-                                        else 0.0
-                                    ),
-                                    step=10.0,
-                                    disabled=(
-                                        not status_eh_presenca(
-                                            status_sel
-                                        )
-                                    ),
-                                    key=(
-                                        f"engm_acordo_{c_id}"
-                                    ),
-                                )
-
-                        categoria_pag = (
-                            categoria_diaria_colaborador(
-                                colab
-                            )
+                        valor_acordo = st.number_input(
+                            "Acordos / Bonificações (R$)",
+                            min_value=0.0,
+                            value=(
+                                float(conv.get("valor_acordo") or 0.0)
+                                if status_eh_presenca(status_sel)
+                                else 0.0
+                            ),
+                            step=10.0,
+                            disabled=(not status_eh_presenca(status_sel)),
+                            key=f"engm_acordo_{c_id}",
                         )
 
-                        total_fin_prev = (
-                            float(
-                                valor_diaria_financeiro
+                        custo_ctrl_preview = (
+                            valor_controladoria_padrao_colaborador(
+                                colab,
+                                "Diária" if eh_sebrae_card else tipo_diaria_sel,
                             )
-                            + float(valor_extra)
-                            + float(
-                                valor_adicional_noturno
-                            )
-                            + float(valor_acordo)
-                            if status_eh_presenca(
-                                status_sel
-                            )
+                            if status_eh_presenca(status_sel)
                             else 0.0
                         )
 
                         resumo_pag = (
-                            f"{categoria_pag} · "
-                            f"Diária {formatar_reais(valor_diaria_financeiro)} · "
+                            f"Controladoria base {formatar_reais(custo_ctrl_preview)} · "
                             f"Extra {formatar_reais(valor_extra)}"
                         )
-
                         if eh_sebrae_card:
-                            resumo_pag += (
-                                f" · Noturno "
-                                f"{formatar_reais(valor_adicional_noturno)}"
-                            )
-
+                            resumo_pag += f" · Noturno {formatar_reais(valor_adicional_noturno)}"
                         resumo_pag += (
-                            f" · Acordos/Bonificações "
-                            f"{formatar_reais(valor_acordo)} "
-                            f"· Total {formatar_reais(total_fin_prev)}"
+                            f" · Acordos/Bonificações {formatar_reais(valor_acordo)} · "
+                            "Base paga: definida pelo Financeiro"
                         )
 
                         st.markdown(
-                            (
-                                '<div class="engm-pay-summary">'
-                                f'{_html.escape(resumo_pag)}'
-                                '</div>'
-                            ),
+                            '<div class="engm-pay-summary">'
+                            f'{_html.escape(resumo_pag)}'
+                            '</div>',
                             unsafe_allow_html=True,
                         )
 
@@ -15540,7 +15339,6 @@ elif modo_campo:
                         "servicos_adicionais_editados": servicos_adicionais_editados,
                         "tem_conv_separada": tem_conv_separada,
                         "tipo_diaria_sel": tipo_diaria_sel,
-                        "valor_diaria_financeiro": valor_diaria_financeiro,
                         "valor_extra": valor_extra,
                         "valor_adicional_noturno": valor_adicional_noturno,
                         "valor_acordo": valor_acordo,
@@ -15782,11 +15580,7 @@ elif modo_campo:
                             else normalizar_tipo_diaria(item["tipo_diaria_sel"])
                         )
                         custo_pago_final = (
-                            float(
-                                item[
-                                    "valor_diaria_financeiro"
-                                ]
-                            )
+                            float(conv.get("custo_pago") or 0.0)
                             if presente_final
                             else 0.0
                         )
@@ -16854,10 +16648,9 @@ elif modo_financeiro:
             st.query_params.clear()
             st.rerun()
     st.caption(
-        "Conferência semanal de pagamentos adicionais. "
-        "O Financeiro exibe somente colaboradores que tiveram Extra, Adicional noturno "
-        "ou Acordos / Bonificações no ciclo. Para esses colaboradores, o total considera "
-        "a base líquida da diária/meia diária + os adicionais. "
+        "Conferência semanal de pagamentos. "
+        "O valor-base efetivamente pago é preenchido pelo Financeiro na aba VALORES-BASE. "
+        "Extra, adicional noturno e Acordos / Bonificações permanecem separados. "
         "Ciclo de terça-feira a segunda-feira."
     )
 
@@ -16888,9 +16681,57 @@ elif modo_financeiro:
     total_faltas_fin = sum(1 for x in ausencias_fin if x.get("Status") == "Falta")
     total_atest_fin = sum(1 for x in ausencias_fin if x.get("Status") == "Atestado")
 
-    tab_fin_extra, tab_fin_aus, tab_fin_rel = st.tabs([
-        "💸 EXTRAS / ADICIONAIS", "🚫 FALTAS / ATESTADOS", "📄 RELATÓRIO"
+    tab_fin_base, tab_fin_extra, tab_fin_aus, tab_fin_rel = st.tabs([
+        "💵 VALORES-BASE", "💸 EXTRAS / ADICIONAIS", "🚫 FALTAS / ATESTADOS", "📄 RELATÓRIO"
     ])
+
+    with tab_fin_base:
+        st.markdown("### Valor-base efetivamente pago")
+        st.caption(
+            "Aqui o Financeiro informa o valor realmente pago pela diária/meia diária. "
+            "O tipo Diária/Meia vem do apontamento; a Controladoria usa o custo cadastrado/importado do colaborador."
+        )
+        bases_fin = carregar_bases_financeiro(data_ini_fin, data_fim_fin)
+        if not bases_fin:
+            st.info("Nenhum colaborador presente neste ciclo.")
+        else:
+            for item_base in bases_fin:
+                chave_base = re.sub(
+                    r"[^A-Za-z0-9]+", "_",
+                    f"{item_base['Data ISO']}_{item_base['Colaborador ID']}"
+                )
+                with st.container(border=True):
+                    b1, b2 = st.columns([2.3, 1])
+                    with b1:
+                        st.markdown(
+                            f"**{item_base['Colaborador']}**  \n"
+                            f"{item_base['Data']} · {item_base['Tipo']} · {item_base['Unidade']}"
+                        )
+                    with b2:
+                        valor_base_fin = st.number_input(
+                            "Base paga (R$)",
+                            min_value=0.0,
+                            step=10.0,
+                            value=float(item_base["Base atual (R$)"]),
+                            key=f"fin_base_val_{chave_base}",
+                        )
+                    if st.button(
+                        "Salvar valor-base",
+                        key=f"fin_base_save_{chave_base}",
+                        use_container_width=True,
+                    ):
+                        ok_base, msg_base = salvar_base_financeiro_lancamento(
+                            item_base,
+                            valor_base_fin,
+                        )
+                        if ok_base:
+                            st.session_state["_fin_base_feedback"] = msg_base
+                            st.rerun()
+                        else:
+                            st.error(msg_base)
+
+        if st.session_state.pop("_fin_base_feedback", None):
+            st.success("Valor-base atualizado pelo Financeiro.")
 
     with tab_fin_extra:
         fm1, fm2, fm3 = st.columns(3)
@@ -17193,7 +17034,7 @@ else:
                 f'<div class="ap-task amber"><div><strong>{len(pendentes)} apontamento(s) pendente(s)</strong>'
                 '<span>Há colaboradores ainda sem Obra/Serviço definida no dia selecionado. '
                 'No próprio dia eles são pendentes, não atrasados para o Teams. '
-                'Se continuarem sem apontamento, entram na cobrança do dia seguinte; no SEBRAE, a partir de 09:30.</span></div>'
+                'Às 16:00 do próprio dia continuam pendentes; às 09:30 do dia seguinte passam a atrasados. No SEBRAE, o atraso também começa às 09:30 do dia seguinte.</span></div>'
                 f'<div class="ap-task-count">{len(pendentes)}</div></div>'
             )
         if qtd_conflitos:
@@ -20866,7 +20707,7 @@ else:
             )
             st.caption(
                 "Automático: demais unidades às 16:00 no próprio dia e, "
-                "se continuar pendente, às 09:30 e 15:00 do dia seguinte. "
+                "se continuar pendente, às 09:30 do dia seguinte, quando passa a atrasado. "
                 "SEBRAE: um único lembrete às 21:00 do próprio dia; "
                 "o prazo operacional do apontamento vai até 09:29 do dia seguinte. "
                 "Depois disso, se continuar pendente, fica atrasado e disponível para cobrança manual."
@@ -21571,7 +21412,7 @@ else:
                 st.markdown("---")
                 st.caption(
                     "Automático — demais unidades: 16:00 no dia do serviço, "
-                    "09:30 e 15:00 no dia seguinte. SEBRAE: 21:00 no próprio dia, "
+                    "09:30 no dia seguinte. Às 16:00 do próprio dia ainda é pendente; às 09:30 do dia seguinte passa a atrasado. SEBRAE: 21:00 no próprio dia, "
                     "uma única vez. Manual: disponível enquanto a pendência existir. "
                     "PAULO e HELENA recebem todas as pendências quando ativos."
                 )
