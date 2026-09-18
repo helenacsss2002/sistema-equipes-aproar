@@ -2510,6 +2510,160 @@ VALOR_ADICIONAL_NOTURNO_SEBRAE = 90.00
 
 
 @st.cache_resource
+def _garantir_colunas_financeiras_essenciais():
+    """
+    Garante primeiro, em uma transação isolada, as colunas usadas pelo
+    apontamento e pelo Financeiro. Assim, se uma migração histórica falhar
+    depois, estas colunas não são desfeitas por rollback.
+    """
+    if DB_BACKEND != "NEON" or not hasattr(supabase, "_connect"):
+        return False
+
+    try:
+        with supabase._connect() as conn:
+            with conn.cursor() as cur:
+                for _tabela_fin in ("convocacoes", "apontamentos"):
+                    cur.execute(
+                        f"""
+                        ALTER TABLE IF EXISTS {_tabela_fin}
+                        ADD COLUMN IF NOT EXISTS tipo_diaria TEXT
+                        """
+                    )
+                    cur.execute(
+                        f"""
+                        ALTER TABLE IF EXISTS {_tabela_fin}
+                        ADD COLUMN IF NOT EXISTS custo_pago NUMERIC(12,2)
+                        """
+                    )
+                    cur.execute(
+                        f"""
+                        ALTER TABLE IF EXISTS {_tabela_fin}
+                        ADD COLUMN IF NOT EXISTS custo_pago_definido_financeiro
+                        BOOLEAN NOT NULL DEFAULT FALSE
+                        """
+                    )
+                    cur.execute(
+                        f"""
+                        ALTER TABLE IF EXISTS {_tabela_fin}
+                        ADD COLUMN IF NOT EXISTS valor_acordo
+                        NUMERIC(12,2) NOT NULL DEFAULT 0
+                        """
+                    )
+                    cur.execute(
+                        f"""
+                        ALTER TABLE IF EXISTS {_tabela_fin}
+                        ADD COLUMN IF NOT EXISTS valor_adicional_noturno
+                        NUMERIC(12,2) NOT NULL DEFAULT 0
+                        """
+                    )
+                    cur.execute(
+                        f"""
+                        ALTER TABLE IF EXISTS {_tabela_fin}
+                        ADD COLUMN IF NOT EXISTS custo_encargos_base
+                        NUMERIC(12,2)
+                        """
+                    )
+                    cur.execute(
+                        f"""
+                        ALTER TABLE IF EXISTS {_tabela_fin}
+                        ADD COLUMN IF NOT EXISTS custos_separados
+                        BOOLEAN NOT NULL DEFAULT FALSE
+                        """
+                    )
+
+                conn.commit()
+        return True
+    except Exception:
+        return False
+
+
+# Executa antes das migrações históricas maiores.
+_garantir_colunas_financeiras_essenciais()
+
+
+def _garantir_schema_apontamento_runtime():
+    """
+    Confere e corrige, no momento do uso, as colunas financeiras do
+    apontamento. A rotina não depende do cache de inicialização: cada coluna
+    ausente é criada e confirmada em uma transação própria, evitando que uma
+    migração histórica com erro dê rollback nas demais.
+    """
+    if DB_BACKEND != "NEON" or not hasattr(supabase, "_connect"):
+        return True, ""
+
+    colunas = {
+        "tipo_diaria": "TEXT",
+        "custo_pago": "NUMERIC(12,2)",
+        "custo_pago_definido_financeiro": "BOOLEAN NOT NULL DEFAULT FALSE",
+        "valor_acordo": "NUMERIC(12,2) NOT NULL DEFAULT 0",
+        "valor_adicional_noturno": "NUMERIC(12,2) NOT NULL DEFAULT 0",
+        "custo_encargos_base": "NUMERIC(12,2)",
+        "custos_separados": "BOOLEAN NOT NULL DEFAULT FALSE",
+        "migracao_sebrae_noturno_v2": "BOOLEAN NOT NULL DEFAULT FALSE",
+    }
+
+    erros = []
+
+    for tabela in ("convocacoes", "apontamentos"):
+        try:
+            with supabase._connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT to_regclass(%s) AS tabela",
+                        (tabela,),
+                    )
+                    row = cur.fetchone() or {}
+                    if not row.get("tabela"):
+                        continue
+
+                for coluna, ddl in colunas.items():
+                    try:
+                        with conn.cursor() as cur:
+                            cur.execute(
+                                f'ALTER TABLE "{tabela}" '
+                                f'ADD COLUMN IF NOT EXISTS "{coluna}" {ddl}'
+                            )
+                        conn.commit()
+                    except Exception as exc:
+                        conn.rollback()
+                        erros.append(
+                            f"{tabela}.{coluna}: {str(exc)[:120]}"
+                        )
+        except Exception as exc:
+            erros.append(f"{tabela}: {str(exc)[:120]}")
+
+    # O portal de apontamento grava primeiro em convocacoes. Só consideramos
+    # o schema pronto se todas as colunas exigidas nessa tabela existirem.
+    faltantes = []
+    try:
+        with supabase._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT column_name
+                      FROM information_schema.columns
+                     WHERE table_schema = current_schema()
+                       AND table_name = 'convocacoes'
+                    """
+                )
+                existentes = {
+                    str(r.get("column_name") or "")
+                    for r in (cur.fetchall() or [])
+                }
+                faltantes = [c for c in colunas if c not in existentes]
+    except Exception as exc:
+        erros.append(f"verificação: {str(exc)[:120]}")
+
+    if faltantes:
+        detalhe = ", ".join(faltantes)
+        if erros:
+            detalhe += " · " + " | ".join(erros[:2])
+        return False, detalhe
+
+    return True, ""
+
+
+@st.cache_resource
 def _garantir_estrutura_cadastros_admin():
     """
     Pequena migração compatível com a base atual.
@@ -10133,19 +10287,13 @@ def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
                     normalizar_tipo_diaria(tipo_diaria_sel)
                     == "Não"
                 )
-                if sem_extra:
-                    st.session_state[diaria_key] = 0.0
-
                 with p2:
                     valor_diaria_financeiro = st.number_input(
                         "Financeiro (R$)",
                         min_value=0.0,
                         step=1.0,
                         format="%.2f",
-                        disabled=(
-                            (not status_eh_presenca(status_sel))
-                            or sem_extra
-                        ),
+                        disabled=(not status_eh_presenca(status_sel)),
                         key=diaria_key,
                         help=(
                             "Valor que será enviado ao Financeiro. "
@@ -10235,16 +10383,20 @@ def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
                     )
                     nova_obs = montar_observacao_operacional(turno, obs_nova, meta)
                     try:
+                        schema_ok, schema_detalhe = _garantir_schema_apontamento_runtime()
+                        if not schema_ok:
+                            raise RuntimeError(
+                                "Banco ainda não está pronto para o apontamento: "
+                                + schema_detalhe
+                            )
+
                         presente_final = status_eh_presenca(status_sel)
                         tipo_diaria_final = normalizar_tipo_diaria(
                             tipo_diaria_sel
                         )
                         custo_pago_final = (
                             float(valor_diaria_financeiro)
-                            if (
-                                presente_final
-                                and tipo_diaria_final != "Não"
-                            )
+                            if presente_final
                             else 0.0
                         )
                         valor_extra_final = 0.0
@@ -10292,8 +10444,11 @@ def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
                         limpar_cache_operacional()
                         st.success(f"Apontamento de {colab.get('nome','-')} salvo.")
                         st.rerun()
-                    except Exception:
-                        st.error("Não foi possível salvar. Tente novamente.")
+                    except Exception as exc:
+                        st.error(
+                            "Não foi possível salvar. "
+                            + str(exc)[:220]
+                        )
 
 
 def render_indisponibilidades_admin():
@@ -10507,15 +10662,11 @@ def salvar_ajuste_financeiro_lancamento(
     usuario="FINANCEIRO",
 ):
     """
-    Ajusta os valores financeiros de um colaborador em um dia.
+    Salva o ajuste do Financeiro nos registros que originaram a linha.
 
-    A alteração é gravada nas tabelas ``convocacoes`` e ``apontamentos``.
-    Como o portal, os relatórios e a Controladoria leem essas mesmas fontes,
-    o ajuste passa a aparecer em todo o sistema.
-
-    Quando existem várias convocações do mesmo colaborador no mesmo dia,
-    os valores monetários ficam no primeiro registro e os demais são zerados,
-    evitando duplicidade no total diário.
+    A alteração é gravada em convocacoes e apontamentos. Em Neon, usa SQL
+    direto e confirma quantas linhas foram atualizadas. Isso evita o caso em
+    que a interface mostra o valor editado, mas o banco não persiste nada.
     """
     ids = [
         str(x).strip()
@@ -10524,104 +10675,144 @@ def salvar_ajuste_financeiro_lancamento(
     ]
 
     if not ids:
-        return False, "Nenhum apontamento foi encontrado para este lançamento."
+        return False, "Nenhum registro de origem foi encontrado para esta linha."
 
     financeiro = round(max(0.0, float(valor_financeiro or 0.0)), 2)
     noturno = round(max(0.0, float(valor_adicional_noturno or 0.0)), 2)
     acordo = round(max(0.0, float(valor_acordo or 0.0)), 2)
 
+    # Garante as colunas antes de qualquer gravação.
     try:
-        for pos, conv_id in enumerate(ids):
-            # Um único registro carrega o total diário; isso impede que duas
-            # convocações da mesma pessoa no dia dupliquem o pagamento.
-            fin_reg = financeiro if pos == 0 else 0.0
-            noturno_reg = noturno if pos == 0 else 0.0
-            acordo_reg = acordo if pos == 0 else 0.0
+        _garantir_colunas_financeiras_essenciais.clear()
+    except Exception:
+        pass
+    _garantir_colunas_financeiras_essenciais()
 
-            antes = None
-            try:
-                resposta_antes = (
+    try:
+        if DB_BACKEND == "NEON" and hasattr(supabase, "_connect"):
+            atualizadas_conv = 0
+
+            with supabase._connect() as conn:
+                with conn.cursor() as cur:
+                    for pos, conv_id in enumerate(ids):
+                        fin_reg = financeiro if pos == 0 else 0.0
+                        noturno_reg = noturno if pos == 0 else 0.0
+                        acordo_reg = acordo if pos == 0 else 0.0
+
+                        cur.execute(
+                            """
+                            UPDATE convocacoes
+                               SET custo_pago = %s,
+                                   custo_pago_definido_financeiro = TRUE,
+                                   valor_adicional_noturno = %s,
+                                   valor_acordo = %s
+                             WHERE CAST(id AS TEXT) = %s
+                            """,
+                            (
+                                fin_reg,
+                                noturno_reg,
+                                acordo_reg,
+                                conv_id,
+                            ),
+                        )
+                        atualizadas_conv += int(cur.rowcount or 0)
+
+                        # A tabela estruturada pode ainda não ter uma linha para
+                        # convocações antigas; quando houver, sincroniza.
+                        cur.execute(
+                            """
+                            UPDATE apontamentos
+                               SET custo_pago = %s,
+                                   custo_pago_definido_financeiro = TRUE,
+                                   valor_adicional_noturno = %s,
+                                   valor_acordo = %s,
+                                   atualizado_em = NOW()
+                             WHERE CAST(convocacao_id AS TEXT) = %s
+                            """,
+                            (
+                                fin_reg,
+                                noturno_reg,
+                                acordo_reg,
+                                conv_id,
+                            ),
+                        )
+
+                if atualizadas_conv <= 0:
+                    conn.rollback()
+                    return False, (
+                        "O banco não encontrou os registros deste lançamento "
+                        "para atualizar."
+                    )
+
+                conn.commit()
+
+        else:
+            # Compatibilidade com o backend REST.
+            atualizadas_conv = 0
+            for pos, conv_id in enumerate(ids):
+                fin_reg = financeiro if pos == 0 else 0.0
+                noturno_reg = noturno if pos == 0 else 0.0
+                acordo_reg = acordo if pos == 0 else 0.0
+
+                payload = {
+                    "custo_pago": fin_reg,
+                    "custo_pago_definido_financeiro": True,
+                    "valor_adicional_noturno": noturno_reg,
+                    "valor_acordo": acordo_reg,
+                }
+
+                resp = (
                     supabase.table("convocacoes")
-                    .select("*")
+                    .update(payload)
                     .eq("id", conv_id)
-                    .limit(1)
                     .execute()
                 )
-                dados_antes = list(
-                    getattr(resposta_antes, "data", None)
-                    or []
-                )
-                antes = dados_antes[0] if dados_antes else None
-            except Exception:
-                antes = None
+                dados = list(getattr(resp, "data", None) or [])
+                if dados:
+                    atualizadas_conv += len(dados)
 
-            payload = {
-                "custo_pago": fin_reg,
-                "custo_pago_definido_financeiro": True,
-                "valor_adicional_noturno": noturno_reg,
-                "valor_acordo": acordo_reg,
-            }
+            if atualizadas_conv <= 0:
+                return False, "O banco não confirmou nenhuma alteração."
 
-            supabase.table("convocacoes").update(
-                payload
-            ).eq("id", conv_id).execute()
-
-            if schema_producao_disponivel():
-                try:
-                    with supabase._connect() as conn:
-                        with conn.cursor() as cur:
-                            cur.execute(
-                                """
-                                UPDATE apontamentos
-                                   SET custo_pago = %s,
-                                       custo_pago_definido_financeiro = TRUE,
-                                       valor_adicional_noturno = %s,
-                                       valor_acordo = %s,
-                                       atualizado_em = NOW()
-                                 WHERE convocacao_id = %s
-                                """,
-                                (
-                                    fin_reg,
-                                    noturno_reg,
-                                    acordo_reg,
-                                    conv_id,
-                                ),
-                            )
-                        conn.commit()
-                except Exception:
-                    # A convocação é a fonte operacional primária; manter a
-                    # edição mesmo se uma instalação antiga ainda não tiver
-                    # todas as colunas na tabela estruturada.
-                    pass
-
-            try:
-                registrar_auditoria_prod(
-                    "convocacao",
-                    conv_id,
-                    "AJUSTE_FINANCEIRO",
-                    usuario,
-                    antes=antes,
-                    depois=payload,
-                    contexto={
-                        "origem": "portal_financeiro",
-                        "data": str(item.get("Data ISO") or ""),
-                        "colaborador_id": str(
-                            item.get("_colaborador_id")
-                            or ""
-                        ),
-                    },
-                )
-            except Exception:
-                pass
-
+        # Invalida o cache que alimenta tanto o detalhamento quanto o resumo.
         limpar_cache_operacional()
-        return True, "Ajuste salvo e sincronizado em todo o sistema."
+
+        try:
+            _buscar_convocacoes_intervalo.clear()
+        except Exception:
+            pass
+
+        try:
+            registrar_auditoria_prod(
+                "financeiro",
+                "|".join(ids),
+                "AJUSTE_FINANCEIRO",
+                usuario,
+                antes=None,
+                depois={
+                    "custo_pago": financeiro,
+                    "valor_adicional_noturno": noturno,
+                    "valor_acordo": acordo,
+                },
+                contexto={
+                    "origem": "portal_financeiro",
+                    "data": str(item.get("Data ISO") or ""),
+                    "colaborador_id": str(
+                        item.get("_colaborador_id") or ""
+                    ),
+                },
+            )
+        except Exception:
+            pass
+
+        return True, "Ajuste salvo e sincronizado."
 
     except Exception as exc:
         return False, (
             "Não foi possível salvar o ajuste financeiro: "
-            + str(exc)[:180]
+            + str(exc)[:220]
         )
+
 
 def carregar_dados_financeiro(data_inicio, data_fim):
     """Retorna pagamentos líquidos e ausências do período."""
@@ -13065,6 +13256,13 @@ elif modo_campo:
         if not itens:
             return 0, []
 
+        schema_ok, schema_detalhe = _garantir_schema_apontamento_runtime()
+        if not schema_ok:
+            return 0, [
+                "Não foi possível preparar o banco para salvar o apontamento. "
+                f"Campos pendentes: {schema_detalhe}"
+            ]
+
         # Caminho rápido de produção.
         if (
             DB_BACKEND == "NEON"
@@ -14825,8 +15023,14 @@ elif modo_campo:
 
             dados_form = {}
 
-            with st.container():
-                for conv in render_campo:
+            # O formulário evita o rerun completo a cada alteração de campo.
+            # O Streamlit só envia os valores quando o supervisor conclui uma
+            # ação estrutural (adicionar/remover serviço) ou salva a equipe.
+            with st.form(
+                "engm_form_apontamento_equipe_v671",
+                clear_on_submit=False,
+            ):
+                for _idx_form, conv in enumerate(render_campo, start=1):
                     c_id = conv.get("id")
                     colab = dict_colaboradores.get(
                         conv.get("colaborador_id"),
@@ -15119,19 +15323,13 @@ elif modo_campo:
                             normalizar_tipo_diaria(tipo_diaria_sel)
                             == "Não"
                         )
-                        if sem_extra:
-                            st.session_state[diaria_key] = 0.0
-
                         with pg2:
                             valor_diaria_financeiro = st.number_input(
                                 "Financeiro (R$)",
                                 min_value=0.0,
                                 step=1.0,
                                 format="%.2f",
-                                disabled=(
-                                    (not status_eh_presenca(status_sel))
-                                    or sem_extra
-                                ),
+                                disabled=(not status_eh_presenca(status_sel)),
                                 key=diaria_key,
                                 help=(
                                     "Valor que será enviado ao Financeiro. "
@@ -15189,39 +15387,6 @@ elif modo_campo:
                                 key=f"engm_acordo_{c_id}",
                             )
 
-                        custo_ctrl_preview = (
-                            valor_controladoria_padrao_colaborador(
-                                colab,
-                                tipo_diaria_sel,
-                            )
-                            if status_eh_presenca(status_sel)
-                            else 0.0
-                        )
-
-                        total_fin_prev = (
-                            float(valor_diaria_financeiro)
-                            + float(valor_adicional_noturno)
-                            + float(valor_acordo)
-                            if status_eh_presenca(status_sel)
-                            else 0.0
-                        )
-
-                        resumo_pag = (
-                            f"Financeiro {formatar_reais(valor_diaria_financeiro)}"
-                        )
-                        if eh_sebrae_card:
-                            resumo_pag += f" · Noturno {formatar_reais(valor_adicional_noturno)}"
-                        resumo_pag += (
-                            f" · Acordos/Bonificações {formatar_reais(valor_acordo)} · "
-                            f"Total Financeiro {formatar_reais(total_fin_prev)}"
-                        )
-
-                        st.markdown(
-                            '<div class="engm-pay-summary">'
-                            f'{_html.escape(resumo_pag)}'
-                            '</div>',
-                            unsafe_allow_html=True,
-                        )
 
                         if eh_sebrae_card:
                             st.caption(
@@ -15273,11 +15438,8 @@ elif modo_campo:
                                 )
 
                                 with ca1:
-                                    if st.button(
-                                        "+ Adicionar serviço",
-                                        key=(
-                                            f"engm_add_serv_{c_id}"
-                                        ),
+                                    if st.form_submit_button(
+                                        "+ Adicionar serviço" + ("\u200b" * _idx_form),
                                         use_container_width=True,
                                     ):
                                         st.session_state[
@@ -15286,15 +15448,10 @@ elif modo_campo:
                                         st.rerun()
 
                                 with ca2:
-                                    if st.button(
-                                        "− Remover último",
-                                        key=(
-                                            f"engm_rem_serv_{c_id}"
-                                        ),
+                                    if st.form_submit_button(
+                                        "− Remover último" + ("\u2060" * _idx_form),
                                         use_container_width=True,
-                                        disabled=(
-                                            qtd_adic <= 0
-                                        ),
+                                        disabled=(qtd_adic <= 0),
                                     ):
                                         idx_rem = qtd_adic
                                         st.session_state.pop(
@@ -15488,11 +15645,10 @@ elif modo_campo:
                         "unidade_contexto": unidade,
                     }
 
-                salvar_todos = st.button(
+                salvar_todos = st.form_submit_button(
                     "Salvar equipe",
                     type="primary",
                     use_container_width=True,
-                    key="engm_salvar_equipe_v630",
                 )
 
             if salvar_todos:
@@ -15731,10 +15887,7 @@ elif modo_campo:
                             float(
                                 item["valor_diaria_financeiro"]
                             )
-                            if (
-                                presente_final
-                                and tipo_diaria_final != "Não"
-                            )
+                            if presente_final
                             else 0.0
                         )
                         valor_extra_final = 0.0
@@ -16881,47 +17034,52 @@ elif modo_financeiro:
                 for item in pagamentos_fin
             ])
 
-            detalhe_fin_editado = st.data_editor(
-                detalhe_fin_editor,
-                hide_index=True,
-                use_container_width=True,
-                num_rows="fixed",
-                key="editor_financeiro_pagamentos",
-                disabled=[
-                    "Data",
-                    "Colaborador",
-                    "Função",
-                    "Unidade",
-                    "Extra",
-                ],
-                column_config={
-                    "Financeiro (R$)": st.column_config.NumberColumn(
-                        "Financeiro (R$)",
-                        min_value=0.0,
-                        step=1.0,
-                        format="R$ %.2f",
-                    ),
-                    "Adic. noturno (R$)": st.column_config.NumberColumn(
-                        "Adic. noturno (R$)",
-                        min_value=0.0,
-                        step=1.0,
-                        format="R$ %.2f",
-                    ),
-                    "Acordos / Bonificações (R$)": st.column_config.NumberColumn(
-                        "Acordos / Bonificações (R$)",
-                        min_value=0.0,
-                        step=1.0,
-                        format="R$ %.2f",
-                    ),
-                },
-            )
-
-            if st.button(
-                "Salvar ajustes do Financeiro",
-                type="primary",
-                use_container_width=True,
-                key="btn_salvar_ajustes_financeiro",
+            with st.form(
+                "form_ajustes_financeiro",
+                clear_on_submit=False,
             ):
+                detalhe_fin_editado = st.data_editor(
+                    detalhe_fin_editor,
+                    hide_index=True,
+                    use_container_width=True,
+                    num_rows="fixed",
+                    key="editor_financeiro_pagamentos",
+                    disabled=[
+                        "Data",
+                        "Colaborador",
+                        "Função",
+                        "Unidade",
+                        "Extra",
+                    ],
+                    column_config={
+                        "Financeiro (R$)": st.column_config.NumberColumn(
+                            "Financeiro (R$)",
+                            min_value=0.0,
+                            step=1.0,
+                            format="R$ %.2f",
+                        ),
+                        "Adic. noturno (R$)": st.column_config.NumberColumn(
+                            "Adic. noturno (R$)",
+                            min_value=0.0,
+                            step=1.0,
+                            format="R$ %.2f",
+                        ),
+                        "Acordos / Bonificações (R$)": st.column_config.NumberColumn(
+                            "Acordos / Bonificações (R$)",
+                            min_value=0.0,
+                            step=1.0,
+                            format="R$ %.2f",
+                        ),
+                    },
+                )
+
+                _salvar_fin_submit = st.form_submit_button(
+                    "Salvar ajustes do Financeiro",
+                    type="primary",
+                    use_container_width=True,
+                )
+
+            if _salvar_fin_submit:
                 alterados_fin = 0
                 erros_fin = []
 
