@@ -4087,6 +4087,75 @@ def _atualizar_colaborador_admin_rapido(
 
 
 
+# --- FUNÇÕES DE LIMPEZA E PADRONIZAÇÃO ---
+def identificar_unidade(nome_card):
+    if not nome_card: return "GERAL"
+    texto = unicodedata.normalize('NFKD', str(nome_card)).encode('ASCII', 'ignore').decode('utf-8').upper()
+    
+    if "APRL005" in texto or "MARACANAU" in texto: return "MARACANAÚ"
+    if "SEBRAE" in texto: return "SEBRAE"
+    if "UNIFOR" in texto: return "UNIFOR"
+    if "IDALYA" in texto or "MATHEUS" in texto: return "IDALYA E MATHEUS"
+    if "COLISEU" in texto: return "COLISEU"
+    if "BARRA" in texto: return "BARRA DO CEARÁ"
+    if "MUSEU" in texto: return "MUSEU"
+    if "HORIZONTE" in texto: return "HORIZONTE"
+    if "ESCRITORIO" in texto: return "ESCRITÓRIO"
+    if "CASA DA INDUSTRIA" in texto or "FIEC" in texto or " DR " in texto or "| SESI DR |" in texto or "| SESI DR" in texto: return "FIEC"
+    if "CENTRO" in texto: return "CENTRO"
+    
+    partes = str(nome_card).split('|')
+    if len(partes) >= 2:
+        return partes[1].strip().upper()
+    return "GERAL"
+
+def limpar_funcao(texto):
+    if not texto or str(texto).upper() == 'NAN': return "INDEFINIDA"
+    texto_limpo = str(texto).upper().strip()
+    texto_limpo = re.sub(r'^\d+\s*-\s*', '', texto_limpo)
+    texto_limpo = unicodedata.normalize('NFKD', texto_limpo).encode('ASCII', 'ignore').decode('utf-8')
+    return texto_limpo
+
+def normalizar(texto):
+    if not texto: return ""
+    return ''.join(c for c in unicodedata.normalize('NFD', str(texto)) if unicodedata.category(c) != 'Mn').upper().strip()
+
+def get_cor_funcao(funcao):
+    cores = ["🟥", "🟧", "🟨", "🟩", "🟦", "🟪", "🟫", "⬛"]
+    hash_num = sum(ord(c) for c in str(funcao))
+    return cores[hash_num % len(cores)]
+
+# ---------------------------------------------------------------------------
+# REGRAS DE DIÁRIA POR CATEGORIA
+# ---------------------------------------------------------------------------
+# CONTROLADORIA — custo padrão com encargos.
+VALOR_DIARIA_PROFISSIONAL = 241.74
+VALOR_DIARIA_AJUDANTE = 182.34
+
+# FINANCEIRO — valor líquido padrão pago ao colaborador.
+VALOR_FIN_DIARIA_PROFISSIONAL = 120.00
+VALOR_FIN_MEIA_PROFISSIONAL = 60.00
+VALOR_FIN_DIARIA_AJUDANTE = 80.00
+VALOR_FIN_MEIA_AJUDANTE = 40.00
+
+# Compatibilidade com trechos antigos que assumiam Profissional.
+VALOR_LIMPO_DIARIA = VALOR_FIN_DIARIA_PROFISSIONAL
+VALOR_LIMPO_MEIA_DIARIA = VALOR_FIN_MEIA_PROFISSIONAL
+
+TIPOS_DIARIA = ["Diária", "Meia diária"]
+
+# Regras de prazo/cobrança:
+# - Demais unidades: 16:00 é lembrete preventivo; atraso começa às 09:30 de D+1.
+# - SEBRAE: jornada 17h–02h continua sendo DIÁRIA INTEGRAL;
+#   o apontamento pode ser concluído até 09:29 do dia seguinte sem atraso.
+# - Para o Teams, o SEBRAE recebe apenas UM lembrete automático às 21:00
+#   do próprio dia do serviço. Depois disso continua visível para cobrança manual.
+VALOR_ADICIONAL_NOTURNO_SEBRAE = 90.00
+HORA_LEMBRETE_TEAMS_GERAL = datetime.time(16, 0)
+HORA_LIMITE_APONTAMENTO_SEBRAE = datetime.time(9, 30)
+HORA_LEMBRETE_TEAMS_SEBRAE = datetime.time(21, 0)
+
+
 def eh_unidade_sebrae(unidade):
     return normalizar(unidade or "") == "SEBRAE"
 
