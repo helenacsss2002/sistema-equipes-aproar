@@ -2541,6 +2541,36 @@ def _garantir_estrutura_cadastros_admin():
                     """
                 )
 
+                cur.execute(
+                    """
+                    ALTER TABLE colaboradores
+                    ADD COLUMN IF NOT EXISTS categoria_diaria TEXT
+                    """
+                )
+
+                cur.execute(
+                    """
+                    UPDATE colaboradores
+                       SET categoria_diaria =
+                           CASE
+                               WHEN UPPER(COALESCE(funcao, '')) LIKE ANY(
+                                   ARRAY[
+                                       '%AJUDANTE%',
+                                       '%AUXILIAR%',
+                                       '%SERVENTE%'
+                                   ]
+                               )
+                                   THEN 'Ajudante'
+                               WHEN COALESCE(valor_diaria, 0) > 0
+                                AND COALESCE(valor_diaria, 0) < 220
+                                   THEN 'Ajudante'
+                               ELSE 'Profissional'
+                           END
+                     WHERE categoria_diaria IS NULL
+                        OR TRIM(COALESCE(categoria_diaria, '')) = ''
+                    """
+                )
+
                 # Campos financeiros do apontamento. Mantemos também em
                 # convocacoes porque os relatórios operacionais já usam esta
                 # tabela como leitura rápida/compatível.
@@ -2573,6 +2603,12 @@ def _garantir_estrutura_cadastros_admin():
                         f"""
                         ALTER TABLE IF EXISTS {_tabela_fin}
                         ADD COLUMN IF NOT EXISTS custo_encargos_base NUMERIC(12,2)
+                        """
+                    )
+                    cur.execute(
+                        f"""
+                        ALTER TABLE IF EXISTS {_tabela_fin}
+                        ADD COLUMN IF NOT EXISTS custos_separados BOOLEAN NOT NULL DEFAULT FALSE
                         """
                     )
 
@@ -2924,6 +2960,437 @@ def _garantir_estrutura_cadastros_admin():
                                )
                            ) > 0.005
                        )
+                    """
+                )
+
+                # ------------------------------------------------------------
+                # MIGRAÇÃO V2 — DIÁRIA E EXTRA EM CAMPOS SEPARADOS
+                # ------------------------------------------------------------
+                # A versão antiga gravava "custo_pago" como DIÁRIA + EXTRA.
+                # Agora:
+                #   custo_pago = diária efetivamente paga;
+                #   valor_extra = extra real;
+                #   valor_acordo = acordos/bonificações;
+                #   valor_adicional_noturno = adicional noturno.
+                #
+                # Padrões reconhecidos das planilhas antigas:
+                # Profissional: R$ 120 padrão, com diárias negociadas como 150/200.
+                # Ajudante: R$ 80 padrão, com diárias negociadas como 100/120.
+                # Meia diária = metade do valor cheio.
+                cur.execute(
+                    """
+                    SELECT
+                        v.id,
+                        v.status,
+                        v.tipo_diaria,
+                        v.custo_pago,
+                        v.valor_extra,
+                        v.valor_adicional_noturno,
+                        v.observacao,
+                        v.colaborador_id,
+                        o.unidade,
+                        c.funcao,
+                        c.categoria_diaria,
+                        c.valor_diaria
+                    FROM convocacoes v
+                    LEFT JOIN obras o
+                      ON o.id = v.obra_id
+                    LEFT JOIN colaboradores c
+                      ON c.id = v.colaborador_id
+                    WHERE COALESCE(v.custos_separados, FALSE) = FALSE
+                    """
+                )
+
+                _linhas_custo_legado = cur.fetchall() or []
+
+                _status_presenca_v2 = {
+                    "Presente (Integral)",
+                    "Presente (Só Manhã)",
+                    "Presente (Só Tarde)",
+                    "Saída Antecipada",
+                    "Presente",
+                    "Extra",
+                }
+
+                _status_meia_v2 = {
+                    "Presente (Só Manhã)",
+                    "Presente (Só Tarde)",
+                    "Saída Antecipada",
+                }
+
+                def _row_get_v2(row, chave, idx):
+                    if isinstance(row, dict):
+                        return row.get(chave)
+                    try:
+                        return row[idx]
+                    except Exception:
+                        return None
+
+                def _float_v2(valor, padrao=0.0):
+                    try:
+                        return float(valor or 0.0)
+                    except Exception:
+                        return float(padrao)
+
+                for _row_v2 in _linhas_custo_legado:
+                    _id_v2 = _row_get_v2(_row_v2, "id", 0)
+                    _status_v2 = str(
+                        _row_get_v2(_row_v2, "status", 1)
+                        or ""
+                    ).strip()
+                    _tipo_v2 = str(
+                        _row_get_v2(_row_v2, "tipo_diaria", 2)
+                        or ""
+                    ).strip()
+                    _custo_antigo_v2 = _float_v2(
+                        _row_get_v2(_row_v2, "custo_pago", 3)
+                    )
+                    _extra_antigo_v2 = _float_v2(
+                        _row_get_v2(_row_v2, "valor_extra", 4)
+                    )
+                    _noturno_v2 = _float_v2(
+                        _row_get_v2(
+                            _row_v2,
+                            "valor_adicional_noturno",
+                            5,
+                        )
+                    )
+                    _obs_v2 = str(
+                        _row_get_v2(_row_v2, "observacao", 6)
+                        or ""
+                    )
+                    _unidade_v2 = str(
+                        _row_get_v2(_row_v2, "unidade", 8)
+                        or ""
+                    ).strip()
+                    _funcao_v2 = str(
+                        _row_get_v2(_row_v2, "funcao", 9)
+                        or ""
+                    )
+                    _categoria_v2 = str(
+                        _row_get_v2(
+                            _row_v2,
+                            "categoria_diaria",
+                            10,
+                        )
+                        or ""
+                    ).upper()
+                    _valor_planilha_v2 = _float_v2(
+                        _row_get_v2(
+                            _row_v2,
+                            "valor_diaria",
+                            11,
+                        )
+                    )
+
+                    _presente_v2 = (
+                        _status_v2
+                        in _status_presenca_v2
+                    )
+
+                    if (
+                        "AJUD" in _categoria_v2
+                        or "SERVENT" in _categoria_v2
+                        or "AUX" in _categoria_v2
+                    ):
+                        _eh_ajudante_v2 = True
+                    elif any(
+                        termo in _funcao_v2.upper()
+                        for termo in (
+                            "AJUDANTE",
+                            "AUXILIAR",
+                            "SERVENTE",
+                        )
+                    ):
+                        _eh_ajudante_v2 = True
+                    elif (
+                        _valor_planilha_v2 > 0
+                        and _valor_planilha_v2 < 220
+                    ):
+                        _eh_ajudante_v2 = True
+                    else:
+                        _eh_ajudante_v2 = False
+
+                    _meia_v2 = (
+                        "MEIA" in _tipo_v2.upper()
+                        or _status_v2
+                        in _status_meia_v2
+                    )
+
+                    # SEBRAE 17h–02h é sempre diária integral.
+                    if _unidade_v2.upper() == "SEBRAE":
+                        _meia_v2 = False
+
+                        if (
+                            _presente_v2
+                            and _noturno_v2 <= 0.005
+                        ):
+                            # Caso ainda exista uma versão antiga com os R$ 90
+                            # misturados no custo/extra, separa antes da leitura.
+                            if (
+                                _extra_antigo_v2 >= 89.995
+                                and _custo_antigo_v2 >= 90.0
+                            ):
+                                _extra_antigo_v2 = max(
+                                    0.0,
+                                    _extra_antigo_v2 - 90.0,
+                                )
+                                _custo_antigo_v2 = max(
+                                    0.0,
+                                    _custo_antigo_v2 - 90.0,
+                                )
+
+                            _noturno_v2 = 90.0
+
+                    _base_cheia_fin_v2 = (
+                        80.0
+                        if _eh_ajudante_v2
+                        else 120.0
+                    )
+                    _base_fin_v2 = (
+                        _base_cheia_fin_v2 / 2.0
+                        if _meia_v2
+                        else _base_cheia_fin_v2
+                    )
+
+                    _base_cheia_ctrl_v2 = (
+                        182.34
+                        if _eh_ajudante_v2
+                        else 241.74
+                    )
+                    _base_ctrl_v2 = (
+                        _base_cheia_ctrl_v2 / 2.0
+                        if _meia_v2
+                        else _base_cheia_ctrl_v2
+                    )
+
+                    if not _presente_v2:
+                        _diaria_nova_v2 = 0.0
+                        _extra_novo_v2 = 0.0
+
+                    else:
+                        _total_antigo_v2 = (
+                            _custo_antigo_v2
+                            if _custo_antigo_v2 > 0
+                            else (
+                                _base_fin_v2
+                                + max(
+                                    0.0,
+                                    _extra_antigo_v2,
+                                )
+                            )
+                        )
+
+                        _obs_norm_v2 = (
+                            unicodedata.normalize(
+                                "NFKD",
+                                _obs_v2,
+                            )
+                            .encode(
+                                "ASCII",
+                                "ignore",
+                            )
+                            .decode(
+                                "utf-8"
+                            )
+                            .upper()
+                        )
+
+                        # "acrescido 30 para fechar a diária de R$150,00"
+                        _alvo_diaria_v2 = None
+                        _match_diaria_v2 = re.search(
+                            r"(?:FECHAR|COMPLETAR).*?DIARIA.*?R\\$?\\s*([0-9]+(?:[\\.,][0-9]+)?)",
+                            _obs_norm_v2,
+                        )
+
+                        if _match_diaria_v2:
+                            try:
+                                _numero_v2 = (
+                                    _match_diaria_v2
+                                    .group(1)
+                                )
+
+                                if (
+                                    "," in _numero_v2
+                                    and "." in _numero_v2
+                                ):
+                                    _numero_v2 = (
+                                        _numero_v2
+                                        .replace(".", "")
+                                        .replace(",", ".")
+                                    )
+                                else:
+                                    _numero_v2 = (
+                                        _numero_v2
+                                        .replace(",", ".")
+                                    )
+
+                                _alvo_diaria_v2 = float(
+                                    _numero_v2
+                                )
+
+                                if _meia_v2:
+                                    _alvo_diaria_v2 /= 2.0
+
+                            except Exception:
+                                _alvo_diaria_v2 = None
+
+                        _tem_indicio_extra_v2 = any(
+                            termo in _obs_norm_v2
+                            for termo in (
+                                "PRODUCAO",
+                                "HORA EXTRA",
+                                "HORAS EXTRA",
+                                "SERVICO EXTRA",
+                                "EXTRA ",
+                            )
+                        )
+
+                        if (
+                            _alvo_diaria_v2 is not None
+                            and _alvo_diaria_v2 > 0
+                        ):
+                            _diaria_nova_v2 = min(
+                                _total_antigo_v2,
+                                _alvo_diaria_v2,
+                            )
+                            _extra_novo_v2 = max(
+                                0.0,
+                                _total_antigo_v2
+                                - _diaria_nova_v2,
+                            )
+
+                        elif _tem_indicio_extra_v2:
+                            _diaria_nova_v2 = _base_fin_v2
+                            _extra_novo_v2 = max(
+                                0.0,
+                                _total_antigo_v2
+                                - _diaria_nova_v2,
+                            )
+
+                        else:
+                            if _eh_ajudante_v2:
+                                _candidatos_cheios_v2 = [
+                                    80.0,
+                                    100.0,
+                                    120.0,
+                                ]
+                            else:
+                                _candidatos_cheios_v2 = [
+                                    120.0,
+                                    150.0,
+                                    200.0,
+                                ]
+
+                            _candidatos_v2 = [
+                                (
+                                    valor / 2.0
+                                    if _meia_v2
+                                    else valor
+                                )
+                                for valor
+                                in _candidatos_cheios_v2
+                            ]
+
+                            _candidato_exato_v2 = next(
+                                (
+                                    valor
+                                    for valor
+                                    in _candidatos_v2
+                                    if abs(
+                                        _total_antigo_v2
+                                        - valor
+                                    ) <= 0.005
+                                ),
+                                None,
+                            )
+
+                            if (
+                                _candidato_exato_v2
+                                is not None
+                            ):
+                                _diaria_nova_v2 = (
+                                    _candidato_exato_v2
+                                )
+                                _extra_novo_v2 = 0.0
+
+                            elif (
+                                not _meia_v2
+                                and _total_antigo_v2
+                                >= _base_fin_v2
+                                and abs(
+                                    _total_antigo_v2 / 10.0
+                                    - round(
+                                        _total_antigo_v2 / 10.0
+                                    )
+                                ) <= 0.0005
+                            ):
+                                # Ex.: 150 no antigo Custo + Extra passa
+                                # a significar Diária = 150.
+                                _diaria_nova_v2 = (
+                                    _total_antigo_v2
+                                )
+                                _extra_novo_v2 = 0.0
+
+                            else:
+                                _diaria_nova_v2 = (
+                                    _base_fin_v2
+                                )
+                                _extra_novo_v2 = max(
+                                    0.0,
+                                    _total_antigo_v2
+                                    - _diaria_nova_v2,
+                                )
+
+                    cur.execute(
+                        """
+                        UPDATE convocacoes
+                           SET custo_pago = %s,
+                               valor_extra = %s,
+                               valor_adicional_noturno = %s,
+                               custo_encargos_base = %s,
+                               custos_separados = TRUE
+                         WHERE id = %s
+                        """,
+                        (
+                            round(
+                                _diaria_nova_v2,
+                                2,
+                            ),
+                            round(
+                                _extra_novo_v2,
+                                2,
+                            ),
+                            round(
+                                _noturno_v2,
+                                2,
+                            ),
+                            round(
+                                (
+                                    _base_ctrl_v2
+                                    if _presente_v2
+                                    else 0.0
+                                ),
+                                2,
+                            ),
+                            _id_v2,
+                        ),
+                    )
+
+                # Espelha a nova leitura na tabela estruturada.
+                cur.execute(
+                    """
+                    UPDATE apontamentos AS a
+                       SET tipo_diaria = v.tipo_diaria,
+                           custo_pago = v.custo_pago,
+                           valor_extra = v.valor_extra,
+                           valor_acordo = v.valor_acordo,
+                           valor_adicional_noturno = v.valor_adicional_noturno,
+                           custo_encargos_base = v.custo_encargos_base,
+                           custos_separados = TRUE
+                      FROM convocacoes AS v
+                     WHERE CAST(a.convocacao_id AS TEXT)
+                           = CAST(v.id AS TEXT)
                     """
                 )
 
@@ -3309,6 +3776,7 @@ def _atualizar_colaborador_admin_rapido(
         "nome",
         "funcao",
         "valor_diaria",
+        "categoria_diaria",
     }
 
     payload = {
@@ -3489,13 +3957,23 @@ def get_cor_funcao(funcao):
     hash_num = sum(ord(c) for c in str(funcao))
     return cores[hash_num % len(cores)]
 
+# ---------------------------------------------------------------------------
+# REGRAS DE DIÁRIA POR CATEGORIA
+# ---------------------------------------------------------------------------
+# CONTROLADORIA — custo padrão com encargos.
 VALOR_DIARIA_PROFISSIONAL = 241.74
 VALOR_DIARIA_AJUDANTE = 182.34
 
-# Pagamento líquido ao colaborador (Financeiro).
-# O custo com encargos da Controladoria vem do cadastro/importação individual.
-VALOR_LIMPO_DIARIA = 120.00
-VALOR_LIMPO_MEIA_DIARIA = 60.00
+# FINANCEIRO — valor líquido padrão pago ao colaborador.
+VALOR_FIN_DIARIA_PROFISSIONAL = 120.00
+VALOR_FIN_MEIA_PROFISSIONAL = 60.00
+VALOR_FIN_DIARIA_AJUDANTE = 80.00
+VALOR_FIN_MEIA_AJUDANTE = 40.00
+
+# Compatibilidade com trechos antigos que assumiam Profissional.
+VALOR_LIMPO_DIARIA = VALOR_FIN_DIARIA_PROFISSIONAL
+VALOR_LIMPO_MEIA_DIARIA = VALOR_FIN_MEIA_PROFISSIONAL
+
 TIPOS_DIARIA = ["Diária", "Meia diária"]
 
 # Regra especial SEBRAE:
@@ -3564,10 +4042,120 @@ def normalizar_tipo_diaria(valor):
 
 
 def valor_limpo_por_tipo_diaria(tipo_diaria):
+    """
+    Compatibilidade: retorna o padrão de Profissional.
+    Para cálculos reais, use valor_financeiro_padrao_colaborador().
+    """
     return (
-        VALOR_LIMPO_MEIA_DIARIA
-        if normalizar_tipo_diaria(tipo_diaria) == "Meia diária"
-        else VALOR_LIMPO_DIARIA
+        VALOR_FIN_MEIA_PROFISSIONAL
+        if normalizar_tipo_diaria(
+            tipo_diaria
+        ) == "Meia diária"
+        else VALOR_FIN_DIARIA_PROFISSIONAL
+    )
+
+
+def categoria_diaria_colaborador(colab):
+    colab = colab or {}
+
+    categoria = normalizar(
+        colab.get("categoria_diaria")
+        or ""
+    )
+
+    if (
+        "AJUD" in categoria
+        or "SERVENT" in categoria
+        or "AUX" in categoria
+    ):
+        return "Ajudante"
+
+    if "PROF" in categoria:
+        return "Profissional"
+
+    funcao = normalizar(
+        colab.get("funcao")
+        or ""
+    )
+
+    if any(
+        termo in funcao
+        for termo in (
+            "AJUDANTE",
+            "AUXILIAR",
+            "SERVENTE",
+        )
+    ):
+        return "Ajudante"
+
+    try:
+        valor_ref = float(
+            colab.get("valor_diaria")
+            or 0.0
+        )
+    except Exception:
+        valor_ref = 0.0
+
+    if 0 < valor_ref < 220:
+        return "Ajudante"
+
+    return "Profissional"
+
+
+def valor_financeiro_padrao_colaborador(
+    colab,
+    tipo_diaria,
+):
+    meia = (
+        normalizar_tipo_diaria(
+            tipo_diaria
+        )
+        == "Meia diária"
+    )
+
+    if (
+        categoria_diaria_colaborador(
+            colab
+        )
+        == "Ajudante"
+    ):
+        return (
+            VALOR_FIN_MEIA_AJUDANTE
+            if meia
+            else VALOR_FIN_DIARIA_AJUDANTE
+        )
+
+    return (
+        VALOR_FIN_MEIA_PROFISSIONAL
+        if meia
+        else VALOR_FIN_DIARIA_PROFISSIONAL
+    )
+
+
+def valor_controladoria_padrao_colaborador(
+    colab,
+    tipo_diaria,
+):
+    valor_cheio = (
+        VALOR_DIARIA_AJUDANTE
+        if categoria_diaria_colaborador(
+            colab
+        )
+        == "Ajudante"
+        else VALOR_DIARIA_PROFISSIONAL
+    )
+
+    return round(
+        valor_cheio
+        * (
+            0.5
+            if normalizar_tipo_diaria(
+                tipo_diaria
+            )
+            == "Meia diária"
+            else 1.0
+        ),
+        2,
     )
 
 
@@ -3752,47 +4340,95 @@ def tipo_diaria_registro(registro):
     return "Diária"
 
 
-def custo_pago_total_registro(registro):
+def valor_diaria_financeiro_registro(
+    registro,
+    colab=None,
+):
     """
-    Valor líquido base + Extra.
+    Diária efetivamente paga ao colaborador.
 
-    Adicional noturno e Acordos / Bonificações ficam separados.
-
-    Para registros antigos do SEBRAE, os primeiros R$ 90 que estavam
-    misturados no antigo Extra são retirados daqui e classificados como
-    Adicional noturno.
+    custo_pago passa a guardar SOMENTE a diária.
+    Extra fica em valor_extra.
     """
     registro = registro or {}
 
-    status = normalizar_status_operacional(
-        registro.get("status")
-        or ""
-    )
-
     if not status_eh_presenca(
-        status
+        normalizar_status_operacional(
+            registro.get("status")
+            or ""
+        )
     ):
         return 0.0
 
-    base = valor_limpo_por_tipo_diaria(
-        tipo_diaria_registro(
-            registro
-        )
+    if colab is None:
+        try:
+            colab = dict_colaboradores.get(
+                registro.get(
+                    "colaborador_id"
+                ),
+                {},
+            )
+        except Exception:
+            colab = {}
+
+    valor = registro.get(
+        "custo_pago"
     )
 
-    valor = registro.get("custo_pago")
-
-    if valor not in (None, ""):
+    if valor not in (
+        None,
+        "",
+    ):
         try:
-            total = max(
+            valor = max(
                 0.0,
                 float(valor),
             )
+            if valor > 0:
+                return round(
+                    valor,
+                    2,
+                )
         except Exception:
-            total = base
-    else:
-        try:
-            extra_legado = max(
+            pass
+
+    return round(
+        valor_financeiro_padrao_colaborador(
+            colab or {},
+            tipo_diaria_registro(
+                registro
+            ),
+        ),
+        2,
+    )
+
+
+def custo_pago_total_registro(
+    registro,
+    colab=None,
+):
+    """Alias de compatibilidade: hoje representa apenas a diária."""
+    return valor_diaria_financeiro_registro(
+        registro,
+        colab=colab,
+    )
+
+
+def valor_extra_registro(registro):
+    """Extra real, separado da diária."""
+    registro = registro or {}
+
+    if not status_eh_presenca(
+        normalizar_status_operacional(
+            registro.get("status")
+            or ""
+        )
+    ):
+        return 0.0
+
+    try:
+        return round(
+            max(
                 0.0,
                 float(
                     registro.get(
@@ -3800,59 +4436,11 @@ def custo_pago_total_registro(registro):
                     )
                     or 0.0
                 ),
-            )
-        except Exception:
-            extra_legado = 0.0
-
-        total = base + extra_legado
-
-    # Registro legado do SEBRAE:
-    # se o adicional noturno ainda não está em coluna própria, separamos
-    # R$ 90 do antigo Custo+Extra.
-    if (
-        registro_tem_servico_sebrae(
-            registro
+            ),
+            2,
         )
-        and _adicional_noturno_salvo_registro(
-            registro
-        ) <= 0.005
-    ):
-        excedente = max(
-            0.0,
-            total - base,
-        )
-
-        if (
-            excedente
-            >= (
-                VALOR_ADICIONAL_NOTURNO_SEBRAE
-                - 0.005
-            )
-        ):
-            total -= (
-                VALOR_ADICIONAL_NOTURNO_SEBRAE
-            )
-
-    return round(
-        max(
-            base,
-            total,
-        ),
-        2,
-    )
-
-
-def valor_extra_registro(registro):
-    """Extra real derivado do campo editável Custo + Extra."""
-    registro = registro or {}
-    if not status_eh_presenca(
-        normalizar_status_operacional(registro.get("status") or "")
-    ):
+    except Exception:
         return 0.0
-
-    base = valor_limpo_por_tipo_diaria(tipo_diaria_registro(registro))
-    total = custo_pago_total_registro(registro)
-    return round(max(0.0, total - base), 2)
 
 
 def valor_adicional_noturno_registro(registro):
@@ -3912,24 +4500,20 @@ def valor_acordo_registro(registro):
         return 0.0
 
 
-def custo_encargos_base_registro(registro, colab=None):
+def custo_encargos_base_registro(
+    registro,
+    colab=None,
+):
     """
-    Custo-base usado pela Controladoria.
+    Custo-base da Controladoria por categoria.
 
-    REGRA:
-    O valor vem SEMPRE do cadastro atual do colaborador, ou seja,
-    da coluna de custo/valor importada pela planilha de colaboradores.
+    Profissional:
+      diária R$ 241,74
+      meia   R$ 120,87
 
-    Não usamos mais o snapshot antigo salvo no apontamento para montar
-    o relatório da Controladoria. Assim, o custo exibido fica alinhado
-    exatamente com a última planilha importada.
-
-    - Diária: 100% do custo cadastrado/importado.
-    - Meia diária: 50% do custo cadastrado/importado.
-    - Falta/Atestado/outros sem presença: R$ 0,00.
-
-    O rateio entre obras/serviços continua acontecendo depois, sem
-    alterar o custo total diário do colaborador.
+    Ajudante:
+      diária R$ 182,34
+      meia   R$ 91,17
     """
     registro = registro or {}
 
@@ -3941,35 +4525,55 @@ def custo_encargos_base_registro(registro, colab=None):
     ):
         return 0.0
 
-    valor_diario_planilha = (
-        obter_valor_diaria_colaborador(
-            colab or {}
-        )
-    )
+    if colab is None:
+        try:
+            colab = dict_colaboradores.get(
+                registro.get(
+                    "colaborador_id"
+                ),
+                {},
+            )
+        except Exception:
+            colab = {}
 
-    if valor_diario_planilha <= 0:
-        # Não inventa valor padrão na Controladoria:
-        # se não veio custo da planilha/cadastro, o relatório mostra zero.
-        return 0.0
-
-    fracao = fracao_encargos_por_tipo_diaria(
+    return valor_controladoria_padrao_colaborador(
+        colab or {},
         tipo_diaria_registro(
             registro
-        )
-    )
-
-    return round(
-        float(valor_diario_planilha)
-        * float(fracao),
-        2,
+        ),
     )
 
 
-def inferir_tipo_colaborador(funcao):
-    """Classifica cadastros antigos quando a diária ainda não está nos novos valores fixos."""
+def inferir_tipo_colaborador(
+    funcao,
+    valor_referencia=None,
+):
     f = normalizar(funcao or "")
-    termos_ajudante = ["AJUDANTE", "AUXILIAR", "AUX.", "AUX ", "SERVENTE"]
-    return "Ajudante" if any(t in f for t in termos_ajudante) else "Profissional"
+
+    if any(
+        termo in f
+        for termo in (
+            "AJUDANTE",
+            "AUXILIAR",
+            "AUX.",
+            "AUX ",
+            "SERVENTE",
+        )
+    ):
+        return "Ajudante"
+
+    try:
+        valor_ref = float(
+            valor_referencia
+            or 0.0
+        )
+    except Exception:
+        valor_ref = 0.0
+
+    if 0 < valor_ref < 220:
+        return "Ajudante"
+
+    return "Profissional"
 
 def valor_diaria_por_tipo(tipo):
     return VALOR_DIARIA_AJUDANTE if normalizar(tipo) == "AJUDANTE" else VALOR_DIARIA_PROFISSIONAL
@@ -4643,8 +5247,8 @@ def salvar_apontamento_estruturado(
                         convocacao_id, data_servico, colaborador_id, engenheiro, status,
                         valor_extra, observacao, apontado_em, apontado_por, retroativo, atualizado_em,
                         tipo_diaria, custo_pago, valor_acordo, valor_adicional_noturno,
-                        custo_encargos_base
-                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,NOW(),%s,%s,NOW(),%s,%s,%s,%s,%s)
+                        custo_encargos_base, custos_separados
+                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,NOW(),%s,%s,NOW(),%s,%s,%s,%s,%s,TRUE)
                     ON CONFLICT (convocacao_id) DO UPDATE SET
                         data_servico = EXCLUDED.data_servico,
                         colaborador_id = EXCLUDED.colaborador_id,
@@ -4659,6 +5263,7 @@ def salvar_apontamento_estruturado(
                         valor_acordo = EXCLUDED.valor_acordo,
                         valor_adicional_noturno = EXCLUDED.valor_adicional_noturno,
                         custo_encargos_base = EXCLUDED.custo_encargos_base,
+                        custos_separados = TRUE,
                         atualizado_em = NOW()
                     """,
                     (
@@ -5074,7 +5679,8 @@ def criar_ou_obter_colaborador_manual(nome, tipo, funcao_livre="", avulso=False)
         criado = supabase.table("colaboradores").insert({
             "nome": nome_limpo.upper(),
             "funcao": limpar_funcao(funcao_salva),
-            "valor_diaria": valor
+            "valor_diaria": valor,
+            "categoria_diaria": str(tipo)
         }).execute().data or []
 
         if criado:
@@ -7178,8 +7784,16 @@ def _processar_registro_operacional(registro):
         + adicional_noturno
         + acordo
     ) if status_eh_presenca(status) else 0.0
+    diaria_financeiro = (
+        valor_diaria_financeiro_registro(
+            registro,
+            colab,
+        )
+    )
+
     total_financeiro = (
-        custo_pago_total_registro(registro)
+        diaria_financeiro
+        + extra
         + adicional_noturno
         + acordo
     ) if status_eh_presenca(status) else 0.0
@@ -7195,6 +7809,7 @@ def _processar_registro_operacional(registro):
         "Função": str(colab.get("funcao") or "-"),
         "Status": status,
         "Tipo": tipo_diaria,
+        "Diária Financeiro (R$)": float(diaria_financeiro),
         "Custo c/ encargos (R$)": float(custo_encargos),
         "Extra (R$)": float(extra),
         "Adicional noturno (R$)": float(adicional_noturno),
@@ -7389,8 +8004,8 @@ def ratear_registros_por_servico(registros):
     """
     Rateia custos por serviço preservando duas visões:
 
-    Financeiro = Base líquida (120/60) + Extra + Adicional noturno + Acordo.
-    Controladoria = Custo importado da planilha do colaborador + Extra + Adicional noturno + Acordos / Bonificações.
+    Financeiro = Diária efetiva (Profissional 120/60 · Ajudante 80/40, editável) + Extra + Adicional noturno + Acordos/Bonificações.
+    Controladoria = Custo padrão da categoria (Profissional 241,74 · Ajudante 182,34) + Extra + Adicional noturno + Acordos/Bonificações.
 
     Se a mesma meia-diária tiver 2 serviços na mesma manhã, a base é dividida
     entre eles; não é duplicada.
@@ -7416,6 +8031,7 @@ def ratear_registros_por_servico(registros):
         # Orçamentos monetários por bloco M/T/N. MAX impede duplicar a mesma
         # meia-diária quando existem dois registros no mesmo bloco.
         base_fin_bloco = {}
+        base_fin_padrao_bloco = {}
         base_ctrl_bloco = {}
 
         for reg in regs:
@@ -7426,8 +8042,32 @@ def ratear_registros_por_servico(registros):
 
             tipo_reg = tipo_diaria_registro(reg)
             presente = status_eh_presenca(status_reg)
-            base_fin_reg = valor_limpo_por_tipo_diaria(tipo_reg) if presente else 0.0
-            base_ctrl_reg = custo_encargos_base_registro(reg, colab) if presente else 0.0
+            base_fin_reg = (
+                valor_diaria_financeiro_registro(
+                    reg,
+                    colab,
+                )
+                if presente
+                else 0.0
+            )
+
+            base_fin_padrao_reg = (
+                valor_financeiro_padrao_colaborador(
+                    colab,
+                    tipo_reg,
+                )
+                if presente
+                else 0.0
+            )
+
+            base_ctrl_reg = (
+                custo_encargos_base_registro(
+                    reg,
+                    colab,
+                )
+                if presente
+                else 0.0
+            )
             extra_reg = valor_extra_registro(reg) if presente else 0.0
             adicional_noturno_reg = valor_adicional_noturno_registro(reg) if presente else 0.0
             acordo_reg = valor_acordo_registro(reg) if presente else 0.0
@@ -7447,11 +8087,60 @@ def ratear_registros_por_servico(registros):
 
             # A opção Diária/Meia diária é a fonte do valor. Os blocos servem
             # somente para não duplicar e para distribuir o custo entre serviços.
-            parte_fin_bloco = base_fin_reg / len(blocos_reg) if blocos_reg else 0.0
-            parte_ctrl_bloco = base_ctrl_reg / len(blocos_reg) if blocos_reg else 0.0
+            parte_fin_bloco = (
+                base_fin_reg / len(blocos_reg)
+                if blocos_reg
+                else 0.0
+            )
+
+            parte_fin_padrao_bloco = (
+                base_fin_padrao_reg / len(blocos_reg)
+                if blocos_reg
+                else 0.0
+            )
+
+            parte_ctrl_bloco = (
+                base_ctrl_reg / len(blocos_reg)
+                if blocos_reg
+                else 0.0
+            )
+
             for bloco in blocos_reg:
-                base_fin_bloco[bloco] = max(float(base_fin_bloco.get(bloco, 0.0)), float(parte_fin_bloco))
-                base_ctrl_bloco[bloco] = max(float(base_ctrl_bloco.get(bloco, 0.0)), float(parte_ctrl_bloco))
+                base_fin_bloco[bloco] = max(
+                    float(
+                        base_fin_bloco.get(
+                            bloco,
+                            0.0,
+                        )
+                    ),
+                    float(
+                        parte_fin_bloco
+                    ),
+                )
+
+                base_fin_padrao_bloco[bloco] = max(
+                    float(
+                        base_fin_padrao_bloco.get(
+                            bloco,
+                            0.0,
+                        )
+                    ),
+                    float(
+                        parte_fin_padrao_bloco
+                    ),
+                )
+
+                base_ctrl_bloco[bloco] = max(
+                    float(
+                        base_ctrl_bloco.get(
+                            bloco,
+                            0.0,
+                        )
+                    ),
+                    float(
+                        parte_ctrl_bloco
+                    ),
+                )
 
             extra_por_item = (
                 extra_reg / len(itens_reg)
@@ -7539,10 +8228,24 @@ def ratear_registros_por_servico(registros):
 
         # Distribui cada orçamento de bloco entre os serviços que realmente
         # participaram daquele bloco.
-        base_fin_por_servico = {chave: 0.0 for chave in servicos}
-        base_ctrl_por_servico = {chave: 0.0 for chave in servicos}
+        base_fin_por_servico = {
+            chave: 0.0
+            for chave in servicos
+        }
+        base_fin_padrao_por_servico = {
+            chave: 0.0
+            for chave in servicos
+        }
+        base_ctrl_por_servico = {
+            chave: 0.0
+            for chave in servicos
+        }
 
-        blocos_todos = set(base_fin_bloco) | set(base_ctrl_bloco)
+        blocos_todos = (
+            set(base_fin_bloco)
+            | set(base_fin_padrao_bloco)
+            | set(base_ctrl_bloco)
+        )
         for bloco in blocos_todos:
             participantes = [
                 chave
@@ -7554,15 +8257,77 @@ def ratear_registros_por_servico(registros):
             if not participantes:
                 continue
 
-            parte_fin = float(base_fin_bloco.get(bloco, 0.0)) / len(participantes)
-            parte_ctrl = float(base_ctrl_bloco.get(bloco, 0.0)) / len(participantes)
+            parte_fin = (
+                float(
+                    base_fin_bloco.get(
+                        bloco,
+                        0.0,
+                    )
+                )
+                / len(participantes)
+            )
+
+            parte_fin_padrao = (
+                float(
+                    base_fin_padrao_bloco.get(
+                        bloco,
+                        0.0,
+                    )
+                )
+                / len(participantes)
+            )
+
+            parte_ctrl = (
+                float(
+                    base_ctrl_bloco.get(
+                        bloco,
+                        0.0,
+                    )
+                )
+                / len(participantes)
+            )
+
             for chave in participantes:
-                base_fin_por_servico[chave] += parte_fin
-                base_ctrl_por_servico[chave] += parte_ctrl
+                base_fin_por_servico[
+                    chave
+                ] += parte_fin
+                base_fin_padrao_por_servico[
+                    chave
+                ] += parte_fin_padrao
+                base_ctrl_por_servico[
+                    chave
+                ] += parte_ctrl
 
         for chave_serv, serv in servicos.items():
-            base_fin_rateada = round(float(base_fin_por_servico.get(chave_serv, 0.0)), 2)
-            base_ctrl_rateada = round(float(base_ctrl_por_servico.get(chave_serv, 0.0)), 2)
+            base_fin_rateada = round(
+                float(
+                    base_fin_por_servico.get(
+                        chave_serv,
+                        0.0,
+                    )
+                ),
+                2,
+            )
+
+            base_fin_padrao_rateada = round(
+                float(
+                    base_fin_padrao_por_servico.get(
+                        chave_serv,
+                        0.0,
+                    )
+                ),
+                2,
+            )
+
+            base_ctrl_rateada = round(
+                float(
+                    base_ctrl_por_servico.get(
+                        chave_serv,
+                        0.0,
+                    )
+                ),
+                2,
+            )
             extra_rateada = round(float(extra_por_servico.get(chave_serv, 0.0)), 2)
             adicional_noturno_rateado = round(
                 float(
@@ -7600,7 +8365,8 @@ def ratear_registros_por_servico(registros):
                 "Status": status_exibido,
                 "Tipo": tipo_exibido,
                 "Base Financeiro (R$)": base_fin_rateada,
-                "Custo + Extra (R$)": round(base_fin_rateada + extra_rateada, 2),
+                "Base Padrão Financeiro (R$)": base_fin_padrao_rateada,
+                "Diária Financeiro (R$)": base_fin_rateada,
                 "Custo c/ encargos (R$)": base_ctrl_rateada,
                 "Extra (R$)": extra_rateada,
                 "Adicional noturno (R$)": adicional_noturno_rateado,
@@ -9097,30 +9863,70 @@ def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
                     )
 
                 tipo_key = f"{key_prefix}_tipo_diaria_{c_id}"
-                custo_key = f"{key_prefix}_custo_pago_{c_id}"
-                adicional_noturno_key = f"{key_prefix}_adicional_noturno_{c_id}"
-                tipo_atual = tipo_diaria_registro(conv)
-                custo_atual = custo_pago_total_registro(conv)
-                adicional_noturno_atual = valor_adicional_noturno_registro(conv)
-                eh_sebrae_card = eh_unidade_sebrae(unidade)
+                diaria_key = f"{key_prefix}_custo_pago_{c_id}"
+                extra_key = f"{key_prefix}_valor_extra_{c_id}"
+                adicional_noturno_key = (
+                    f"{key_prefix}_adicional_noturno_{c_id}"
+                )
+
+                tipo_atual = tipo_diaria_registro(
+                    conv
+                )
+                diaria_atual = (
+                    valor_diaria_financeiro_registro(
+                        conv,
+                        colab,
+                    )
+                )
+                extra_atual = valor_extra_registro(
+                    conv
+                )
+                adicional_noturno_atual = (
+                    valor_adicional_noturno_registro(
+                        conv
+                    )
+                )
+                eh_sebrae_card = eh_unidade_sebrae(
+                    unidade
+                )
 
                 if eh_sebrae_card:
-                    # SEBRAE 17h–02h sempre conta como diária integral.
-                    st.session_state[tipo_key] = "Diária"
+                    st.session_state[
+                        tipo_key
+                    ] = "Diária"
                 elif tipo_key not in st.session_state:
-                    st.session_state[tipo_key] = tipo_atual
+                    st.session_state[
+                        tipo_key
+                    ] = tipo_atual
 
-                if custo_key not in st.session_state:
-                    st.session_state[custo_key] = (
-                        custo_atual
-                        if custo_atual > 0
-                        else valor_limpo_por_tipo_diaria(
-                            "Diária" if eh_sebrae_card else tipo_atual
+                if diaria_key not in st.session_state:
+                    st.session_state[
+                        diaria_key
+                    ] = (
+                        diaria_atual
+                        if diaria_atual > 0
+                        else valor_financeiro_padrao_colaborador(
+                            colab,
+                            (
+                                "Diária"
+                                if eh_sebrae_card
+                                else tipo_atual
+                            ),
                         )
                     )
 
-                if adicional_noturno_key not in st.session_state:
-                    st.session_state[adicional_noturno_key] = (
+                if extra_key not in st.session_state:
+                    st.session_state[
+                        extra_key
+                    ] = extra_atual
+
+                if (
+                    adicional_noturno_key
+                    not in st.session_state
+                ):
+                    st.session_state[
+                        adicional_noturno_key
+                    ] = (
                         adicional_noturno_atual
                         if adicional_noturno_atual > 0
                         else (
@@ -9130,68 +9936,175 @@ def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
                         )
                     )
 
-                def _ajustar_custo_desktop(_tipo_key=tipo_key, _custo_key=custo_key):
-                    st.session_state[_custo_key] = valor_limpo_por_tipo_diaria(
-                        st.session_state.get(_tipo_key, "Diária")
+                def _ajustar_diaria_desktop(
+                    _tipo_key=tipo_key,
+                    _diaria_key=diaria_key,
+                    _colab=colab,
+                ):
+                    st.session_state[
+                        _diaria_key
+                    ] = (
+                        valor_financeiro_padrao_colaborador(
+                            _colab,
+                            st.session_state.get(
+                                _tipo_key,
+                                "Diária",
+                            ),
+                        )
                     )
 
-                p1, p2, p3, p4 = st.columns([1, 1.2, 1, 1])
+                categoria_txt = (
+                    categoria_diaria_colaborador(
+                        colab
+                    )
+                )
+
+                if eh_sebrae_card:
+                    p1, p2, p3, p4, p5 = st.columns(
+                        [1, 1, 1, 1, 1.2]
+                    )
+                else:
+                    p1, p2, p3, p5 = st.columns(
+                        [1, 1, 1, 1.2]
+                    )
+                    p4 = None
+
                 with p1:
                     tipo_diaria_sel = st.selectbox(
                         "Diária / Meia diária",
                         TIPOS_DIARIA,
                         key=tipo_key,
-                        on_change=_ajustar_custo_desktop,
+                        on_change=_ajustar_diaria_desktop,
                         disabled=eh_sebrae_card,
-                        help=(
-                            "No SEBRAE a jornada 17h–02h é sempre considerada diária integral."
-                            if eh_sebrae_card
-                            else None
-                        ),
                     )
+
                 with p2:
-                    custo_pago_total = st.number_input(
-                        "Custo + Extra (R$)",
-                        min_value=0.0,
-                        step=10.0,
-                        disabled=not status_eh_presenca(status_sel),
-                        key=custo_key,
-                        help="Valor efetivamente pago antes do Acordo e do Adicional Noturno. Diária inicia em R$ 120,00 e meia diária em R$ 60,00.",
+                    valor_diaria_financeiro = (
+                        st.number_input(
+                            "Diária (R$)",
+                            min_value=0.0,
+                            step=10.0,
+                            disabled=(
+                                not status_eh_presenca(
+                                    status_sel
+                                )
+                            ),
+                            key=diaria_key,
+                            help=(
+                                "Valor efetivamente pago pela diária. "
+                                "Pode ser alterado; ex.: R$ 150."
+                            ),
+                        )
                     )
+
                 with p3:
-                    valor_adicional_noturno = st.number_input(
-                        "Adicional noturno (R$)",
+                    valor_extra = st.number_input(
+                        "Extra (R$)",
                         min_value=0.0,
                         step=10.0,
-                        disabled=not status_eh_presenca(status_sel),
-                        key=adicional_noturno_key,
+                        disabled=(
+                            not status_eh_presenca(
+                                status_sel
+                            )
+                        ),
+                        key=extra_key,
                         help=(
-                            "No SEBRAE o padrão é R$ 90,00 pela jornada noturna 17h–02h. "
-                            "Este valor é separado de Extra."
+                            "Horas extras, produção ou outro valor "
+                            "que não faça parte da diária."
                         ),
                     )
-                with p4:
+
+                if eh_sebrae_card:
+                    with p4:
+                        valor_adicional_noturno = (
+                            st.number_input(
+                                "Adic. noturno (R$)",
+                                min_value=0.0,
+                                step=10.0,
+                                disabled=(
+                                    not status_eh_presenca(
+                                        status_sel
+                                    )
+                                ),
+                                key=(
+                                    adicional_noturno_key
+                                ),
+                            )
+                        )
+                else:
+                    valor_adicional_noturno = 0.0
+
+                with p5:
                     valor_acordo = st.number_input(
                         "Acordos / Bonificações (R$)",
                         min_value=0.0,
-                        value=(float(conv.get("valor_acordo") or 0.0) if status_eh_presenca(status_sel) else 0.0),
+                        value=(
+                            float(
+                                conv.get(
+                                    "valor_acordo"
+                                )
+                                or 0.0
+                            )
+                            if status_eh_presenca(
+                                status_sel
+                            )
+                            else 0.0
+                        ),
                         step=10.0,
-                        disabled=not status_eh_presenca(status_sel),
-                        key=f"{key_prefix}_acordo_{c_id}",
+                        disabled=(
+                            not status_eh_presenca(
+                                status_sel
+                            )
+                        ),
+                        key=(
+                            f"{key_prefix}_acordo_{c_id}"
+                        ),
                     )
 
-                base_limpa_preview = valor_limpo_por_tipo_diaria(tipo_diaria_sel)
-                extra_preview = max(0.0, float(custo_pago_total) - base_limpa_preview) if status_eh_presenca(status_sel) else 0.0
-                st.caption(
-                    f"Base Financeiro: {formatar_reais(base_limpa_preview)} · "
-                    f"Extra calculado: {formatar_reais(extra_preview)} · "
-                    f"Adicional noturno: {formatar_reais(valor_adicional_noturno)} · "
-                    f"Acordo: {formatar_reais(valor_acordo)}"
+                custo_ctrl_preview = (
+                    valor_controladoria_padrao_colaborador(
+                        colab,
+                        tipo_diaria_sel,
+                    )
+                    if status_eh_presenca(
+                        status_sel
+                    )
+                    else 0.0
                 )
+
+                total_fin_preview = (
+                    float(
+                        valor_diaria_financeiro
+                    )
+                    + float(valor_extra)
+                    + float(
+                        valor_adicional_noturno
+                    )
+                    + float(valor_acordo)
+                    if status_eh_presenca(
+                        status_sel
+                    )
+                    else 0.0
+                )
+
+                st.caption(
+                    f"{categoria_txt} · "
+                    f"Diária {formatar_reais(valor_diaria_financeiro)} · "
+                    f"Extra {formatar_reais(valor_extra)}"
+                    + (
+                        f" · Noturno {formatar_reais(valor_adicional_noturno)}"
+                        if eh_sebrae_card
+                        else ""
+                    )
+                    + f" · Acordos/Bonificações {formatar_reais(valor_acordo)} "
+                    f"· Financeiro {formatar_reais(total_fin_preview)} "
+                    f"· Controladoria base {formatar_reais(custo_ctrl_preview)}"
+                )
+
                 if eh_sebrae_card:
                     st.caption(
                         "🌙 SEBRAE: 17h–02h = diária integral. "
-                        "O apontamento do dia pode ser concluído até 09:29 do dia seguinte sem atraso."
+                        "Adicional noturno padrão de R$ 90,00."
                     )
                 obs_nova = st.text_input("Observação / justificativa", value=obs_livre, key=f"{key_prefix}_obs_{c_id}")
                 salvar = st.button("💾 SALVAR APONTAMENTO", type="primary", use_container_width=True, key=f"{key_prefix}_salvar_{c_id}")
@@ -9224,9 +10137,20 @@ def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
                             if eh_sebrae_card
                             else normalizar_tipo_diaria(tipo_diaria_sel)
                         )
-                        base_limpa_final = valor_limpo_por_tipo_diaria(tipo_diaria_final)
-                        custo_pago_final = float(custo_pago_total) if presente_final else 0.0
-                        valor_extra_final = max(0.0, custo_pago_final - base_limpa_final) if presente_final else 0.0
+                        custo_pago_final = (
+                            float(
+                                valor_diaria_financeiro
+                            )
+                            if presente_final
+                            else 0.0
+                        )
+                        valor_extra_final = (
+                            float(
+                                valor_extra
+                            )
+                            if presente_final
+                            else 0.0
+                        )
                         valor_adicional_noturno_final = (
                             float(valor_adicional_noturno)
                             if presente_final
@@ -9234,10 +10158,9 @@ def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
                         )
                         valor_acordo_final = float(valor_acordo) if presente_final else 0.0
                         custo_encargos_final = (
-                            round(
-                                obter_valor_diaria_colaborador(colab)
-                                * fracao_encargos_por_tipo_diaria(tipo_diaria_final),
-                                2,
+                            valor_controladoria_padrao_colaborador(
+                                colab,
+                                tipo_diaria_final,
                             )
                             if presente_final
                             else 0.0
@@ -9387,7 +10310,28 @@ def carregar_dados_financeiro(data_inicio, data_fim):
         #
         # Depois de entrar no relatório, a Base Financeiro continua compondo
         # o Total a Pagar, conforme a regra financeira já definida.
+        diaria_real_fin = pd.to_numeric(
+            df["Base Financeiro (R$)"],
+            errors="coerce",
+        ).fillna(0.0)
+
+        diaria_padrao_fin = pd.to_numeric(
+            df.get(
+                "Base Padrão Financeiro (R$)",
+                0.0,
+            ),
+            errors="coerce",
+        ).fillna(0.0)
+
         df = df[
+            (
+                (
+                    diaria_real_fin
+                    - diaria_padrao_fin
+                ).abs()
+                > 0.005
+            )
+            |
             (
                 pd.to_numeric(
                     df["Extra (R$)"],
@@ -9481,7 +10425,7 @@ def resumir_pagamentos_financeiro(pagamentos):
     if not pagamentos:
         return pd.DataFrame(columns=[
             "Colaborador", "Função", "Unidades", "Dias/Lançamentos",
-            "Base (R$)", "Extra (R$)", "Adic. noturno (R$)", "Acordos / Bonificações (R$)", "Total a Pagar (R$)"
+            "Diária (R$)", "Extra (R$)", "Adic. noturno (R$)", "Acordos / Bonificações (R$)", "Total a Pagar (R$)"
         ])
 
     df = pd.DataFrame(pagamentos)
@@ -9491,7 +10435,7 @@ def resumir_pagamentos_financeiro(pagamentos):
             Unidades=("Unidade", lambda s: ", ".join(sorted(set(str(v) for v in s if str(v).strip())))),
             **{
                 "Dias/Lançamentos": ("Data", "size"),
-                "Base (R$)": ("Base Financeiro (R$)", "sum"),
+                "Diária (R$)": ("Base Financeiro (R$)", "sum"),
                 "Extra (R$)": ("Extra (R$)", "sum"),
                 "Adic. noturno (R$)": ("Adicional noturno (R$)", "sum"),
                 "Acordos / Bonificações (R$)": ("Acordos / Bonificações (R$)", "sum"),
@@ -9534,7 +10478,7 @@ def gerar_excel_financeiro(pagamentos, ausencias, data_inicio, data_fim, data_pa
     )
     headers_resumo = [
         "Colaborador", "Função", "Unidades", "Dias/Lançamentos",
-        "Base (R$)", "Extra (R$)", "Adic. noturno (R$)", "Acordos / Bonificações (R$)", "Total a Pagar (R$)"
+        "Diária (R$)", "Extra (R$)", "Adic. noturno (R$)", "Acordos / Bonificações (R$)", "Total a Pagar (R$)"
     ]
     cabecalho_planilha(ws_resumo, "APROAR - RELATÓRIO FINANCEIRO", subtitulo, len(headers_resumo))
     for ci, nome in enumerate(headers_resumo, 1):
@@ -9662,7 +10606,7 @@ def gerar_pdf_financeiro(pagamentos, ausencias, data_inicio, data_fim, data_paga
         "Função",
         "Unidade(s)",
         "Dias",
-        "Base",
+        "Diária",
         "Extra",
         "Adic. not.",
         "Acordos / Bonif.",
@@ -9690,7 +10634,7 @@ def gerar_pdf_financeiro(pagamentos, ausencias, data_inicio, data_fim, data_paga
                 str(r["Função"])[:17],
                 str(r["Unidades"])[:20],
                 str(int(r["Dias/Lançamentos"])),
-                formatar_reais(float(r["Base (R$)"])),
+                formatar_reais(float(r["Diária (R$)"])),
                 formatar_reais(float(r["Extra (R$)"])),
                 formatar_reais(float(r["Adic. noturno (R$)"])),
                 formatar_reais(float(r["Acordos / Bonificações (R$)"])),
@@ -11467,6 +12411,7 @@ elif modo_campo:
                                        valor_adicional_noturno = %s,
                                        valor_acordo = %s,
                                        custo_encargos_base = %s,
+                                       custos_separados = TRUE,
                                        observacao = %s
                                  WHERE id = %s
                                 """,
@@ -11494,9 +12439,10 @@ elif modo_campo:
                                     engenheiro, status, valor_extra, observacao,
                                     apontado_em, apontado_por, retroativo, atualizado_em,
                                     tipo_diaria, custo_pago, valor_acordo,
-                                    valor_adicional_noturno, custo_encargos_base
+                                    valor_adicional_noturno, custo_encargos_base,
+                                    custos_separados
                                 )
-                                VALUES (%s,%s,%s,%s,%s,%s,%s,NOW(),%s,%s,NOW(),%s,%s,%s,%s,%s)
+                                VALUES (%s,%s,%s,%s,%s,%s,%s,NOW(),%s,%s,NOW(),%s,%s,%s,%s,%s,TRUE)
                                 ON CONFLICT (convocacao_id) DO UPDATE SET
                                     data_servico = EXCLUDED.data_servico,
                                     colaborador_id = EXCLUDED.colaborador_id,
@@ -11511,6 +12457,7 @@ elif modo_campo:
                                     valor_acordo = EXCLUDED.valor_acordo,
                                     valor_adicional_noturno = EXCLUDED.valor_adicional_noturno,
                                     custo_encargos_base = EXCLUDED.custo_encargos_base,
+                                    custos_separados = TRUE,
                                     atualizado_em = NOW()
                                 """,
                                 (
@@ -11705,6 +12652,7 @@ elif modo_campo:
                         "valor_adicional_noturno": item["valor_adicional_noturno_final"],
                         "valor_acordo": item["valor_acordo_final"],
                         "custo_encargos_base": item["custo_encargos_final"],
+                        "custos_separados": True,
                         "observacao": item["nova_obs"],
                     }
                 ).eq(
@@ -13184,50 +14132,82 @@ elif modo_campo:
 
                         servicos_adicionais_editados = []
 
-                        # Pagamento compacto: 2 campos por linha sempre que possível.
+                        # Pagamento compacto:
+                        # diária, extra e acordos ficam separados.
                         tipo_key = f"engm_tipo_diaria_{c_id}"
-                        custo_key = f"engm_custo_pago_{c_id}"
-                        adicional_noturno_key = f"engm_adicional_noturno_{c_id}"
+                        diaria_key = f"engm_custo_pago_{c_id}"
+                        extra_key = f"engm_valor_extra_{c_id}"
+                        adicional_noturno_key = (
+                            f"engm_adicional_noturno_{c_id}"
+                        )
 
-                        tipo_atual_pag = tipo_diaria_registro(conv)
-                        custo_atual_pag = custo_pago_total_registro(conv)
+                        tipo_atual_pag = tipo_diaria_registro(
+                            conv
+                        )
+                        diaria_atual_pag = (
+                            valor_diaria_financeiro_registro(
+                                conv,
+                                colab,
+                            )
+                        )
+                        extra_atual_pag = (
+                            valor_extra_registro(
+                                conv
+                            )
+                        )
                         adicional_noturno_atual = (
-                            valor_adicional_noturno_registro(conv)
+                            valor_adicional_noturno_registro(
+                                conv
+                            )
                         )
                         eh_sebrae_card = eh_unidade_sebrae(
                             unidade
                         )
 
                         if eh_sebrae_card:
-                            st.session_state[tipo_key] = "Diária"
+                            st.session_state[
+                                tipo_key
+                            ] = "Diária"
                         elif tipo_key not in st.session_state:
-                            st.session_state[tipo_key] = (
-                                tipo_atual_pag
-                            )
+                            st.session_state[
+                                tipo_key
+                            ] = tipo_atual_pag
 
-                        if custo_key not in st.session_state:
-                            st.session_state[custo_key] = (
-                                custo_atual_pag
-                                if custo_atual_pag > 0
-                                else valor_limpo_por_tipo_diaria(
+                        if diaria_key not in st.session_state:
+                            st.session_state[
+                                diaria_key
+                            ] = (
+                                diaria_atual_pag
+                                if diaria_atual_pag > 0
+                                else valor_financeiro_padrao_colaborador(
+                                    colab,
                                     (
                                         "Diária"
                                         if eh_sebrae_card
                                         else tipo_atual_pag
-                                    )
+                                    ),
                                 )
                             )
 
-                        def _ajustar_custo_mobile(
+                        if extra_key not in st.session_state:
+                            st.session_state[
+                                extra_key
+                            ] = extra_atual_pag
+
+                        def _ajustar_diaria_mobile(
                             _tipo_key=tipo_key,
-                            _custo_key=custo_key,
+                            _diaria_key=diaria_key,
+                            _colab=colab,
                         ):
                             st.session_state[
-                                _custo_key
-                            ] = valor_limpo_por_tipo_diaria(
-                                st.session_state.get(
-                                    _tipo_key,
-                                    "Diária",
+                                _diaria_key
+                            ] = (
+                                valor_financeiro_padrao_colaborador(
+                                    _colab,
+                                    st.session_state.get(
+                                        _tipo_key,
+                                        "Diária",
+                                    ),
                                 )
                             )
 
@@ -13240,18 +14220,30 @@ elif modo_campo:
                                 "Diária / Meia",
                                 TIPOS_DIARIA,
                                 key=tipo_key,
-                                on_change=_ajustar_custo_mobile,
+                                on_change=_ajustar_diaria_mobile,
                                 disabled=eh_sebrae_card,
-                                help=(
-                                    "No SEBRAE, 17h–02h é sempre diária integral."
-                                    if eh_sebrae_card
-                                    else None
-                                ),
                             )
 
                         with pg2:
-                            custo_pago_total = st.number_input(
-                                "Custo + Extra (R$)",
+                            valor_diaria_financeiro = (
+                                st.number_input(
+                                    "Diária (R$)",
+                                    min_value=0.0,
+                                    step=10.0,
+                                    disabled=(
+                                        not status_eh_presenca(
+                                            status_sel
+                                        )
+                                    ),
+                                    key=diaria_key,
+                                )
+                            )
+
+                        pg3, pg4 = st.columns(2)
+
+                        with pg3:
+                            valor_extra = st.number_input(
+                                "Extra (R$)",
                                 min_value=0.0,
                                 step=10.0,
                                 disabled=(
@@ -13259,11 +14251,7 @@ elif modo_campo:
                                         status_sel
                                     )
                                 ),
-                                key=custo_key,
-                                help=(
-                                    "Base: R$ 120 na diária e R$ 60 na meia. "
-                                    "Aumente apenas quando houver extra."
-                                ),
+                                key=extra_key,
                             )
 
                         if eh_sebrae_card:
@@ -13279,9 +14267,7 @@ elif modo_campo:
                                     else VALOR_ADICIONAL_NOTURNO_SEBRAE
                                 )
 
-                            pg3, pg4 = st.columns(2)
-
-                            with pg3:
+                            with pg4:
                                 valor_adicional_noturno = (
                                     st.number_input(
                                         "Adic. noturno (R$)",
@@ -13295,12 +14281,41 @@ elif modo_campo:
                                         key=(
                                             adicional_noturno_key
                                         ),
-                                        help=(
-                                            "SEBRAE: padrão R$ 90,00. "
-                                            "É separado de Extra."
-                                        ),
                                     )
                                 )
+
+                            valor_acordo = st.number_input(
+                                "Acordos / Bonificações (R$)",
+                                min_value=0.0,
+                                value=(
+                                    float(
+                                        conv.get(
+                                            "valor_acordo"
+                                        )
+                                        or 0.0
+                                    )
+                                    if status_eh_presenca(
+                                        status_sel
+                                    )
+                                    else 0.0
+                                ),
+                                step=10.0,
+                                disabled=(
+                                    not status_eh_presenca(
+                                        status_sel
+                                    )
+                                ),
+                                key=(
+                                    f"engm_acordo_{c_id}"
+                                ),
+                            )
+
+                        else:
+                            valor_adicional_noturno = 0.0
+                            st.session_state.pop(
+                                adicional_noturno_key,
+                                None,
+                            )
 
                             with pg4:
                                 valor_acordo = st.number_input(
@@ -13329,57 +14344,21 @@ elif modo_campo:
                                     ),
                                 )
 
-                        else:
-                            # Fora do SEBRAE, este campo nem aparece.
-                            valor_adicional_noturno = 0.0
-                            st.session_state.pop(
-                                adicional_noturno_key,
-                                None,
-                            )
-
-                            valor_acordo = st.number_input(
-                                "Acordos / Bonificações (R$)",
-                                min_value=0.0,
-                                value=(
-                                    float(
-                                        conv.get(
-                                            "valor_acordo"
-                                        )
-                                        or 0.0
-                                    )
-                                    if status_eh_presenca(
-                                        status_sel
-                                    )
-                                    else 0.0
-                                ),
-                                step=10.0,
-                                disabled=(
-                                    not status_eh_presenca(
-                                        status_sel
-                                    )
-                                ),
-                                key=(
-                                    f"engm_acordo_{c_id}"
-                                ),
-                                help=(
-                                    "Bonificação ou acordo adicional."
-                                ),
-                            )
-
-                        _base_prev = (
-                            valor_limpo_por_tipo_diaria(
-                                tipo_diaria_sel
+                        categoria_pag = (
+                            categoria_diaria_colaborador(
+                                colab
                             )
                         )
 
-                        _extra_prev = (
-                            max(
-                                0.0,
-                                float(
-                                    custo_pago_total
-                                )
-                                - _base_prev,
+                        total_fin_prev = (
+                            float(
+                                valor_diaria_financeiro
                             )
+                            + float(valor_extra)
+                            + float(
+                                valor_adicional_noturno
+                            )
+                            + float(valor_acordo)
                             if status_eh_presenca(
                                 status_sel
                             )
@@ -13387,8 +14366,9 @@ elif modo_campo:
                         )
 
                         resumo_pag = (
-                            f"Base {formatar_reais(_base_prev)} · "
-                            f"Extra {formatar_reais(_extra_prev)}"
+                            f"{categoria_pag} · "
+                            f"Diária {formatar_reais(valor_diaria_financeiro)} · "
+                            f"Extra {formatar_reais(valor_extra)}"
                         )
 
                         if eh_sebrae_card:
@@ -13399,7 +14379,8 @@ elif modo_campo:
 
                         resumo_pag += (
                             f" · Acordos/Bonificações "
-                            f"{formatar_reais(valor_acordo)}"
+                            f"{formatar_reais(valor_acordo)} "
+                            f"· Total {formatar_reais(total_fin_prev)}"
                         )
 
                         st.markdown(
@@ -13414,7 +14395,7 @@ elif modo_campo:
                         if eh_sebrae_card:
                             st.caption(
                                 "🌙 SEBRAE: 17h–02h = diária integral. "
-                                "Apontamento até 09:29 do dia seguinte continua no prazo."
+                                "Adicional noturno padrão R$ 90,00."
                             )
 
                         with st.expander(
@@ -13662,7 +14643,8 @@ elif modo_campo:
                         "servicos_adicionais_editados": servicos_adicionais_editados,
                         "tem_conv_separada": tem_conv_separada,
                         "tipo_diaria_sel": tipo_diaria_sel,
-                        "custo_pago_total": custo_pago_total,
+                        "valor_diaria_financeiro": valor_diaria_financeiro,
+                        "valor_extra": valor_extra,
                         "valor_adicional_noturno": valor_adicional_noturno,
                         "valor_acordo": valor_acordo,
                         "obs_nova": obs_nova,
@@ -13902,9 +14884,24 @@ elif modo_campo:
                             if eh_unidade_sebrae(item["unidade_contexto"])
                             else normalizar_tipo_diaria(item["tipo_diaria_sel"])
                         )
-                        base_limpa_final = valor_limpo_por_tipo_diaria(tipo_diaria_final)
-                        custo_pago_final = float(item["custo_pago_total"]) if presente_final else 0.0
-                        valor_extra_final = max(0.0, custo_pago_final - base_limpa_final) if presente_final else 0.0
+                        custo_pago_final = (
+                            float(
+                                item[
+                                    "valor_diaria_financeiro"
+                                ]
+                            )
+                            if presente_final
+                            else 0.0
+                        )
+                        valor_extra_final = (
+                            float(
+                                item[
+                                    "valor_extra"
+                                ]
+                            )
+                            if presente_final
+                            else 0.0
+                        )
                         valor_adicional_noturno_final = (
                             float(item["valor_adicional_noturno"])
                             if (
@@ -13917,10 +14914,9 @@ elif modo_campo:
                         )
                         valor_acordo_final = float(item["valor_acordo"]) if presente_final else 0.0
                         custo_encargos_final = (
-                            round(
-                                obter_valor_diaria_colaborador(item["colab"])
-                                * fracao_encargos_por_tipo_diaria(tipo_diaria_final),
-                                2,
+                            valor_controladoria_padrao_colaborador(
+                                item["colab"],
+                                tipo_diaria_final,
                             )
                             if presente_final
                             else 0.0
@@ -15014,7 +16010,7 @@ elif modo_financeiro:
             )
         else:
             resumo_view = resumo_fin.copy()
-            for _c in ["Base (R$)", "Extra (R$)", "Adic. noturno (R$)", "Acordos / Bonificações (R$)", "Total a Pagar (R$)"]:
+            for _c in ["Diária (R$)", "Extra (R$)", "Adic. noturno (R$)", "Acordos / Bonificações (R$)", "Total a Pagar (R$)"]:
                 if _c in resumo_view.columns:
                     resumo_view[_c.replace(" (R$)", "")] = resumo_view[_c].apply(formatar_reais)
                     resumo_view = resumo_view.drop(columns=[_c])
@@ -15993,7 +16989,7 @@ else:
     elif menu_escolhido == "📊 RELATÓRIOS":
         cabecalho_pagina_aproar(
             "Relatórios",
-            "Controladoria: custo cadastrado/importado na planilha do colaborador + Extra + Adicional noturno + Acordos/Bonificações. O Total de cada colaborador é a soma desses valores. No SEBRAE, o adicional noturno é sempre R$ 90,00 por colaborador presente.",
+            "Controladoria: Profissional R$ 241,74 / Ajudante R$ 182,34 + Extra + Adicional noturno + Acordos/Bonificações. O Total de cada colaborador é a soma desses valores. No SEBRAE, o adicional noturno é sempre R$ 90,00 por colaborador presente.",
             categoria="ANÁLISE E FECHAMENTO",
         )
         
@@ -17199,6 +18195,10 @@ else:
                                 "valor_diaria": float(
                                     valor_colab
                                 ),
+                                "categoria_diaria": inferir_tipo_colaborador(
+                                    funcao_nova,
+                                    valor_colab,
+                                ),
                                 "local_moradia": moradia_colab,
                                 "ativo": True,
                             }
@@ -18272,6 +19272,10 @@ else:
                                 "valor_diaria": float(
                                     valor_edit
                                 ),
+                                "categoria_diaria": inferir_tipo_colaborador(
+                                    funcao_edit,
+                                    valor_edit,
+                                ),
                                 "local_moradia": moradia_edit,
                             }
 
@@ -18917,6 +19921,7 @@ else:
                                         "nome": reg["nome"],
                                         "funcao": reg["funcao"],
                                         "valor_diaria": reg["valor_diaria"],
+                                        "categoria_diaria": reg["tipo"],
                                         "ativo": True,
                                     }
 
