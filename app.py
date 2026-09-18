@@ -11858,25 +11858,58 @@ elif modo_campo:
         opacity:.95;
     }
 
-    /* Lista que só aparece depois do clique no card. */
-    .engm-pending-list-title{
-        margin:2px 0 6px;
-        color:#172235;
+    .engm-summary-static{
+        min-height:86px;
+        border-radius:16px;
+        background:linear-gradient(135deg,#0C3176 0%, #1250BA 100%);
+        display:flex;
+        flex-direction:column;
+        align-items:center;
+        justify-content:center;
+        text-align:center;
+        padding:10px 8px 12px;
+    }
+
+    .engm-summary-static .engm-summary-value{
+        color:#FFFFFF !important;
+        font-size:32px;
+        line-height:1;
+        margin-bottom:6px;
+    }
+
+    .engm-summary-static .engm-summary-label{
+        color:#EAF1FF !important;
         font-size:11px;
-        font-weight:700;
+        line-height:1.1;
+        text-transform:none;
+        letter-spacing:0;
+        margin:0;
+    }
+
+    .engm-summary-static.warn .engm-summary-value,
+    .engm-summary-static.warn .engm-summary-label{
+        color:#FFD84D !important;
+    }
+
+    /* Lista compacta de pendências abaixo apenas do card clicável. */
+    div[class*="st-key-engm_ir_pend_"]{
+        margin-top:6px !important;
     }
 
     div[class*="st-key-engm_ir_pend_"] button{
-        min-height:38px !important;
-        text-align:left !important;
-        justify-content:flex-start !important;
+        min-height:30px !important;
+        text-align:center !important;
+        justify-content:center !important;
         background:#FFFFFF !important;
         border:1px solid #DCE3EC !important;
-        border-radius:9px !important;
+        border-radius:10px !important;
         color:#26364D !important;
-        font-size:10.5px !important;
+        font-size:9.5px !important;
         font-weight:650 !important;
         box-shadow:none !important;
+        padding:4px 8px !important;
+        line-height:1.2 !important;
+        white-space:normal !important;
     }
 
     div[class*="st-key-engm_ir_pend_"] button *{
@@ -13958,7 +13991,7 @@ elif modo_campo:
         with c_sum_conv:
             st.markdown(
                 f"""
-                <div class="engm-summary-item">
+                <div class="engm-summary-item engm-summary-static">
                     <div class="engm-summary-value">{total_data}</div>
                     <div class="engm-summary-label">convocados</div>
                 </div>
@@ -13969,7 +14002,7 @@ elif modo_campo:
         with c_sum_apont:
             st.markdown(
                 f"""
-                <div class="engm-summary-item">
+                <div class="engm-summary-item engm-summary-static">
                     <div class="engm-summary-value">{apontados_data}</div>
                     <div class="engm-summary-label">apontados</div>
                 </div>
@@ -13981,8 +14014,10 @@ elif modo_campo:
             if total_pendencias_supervisor > 0:
                 if st.button(
                     (
-                        f"**{total_pendencias_supervisor}**  \n"
-                        "pendentes  \n"
+                        f"**{total_pendencias_supervisor}**  \
+"
+                        "pendentes  \
+"
                         "*Ver minhas pendências*"
                     ),
                     key="engm_pendentes_card",
@@ -13995,76 +14030,65 @@ elif modo_campo:
                         False,
                     )
                     st.rerun()
+
+                if st.session_state.get(
+                    "_engm_mostrar_pendencias",
+                    False,
+                ):
+                    for data_pend in sorted(
+                        pendencias_por_data.keys(),
+                        reverse=True,
+                    ):
+                        info_pend = pendencias_por_data[data_pend]
+                        unidades_pend = sorted(
+                            info_pend["unidades"]
+                        )
+                        unidades_txt = (
+                            " · ".join(unidades_pend)
+                            if unidades_pend
+                            else "Unidade não identificada"
+                        )
+
+                        rotulo_pend = (
+                            f"{data_pend.strftime('%d/%m/%Y')} · "
+                            f"{info_pend['qtd']} pend. · "
+                            f"{unidades_txt}"
+                        )
+
+                        if st.button(
+                            rotulo_pend,
+                            use_container_width=True,
+                            key=(
+                                "engm_ir_pend_"
+                                + data_pend.isoformat()
+                                + "_"
+                                + re.sub(
+                                    r"[^A-Za-z0-9]+",
+                                    "_",
+                                    str(engenheiro_campo),
+                                )
+                            ),
+                        ):
+                            st.session_state[
+                                "_engm_data_pendente_destino"
+                            ] = data_pend
+                            st.session_state[
+                                "_engm_limpar_unidade_ao_ir_pendente"
+                            ] = True
+                            st.session_state[
+                                "_engm_mostrar_pendencias"
+                            ] = False
+                            st.rerun()
             else:
                 st.markdown(
                     """
-                    <div class="engm-summary-item">
+                    <div class="engm-summary-item engm-summary-static">
                         <div class="engm-summary-value">0</div>
                         <div class="engm-summary-label">pendentes</div>
                     </div>
                     """,
                     unsafe_allow_html=True,
                 )
-
-        # A lista fica invisível até o próprio card azul ser tocado.
-        if (
-            total_pendencias_supervisor > 0
-            and st.session_state.get(
-                "_engm_mostrar_pendencias",
-                False,
-            )
-        ):
-            st.markdown(
-                '<div class="engm-pending-list-title">'
-                'Seus apontamentos pendentes'
-                '</div>',
-                unsafe_allow_html=True,
-            )
-
-            for data_pend in sorted(
-                pendencias_por_data.keys(),
-                reverse=True,
-            ):
-                info_pend = pendencias_por_data[data_pend]
-                unidades_pend = sorted(
-                    info_pend["unidades"]
-                )
-                unidades_txt = (
-                    " · ".join(unidades_pend)
-                    if unidades_pend
-                    else "Unidade não identificada"
-                )
-
-                rotulo_pend = (
-                    f"{data_pend.strftime('%d/%m/%Y')} · "
-                    f"{info_pend['qtd']} pendente(s) · "
-                    f"{unidades_txt}"
-                )
-
-                if st.button(
-                    rotulo_pend,
-                    use_container_width=True,
-                    key=(
-                        "engm_ir_pend_"
-                        + data_pend.isoformat()
-                        + "_"
-                        + re.sub(
-                            r"[^A-Za-z0-9]+",
-                            "_",
-                            str(engenheiro_campo),
-                        )
-                    ),
-                ):
-                    st.session_state[
-                        "_engm_data_pendente_destino"
-                    ] = data_pend
-                    st.session_state[
-                        "_engm_limpar_unidade_ao_ir_pendente"
-                    ] = True
-                    st.session_state[
-                        "_engm_mostrar_pendencias"
-                    ] = False
-                    st.rerun()
 
         if data_apont < hoje_campo:
             st.markdown(
