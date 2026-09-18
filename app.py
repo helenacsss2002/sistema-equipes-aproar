@@ -11743,6 +11743,25 @@ elif modo_campo:
 
     .engm-date-chip-label{ font-size:11px; opacity:.85; margin-bottom:0; }
 
+    .engm-head-side{
+        flex:0 0 auto;
+        display:flex;
+        flex-direction:column;
+        align-items:center;
+        gap:8px;
+        min-width:120px;
+    }
+
+    .engm-head-side .engm-logout-link{
+        min-width:52px;
+    }
+
+    .engm-summary-host{
+        background:transparent !important;
+        padding:0;
+        margin:0;
+    }
+
     .engm-summary-v2{
         grid-template-columns:repeat(3,minmax(0,1fr));
         background:transparent;
@@ -12564,9 +12583,7 @@ elif modo_campo:
 
     /* ----- SAIR ----- */
     .engm-logout-row{
-        display:flex;
-        justify-content:flex-end;
-        margin:0 0 2px;
+        display:none;
     }
 
     .engm-logout-link{
@@ -12827,6 +12844,16 @@ elif modo_campo:
             min-height:31px;
             padding:0 13px;
             font-size:10px;
+        }
+
+        .engm-head-side{
+            align-items:center;
+            min-width:108px;
+        }
+
+        .engm-date-v2{
+            min-width:108px;
+            width:108px;
         }
     }
     </style>
@@ -13510,19 +13537,13 @@ elif modo_campo:
                     </div>
                 </div>
             </div>
-            <div class="engm-date engm-date-v2">
-                <div class="engm-date-chip-label">Data</div>
-                <b>{hoje_campo.strftime('%d/%m/%Y')}</b>
+            <div class="engm-head-side">
+                <div class="engm-date engm-date-v2">
+                    <div class="engm-date-chip-label">Data</div>
+                    <b>{hoje_campo.strftime('%d/%m/%Y')}</b>
+                </div>
+                <a class="engm-logout-link" href="?logout=1">Sair</a>
             </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        """
-        <div class="engm-logout-row">
-            <a class="engm-logout-link" href="?logout=1">Sair</a>
         </div>
         """,
         unsafe_allow_html=True,
@@ -13574,7 +13595,7 @@ elif modo_campo:
     # =====================================================================
     if area_campo == "Hoje":
         c_ap_eng, c_ap_unid, c_ap_data = st.columns(
-            [1.05, 1.05, .82]
+            [.96, .98, .78]
         )
 
         with c_ap_eng:
@@ -13676,18 +13697,20 @@ elif modo_campo:
 
         st.markdown(
             f"""
-            <div class="engm-summary engm-summary-v2">
-                <div class="engm-summary-item">
-                    <div class="engm-summary-value">{total_data}</div>
-                    <div class="engm-summary-label">convocados</div>
-                </div>
-                <div class="engm-summary-item">
-                    <div class="engm-summary-value">{apontados_data}</div>
-                    <div class="engm-summary-label">apontados</div>
-                </div>
-                <div class="engm-summary-item {classe_pend}">
-                    <div class="engm-summary-value">{pendentes_data}</div>
-                    <div class="engm-summary-label">pendentes</div>
+            <div class="engm-summary-host">
+                <div class="engm-summary engm-summary-v2">
+                    <div class="engm-summary-item">
+                        <div class="engm-summary-value">{total_data}</div>
+                        <div class="engm-summary-label">convocados</div>
+                    </div>
+                    <div class="engm-summary-item">
+                        <div class="engm-summary-value">{apontados_data}</div>
+                        <div class="engm-summary-label">apontados</div>
+                    </div>
+                    <div class="engm-summary-item {classe_pend}">
+                        <div class="engm-summary-value">{pendentes_data}</div>
+                        <div class="engm-summary-label">pendentes</div>
+                    </div>
                 </div>
             </div>
             """,
@@ -14601,7 +14624,7 @@ elif modo_campo:
                         )
 
                         c_status, c_periodo = st.columns(
-                            [1.12, .88]
+                            [.96, .74]
                         )
 
                         with c_status:
@@ -14711,7 +14734,7 @@ elif modo_campo:
                             )
 
                         pg1, pg2 = st.columns(
-                            [1, 1.12]
+                            [.86, 1.0]
                         )
 
                         with pg1:
@@ -14738,7 +14761,7 @@ elif modo_campo:
                                 )
                             )
 
-                        pg3, pg4 = st.columns(2)
+                        pg3, pg4 = st.columns([.96, .96])
 
                         with pg3:
                             valor_extra = st.number_input(
