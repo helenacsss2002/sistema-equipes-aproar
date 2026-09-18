@@ -11798,6 +11798,60 @@ elif modo_campo:
         color:#FFD84D !important;
     }
 
+    /* Pendências de outros dias do supervisor selecionado */
+    div[class*="st-key-engm_pendencias_anteriores"]{
+        margin:2px 0 8px !important;
+        padding:10px 12px 8px !important;
+        border:1px solid #F0D58B !important;
+        border-radius:12px !important;
+        background:#FFF8DD !important;
+        box-shadow:none !important;
+    }
+
+    div[class*="st-key-engm_pendencias_anteriores"] > div{
+        gap:.35rem !important;
+    }
+
+    .engm-pending-history-head{
+        font-size:12px;
+        line-height:1.3;
+        color:#5D4811;
+        margin:0;
+    }
+
+    .engm-pending-history-head strong{
+        font-size:15px;
+        color:#3F310B;
+    }
+
+    div[class*="st-key-engm_pendencias_anteriores"] [data-testid="stExpander"]{
+        margin:0 !important;
+        border:0 !important;
+        background:transparent !important;
+    }
+
+    div[class*="st-key-engm_pendencias_anteriores"] [data-testid="stExpander"] summary{
+        min-height:34px !important;
+        padding-top:4px !important;
+        padding-bottom:4px !important;
+        background:transparent !important;
+        color:#8A6410 !important;
+        font-size:11px !important;
+        font-weight:700 !important;
+    }
+
+    div[class*="st-key-engm_pendencias_anteriores"] .stButton > button{
+        min-height:38px !important;
+        text-align:left !important;
+        justify-content:flex-start !important;
+        background:#FFFFFF !important;
+        border-color:#E6D59F !important;
+        color:#26364D !important;
+        font-size:10.5px !important;
+        font-weight:650 !important;
+        box-shadow:none !important;
+    }
+
     /* Seletor do engenheiro */
     div[class*="st-key-engenheiro_campo_mobile"]{
         margin-bottom:2px !important;
@@ -13240,6 +13294,38 @@ elif modo_campo:
         )
         return bool(obra) and not eh_obra_placeholder(obra)
 
+    def _buscar_pendencias_anteriores_supervisor_campo(
+        engenheiro,
+        data_fim,
+    ):
+        """
+        Busca convocações anteriores ainda sem apontamento para o supervisor
+        selecionado. O filtro de engenheiro é exato: um supervisor nunca vê
+        pendências pertencentes a outro supervisor.
+        """
+        if not engenheiro or not data_fim:
+            return []
+
+        # O sistema atual é recente, mas usamos uma janela ampla para não
+        # esconder pendências antigas do supervisor.
+        data_inicio = datetime.date(2020, 1, 1)
+
+        registros = _buscar_convocacoes_intervalo(
+            data_inicio,
+            data_fim,
+            engenheiro,
+        ) or []
+
+        enriquecidos = _enriquecer_convocacoes_campo(
+            registros
+        )
+
+        return [
+            conv
+            for conv in enriquecidos
+            if not _convocacao_apontada_campo(conv)
+        ]
+
     def _servicos_convocacao_mobile(conv):
         """
         Retorna todos os serviços reais vinculados ao registro:
@@ -13594,6 +13680,26 @@ elif modo_campo:
     # HOJE — RESUMO + CONVOCADOS + APONTAMENTO NA MESMA TELA
     # =====================================================================
     if area_campo == "Hoje":
+        # Quando o supervisor escolhe uma pendência antiga, a data é aplicada
+        # antes de criar o widget. Isso evita conflito com o estado do Streamlit.
+        _data_pendente_destino = st.session_state.pop(
+            "_engm_data_pendente_destino",
+            None,
+        )
+        if _data_pendente_destino is not None:
+            st.session_state["engm_data_apont"] = (
+                _data_pendente_destino
+            )
+
+        if st.session_state.pop(
+            "_engm_limpar_unidade_ao_ir_pendente",
+            False,
+        ):
+            st.session_state.pop(
+                "engm_unidade_apont_top",
+                None,
+            )
+
         c_ap_eng, c_ap_unid, c_ap_data = st.columns(
             [.96, .98, .78]
         )
@@ -13716,6 +13822,125 @@ elif modo_campo:
             """,
             unsafe_allow_html=True,
         )
+
+        # Pendências de dias anteriores: SEMPRE filtradas pelo supervisor
+        # atualmente selecionado em "Engenheiro".
+        data_limite_pendencias = hoje_campo - datetime.timedelta(
+            days=1
+        )
+        pendencias_anteriores = (
+            _buscar_pendencias_anteriores_supervisor_campo(
+                engenheiro_campo,
+                data_limite_pendencias,
+            )
+            if data_limite_pendencias >= datetime.date(2020, 1, 1)
+            else []
+        )
+
+        # Enquanto o supervisor estiver olhando uma data antiga, aquela data
+        # já está na tela principal e não precisa ser repetida no aviso.
+        pendencias_outros_dias = [
+            conv
+            for conv in pendencias_anteriores
+            if str(conv.get("data") or "")
+            != data_apont.isoformat()
+        ]
+
+        if pendencias_outros_dias:
+            pendencias_por_data = {}
+
+            for conv in pendencias_outros_dias:
+                data_txt = str(conv.get("data") or "").strip()
+                try:
+                    data_conv = datetime.date.fromisoformat(
+                        data_txt[:10]
+                    )
+                except Exception:
+                    continue
+
+                item_data = pendencias_por_data.setdefault(
+                    data_conv,
+                    {
+                        "qtd": 0,
+                        "unidades": set(),
+                    },
+                )
+                item_data["qtd"] += 1
+
+                for unid in _unidades_convocacao_mobile(
+                    conv
+                ):
+                    if str(unid).strip():
+                        item_data["unidades"].add(
+                            str(unid).strip()
+                        )
+
+            total_pendencias_anteriores = sum(
+                item["qtd"]
+                for item in pendencias_por_data.values()
+            )
+
+            if total_pendencias_anteriores:
+                with st.container(
+                    key="engm_pendencias_anteriores"
+                ):
+                    st.markdown(
+                        (
+                            '<div class="engm-pending-history-head">'
+                            f'<strong>{total_pendencias_anteriores}</strong> '
+                            'apontamento(s) pendente(s) em outros dias'
+                            '</div>'
+                        ),
+                        unsafe_allow_html=True,
+                    )
+
+                    with st.expander(
+                        "Clique para ver seus apontamentos pendentes",
+                        expanded=False,
+                    ):
+                        for data_pend in sorted(
+                            pendencias_por_data.keys(),
+                            reverse=True,
+                        ):
+                            info_pend = pendencias_por_data[
+                                data_pend
+                            ]
+                            unidades_pend = sorted(
+                                info_pend["unidades"]
+                            )
+                            unidades_txt = (
+                                " · ".join(unidades_pend)
+                                if unidades_pend
+                                else "Unidade não identificada"
+                            )
+
+                            rotulo_pend = (
+                                f"{data_pend.strftime('%d/%m/%Y')} · "
+                                f"{info_pend['qtd']} pendente(s) · "
+                                f"{unidades_txt}"
+                            )
+
+                            if st.button(
+                                rotulo_pend,
+                                use_container_width=True,
+                                key=(
+                                    "engm_ir_pend_"
+                                    + data_pend.isoformat()
+                                    + "_"
+                                    + re.sub(
+                                        r"[^A-Za-z0-9]+",
+                                        "_",
+                                        str(engenheiro_campo),
+                                    )
+                                ),
+                            ):
+                                st.session_state[
+                                    "_engm_data_pendente_destino"
+                                ] = data_pend
+                                st.session_state[
+                                    "_engm_limpar_unidade_ao_ir_pendente"
+                                ] = True
+                                st.rerun()
 
         if data_apont < hoje_campo:
             st.markdown(
