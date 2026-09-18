@@ -2,25 +2,27 @@ name: Cobrar apontamentos no Teams
 
 on:
   schedule:
-    # Fortaleza = UTC-3
-    # 09:30 Fortaleza = 12:30 UTC
-    - cron: "30 12 * * 1-5"
-    # 15:00 Fortaleza = 18:00 UTC
-    - cron: "0 18 * * 1-5"
+    - cron: "30 12 * * *"  # 09:30 Fortaleza
+    - cron: "0 18 * * *"   # 15:00 Fortaleza
+    - cron: "0 19 * * *"   # 16:00 Fortaleza
+    - cron: "0 0 * * *"    # 21:00 Fortaleza (00:00 UTC do dia seguinte)
+
   workflow_dispatch:
     inputs:
       slot:
-        description: "Horário lógico da cobrança"
-        required: false
+        description: "Horário da cobrança"
+        required: true
+        default: "16:00"
         type: choice
         options:
           - "09:30"
           - "15:00"
+          - "16:00"
+          - "21:00"
 
 jobs:
   cobrar:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
 
     steps:
       - name: Baixar repositório
@@ -32,16 +34,35 @@ jobs:
           python-version: "3.12"
 
       - name: Instalar dependências
-        run: pip install "psycopg[binary]>=3.2" "requests>=2.31"
+        run: |
+          python -m pip install --upgrade pip
+          pip install psycopg[binary] requests
+
+      - name: Resolver slot automático
+        id: horario
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            SLOT="${{ inputs.slot }}"
+          else
+            HORA_UTC="$(date -u +%H:%M)"
+
+            if [ "$HORA_UTC" = "12:30" ]; then
+              SLOT="09:30"
+            elif [ "$HORA_UTC" = "18:00" ]; then
+              SLOT="15:00"
+            elif [ "$HORA_UTC" = "19:00" ]; then
+              SLOT="16:00"
+            else
+              SLOT="21:00"
+            fi
+          fi
+
+          echo "slot=$SLOT" >> "$GITHUB_OUTPUT"
 
       - name: Cobrar apontamentos pendentes
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           TEAMS_COBRANCA_WEBHOOK_URL: ${{ secrets.TEAMS_COBRANCA_WEBHOOK_URL }}
-          PORTAL_SUPERVISOR_URL: https://apontamentos-aproar.streamlit.app/?eng
-          MANUAL_SLOT: ${{ github.event.inputs.slot }}
-        run: |
-          if [ -n "$MANUAL_SLOT" ]; then
-            export COBRANCA_SLOT="$MANUAL_SLOT"
-          fi
-          python cobrar_apontamentos_teams.py
+          COBRANCA_SLOT: ${{ steps.horario.outputs.slot }}
+        run: python cobrar_apontamentos_teams.py
