@@ -11481,6 +11481,76 @@ elif modo_campo:
     # =====================================================================
     import html as _html
 
+    # Limpa elementos visuais do próprio Streamlit no Portal do Supervisor.
+    # Isso não altera a lógica dos widgets; remove apenas chrome/menu/toolbar.
+    st.html("""
+    <style>
+    /* =========================================================
+       APROAR — LIMPEZA VISUAL DO STREAMLIT (PORTAL SUPERVISOR)
+       ========================================================= */
+
+    /* Menu superior, toolbar, decoração e indicadores internos */
+    [data-testid="stToolbar"],
+    [data-testid="stDecoration"],
+    [data-testid="stStatusWidget"],
+    [data-testid="stHeaderActionElements"],
+    [data-testid="stMainMenu"],
+    #MainMenu {
+        display:none !important;
+        visibility:hidden !important;
+    }
+
+    /* Botões de deploy/share quando aparecem */
+    [data-testid="stAppDeployButton"],
+    [data-testid="stDeployButton"] {
+        display:none !important;
+        visibility:hidden !important;
+    }
+
+    /* Cabeçalho padrão do Streamlit */
+    [data-testid="stHeader"] {
+        display:none !important;
+        visibility:hidden !important;
+        height:0 !important;
+        min-height:0 !important;
+    }
+
+    /* Sidebar e controles para abrir/recolher */
+    [data-testid="stSidebar"],
+    [data-testid="collapsedControl"],
+    [data-testid="stSidebarCollapsedControl"] {
+        display:none !important;
+        visibility:hidden !important;
+    }
+
+    /* Toolbar flutuante em gráficos/tabelas/elementos */
+    [data-testid="stElementToolbar"] {
+        display:none !important;
+        visibility:hidden !important;
+    }
+
+    /* Badges do viewer / branding eventual */
+    [data-testid="stViewerBadge"],
+    .viewerBadge_container__1QSob,
+    .viewerBadge_link__1S137 {
+        display:none !important;
+        visibility:hidden !important;
+    }
+
+    /* Rodapé padrão */
+    footer {
+        display:none !important;
+        visibility:hidden !important;
+    }
+
+    /* Remove o espaço residual do cabeçalho */
+    [data-testid="stMainBlockContainer"],
+    main .block-container {
+        padding-top:.55rem !important;
+    }
+    </style>
+    """)
+
     st.html("""
     <style>
     /* Portal de campo: uma única coluna, sem sidebar e sem chrome do Streamlit. */
@@ -11577,25 +11647,50 @@ elif modo_campo:
         box-shadow:0 14px 32px rgba(16,36,66,.18);
     }
 
+    .engm-brand-top{
+        display:flex;
+        align-items:center;
+        gap:14px;
+        margin:0 0 8px;
+    }
+
     .engm-brand-logo-wrap{
         display:inline-flex;
         align-items:center;
         justify-content:center;
-        width:78px;
-        height:78px;
-        margin:0 0 6px;
-        border-radius:18px;
-        background:rgba(255,255,255,.94);
-        border:1px solid rgba(255,255,255,.22);
-        box-shadow:0 8px 18px rgba(8,24,56,.16);
-        overflow:hidden;
+        width:98px;
+        height:88px;
+        margin:0;
+        background:transparent;
+        border:none;
+        box-shadow:none;
+        overflow:visible;
+        flex:0 0 auto;
     }
 
     .engm-brand-logo-img{
         display:block;
-        width:62px;
-        height:62px;
+        width:94px;
+        height:82px;
         object-fit:contain;
+        filter:drop-shadow(0 3px 8px rgba(6,20,48,.10));
+    }
+
+    .engm-brand-copy{
+        min-width:0;
+        display:flex;
+        flex-direction:column;
+        gap:4px;
+    }
+
+    .engm-brand-wordmark{
+        font-size:28px;
+        line-height:1;
+        font-weight:650;
+        letter-spacing:.16em;
+        color:#FFFFFF;
+        text-transform:uppercase;
+        margin:0;
     }
 
     .engm-head-v2 .engm-kicker,
@@ -13391,8 +13486,13 @@ elif modo_campo:
         f"""
         <div class="engm-head engm-head-v2">
             <div class="engm-brand">
-                <div class="engm-brand-logo-wrap"><img class="engm-brand-logo-img" src="data:image/png;base64,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" alt="Logo APROAR"></div>
-                <div class="engm-kicker">Portal do Supervisor</div>
+                <div class="engm-brand-top">
+                    <div class="engm-brand-logo-wrap"><img class="engm-brand-logo-img" src="data:image/png;base64,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" alt="Logo APROAR"></div>
+                    <div class="engm-brand-copy">
+                        <div class="engm-brand-wordmark">APROAR</div>
+                        <div class="engm-kicker">Portal do Supervisor</div>
+                    </div>
+                </div>
                 <div class="engm-title">Minha equipe</div>
             </div>
             <div class="engm-date engm-date-v2">
