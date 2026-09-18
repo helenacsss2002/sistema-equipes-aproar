@@ -2611,6 +2611,12 @@ def _garantir_estrutura_cadastros_admin():
                         ADD COLUMN IF NOT EXISTS custos_separados BOOLEAN NOT NULL DEFAULT FALSE
                         """
                     )
+                    cur.execute(
+                        f"""
+                        ALTER TABLE IF EXISTS {_tabela_fin}
+                        ADD COLUMN IF NOT EXISTS sebrae_noturno_reclassificado BOOLEAN NOT NULL DEFAULT FALSE
+                        """
+                    )
 
                 # ------------------------------------------------------------
                 # MIGRAÇÃO AUTOMÁTICA DOS APONTAMENTOS ANTIGOS
@@ -3395,133 +3401,64 @@ def _garantir_estrutura_cadastros_admin():
                 )
 
                 # ------------------------------------------------------------
-                # MIGRAÇÃO ÚNICA — SEBRAE SEM "EXTRA" LEGADO
+                # MIGRAÇÃO CORRETIVA — SEBRAE / ADICIONAL NOTURNO
                 # ------------------------------------------------------------
-                # Antes de existir o campo "Adicional noturno", os valores do
-                # SEBRAE foram lançados no campo antigo de Extra.
-                #
-                # Para limpar definitivamente o histórico já existente:
-                # - Extra do SEBRAE = R$ 0,00;
-                # - Adicional noturno = R$ 90,00;
-                # - mantém a diária financeira e os acordos/bonificações.
-                #
-                # Esta migração roda UMA única vez. Assim, no futuro, caso o
-                # supervisor lance um Extra real no SEBRAE usando o campo novo,
-                # ele não será apagado.
+                # Nos registros antigos os R$ 90 do noturno estavam dentro de Extra.
+                # Corrige uma única vez os apontamentos até 16/09/2026.
                 cur.execute(
                     """
-                    CREATE TABLE IF NOT EXISTS migracoes_sistema (
-                        chave TEXT PRIMARY KEY,
-                        aplicado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                    )
-                    """
-                )
-
-                cur.execute(
-                    """
-                    SELECT 1
-                    FROM migracoes_sistema
-                    WHERE chave = 'sebrae_extra_legado_zero_v1'
-                    LIMIT 1
-                    """
-                )
-                _sebrae_extra_ja_limpo = cur.fetchone()
-
-                if not _sebrae_extra_ja_limpo:
-                    cur.execute(
-                        f"""
-                        UPDATE convocacoes AS v
-                           SET valor_extra = 0,
-                               valor_adicional_noturno =
-                                   CASE
-                                       WHEN v.status IN (
-                                           'Presente (Integral)',
-                                           'Presente (Só Manhã)',
-                                           'Presente (Só Tarde)',
-                                           'Saída Antecipada',
-                                           'Presente',
-                                           'Extra'
-                                       )
-                                           THEN GREATEST(
-                                               COALESCE(
-                                                   v.valor_adicional_noturno,
-                                                   0
-                                               ),
-                                               {VALOR_ADICIONAL_NOTURNO_SEBRAE}
-                                           )
-                                       ELSE COALESCE(
-                                           v.valor_adicional_noturno,
+                    UPDATE convocacoes AS v
+                       SET valor_extra =
+                               CASE
+                                   WHEN COALESCE(v.valor_extra, 0) >= 90.00
+                                       THEN GREATEST(
+                                           COALESCE(v.valor_extra, 0) - 90.00,
                                            0
                                        )
-                                   END,
-                               tipo_diaria =
-                                   CASE
-                                       WHEN v.status IN (
-                                           'Presente (Integral)',
-                                           'Presente (Só Manhã)',
-                                           'Presente (Só Tarde)',
-                                           'Saída Antecipada',
-                                           'Presente',
-                                           'Extra'
-                                       )
-                                           THEN 'Diária'
-                                       ELSE v.tipo_diaria
-                                   END
-                          FROM obras AS o
-                         WHERE o.id = v.obra_id
-                           AND UPPER(
-                               TRIM(
-                                   COALESCE(
-                                       o.unidade,
-                                       ''
-                                   )
-                               )
-                           ) = 'SEBRAE'
-                        """
-                    )
-
-                    cur.execute(
-                        """
-                        UPDATE apontamentos AS a
-                           SET valor_extra = COALESCE(
-                                   v.valor_extra,
-                                   0
+                                   ELSE COALESCE(v.valor_extra, 0)
+                               END,
+                           valor_adicional_noturno =
+                               GREATEST(
+                                   COALESCE(v.valor_adicional_noturno, 0),
+                                   90.00
                                ),
-                               valor_adicional_noturno =
-                                   COALESCE(
-                                       v.valor_adicional_noturno,
-                                       0
-                                   ),
-                               tipo_diaria =
-                                   COALESCE(
-                                       v.tipo_diaria,
-                                       a.tipo_diaria
-                                   )
-                          FROM convocacoes AS v
-                         WHERE CAST(
-                                   a.convocacao_id AS TEXT
-                               ) = CAST(
-                                   v.id AS TEXT
-                               )
-                           AND COALESCE(
-                                   v.valor_adicional_noturno,
-                                   0
-                               ) >= 90
-                        """
-                    )
+                           sebrae_noturno_reclassificado = TRUE
+                      FROM obras AS o
+                     WHERE o.id = v.obra_id
+                       AND UPPER(TRIM(COALESCE(o.unidade, ''))) = 'SEBRAE'
+                       AND v.data <= DATE '2026-09-16'
+                       AND COALESCE(
+                           v.sebrae_noturno_reclassificado,
+                           FALSE
+                       ) = FALSE
+                       AND v.status IN (
+                           'Presente (Integral)',
+                           'Presente (Só Manhã)',
+                           'Presente (Só Tarde)',
+                           'Saída Antecipada',
+                           'Presente',
+                           'Extra'
+                       )
+                    """
+                )
 
-                    cur.execute(
-                        """
-                        INSERT INTO migracoes_sistema (
-                            chave
-                        )
-                        VALUES (
-                            'sebrae_extra_legado_zero_v1'
-                        )
-                        ON CONFLICT (chave)
-                        DO NOTHING
-                        """
-                    )
+                cur.execute(
+                    """
+                    UPDATE apontamentos AS a
+                       SET valor_extra =
+                               COALESCE(v.valor_extra, 0),
+                           valor_adicional_noturno =
+                               COALESCE(v.valor_adicional_noturno, 0),
+                           sebrae_noturno_reclassificado = TRUE
+                      FROM convocacoes AS v
+                     WHERE CAST(a.convocacao_id AS TEXT)
+                           = CAST(v.id AS TEXT)
+                       AND COALESCE(
+                           v.sebrae_noturno_reclassificado,
+                           FALSE
+                       ) = TRUE
+                    """
+                )
 
                 # O índice antigo impedia, por exemplo, uma obra com o mesmo
                 # nome em duas unidades diferentes.
@@ -4113,221 +4050,62 @@ TIPOS_DIARIA = ["Diária", "Meia diária"]
 VALOR_ADICIONAL_NOTURNO_SEBRAE = 90.00
 HORA_LIMITE_APONTAMENTO_SEBRAE = datetime.time(9, 30)
 
+# Até 16/09/2026 os R$ 90 do SEBRAE eram digitados no antigo campo Extra.
+CORTE_LEGADO_NOTURNO_SEBRAE = datetime.date(2026, 9, 16)
+
 
 def eh_unidade_sebrae(unidade):
     return normalizar(unidade or "") == "SEBRAE"
 
 
-def apontamento_esta_atrasado(
-    data_servico,
-    unidade="",
-    agora=None,
-):
+def apontamento_esta_atrasado(data_servico, unidade="", agora=None):
     """
-    Regra visual de atraso.
+    Regra de atraso operacional.
 
-    Demais unidades:
-      - no dia do serviço, passa a "Atrasado" às 16:00;
-      - em qualquer data posterior, continua atrasado.
+    Geral:
+      qualquer apontamento feito em data posterior ao serviço é retroativo.
 
     SEBRAE:
-      - jornada 17h–02h;
-      - às 21:00 do próprio dia há um lembrete automático;
-      - não classificamos esse lembrete como atraso, pois a jornada ainda está
-        em andamento;
-      - no dia seguinte, se ainda não foi apontado, fica como atrasado e
-        permanece disponível para cobrança manual.
+      a equipe trabalha 17h–02h. O apontamento do serviço do dia D pode ser
+      concluído no dia D+1 até 09:29 sem ser marcado como atraso. Às 09:30,
+      se ainda estiver pendente, entra na cobrança Teams.
     """
     agora = agora or agora_aproar()
 
-    if not isinstance(
-        data_servico,
-        datetime.date,
-    ):
+    if not isinstance(data_servico, datetime.date):
         try:
-            data_servico = (
-                datetime.date.fromisoformat(
-                    str(data_servico)
-                )
-            )
+            data_servico = datetime.date.fromisoformat(str(data_servico))
         except Exception:
             return False
 
-    if data_servico > agora.date():
+    if agora.date() <= data_servico:
         return False
 
-    if eh_unidade_sebrae(
-        unidade
-    ):
-        return agora.date() > data_servico
+    if eh_unidade_sebrae(unidade):
+        dia_seguinte = data_servico + datetime.timedelta(days=1)
+        if agora.date() == dia_seguinte:
+            return agora.time() >= HORA_LIMITE_APONTAMENTO_SEBRAE
 
-    if data_servico < agora.date():
-        return True
-
-    return agora.time() >= datetime.time(
-        16,
-        0,
-    )
+    return True
 
 
-def pendencia_teams_visivel(
-    data_servico,
-    unidade="",
-    agora=None,
-):
+def pendencia_teams_esta_atrasada(data_servico, unidade="", agora=None):
     """
-    Toda convocação ainda sem apontamento fica visível em Configurações
-    desde o próprio dia do serviço, independentemente de já ter recebido
-    cobrança automática.
-
-    Isso permite conferir e usar "Cobrar agora" a qualquer momento.
+    Compatibilidade para telas antigas.
+    Toda pendência até hoje permanece visível no administrativo.
+    A agenda automática é controlada pelo robô do GitHub.
     """
     agora = agora or agora_aproar()
 
-    if not isinstance(
-        data_servico,
-        datetime.date,
-    ):
+    if not isinstance(data_servico, datetime.date):
         try:
-            data_servico = (
-                datetime.date.fromisoformat(
-                    str(data_servico)
-                )
+            data_servico = datetime.date.fromisoformat(
+                str(data_servico)
             )
         except Exception:
             return False
 
     return data_servico <= agora.date()
-
-
-def situacao_pendencia_teams(
-    data_servico,
-    unidade="",
-    agora=None,
-):
-    agora = agora or agora_aproar()
-
-    if not isinstance(
-        data_servico,
-        datetime.date,
-    ):
-        try:
-            data_servico = (
-                datetime.date.fromisoformat(
-                    str(data_servico)
-                )
-            )
-        except Exception:
-            return "Pendente"
-
-    if eh_unidade_sebrae(
-        unidade
-    ):
-        if data_servico == agora.date():
-            return (
-                "Pendente · lembrete às 21:00"
-                if agora.time() < datetime.time(21, 0)
-                else "Pendente · automático das 21:00 já previsto"
-            )
-
-        return "Atrasado · disponível para cobrança manual"
-
-    if data_servico == agora.date():
-        if agora.time() < datetime.time(
-            16,
-            0,
-        ):
-            return "Pendente · prazo até 16:00"
-
-        return "Atrasado · cobrança das 16:00"
-
-    return "Atrasado"
-
-
-def proxima_cobranca_automatica_teams(
-    data_servico,
-    unidade="",
-    agora=None,
-):
-    agora = agora or agora_aproar()
-
-    if not isinstance(
-        data_servico,
-        datetime.date,
-    ):
-        try:
-            data_servico = (
-                datetime.date.fromisoformat(
-                    str(data_servico)
-                )
-            )
-        except Exception:
-            return "Manual"
-
-    hoje = agora.date()
-
-    if eh_unidade_sebrae(
-        unidade
-    ):
-        if (
-            data_servico == hoje
-            and agora.time()
-            < datetime.time(
-                21,
-                0,
-            )
-        ):
-            return "Hoje 21:00"
-
-        return "Somente manual"
-
-    if data_servico == hoje:
-        if agora.time() < datetime.time(
-            16,
-            0,
-        ):
-            return "Hoje 16:00"
-
-        return "Amanhã 09:30"
-
-    if data_servico == (
-        hoje
-        - datetime.timedelta(days=1)
-    ):
-        if agora.time() < datetime.time(
-            9,
-            30,
-        ):
-            return "Hoje 09:30"
-
-        if agora.time() < datetime.time(
-            15,
-            0,
-        ):
-            return "Hoje 15:00"
-
-        return "Somente manual"
-
-    return "Somente manual"
-
-
-def pendencia_teams_esta_atrasada(
-    data_servico,
-    unidade="",
-    agora=None,
-):
-    """
-    Compatibilidade com chamadas antigas.
-
-    Para a tela/configuração, o importante é a pendência estar VISÍVEL.
-    A coluna "Situação" informa se ela já está atrasada ou ainda dentro
-    da janela operacional.
-    """
-    return pendencia_teams_visivel(
-        data_servico,
-        unidade=unidade,
-        agora=agora or agora_aproar(),
-    )
 
 
 def normalizar_tipo_diaria(valor):
@@ -4711,7 +4489,14 @@ def custo_pago_total_registro(
 
 
 def valor_extra_registro(registro):
-    """Extra real, separado da diária."""
+    """
+    Extra real, separado da diária.
+
+    Compatibilidade SEBRAE:
+    nos registros até 16/09/2026, os R$ 90 do adicional noturno eram
+    lançados dentro de Extra. Enquanto a migração física não tiver sido
+    aplicada, o relatório já corrige isso na leitura.
+    """
     registro = registro or {}
 
     if not status_eh_presenca(
@@ -4723,20 +4508,50 @@ def valor_extra_registro(registro):
         return 0.0
 
     try:
-        return round(
-            max(
-                0.0,
-                float(
-                    registro.get(
-                        "valor_extra"
-                    )
-                    or 0.0
-                ),
+        extra = max(
+            0.0,
+            float(
+                registro.get("valor_extra")
+                or 0.0
             ),
-            2,
         )
     except Exception:
         return 0.0
+
+    if registro_tem_servico_sebrae(
+        registro
+    ):
+        data_registro = registro.get("data")
+
+        if not isinstance(
+            data_registro,
+            datetime.date,
+        ):
+            try:
+                data_registro = datetime.date.fromisoformat(
+                    str(data_registro)
+                )
+            except Exception:
+                data_registro = None
+
+        ja_reclassificado = bool(
+            registro.get(
+                "sebrae_noturno_reclassificado"
+            )
+        )
+
+        if (
+            data_registro is not None
+            and data_registro <= CORTE_LEGADO_NOTURNO_SEBRAE
+            and not ja_reclassificado
+            and extra >= 90.0
+        ):
+            extra = max(
+                0.0,
+                extra - 90.0,
+            )
+
+    return round(extra, 2)
 
 
 def valor_adicional_noturno_registro(registro):
@@ -7411,43 +7226,37 @@ def _carregar_pendentes_responsavel_teams(
     agora_ref=None,
 ):
     """
-    Retorna TODAS as pendências visíveis até hoje.
+    Lista TODAS as pendências de apontamento até hoje.
 
-    Não depende do horário automático.
-    Assim a Controladoria consegue:
-    - ver pendências do próprio dia;
-    - ver atrasos antigos;
-    - cobrar manualmente mesmo se uma automática já tiver sido disparada.
+    A tela e a cobrança manual mostram a pendência mesmo antes do horário
+    automático.
+
+    Automático:
+      demais unidades -> D 16:00, D+1 09:30 e D+1 15:00
+      SEBRAE           -> D 21:00, uma única vez
+
+    Manual:
+      disponível enquanto o apontamento continuar pendente.
     """
     supervisor = str(
-        supervisor
-        or ""
+        supervisor or ""
     ).strip().upper()
-
-    agora_ref = agora_ref or agora_aproar()
 
     where_unidade = ""
     params_unidade = []
 
     if supervisor not in OBSERVADORES_TEAMS:
-        unidades = (
-            RESPONSAVEIS_UNIDADES_TEAMS.get(
-                supervisor,
-                [],
-            )
+        unidades = RESPONSAVEIS_UNIDADES_TEAMS.get(
+            supervisor,
+            [],
         )
 
         if not unidades:
             return []
 
         where_unidade = """
-          AND UPPER(
-                TRIM(
-                    COALESCE(o.unidade, '')
-                )
-              ) = ANY(%s)
+          AND UPPER(TRIM(COALESCE(o.unidade, ''))) = ANY(%s)
         """
-
         params_unidade = [[
             str(u).strip().upper()
             for u in unidades
@@ -7469,9 +7278,7 @@ def _carregar_pendentes_responsavel_teams(
         JOIN obras o
           ON o.id = c.obra_id
         WHERE c.data <= %s
-          AND UPPER(
-                COALESCE(o.nome, '')
-              ) LIKE UPPER(%s)
+          AND UPPER(COALESCE(o.nome, '')) LIKE UPPER(%s)
           {where_unidade}
         ORDER BY
             c.data ASC,
@@ -7485,34 +7292,69 @@ def _carregar_pendentes_responsavel_teams(
         ),
     )
 
-    rows = cur.fetchall() or []
+    return cur.fetchall() or []
 
-    return [
-        row
-        for row in rows
-        if pendencia_teams_visivel(
-            (
-                row.get("data")
-                if isinstance(
-                    row,
-                    dict,
-                )
-                else row[1]
-            ),
-            unidade=(
-                (
-                    row.get("unidade")
-                    if isinstance(
-                        row,
-                        dict,
-                    )
-                    else row[5]
-                )
-                or ""
-            ),
-            agora=agora_ref,
+
+def _situacao_pendencia_teams(
+    data_servico,
+    unidade,
+    agora=None,
+):
+    agora = agora or agora_aproar()
+
+    if not isinstance(
+        data_servico,
+        datetime.date,
+    ):
+        try:
+            data_servico = datetime.date.fromisoformat(
+                str(data_servico)
+            )
+        except Exception:
+            return "Pendente", "Manual disponível"
+
+    hoje = agora.date()
+    sebrae = eh_unidade_sebrae(unidade)
+
+    if data_servico == hoje:
+        if sebrae:
+            if agora.time() < datetime.time(21, 0):
+                return "Pendente de hoje", "Hoje · 21:00"
+            return (
+                "Pendente de hoje",
+                "Cobrança automática das 21:00 prevista/executada · manual disponível",
+            )
+
+        if agora.time() < datetime.time(16, 0):
+            return "Pendente de hoje", "Hoje · 16:00"
+
+        return "Atrasado", "Próxima automática · amanhã 09:30"
+
+    if data_servico == hoje - datetime.timedelta(days=1):
+        if sebrae:
+            return (
+                "Atrasado",
+                "SEBRAE: automáticas encerradas · manual disponível",
+            )
+
+        if agora.time() < datetime.time(9, 30):
+            return "Atrasado", "Hoje · 09:30"
+
+        if agora.time() < datetime.time(15, 0):
+            return "Atrasado", "Hoje · 15:00"
+
+        return (
+            "Atrasado",
+            "Automáticas encerradas · manual disponível",
         )
-    ]
+
+    if data_servico < hoje:
+        return (
+            "Atrasado",
+            "Automáticas encerradas · manual disponível",
+        )
+
+    return "Pendente", "Manual disponível"
 
 
 def _montar_mensagem_cobranca_manual_teams(
@@ -7596,8 +7438,8 @@ def _cobrar_supervisor_teams_agora(
     email_teams,
 ):
     """
-    Envia uma cobrança manual sem interferir nas execuções automáticas
-    das 09:30 e 15:00.
+    Envia uma cobrança manual sem interferir nas execuções automáticas.
+    Pode ser usada enquanto a pendência estiver visível.
     """
     supervisor = str(
         supervisor or ""
@@ -7643,7 +7485,7 @@ def _cobrar_supervisor_teams_agora(
                 if not pendentes:
                     return (
                         True,
-                        f"{supervisor}: não há apontamentos atrasados "
+                        f"{supervisor}: não há apontamentos pendentes "
                         "nas unidades sob sua responsabilidade.",
                     )
 
@@ -9205,7 +9047,7 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
             "Convocações auditáveis": 0,
             "Convocações atrasadas": 0,
             "Apontamentos auditáveis": 0,
-            "Apontamentos atrasados": 0,
+            "Pendências": 0,
         })
         if meta.get("convocado_em"):
             d["Convocações auditáveis"] += 1
@@ -16582,7 +16424,7 @@ else:
                 f'<div class="ap-task amber"><div><strong>{len(pendentes)} apontamento(s) pendente(s)</strong>'
                 '<span>Há colaboradores ainda sem Obra/Serviço definida no dia selecionado. '
                 'No próprio dia eles são pendentes, não atrasados para o Teams. '
-                'Se continuarem sem apontamento: demais unidades têm cobrança às 16:00 e no dia seguinte às 09:30 e 15:00; SEBRAE recebe um único lembrete às 21:00 do dia do serviço.</span></div>'
+                'Se continuarem sem apontamento, entram na cobrança do dia seguinte; no SEBRAE, a partir de 09:30.</span></div>'
                 f'<div class="ap-task-count">{len(pendentes)}</div></div>'
             )
         if qtd_conflitos:
@@ -20254,8 +20096,10 @@ else:
                 "**Cobranças de apontamentos no Teams**"
             )
             st.caption(
-                "O automático continua programado para 09:30 e 15:00. "
-                "Além disso, você pode cobrar qualquer supervisor manualmente."
+                "Automático: demais unidades às 16:00 no dia do serviço e, "
+                "se continuar pendente, às 09:30 e 15:00 do dia seguinte. "
+                "SEBRAE: uma única cobrança automática às 21:00 no dia do serviço. "
+                "A cobrança manual continua disponível enquanto houver pendência."
             )
 
             st.info(
@@ -20592,11 +20436,11 @@ else:
 
                 st.markdown("---")
                 st.markdown(
-                    "**Pendências de apontamento e destinatários**"
+                    "**Apontamentos pendentes e destinatários**"
                 )
                 st.caption(
-                    "A lista permanece visível mesmo depois das cobranças automáticas. "
-                    "Assim você sempre consegue conferir e usar Cobrar agora manualmente."
+                    "Esta prévia mostra toda pendência até hoje, inclusive antes do horário automático, "
+                    "para você conferir e cobrar manualmente quando quiser."
                 )
 
                 try:
@@ -20677,6 +20521,15 @@ else:
                                     observador
                                 )
 
+                        (
+                            situacao_ref,
+                            proxima_auto_ref,
+                        ) = _situacao_pendencia_teams(
+                            data_ref,
+                            unidade_ref,
+                            agora=agora_preview,
+                        )
+
                         linhas_preview.append({
                             "Data": (
                                 data_ref.strftime("%d/%m/%Y")
@@ -20692,18 +20545,8 @@ else:
                             "Unidade": unidade_ref,
                             "Colaborador": colaborador_ref,
                             "Turno": turno_ref or "-",
-                            "Situação": situacao_pendencia_teams(
-                                data_ref,
-                                unidade_ref,
-                                agora=agora_preview,
-                            ),
-                            "Próxima automática": (
-                                proxima_cobranca_automatica_teams(
-                                    data_ref,
-                                    unidade_ref,
-                                    agora=agora_preview,
-                                )
-                            ),
+                            "Situação": situacao_ref,
+                            "Automático": proxima_auto_ref,
                             "Responsável": responsavel_ref,
                             "Será enviado para": (
                                 " · ".join(
@@ -20732,7 +20575,7 @@ else:
 
                         with c_prev1:
                             st.metric(
-                                "Pendências visíveis",
+                                "Apontamentos atrasados",
                                 len(
                                     df_preview_teams
                                 ),
@@ -20767,12 +20610,12 @@ else:
 
                     else:
                         st.success(
-                            "Não há pendências de apontamento neste momento."
+                            "Não há apontamentos pendentes neste momento."
                         )
 
                 except Exception as e:
                     st.warning(
-                        "Não foi possível carregar a prévia das pendências de apontamento."
+                        "Não foi possível carregar a prévia dos apontamentos atrasados."
                     )
 
                 st.markdown("---")
@@ -20943,8 +20786,8 @@ else:
 
                 st.markdown("---")
                 st.caption(
-                    "Automático geral: 16:00 no dia do serviço, 09:30 e 15:00 no dia seguinte. "
-                    "SEBRAE: uma única cobrança automática às 21:00 do dia do serviço. "
+                    "Automático — demais unidades: D 16:00, D+1 09:30 e D+1 15:00. "
+                    "SEBRAE: D 21:00, uma única vez. "
                     "Depois disso a pendência continua visível para cobrança manual. "
                     "PAULO e HELENA recebem todas as pendências apenas se estiverem ativos."
                 )
