@@ -3,7 +3,6 @@ name: Cobrar apontamentos no Teams
 on:
   schedule:
     - cron: "30 12 * * *"  # 09:30 Fortaleza
-    - cron: "0 18 * * *"   # 15:00 Fortaleza
     - cron: "0 19 * * *"   # 16:00 Fortaleza
     - cron: "0 0 * * *"    # 21:00 Fortaleza (00:00 UTC do dia seguinte)
 
@@ -16,7 +15,6 @@ on:
         type: choice
         options:
           - "09:30"
-          - "15:00"
           - "16:00"
           - "21:00"
 
@@ -49,8 +47,6 @@ jobs:
 
             if [ "$HORA_UTC" = "12:30" ]; then
               SLOT="09:30"
-            elif [ "$HORA_UTC" = "18:00" ]; then
-              SLOT="15:00"
             elif [ "$HORA_UTC" = "19:00" ]; then
               SLOT="16:00"
             else
