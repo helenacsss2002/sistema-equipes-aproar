@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 from supabase import create_client, Client
 import datetime
 import pandas as pd
@@ -2581,6 +2582,7 @@ def _garantir_colunas_financeiras_essenciais():
 _garantir_colunas_financeiras_essenciais()
 
 
+@st.cache_resource(ttl=3600, show_spinner=False)
 def _garantir_schema_apontamento_runtime():
     """
     Confere e corrige, no momento do uso, as colunas financeiras do
@@ -13291,9 +13293,12 @@ elif modo_campo:
         engenheiro,
     ):
         """
-        Salva toda a equipe em uma única conexão no Neon.
-        Mantém exatamente os mesmos dados gravados pelo fluxo anterior,
-        mas evita 2+ conexões por colaborador.
+        Salva a equipe de uma vez e só retorna sucesso depois de confirmar
+        no banco que TODAS as convocações foram atualizadas.
+
+        No Neon, as operações principais são enviadas em lote dentro de uma
+        única transação. Se qualquer parte falhar, há rollback completo:
+        nunca exibimos "salvo" para um lote parcialmente gravado.
         """
         itens = list(itens or [])
         if not itens:
@@ -13306,7 +13311,6 @@ elif modo_campo:
                 f"Campos pendentes: {schema_detalhe}"
             ]
 
-        # Caminho rápido de produção.
         if (
             DB_BACKEND == "NEON"
             and hasattr(supabase, "_connect")
@@ -13315,26 +13319,151 @@ elif modo_campo:
                 usar_estrutura = schema_producao_disponivel()
                 agora_lote = agora_aproar()
 
+                updates_conv = []
+                upserts_apont = []
+                servicos_rows = []
+                auditoria_rows = []
+                ids_lote = []
+
+                for item in itens:
+                    conv = item["conv"]
+                    conv_id = str(conv.get("id") or "").strip()
+                    colab_id = str(conv.get("colaborador_id") or "").strip()
+
+                    if not conv_id:
+                        raise RuntimeError(
+                            f"{item.get('nome_pessoa') or 'Colaborador'}: "
+                            "convocação sem ID."
+                        )
+
+                    ids_lote.append(conv_id)
+
+                    retroativo_item = apontamento_esta_atrasado(
+                        data_servico,
+                        unidade=item.get("unidade_contexto") or "",
+                        agora=agora_lote,
+                    )
+
+                    updates_conv.append((
+                        item["obra_id_final"],
+                        item["status"],
+                        item["tipo_diaria_final"],
+                        float(item["custo_pago_final"] or 0),
+                        float(item["valor_extra_final"] or 0),
+                        float(item["valor_adicional_noturno_final"] or 0),
+                        float(item["valor_acordo_final"] or 0),
+                        float(item["custo_encargos_final"] or 0),
+                        item["nova_obs"],
+                        conv_id,
+                    ))
+
+                    if usar_estrutura:
+                        upserts_apont.append((
+                            conv_id,
+                            data_servico,
+                            colab_id,
+                            str(engenheiro),
+                            str(item["status"]),
+                            float(item["valor_extra_final"] or 0),
+                            str(item["obs_livre"] or ""),
+                            str(engenheiro),
+                            retroativo_item,
+                            item["tipo_diaria_final"],
+                            float(item["custo_pago_final"] or 0),
+                            float(item["valor_acordo_final"] or 0),
+                            float(item["valor_adicional_noturno_final"] or 0),
+                            float(item["custo_encargos_final"] or 0),
+                        ))
+
+                        obra_principal = dict_obras.get(
+                            item["obra_id_final"],
+                            {},
+                        )
+                        servicos_rows.append((
+                            conv_id,
+                            str(item["obra_id_final"] or ""),
+                            str(obra_principal.get("nome") or ""),
+                            str(obra_principal.get("unidade") or ""),
+                            str(item["periodo_principal"] or ""),
+                            True,
+                        ))
+
+                        for adicional in item["adicionais"] or []:
+                            nome = str(
+                                adicional.get("servico") or ""
+                            ).strip()
+                            if not nome:
+                                continue
+
+                            obra_id_adic = str(
+                                adicional.get("obra_id") or ""
+                            ).strip()
+                            obra_adic = (
+                                dict_obras.get(obra_id_adic, {})
+                                if obra_id_adic
+                                else {}
+                            )
+
+                            if not obra_adic:
+                                obra_adic = next(
+                                    (
+                                        o for o in obras
+                                        if normalizar(o.get("nome"))
+                                        == normalizar(nome)
+                                    ),
+                                    {},
+                                )
+
+                            servicos_rows.append((
+                                conv_id,
+                                str(
+                                    obra_adic.get("id")
+                                    or obra_id_adic
+                                    or ""
+                                ),
+                                nome,
+                                str(
+                                    adicional.get("unidade")
+                                    or obra_adic.get("unidade")
+                                    or obra_principal.get("unidade")
+                                    or ""
+                                ),
+                                str(adicional.get("periodo") or ""),
+                                False,
+                            ))
+
+                        auditoria_rows.append((
+                            "apontamento",
+                            conv_id,
+                            "SALVAR",
+                            str(engenheiro),
+                            None,
+                            _json_db({
+                                "data_servico": data_servico,
+                                "status": item["status"],
+                                "tipo_diaria": item["tipo_diaria_final"],
+                                "custo_pago": item["custo_pago_final"],
+                                "valor_extra": item["valor_extra_final"],
+                                "valor_adicional_noturno": item["valor_adicional_noturno_final"],
+                                "valor_acordo": item["valor_acordo_final"],
+                                "custo_encargos_base": item["custo_encargos_final"],
+                                "obra_principal_id": str(item["obra_id_final"]),
+                                "periodo_principal": item["periodo_principal"],
+                                "servicos_adicionais": item["adicionais"],
+                                "retroativo": retroativo_item,
+                            }),
+                            _json_db({
+                                "origem": "portal_engenheiro_lote",
+                            }),
+                        ))
+
+                ids_unicos = list(dict.fromkeys(ids_lote))
+
                 with supabase._connect() as conn:
-                    with conn.cursor() as cur:
-                        for item in itens:
-                            conv = item["conv"]
-                            conv_id = str(
-                                conv.get("id")
-                                or ""
-                            )
-                            colab_id = str(
-                                conv.get("colaborador_id")
-                                or ""
-                            )
-
-                            retroativo_item = apontamento_esta_atrasado(
-                                data_servico,
-                                unidade=item.get("unidade_contexto") or "",
-                                agora=agora_lote,
-                            )
-
-                            cur.execute(
+                    try:
+                        with conn.cursor() as cur:
+                            # Atualiza todas as convocações na mesma transação.
+                            cur.executemany(
                                 """
                                 UPDATE convocacoes
                                    SET obra_id = %s,
@@ -13348,226 +13477,141 @@ elif modo_campo:
                                        custos_separados = TRUE,
                                        migracao_sebrae_noturno_v2 = TRUE,
                                        observacao = %s
-                                 WHERE id = %s
+                                 WHERE CAST(id AS TEXT) = %s
                                 """,
-                                (
-                                    item["obra_id_final"],
-                                    item["status"],
-                                    item["tipo_diaria_final"],
-                                    float(item["custo_pago_final"] or 0),
-                                    float(item["valor_extra_final"] or 0),
-                                    float(item["valor_adicional_noturno_final"] or 0),
-                                    float(item["valor_acordo_final"] or 0),
-                                    float(item["custo_encargos_final"] or 0),
-                                    item["nova_obs"],
-                                    conv_id,
-                                ),
+                                updates_conv,
                             )
 
-                            if not usar_estrutura:
-                                continue
-
-                            cur.execute(
-                                """
-                                INSERT INTO apontamentos (
-                                    convocacao_id, data_servico, colaborador_id,
-                                    engenheiro, status, valor_extra, observacao,
-                                    apontado_em, apontado_por, retroativo, atualizado_em,
-                                    tipo_diaria, custo_pago, valor_acordo,
-                                    valor_adicional_noturno, custo_encargos_base,
-                                    custos_separados
-                                )
-                                VALUES (%s,%s,%s,%s,%s,%s,%s,NOW(),%s,%s,NOW(),%s,%s,%s,%s,%s,TRUE)
-                                ON CONFLICT (convocacao_id) DO UPDATE SET
-                                    data_servico = EXCLUDED.data_servico,
-                                    colaborador_id = EXCLUDED.colaborador_id,
-                                    engenheiro = EXCLUDED.engenheiro,
-                                    status = EXCLUDED.status,
-                                    valor_extra = EXCLUDED.valor_extra,
-                                    observacao = EXCLUDED.observacao,
-                                    apontado_por = EXCLUDED.apontado_por,
-                                    retroativo = EXCLUDED.retroativo,
-                                    tipo_diaria = EXCLUDED.tipo_diaria,
-                                    custo_pago = EXCLUDED.custo_pago,
-                                    valor_acordo = EXCLUDED.valor_acordo,
-                                    valor_adicional_noturno = EXCLUDED.valor_adicional_noturno,
-                                    custo_encargos_base = EXCLUDED.custo_encargos_base,
-                                    custos_separados = TRUE,
-                                    migracao_sebrae_noturno_v2 = TRUE,
-                                    atualizado_em = NOW()
-                                """,
-                                (
-                                    conv_id,
-                                    data_servico,
-                                    colab_id,
-                                    str(engenheiro),
-                                    str(item["status"]),
-                                    float(item["valor_extra_final"] or 0),
-                                    str(item["obs_livre"] or ""),
-                                    str(engenheiro),
-                                    retroativo_item,
-                                    item["tipo_diaria_final"],
-                                    float(item["custo_pago_final"] or 0),
-                                    float(item["valor_acordo_final"] or 0),
-                                    float(item["valor_adicional_noturno_final"] or 0),
-                                    float(item["custo_encargos_final"] or 0),
-                                ),
-                            )
-
-                            cur.execute(
-                                """
-                                DELETE FROM servicos_apontamento
-                                WHERE convocacao_id = %s
-                                """,
-                                (conv_id,),
-                            )
-
-                            obra_principal = dict_obras.get(
-                                item["obra_id_final"],
-                                {},
-                            )
-
-                            cur.execute(
-                                """
-                                INSERT INTO servicos_apontamento (
-                                    convocacao_id, obra_id, obra_nome_snapshot,
-                                    unidade_snapshot, periodo, principal
-                                )
-                                VALUES (%s,%s,%s,%s,%s,TRUE)
-                                """,
-                                (
-                                    conv_id,
-                                    str(
-                                        item["obra_id_final"]
-                                        or ""
-                                    ),
-                                    str(
-                                        obra_principal.get("nome")
-                                        or ""
-                                    ),
-                                    str(
-                                        obra_principal.get("unidade")
-                                        or ""
-                                    ),
-                                    str(
-                                        item["periodo_principal"]
-                                        or ""
-                                    ),
-                                ),
-                            )
-
-                            for adicional in (
-                                item["adicionais"]
-                                or []
-                            ):
-                                nome = str(
-                                    adicional.get("servico")
-                                    or ""
-                                ).strip()
-                                if not nome:
-                                    continue
-
-                                obra_id_adic = str(
-                                    adicional.get("obra_id")
-                                    or ""
-                                ).strip()
-                                obra_adic = (
-                                    dict_obras.get(
-                                        obra_id_adic,
-                                        {},
+                            if usar_estrutura:
+                                cur.executemany(
+                                    """
+                                    INSERT INTO apontamentos (
+                                        convocacao_id, data_servico, colaborador_id,
+                                        engenheiro, status, valor_extra, observacao,
+                                        apontado_em, apontado_por, retroativo, atualizado_em,
+                                        tipo_diaria, custo_pago, valor_acordo,
+                                        valor_adicional_noturno, custo_encargos_base,
+                                        custos_separados
                                     )
-                                    if obra_id_adic
-                                    else {}
-                                )
-
-                                if not obra_adic:
-                                    obra_adic = next(
-                                        (
-                                            o for o in obras
-                                            if normalizar(
-                                                o.get("nome")
-                                            )
-                                            == normalizar(nome)
-                                        ),
-                                        {},
+                                    VALUES (
+                                        %s,%s,%s,%s,%s,%s,%s,
+                                        NOW(),%s,%s,NOW(),%s,%s,%s,%s,%s,TRUE
                                     )
+                                    ON CONFLICT (convocacao_id) DO UPDATE SET
+                                        data_servico = EXCLUDED.data_servico,
+                                        colaborador_id = EXCLUDED.colaborador_id,
+                                        engenheiro = EXCLUDED.engenheiro,
+                                        status = EXCLUDED.status,
+                                        valor_extra = EXCLUDED.valor_extra,
+                                        observacao = EXCLUDED.observacao,
+                                        apontado_por = EXCLUDED.apontado_por,
+                                        retroativo = EXCLUDED.retroativo,
+                                        tipo_diaria = EXCLUDED.tipo_diaria,
+                                        custo_pago = EXCLUDED.custo_pago,
+                                        valor_acordo = EXCLUDED.valor_acordo,
+                                        valor_adicional_noturno = EXCLUDED.valor_adicional_noturno,
+                                        custo_encargos_base = EXCLUDED.custo_encargos_base,
+                                        custos_separados = TRUE,
+                                        migracao_sebrae_noturno_v2 = TRUE,
+                                        atualizado_em = NOW()
+                                    """,
+                                    upserts_apont,
+                                )
 
                                 cur.execute(
                                     """
-                                    INSERT INTO servicos_apontamento (
-                                        convocacao_id, obra_id, obra_nome_snapshot,
-                                        unidade_snapshot, periodo, principal
-                                    )
-                                    VALUES (%s,%s,%s,%s,%s,FALSE)
+                                    DELETE FROM servicos_apontamento
+                                     WHERE CAST(convocacao_id AS TEXT) = ANY(%s)
                                     """,
-                                    (
-                                        conv_id,
-                                        str(
-                                            obra_adic.get("id")
-                                            or obra_id_adic
-                                            or ""
-                                        ),
-                                        nome,
-                                        str(
-                                            adicional.get("unidade")
-                                            or obra_adic.get("unidade")
-                                            or obra_principal.get("unidade")
-                                            or ""
-                                        ),
-                                        str(
-                                            adicional.get("periodo")
-                                            or ""
-                                        ),
-                                    ),
+                                    (ids_unicos,),
                                 )
 
-                            # Auditoria no mesmo commit: sem abrir outra conexão.
+                                if servicos_rows:
+                                    cur.executemany(
+                                        """
+                                        INSERT INTO servicos_apontamento (
+                                            convocacao_id, obra_id, obra_nome_snapshot,
+                                            unidade_snapshot, periodo, principal
+                                        )
+                                        VALUES (%s,%s,%s,%s,%s,%s)
+                                        """,
+                                        servicos_rows,
+                                    )
+
+                                if auditoria_rows:
+                                    cur.executemany(
+                                        """
+                                        INSERT INTO auditoria
+                                            (entidade, entidade_id, acao, usuario,
+                                             antes, depois, contexto)
+                                        VALUES
+                                            (%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s::jsonb)
+                                        """,
+                                        auditoria_rows,
+                                    )
+
+                            # Confirma ANTES do commit que todas as convocações
+                            # do lote existem e receberam o marcador de gravação.
                             cur.execute(
                                 """
-                                INSERT INTO auditoria
-                                    (entidade, entidade_id, acao, usuario,
-                                     antes, depois, contexto)
-                                VALUES
-                                    (%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s::jsonb)
+                                SELECT COUNT(*) AS qtd
+                                  FROM convocacoes
+                                 WHERE CAST(id AS TEXT) = ANY(%s)
+                                   AND custos_separados = TRUE
                                 """,
-                                (
-                                    "apontamento",
-                                    conv_id,
-                                    "SALVAR",
-                                    str(engenheiro),
-                                    None,
-                                    _json_db({
-                                        "data_servico": data_servico,
-                                        "status": item["status"],
-                                        "tipo_diaria": item["tipo_diaria_final"],
-                                        "custo_pago": item["custo_pago_final"],
-                                        "valor_extra": item["valor_extra_final"],
-                                        "valor_adicional_noturno": item["valor_adicional_noturno_final"],
-                                        "valor_acordo": item["valor_acordo_final"],
-                                        "custo_encargos_base": item["custo_encargos_final"],
-                                        "obra_principal_id": str(
-                                            item["obra_id_final"]
-                                        ),
-                                        "periodo_principal": item["periodo_principal"],
-                                        "servicos_adicionais": item["adicionais"],
-                                        "retroativo": retroativo_item,
-                                    }),
-                                    _json_db({
-                                        "origem": "portal_engenheiro_lote",
-                                    }),
-                                ),
+                                (ids_unicos,),
                             )
+                            row_conf = cur.fetchone() or {}
+                            qtd_conv = (
+                                int(row_conf.get("qtd") or 0)
+                                if isinstance(row_conf, dict)
+                                else int(row_conf[0] or 0)
+                            )
+
+                            if qtd_conv != len(ids_unicos):
+                                raise RuntimeError(
+                                    "O banco não confirmou todos os registros "
+                                    f"({qtd_conv}/{len(ids_unicos)})."
+                                )
+
+                            if usar_estrutura:
+                                cur.execute(
+                                    """
+                                    SELECT COUNT(*) AS qtd
+                                      FROM apontamentos
+                                     WHERE CAST(convocacao_id AS TEXT) = ANY(%s)
+                                    """,
+                                    (ids_unicos,),
+                                )
+                                row_ap = cur.fetchone() or {}
+                                qtd_ap = (
+                                    int(row_ap.get("qtd") or 0)
+                                    if isinstance(row_ap, dict)
+                                    else int(row_ap[0] or 0)
+                                )
+
+                                if qtd_ap != len(ids_unicos):
+                                    raise RuntimeError(
+                                        "A confirmação estruturada do apontamento "
+                                        f"falhou ({qtd_ap}/{len(ids_unicos)})."
+                                    )
 
                         conn.commit()
 
+                    except Exception:
+                        conn.rollback()
+                        raise
+
                 limpar_cache_convocacoes()
-                return len(itens), []
+                return len(ids_unicos), []
 
-            except Exception:
-                # Fallback abaixo mantém o comportamento antigo se houver
-                # qualquer incompatibilidade inesperada no banco.
-                pass
+            except Exception as exc:
+                return 0, [
+                    "O apontamento NÃO foi confirmado no banco. "
+                    f"Nenhuma confirmação de sucesso foi exibida. Detalhe: {str(exc)[:220]}"
+                ]
 
+        # Fallback REST: confirma individualmente cada atualização.
         salvos = 0
         falhas = []
 
@@ -13576,10 +13620,9 @@ elif modo_campo:
             nome_pessoa = item["nome_pessoa"]
 
             try:
-                supabase.table(
-                    "convocacoes"
-                ).update(
-                    {
+                resposta = (
+                    supabase.table("convocacoes")
+                    .update({
                         "obra_id": item["obra_id_final"],
                         "status": item["status"],
                         "tipo_diaria": item["tipo_diaria_final"],
@@ -13591,11 +13634,16 @@ elif modo_campo:
                         "custos_separados": True,
                         "migracao_sebrae_noturno_v2": True,
                         "observacao": item["nova_obs"],
-                    }
-                ).eq(
-                    "id",
-                    conv.get("id"),
-                ).execute()
+                    })
+                    .eq("id", conv.get("id"))
+                    .execute()
+                )
+
+                dados_resp = list(getattr(resposta, "data", None) or [])
+                if not dados_resp:
+                    raise RuntimeError(
+                        "o banco não confirmou a atualização da convocação"
+                    )
 
                 salvar_apontamento_estruturado(
                     conv,
@@ -13616,9 +13664,9 @@ elif modo_campo:
 
                 salvos += 1
 
-            except Exception as e:
+            except Exception as exc:
                 falhas.append(
-                    f"{nome_pessoa}: {str(e)[:110]}"
+                    f"{nome_pessoa}: {str(exc)[:150]}"
                 )
 
         limpar_cache_convocacoes()
@@ -15066,6 +15114,86 @@ elif modo_campo:
 
             dados_form = {}
 
+            # Proteção contra F5 / Ctrl+R / fechar a aba enquanto houver
+            # alterações ainda não enviadas pelo formulário. Como os widgets
+            # estão dentro de st.form, o servidor não recebe os valores antes
+            # de "Salvar equipe"; por isso bloqueamos o refresh acidental no
+            # próprio navegador.
+            components.html(
+                """
+                <script>
+                (() => {
+                    const p = window.parent;
+                    if (!p.__aproarApontamentoGuardInstalado) {
+                        p.__aproarApontamentoGuardInstalado = true;
+                        p.__aproarApontamentoSujo = false;
+
+                        const dentroDoForm = (el) => {
+                            try {
+                                return !!(el && el.closest &&
+                                    el.closest('[data-testid="stForm"]'));
+                            } catch (_) {
+                                return false;
+                            }
+                        };
+
+                        const marcarSujo = (ev) => {
+                            if (dentroDoForm(ev.target)) {
+                                p.__aproarApontamentoSujo = true;
+                            }
+                        };
+
+                        p.document.addEventListener('input', marcarSujo, true);
+                        p.document.addEventListener('change', marcarSujo, true);
+
+                        p.document.addEventListener('keydown', (ev) => {
+                            const recarregar =
+                                ev.key === 'F5' ||
+                                ((ev.ctrlKey || ev.metaKey) &&
+                                 String(ev.key).toLowerCase() === 'r');
+
+                            if (recarregar && p.__aproarApontamentoSujo) {
+                                ev.preventDefault();
+                                ev.stopImmediatePropagation();
+                                p.alert(
+                                    'Há alterações não salvas no apontamento. ' +
+                                    'Clique em "Salvar equipe" antes de atualizar a página.'
+                                );
+                            }
+                        }, true);
+
+                        p.addEventListener('beforeunload', (ev) => {
+                            if (p.__aproarApontamentoSujo) {
+                                ev.preventDefault();
+                                ev.returnValue = '';
+                            }
+                        });
+
+                        const obs = new MutationObserver(() => {
+                            const corpo = p.document.body?.innerText || '';
+                            if (
+                                corpo.includes('Apontamento salvo e confirmado') ||
+                                corpo.includes('Apontamento salvo com sucesso')
+                            ) {
+                                p.__aproarApontamentoSujo = false;
+                            }
+                        });
+
+                        if (p.document.body) {
+                            obs.observe(p.document.body, {
+                                childList: true,
+                                subtree: true,
+                                characterData: true
+                            });
+                        }
+                    }
+                })();
+                </script>
+                """,
+                height=0,
+                width=0,
+            )
+
             # O formulário evita o rerun completo a cada alteração de campo.
             # O Streamlit só envia os valores quando o supervisor conclui uma
             # ação estrutural (adicionar/remover serviço) ou salva a equipe.
@@ -16009,13 +16137,22 @@ elif modo_campo:
                         st.error(msg)
 
                     if salvos and not falhas:
-                        st.session_state[
-                            "_engm_success_message"
-                        ] = (
-                            f"✓ Apontamento salvo com sucesso · "
+                        # Sem st.rerun extra: o submit do formulário já fez a
+                        # única execução necessária. O sucesso só aparece após
+                        # a confirmação transacional do banco.
+                        components.html(
+                            """
+                            <script>
+                            window.parent.__aproarApontamentoSujo = false;
+                            </script>
+                            """,
+                            height=0,
+                            width=0,
+                        )
+                        _feedback_salvo_mobile(
+                            f"✓ Apontamento salvo e confirmado no banco · "
                             f"{salvos} registro(s)."
                         )
-                        st.rerun()
 
                     elif salvos:
                         st.caption(
