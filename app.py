@@ -2614,7 +2614,7 @@ def _garantir_estrutura_cadastros_admin():
                     cur.execute(
                         f"""
                         ALTER TABLE IF EXISTS {_tabela_fin}
-                        ADD COLUMN IF NOT EXISTS sebrae_noturno_reclassificado BOOLEAN NOT NULL DEFAULT FALSE
+                        ADD COLUMN IF NOT EXISTS migracao_sebrae_noturno_v2 BOOLEAN NOT NULL DEFAULT FALSE
                         """
                     )
 
@@ -3401,68 +3401,154 @@ def _garantir_estrutura_cadastros_admin():
                 )
 
                 # ------------------------------------------------------------
-                # SEBRAE — RECLASSIFICAÇÃO DEFINITIVA DOS R$ 90 LEGADOS
+                # CORREÇÃO V2 SEBRAE — R$ 90 ANTIGO = ADICIONAL NOTURNO
                 # ------------------------------------------------------------
-                # Antes de existir "Adicional noturno", Soares lançava os
-                # R$ 90 no campo disponível. No SEBRAE, esses R$ 90 NÃO são Extra.
+                # Antes de existir o campo "Adicional noturno", os R$ 90 do
+                # SEBRAE eram colocados no antigo "Custo + Extra".
                 #
-                # Exemplos:
-                #   Extra 90,00  -> Extra 0,00  + Noturno 90,00
-                #   Extra 137,56 -> Extra 47,56 + Noturno 90,00
-                #   Extra 185,12 -> Extra 95,12 + Noturno 90,00
+                # Exemplos corrigidos:
+                #   diária 120 + extra 90 + noturno 90 -> diária 120 + extra 0 + noturno 90
+                #   diária 210 + extra 0  + noturno 90 -> diária 120 + extra 0 + noturno 90
                 #
-                # A coluna sebrae_noturno_reclassificado torna esta etapa
-                # idempotente mesmo em bases que já passaram por migrações antigas.
+                # Novos apontamentos já nascem marcados e não entram nesta
+                # correção histórica.
                 cur.execute(
                     """
-                    UPDATE convocacoes AS v
-                       SET valor_adicional_noturno = 90.00,
-                           valor_extra =
-                               CASE
-                                   WHEN COALESCE(v.valor_extra, 0) >= 90.00
-                                       THEN GREATEST(
-                                           0,
-                                           COALESCE(v.valor_extra, 0) - 90.00
-                                       )
-                                   ELSE COALESCE(v.valor_extra, 0)
-                               END,
-                           sebrae_noturno_reclassificado = TRUE
-                      FROM obras AS o
-                     WHERE o.id = v.obra_id
-                       AND UPPER(TRIM(COALESCE(o.unidade, ''))) = 'SEBRAE'
-                       AND COALESCE(v.sebrae_noturno_reclassificado, FALSE) = FALSE
-                       AND v.status IN (
-                           'Presente (Integral)',
-                           'Presente (Só Manhã)',
-                           'Presente (Só Tarde)',
-                           'Saída Antecipada',
-                           'Presente',
-                           'Extra'
-                       )
+                    SELECT
+                        v.id,
+                        v.status,
+                        v.custo_pago,
+                        v.valor_extra,
+                        v.valor_adicional_noturno,
+                        c.funcao,
+                        c.categoria_diaria
+                    FROM convocacoes v
+                    JOIN obras o
+                      ON o.id = v.obra_id
+                    JOIN colaboradores c
+                      ON c.id = v.colaborador_id
+                    WHERE UPPER(TRIM(COALESCE(o.unidade, ''))) = 'SEBRAE'
+                      AND COALESCE(v.migracao_sebrae_noturno_v2, FALSE) = FALSE
                     """
                 )
+
+                _rows_sb_v2 = cur.fetchall() or []
+
+                for _row_sb in _rows_sb_v2:
+                    def _sb_get(chave, idx):
+                        if isinstance(_row_sb, dict):
+                            return _row_sb.get(chave)
+                        try:
+                            return _row_sb[idx]
+                        except Exception:
+                            return None
+
+                    _id_sb = _sb_get("id", 0)
+                    _status_sb = str(
+                        _sb_get("status", 1) or ""
+                    ).strip()
+                    _diaria_sb = float(
+                        _sb_get("custo_pago", 2) or 0.0
+                    )
+                    _extra_sb = float(
+                        _sb_get("valor_extra", 3) or 0.0
+                    )
+                    _noturno_sb = float(
+                        _sb_get("valor_adicional_noturno", 4) or 0.0
+                    )
+                    _funcao_sb = str(
+                        _sb_get("funcao", 5) or ""
+                    ).upper()
+                    _categoria_sb = str(
+                        _sb_get("categoria_diaria", 6) or ""
+                    ).upper()
+
+                    _presente_sb = _status_sb in {
+                        "Presente (Integral)",
+                        "Presente (Só Manhã)",
+                        "Presente (Só Tarde)",
+                        "Saída Antecipada",
+                        "Presente",
+                        "Extra",
+                    }
+
+                    _ajudante_sb = (
+                        "AJUD" in _categoria_sb
+                        or "AUX" in _categoria_sb
+                        or "SERVENT" in _categoria_sb
+                        or any(
+                            termo in _funcao_sb
+                            for termo in (
+                                "AJUDANTE",
+                                "AUXILIAR",
+                                "SERVENTE",
+                            )
+                        )
+                    )
+
+                    _base_fin_sb = 80.0 if _ajudante_sb else 120.0
+
+                    if _presente_sb:
+                        _noturno_novo_sb = max(
+                            90.0,
+                            _noturno_sb,
+                        )
+
+                        # O R$ 90 antigo do Soares não é Extra.
+                        _extra_novo_sb = (
+                            0.0
+                            if abs(_extra_sb - 90.0) <= 0.01
+                            else _extra_sb
+                        )
+
+                        # Se a diária ficou inflada exatamente em +R$ 90
+                        # por causa do antigo campo combinado, volta à base.
+                        _diaria_nova_sb = (
+                            _base_fin_sb
+                            if abs(
+                                _diaria_sb - (_base_fin_sb + 90.0)
+                            ) <= 0.01
+                            else (
+                                _diaria_sb
+                                if _diaria_sb > 0
+                                else _base_fin_sb
+                            )
+                        )
+                    else:
+                        _noturno_novo_sb = 0.0
+                        _extra_novo_sb = 0.0
+                        _diaria_nova_sb = 0.0
+
+                    cur.execute(
+                        """
+                        UPDATE convocacoes
+                           SET tipo_diaria = 'Diária',
+                               custo_pago = %s,
+                               valor_extra = %s,
+                               valor_adicional_noturno = %s,
+                               migracao_sebrae_noturno_v2 = TRUE
+                         WHERE id = %s
+                        """,
+                        (
+                            round(_diaria_nova_sb, 2),
+                            round(_extra_novo_sb, 2),
+                            round(_noturno_novo_sb, 2),
+                            _id_sb,
+                        ),
+                    )
 
                 cur.execute(
                     """
                     UPDATE apontamentos AS a
-                       SET valor_adicional_noturno =
-                               COALESCE(
-                                   v.valor_adicional_noturno,
-                                   90.00
-                               ),
-                           valor_extra =
-                               COALESCE(
-                                   v.valor_extra,
-                                   0
-                               ),
-                           sebrae_noturno_reclassificado = TRUE
+                       SET tipo_diaria = v.tipo_diaria,
+                           custo_pago = v.custo_pago,
+                           valor_extra = v.valor_extra,
+                           valor_adicional_noturno = v.valor_adicional_noturno,
+                           migracao_sebrae_noturno_v2 = TRUE
                       FROM convocacoes AS v
                      WHERE CAST(a.convocacao_id AS TEXT)
                            = CAST(v.id AS TEXT)
-                       AND COALESCE(
-                           v.sebrae_noturno_reclassificado,
-                           FALSE
-                       ) = TRUE
+                       AND COALESCE(v.migracao_sebrae_noturno_v2, FALSE) = TRUE
                     """
                 )
 
@@ -4048,13 +4134,16 @@ VALOR_LIMPO_MEIA_DIARIA = VALOR_FIN_MEIA_PROFISSIONAL
 
 TIPOS_DIARIA = ["Diária", "Meia diária"]
 
-# Regra especial SEBRAE:
-# - jornada noturna 17h às 02h continua sendo DIÁRIA INTEGRAL;
-# - adicional noturno padrão = R$ 90,00, separado de Extra;
-# - apontamento do serviço do dia D pode ser lançado na madrugada/manhã do dia D+1
-#   sem ser considerado atrasado até o primeiro horário de cobrança (09:30).
+# Regras de prazo/cobrança:
+# - Demais unidades: o apontamento do dia deve estar concluído até 16:00.
+# - SEBRAE: jornada 17h–02h continua sendo DIÁRIA INTEGRAL;
+#   o apontamento pode ser concluído até 09:29 do dia seguinte sem atraso.
+# - Para o Teams, o SEBRAE recebe apenas UM lembrete automático às 21:00
+#   do próprio dia do serviço. Depois disso continua visível para cobrança manual.
 VALOR_ADICIONAL_NOTURNO_SEBRAE = 90.00
+HORA_LIMITE_APONTAMENTO_GERAL = datetime.time(16, 0)
 HORA_LIMITE_APONTAMENTO_SEBRAE = datetime.time(9, 30)
+HORA_LEMBRETE_TEAMS_SEBRAE = datetime.time(21, 0)
 
 
 def eh_unidade_sebrae(unidade):
@@ -4067,16 +4156,22 @@ def apontamento_esta_atrasado(
     agora=None,
 ):
     """
-    Define atraso operacional, sem esconder pendências ainda dentro do prazo.
+    Regra operacional de atraso.
 
-    Demais unidades:
-      - até 15:59 do dia do serviço: pendente do dia;
-      - a partir de 16:00: atrasado.
+    DEMAIS UNIDADES
+    ----------------
+    O apontamento do serviço do dia D deve ser concluído até 16:00 de D.
+    Portanto:
+      - D antes de 16:00 -> ainda no prazo;
+      - D a partir de 16:00 -> atrasado;
+      - D+1 em diante -> atrasado.
 
-    SEBRAE:
-      - jornada 17h–02h;
-      - lembrete automático às 21:00 do próprio dia;
-      - atraso operacional somente a partir de 09:30 do dia seguinte.
+    SEBRAE
+    ------
+    Como a jornada é 17h–02h, o apontamento de D pode ser concluído
+    até 09:29 de D+1 sem ser marcado como atraso.
+    O lembrete do Teams às 21:00 de D é apenas uma cobrança preventiva
+    e não muda essa regra operacional.
     """
     agora = agora or agora_aproar()
 
@@ -4093,37 +4188,34 @@ def apontamento_esta_atrasado(
         except Exception:
             return False
 
-    hoje = agora.date()
-
-    if data_servico > hoje:
+    if agora.date() < data_servico:
         return False
 
-    if eh_unidade_sebrae(
-        unidade
-    ):
+    if eh_unidade_sebrae(unidade):
+        if agora.date() == data_servico:
+            return False
+
         dia_seguinte = (
             data_servico
             + datetime.timedelta(days=1)
         )
 
-        if hoje < dia_seguinte:
-            return False
-
-        if hoje == dia_seguinte:
+        if agora.date() == dia_seguinte:
             return (
                 agora.time()
-                >= datetime.time(9, 30)
+                >= HORA_LIMITE_APONTAMENTO_SEBRAE
             )
 
-        return True
+        return agora.date() > dia_seguinte
 
-    if data_servico < hoje:
-        return True
+    # Demais unidades.
+    if agora.date() == data_servico:
+        return (
+            agora.time()
+            >= HORA_LIMITE_APONTAMENTO_GERAL
+        )
 
-    return (
-        agora.time()
-        >= datetime.time(16, 0)
-    )
+    return agora.date() > data_servico
 
 
 def pendencia_teams_esta_atrasada(
@@ -4132,10 +4224,9 @@ def pendencia_teams_esta_atrasada(
     agora=None,
 ):
     """
-    Mantida para compatibilidade com telas antigas.
-
-    A aba Configurações mostra TODAS as pendências até hoje.
-    Esta função responde apenas se a pendência já é atraso operacional.
+    Indica atraso operacional. A lista de Configurações não depende desta
+    função: toda pendência de hoje ou de dias anteriores continua visível
+    para conferência e cobrança manual.
     """
     return apontamento_esta_atrasado(
         data_servico,
@@ -4150,15 +4241,17 @@ def proxima_cobranca_automatica_teams(
     agora=None,
 ):
     """
-    Informa a próxima cobrança automática prevista para a pendência.
+    Retorna a próxima janela automática prevista para uma pendência.
 
-    GERAL:
+    Demais unidades:
       D 16:00
       D+1 09:30
       D+1 15:00
+      depois: somente manual
 
     SEBRAE:
-      D 21:00 (única automática)
+      D 21:00 (único automático)
+      depois: somente manual
     """
     agora = agora or agora_aproar()
 
@@ -4176,25 +4269,22 @@ def proxima_cobranca_automatica_teams(
             return "Somente manual"
 
     hoje = agora.date()
-    hora = agora.time()
 
     if data_servico > hoje:
-        return "Ainda não vencido"
+        return "Ainda não iniciou"
 
-    if eh_unidade_sebrae(
-        unidade
-    ):
+    if eh_unidade_sebrae(unidade):
         if data_servico == hoje:
-            if hora < datetime.time(21, 0):
-                return "21:00 hoje"
-            return "Automático encerrado · manual"
-
+            if agora.time() < HORA_LEMBRETE_TEAMS_SEBRAE:
+                return "Hoje · 21:00"
+            return "Automático de 21:00 já passou"
         return "Somente manual"
 
+    # Demais unidades.
     if data_servico == hoje:
-        if hora < datetime.time(16, 0):
-            return "16:00 hoje"
-        return "09:30 amanhã"
+        if agora.time() < datetime.time(16, 0):
+            return "Hoje · 16:00"
+        return "Amanhã · 09:30"
 
     dia_seguinte = (
         data_servico
@@ -4202,13 +4292,11 @@ def proxima_cobranca_automatica_teams(
     )
 
     if hoje == dia_seguinte:
-        if hora < datetime.time(9, 30):
-            return "09:30 hoje"
-
-        if hora < datetime.time(15, 0):
-            return "15:00 hoje"
-
-        return "Somente manual"
+        if agora.time() < datetime.time(9, 30):
+            return "Hoje · 09:30"
+        if agora.time() < datetime.time(15, 0):
+            return "Hoje · 15:00"
+        return "Último automático já passou"
 
     return "Somente manual"
 
@@ -4218,6 +4306,9 @@ def situacao_pendencia_teams(
     unidade="",
     agora=None,
 ):
+    """
+    Texto curto para a prévia da Configuração.
+    """
     agora = agora or agora_aproar()
 
     if apontamento_esta_atrasado(
@@ -4225,14 +4316,13 @@ def situacao_pendencia_teams(
         unidade=unidade,
         agora=agora,
     ):
-        return "Atrasado"
+        return "ATRASADO"
 
-    if eh_unidade_sebrae(
-        unidade
-    ):
-        return "Pendente SEBRAE"
+    if eh_unidade_sebrae(unidade):
+        return "PENDENTE · SEBRAE"
 
-    return "Pendente do dia"
+    return "PENDENTE"
+
 
 
 def normalizar_tipo_diaria(valor):
@@ -4337,36 +4427,25 @@ def valor_controladoria_padrao_colaborador(
     colab,
     tipo_diaria,
 ):
-    """
-    Custo da Controladoria vindo do cadastro/planilha importada.
-
-    A coluna "Custo diário" da planilha é a referência individual.
-    - Diária: 100% do custo importado;
-    - Meia diária: 50% do custo importado.
-
-    Exemplo:
-      custo diário importado = R$ 254,01
-      meia diária = R$ 127,01
-    """
-    valor_cheio = obter_valor_diaria_colaborador(
-        colab or {}
-    )
-
-    if valor_cheio <= 0:
-        return 0.0
-
-    fracao = (
-        0.5
-        if normalizar_tipo_diaria(
-            tipo_diaria
+    valor_cheio = (
+        VALOR_DIARIA_AJUDANTE
+        if categoria_diaria_colaborador(
+            colab
         )
-        == "Meia diária"
-        else 1.0
+        == "Ajudante"
+        else VALOR_DIARIA_PROFISSIONAL
     )
 
     return round(
-        float(valor_cheio)
-        * fracao,
+        valor_cheio
+        * (
+            0.5
+            if normalizar_tipo_diaria(
+                tipo_diaria
+            )
+            == "Meia diária"
+            else 1.0
+        ),
         2,
     )
 
@@ -4717,10 +4796,15 @@ def custo_encargos_base_registro(
     colab=None,
 ):
     """
-    Custo-base da Controladoria.
+    Custo-base da Controladoria por categoria.
 
-    Sempre usa o custo diário individual da planilha/cadastro do colaborador.
-    A categoria Profissional/Ajudante NÃO substitui o valor importado.
+    Profissional:
+      diária R$ 241,74
+      meia   R$ 120,87
+
+    Ajudante:
+      diária R$ 182,34
+      meia   R$ 91,17
     """
     registro = registro or {}
 
@@ -5454,8 +5538,9 @@ def salvar_apontamento_estruturado(
                         convocacao_id, data_servico, colaborador_id, engenheiro, status,
                         valor_extra, observacao, apontado_em, apontado_por, retroativo, atualizado_em,
                         tipo_diaria, custo_pago, valor_acordo, valor_adicional_noturno,
-                        custo_encargos_base, custos_separados
-                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,NOW(),%s,%s,NOW(),%s,%s,%s,%s,%s,TRUE)
+                        custo_encargos_base, custos_separados,
+                        migracao_sebrae_noturno_v2
+                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,NOW(),%s,%s,NOW(),%s,%s,%s,%s,%s,TRUE,TRUE)
                     ON CONFLICT (convocacao_id) DO UPDATE SET
                         data_servico = EXCLUDED.data_servico,
                         colaborador_id = EXCLUDED.colaborador_id,
@@ -5471,6 +5556,7 @@ def salvar_apontamento_estruturado(
                         valor_adicional_noturno = EXCLUDED.valor_adicional_noturno,
                         custo_encargos_base = EXCLUDED.custo_encargos_base,
                         custos_separados = TRUE,
+                        migracao_sebrae_noturno_v2 = TRUE,
                         atualizado_em = NOW()
                     """,
                     (
@@ -7322,64 +7408,39 @@ def _carregar_pendentes_responsavel_teams(
     agora_ref=None,
 ):
     """
-    Retorna TODAS as pendências de apontamento com data <= hoje.
+    Carrega TODAS as pendências visíveis no painel.
 
-    A aba Configurações não esconde a pendência só porque a cobrança
-    automática ainda não chegou ao horário. Assim é possível visualizar
-    e cobrar manualmente a qualquer momento.
-
-    Supervisores operacionais:
-        somente unidades sob sua responsabilidade.
-
-    PAULO e HELENA:
-        todas as unidades.
+    A prévia e o botão manual independem dos horários automáticos:
+    - pendência do próprio dia já aparece;
+    - uma cobrança automática não remove a linha;
+    - a linha só desaparece quando o apontamento é regularizado.
     """
     supervisor = str(
-        supervisor
-        or ""
+        supervisor or ""
     ).strip().upper()
 
-    if supervisor in OBSERVADORES_TEAMS:
-        cur.execute(
-            """
-            SELECT
-                c.id,
-                c.data,
-                c.turno,
-                c.engenheiro,
-                col.nome AS colaborador,
-                o.unidade,
-                o.nome AS obra_atual
-            FROM convocacoes c
-            JOIN colaboradores col
-              ON col.id = c.colaborador_id
-            JOIN obras o
-              ON o.id = c.obra_id
-            WHERE c.data <= %s
-              AND UPPER(COALESCE(o.nome, '')) LIKE UPPER(%s)
-            ORDER BY
-                c.data ASC,
-                o.unidade ASC,
-                col.nome ASC
-            """,
-            (
-                hoje_ref,
-                "A DEFINIR NO APONTAMENTO%",
-            ),
+    where_unidade = ""
+    params_unidade = []
+
+    if supervisor not in OBSERVADORES_TEAMS:
+        unidades = RESPONSAVEIS_UNIDADES_TEAMS.get(
+            supervisor,
+            [],
         )
 
-        return cur.fetchall() or []
+        if not unidades:
+            return []
 
-    unidades = RESPONSAVEIS_UNIDADES_TEAMS.get(
-        supervisor,
-        [],
-    )
-
-    if not unidades:
-        return []
+        where_unidade = """
+          AND UPPER(TRIM(COALESCE(o.unidade, ''))) = ANY(%s)
+        """
+        params_unidade = [[
+            str(u).strip().upper()
+            for u in unidades
+        ]]
 
     cur.execute(
-        """
+        f"""
         SELECT
             c.id,
             c.data,
@@ -7395,7 +7456,7 @@ def _carregar_pendentes_responsavel_teams(
           ON o.id = c.obra_id
         WHERE c.data <= %s
           AND UPPER(COALESCE(o.nome, '')) LIKE UPPER(%s)
-          AND UPPER(TRIM(COALESCE(o.unidade, ''))) = ANY(%s)
+          {where_unidade}
         ORDER BY
             c.data ASC,
             o.unidade ASC,
@@ -7404,14 +7465,51 @@ def _carregar_pendentes_responsavel_teams(
         (
             hoje_ref,
             "A DEFINIR NO APONTAMENTO%",
-            [
-                str(u).strip().upper()
-                for u in unidades
-            ],
+            *params_unidade,
         ),
     )
 
     return cur.fetchall() or []
+
+
+def _situacao_pendencia_teams(
+    data_servico,
+    unidade,
+    agora_ref=None,
+):
+    """
+    Compatibilidade com a UI atual: devolve Situação + Próxima automática
+    usando exatamente as mesmas regras operacionais e de cobrança.
+    """
+    agora_ref = agora_ref or datetime.datetime.now(
+        ZoneInfo("America/Fortaleza")
+    )
+
+    situacao_base = situacao_pendencia_teams(
+        data_servico,
+        unidade=unidade,
+        agora=agora_ref,
+    )
+    automatico = proxima_cobranca_automatica_teams(
+        data_servico,
+        unidade=unidade,
+        agora=agora_ref,
+    )
+
+    if situacao_base == "ATRASADO":
+        situacao = "Atrasado"
+    else:
+        try:
+            mesma_data = data_servico == agora_ref.date()
+        except Exception:
+            mesma_data = False
+
+        if mesma_data:
+            situacao = "Pendente hoje"
+        else:
+            situacao = "Pendente"
+
+    return situacao, automatico
 
 
 def _montar_mensagem_cobranca_manual_teams(
@@ -8190,7 +8288,7 @@ def ratear_registros_por_servico(registros):
     Rateia custos por serviço preservando duas visões:
 
     Financeiro = Diária efetiva (Profissional 120/60 · Ajudante 80/40, editável) + Extra + Adicional noturno + Acordos/Bonificações.
-    Controladoria = custo diário individual da planilha (meia diária = 50%) + Extra + Adicional noturno + Acordos/Bonificações.
+    Controladoria = Custo padrão da categoria (Profissional 241,74 · Ajudante 182,34) + Extra + Adicional noturno + Acordos/Bonificações.
 
     Se a mesma meia-diária tiver 2 serviços na mesma manhã, a base é dividida
     entre eles; não é duplicada.
@@ -10156,7 +10254,7 @@ def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
 
                 with p1:
                     tipo_diaria_sel = st.selectbox(
-                        "Tipo de diária",
+                        "Diária / Meia diária",
                         TIPOS_DIARIA,
                         key=tipo_key,
                         on_change=_ajustar_diaria_desktop,
@@ -10166,7 +10264,7 @@ def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
                 with p2:
                     valor_diaria_financeiro = (
                         st.number_input(
-                            "Valor acordado (R$)",
+                            "Diária (R$)",
                             min_value=0.0,
                             step=10.0,
                             disabled=(
@@ -10176,8 +10274,8 @@ def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
                             ),
                             key=diaria_key,
                             help=(
-                                "Valor acordado pelo supervisor para o Financeiro. "
-                                "Ex.: diária R$ 120/150/200 ou meia R$ 60/75/100."
+                                "Valor efetivamente pago pela diária. "
+                                "Pode ser alterado; ex.: R$ 150."
                             ),
                         )
                     )
@@ -10200,27 +10298,21 @@ def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
                     )
 
                 if eh_sebrae_card:
-                    valor_adicional_noturno = (
-                        VALOR_ADICIONAL_NOTURNO_SEBRAE
-                        if status_eh_presenca(
-                            status_sel
-                        )
-                        else 0.0
-                    )
-
                     with p4:
-                        st.markdown(
-                            (
-                                "<div style='padding-top:5px'>"
-                                "<div style='font-size:11px;color:#667085;"
-                                "margin-bottom:5px'>Adic. noturno</div>"
-                                "<div style='min-height:38px;padding:9px 10px;"
-                                "border:1px solid #DCE3EC;border-radius:8px;"
-                                "background:#F7F9FC;font-weight:700'>"
-                                f"{formatar_reais(valor_adicional_noturno)}"
-                                "</div></div>"
-                            ),
-                            unsafe_allow_html=True,
+                        valor_adicional_noturno = (
+                            st.number_input(
+                                "Adic. noturno (R$)",
+                                min_value=0.0,
+                                step=10.0,
+                                disabled=(
+                                    not status_eh_presenca(
+                                        status_sel
+                                    )
+                                ),
+                                key=(
+                                    adicional_noturno_key
+                                ),
+                            )
                         )
                 else:
                     valor_adicional_noturno = 0.0
@@ -10280,7 +10372,7 @@ def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
 
                 st.caption(
                     f"{categoria_txt} · "
-                    f"Valor acordado {formatar_reais(valor_diaria_financeiro)} · "
+                    f"Diária {formatar_reais(valor_diaria_financeiro)} · "
                     f"Extra {formatar_reais(valor_extra)}"
                     + (
                         f" · Noturno {formatar_reais(valor_adicional_noturno)}"
@@ -10616,7 +10708,7 @@ def resumir_pagamentos_financeiro(pagamentos):
     if not pagamentos:
         return pd.DataFrame(columns=[
             "Colaborador", "Função", "Unidades", "Dias/Lançamentos",
-            "Valor acordado (R$)", "Extra (R$)", "Adic. noturno (R$)", "Acordos / Bonificações (R$)", "Total a Pagar (R$)"
+            "Diária (R$)", "Extra (R$)", "Adic. noturno (R$)", "Acordos / Bonificações (R$)", "Total a Pagar (R$)"
         ])
 
     df = pd.DataFrame(pagamentos)
@@ -10626,7 +10718,7 @@ def resumir_pagamentos_financeiro(pagamentos):
             Unidades=("Unidade", lambda s: ", ".join(sorted(set(str(v) for v in s if str(v).strip())))),
             **{
                 "Dias/Lançamentos": ("Data", "size"),
-                "Valor acordado (R$)": ("Base Financeiro (R$)", "sum"),
+                "Diária (R$)": ("Base Financeiro (R$)", "sum"),
                 "Extra (R$)": ("Extra (R$)", "sum"),
                 "Adic. noturno (R$)": ("Adicional noturno (R$)", "sum"),
                 "Acordos / Bonificações (R$)": ("Acordos / Bonificações (R$)", "sum"),
@@ -10669,7 +10761,7 @@ def gerar_excel_financeiro(pagamentos, ausencias, data_inicio, data_fim, data_pa
     )
     headers_resumo = [
         "Colaborador", "Função", "Unidades", "Dias/Lançamentos",
-        "Valor acordado (R$)", "Extra (R$)", "Adic. noturno (R$)", "Acordos / Bonificações (R$)", "Total a Pagar (R$)"
+        "Diária (R$)", "Extra (R$)", "Adic. noturno (R$)", "Acordos / Bonificações (R$)", "Total a Pagar (R$)"
     ]
     cabecalho_planilha(ws_resumo, "APROAR - RELATÓRIO FINANCEIRO", subtitulo, len(headers_resumo))
     for ci, nome in enumerate(headers_resumo, 1):
@@ -10797,7 +10889,7 @@ def gerar_pdf_financeiro(pagamentos, ausencias, data_inicio, data_fim, data_paga
         "Função",
         "Unidade(s)",
         "Dias",
-        "Valor acordado",
+        "Diária",
         "Extra",
         "Adic. not.",
         "Acordos / Bonif.",
@@ -10825,7 +10917,7 @@ def gerar_pdf_financeiro(pagamentos, ausencias, data_inicio, data_fim, data_paga
                 str(r["Função"])[:17],
                 str(r["Unidades"])[:20],
                 str(int(r["Dias/Lançamentos"])),
-                formatar_reais(float(r["Valor acordado (R$)"])),
+                formatar_reais(float(r["Diária (R$)"])),
                 formatar_reais(float(r["Extra (R$)"])),
                 formatar_reais(float(r["Adic. noturno (R$)"])),
                 formatar_reais(float(r["Acordos / Bonificações (R$)"])),
@@ -11389,6 +11481,76 @@ elif modo_campo:
     # =====================================================================
     import html as _html
 
+    # Limpa elementos visuais do próprio Streamlit no Portal do Supervisor.
+    # Isso não altera a lógica dos widgets; remove apenas chrome/menu/toolbar.
+    st.html("""
+    <style>
+    /* =========================================================
+       APROAR — LIMPEZA VISUAL DO STREAMLIT (PORTAL SUPERVISOR)
+       ========================================================= */
+
+    /* Menu superior, toolbar, decoração e indicadores internos */
+    [data-testid="stToolbar"],
+    [data-testid="stDecoration"],
+    [data-testid="stStatusWidget"],
+    [data-testid="stHeaderActionElements"],
+    [data-testid="stMainMenu"],
+    #MainMenu {
+        display:none !important;
+        visibility:hidden !important;
+    }
+
+    /* Botões de deploy/share quando aparecem */
+    [data-testid="stAppDeployButton"],
+    [data-testid="stDeployButton"] {
+        display:none !important;
+        visibility:hidden !important;
+    }
+
+    /* Cabeçalho padrão do Streamlit */
+    [data-testid="stHeader"] {
+        display:none !important;
+        visibility:hidden !important;
+        height:0 !important;
+        min-height:0 !important;
+    }
+
+    /* Sidebar e controles para abrir/recolher */
+    [data-testid="stSidebar"],
+    [data-testid="collapsedControl"],
+    [data-testid="stSidebarCollapsedControl"] {
+        display:none !important;
+        visibility:hidden !important;
+    }
+
+    /* Toolbar flutuante em gráficos/tabelas/elementos */
+    [data-testid="stElementToolbar"] {
+        display:none !important;
+        visibility:hidden !important;
+    }
+
+    /* Badges do viewer / branding eventual */
+    [data-testid="stViewerBadge"],
+    .viewerBadge_container__1QSob,
+    .viewerBadge_link__1S137 {
+        display:none !important;
+        visibility:hidden !important;
+    }
+
+    /* Rodapé padrão */
+    footer {
+        display:none !important;
+        visibility:hidden !important;
+    }
+
+    /* Remove o espaço residual do cabeçalho */
+    [data-testid="stMainBlockContainer"],
+    main .block-container {
+        padding-top:.55rem !important;
+    }
+    </style>
+    """)
+
     st.html("""
     <style>
     /* Portal de campo: uma única coluna, sem sidebar e sem chrome do Streamlit. */
@@ -11473,6 +11635,286 @@ elif modo_campo:
         );
         text-align:right;
         line-height:1.35;
+    }
+
+
+    .engm-head-v2{
+        align-items:flex-start;
+        margin:0 0 8px;
+        padding:16px 16px 14px;
+        border-radius:20px;
+        background:linear-gradient(135deg,#0C3176 0%, #1250BA 100%);
+        box-shadow:0 14px 32px rgba(16,36,66,.18);
+    }
+
+    .engm-brand-top{
+        display:flex;
+        align-items:flex-start;
+        gap:16px;
+        margin:0;
+    }
+
+    .engm-brand-logo-wrap{
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        width:108px;
+        height:92px;
+        margin:0;
+        background:transparent;
+        border:none;
+        box-shadow:none;
+        overflow:visible;
+        flex:0 0 auto;
+    }
+
+    .engm-brand-logo-img{
+        display:block;
+        width:100px;
+        height:86px;
+        object-fit:contain;
+        filter:drop-shadow(0 3px 8px rgba(6,20,48,.10));
+    }
+
+    .engm-brand-copy{
+        min-width:0;
+        display:flex;
+        flex-direction:column;
+        justify-content:flex-start;
+        align-items:flex-start;
+        gap:6px;
+        padding-top:6px;
+    }
+
+    .engm-brand-wordmark{
+        font-size:28px;
+        line-height:1;
+        font-weight:650;
+        letter-spacing:.16em;
+        color:#FFFFFF;
+        text-transform:uppercase;
+        margin:0;
+    }
+
+    .engm-head-v2 .engm-kicker,
+    .engm-head-v2 .engm-title,
+    .engm-head-v2 .engm-date,
+    .engm-head-v2 .engm-date b,
+    .engm-head-v2 .engm-date-chip-label{
+        color:#FFFFFF !important;
+    }
+
+    .engm-head-v2 .engm-kicker{
+        opacity:.92;
+        letter-spacing:.01em;
+        text-transform:none;
+        font-size:15px;
+        font-weight:600;
+        margin:0;
+    }
+
+    .engm-head-v2 .engm-title{
+        font-size:40px;
+        margin-top:0;
+        line-height:1.02;
+    }
+
+    .engm-title-stack{
+        display:block;
+        margin-top:8px;
+    }
+
+    .engm-date-v2{
+        flex:0 0 auto;
+        min-width:120px;
+        min-height:64px;
+        display:flex;
+        flex-direction:column;
+        align-items:center;
+        justify-content:center;
+        text-align:center;
+        font-size:12px;
+        background:rgba(255,255,255,.10);
+        border:1px solid rgba(255,255,255,.18);
+        border-radius:14px;
+        padding:8px 12px;
+        gap:2px;
+    }
+
+    .engm-date-chip-label{ font-size:11px; opacity:.85; margin-bottom:0; }
+
+    .engm-head-side{
+        flex:0 0 auto;
+        display:flex;
+        flex-direction:column;
+        align-items:center;
+        gap:8px;
+        min-width:120px;
+    }
+
+    .engm-head-side .engm-logout-link{
+        min-width:52px;
+    }
+
+    .engm-summary-host{
+        background:transparent !important;
+        padding:0;
+        margin:0;
+    }
+
+    .engm-summary-v2{
+        grid-template-columns:repeat(3,minmax(0,1fr));
+        background:transparent;
+        border:none;
+        gap:10px;
+        margin:8px 0 10px;
+    }
+
+    .engm-summary-v2 .engm-summary-item{
+        background:linear-gradient(135deg,#0C3176 0%, #1250BA 100%);
+        border-radius:16px;
+        border:none;
+        text-align:center;
+        padding:14px 10px 13px;
+    }
+
+    .engm-summary-v2 .engm-summary-label{
+        margin-top:5px;
+        font-size:11px;
+        letter-spacing:0;
+        text-transform:none;
+        color:#EAF1FF !important;
+    }
+
+    .engm-summary-v2 .engm-summary-value{
+        color:#FFFFFF !important;
+        font-size:32px;
+    }
+
+    .engm-summary-v2 .engm-summary-note{ display:none; }
+
+    .engm-summary-v2 .engm-summary-item.warn .engm-summary-value,
+    .engm-summary-v2 .engm-summary-item.warn .engm-summary-label{
+        color:#FFD84D !important;
+    }
+
+    /* Card azul de pendências: o próprio card é clicável. */
+    div[class*="st-key-engm_pendentes_card"]{
+        height:100% !important;
+        margin:0 !important;
+    }
+
+    div[class*="st-key-engm_pendentes_card"] .stButton,
+    div[class*="st-key-engm_pendentes_card"] .stButton > button{
+        width:100% !important;
+        height:100% !important;
+    }
+
+    div[class*="st-key-engm_pendentes_card"] button{
+        min-height:86px !important;
+        border-radius:16px !important;
+        border:none !important;
+        background:linear-gradient(135deg,#0C3176 0%, #1250BA 100%) !important;
+        color:#FFFFFF !important;
+        box-shadow:none !important;
+        padding:10px 8px !important;
+        white-space:normal !important;
+    }
+
+    div[class*="st-key-engm_pendentes_card"] button:hover{
+        border:none !important;
+        filter:brightness(1.04);
+    }
+
+    div[class*="st-key-engm_pendentes_card"] button p{
+        margin:0 !important;
+        color:#FFD84D !important;
+        -webkit-text-fill-color:#FFD84D !important;
+        font-size:11px !important;
+        font-weight:700 !important;
+        line-height:1.35 !important;
+        white-space:normal !important;
+        text-align:center !important;
+    }
+
+    div[class*="st-key-engm_pendentes_card"] button strong{
+        display:block !important;
+        margin-bottom:2px !important;
+        color:#FFFFFF !important;
+        -webkit-text-fill-color:#FFFFFF !important;
+        font-size:32px !important;
+        line-height:1 !important;
+        font-weight:800 !important;
+    }
+
+    div[class*="st-key-engm_pendentes_card"] button em{
+        display:block !important;
+        margin-top:3px !important;
+        color:#EAF1FF !important;
+        -webkit-text-fill-color:#EAF1FF !important;
+        font-size:9px !important;
+        font-style:normal !important;
+        font-weight:600 !important;
+        opacity:.95;
+    }
+
+    .engm-summary-static{
+        min-height:86px;
+        border-radius:16px;
+        background:linear-gradient(135deg,#0C3176 0%, #1250BA 100%);
+        display:flex;
+        flex-direction:column;
+        align-items:center;
+        justify-content:center;
+        text-align:center;
+        padding:10px 8px 12px;
+    }
+
+    .engm-summary-static .engm-summary-value{
+        color:#FFFFFF !important;
+        font-size:32px;
+        line-height:1;
+        margin-bottom:6px;
+    }
+
+    .engm-summary-static .engm-summary-label{
+        color:#EAF1FF !important;
+        font-size:11px;
+        line-height:1.1;
+        text-transform:none;
+        letter-spacing:0;
+        margin:0;
+    }
+
+    .engm-summary-static.warn .engm-summary-value,
+    .engm-summary-static.warn .engm-summary-label{
+        color:#FFD84D !important;
+    }
+
+    /* Lista compacta de pendências abaixo apenas do card clicável. */
+    div[class*="st-key-engm_ir_pend_"]{
+        margin-top:6px !important;
+    }
+
+    div[class*="st-key-engm_ir_pend_"] button{
+        min-height:30px !important;
+        text-align:center !important;
+        justify-content:center !important;
+        background:#FFFFFF !important;
+        border:1px solid #DCE3EC !important;
+        border-radius:10px !important;
+        color:#26364D !important;
+        font-size:9.5px !important;
+        font-weight:650 !important;
+        box-shadow:none !important;
+        padding:4px 8px !important;
+        line-height:1.2 !important;
+        white-space:normal !important;
+    }
+
+    div[class*="st-key-engm_ir_pend_"] button *{
+        color:#26364D !important;
+        -webkit-text-fill-color:#26364D !important;
     }
 
     /* Seletor do engenheiro */
@@ -12260,9 +12702,7 @@ elif modo_campo:
 
     /* ----- SAIR ----- */
     .engm-logout-row{
-        display:flex;
-        justify-content:flex-end;
-        margin:0 0 2px;
+        display:none;
     }
 
     .engm-logout-link{
@@ -12524,6 +12964,16 @@ elif modo_campo:
             padding:0 13px;
             font-size:10px;
         }
+
+        .engm-head-side{
+            align-items:center;
+            min-width:108px;
+        }
+
+        .engm-date-v2{
+            min-width:108px;
+            width:108px;
+        }
     }
     </style>
     """)
@@ -12603,6 +13053,7 @@ elif modo_campo:
                                        valor_acordo = %s,
                                        custo_encargos_base = %s,
                                        custos_separados = TRUE,
+                                       migracao_sebrae_noturno_v2 = TRUE,
                                        observacao = %s
                                  WHERE id = %s
                                 """,
@@ -12649,6 +13100,7 @@ elif modo_campo:
                                     valor_adicional_noturno = EXCLUDED.valor_adicional_noturno,
                                     custo_encargos_base = EXCLUDED.custo_encargos_base,
                                     custos_separados = TRUE,
+                                    migracao_sebrae_noturno_v2 = TRUE,
                                     atualizado_em = NOW()
                                 """,
                                 (
@@ -12844,6 +13296,7 @@ elif modo_campo:
                         "valor_acordo": item["valor_acordo_final"],
                         "custo_encargos_base": item["custo_encargos_final"],
                         "custos_separados": True,
+                        "migracao_sebrae_noturno_v2": True,
                         "observacao": item["nova_obs"],
                     }
                 ).eq(
@@ -12905,6 +13358,108 @@ elif modo_campo:
             {},
         )
         return bool(obra) and not eh_obra_placeholder(obra)
+
+    def _buscar_pendencias_anteriores_supervisor_campo(
+        engenheiro,
+        data_fim,
+    ):
+        """
+        Retorna SOMENTE as pendências do supervisor selecionado.
+
+        A checagem não depende apenas do obra_id/placeholder. Primeiro usamos
+        os sinais reais de que o apontamento foi salvo: registro na tabela
+        `apontamentos`, metadata `apontado_em` e, como compatibilidade,
+        `custos_separados`. Isso evita esconder convocações antigas que já
+        nasceram vinculadas a uma obra real.
+        """
+        if not engenheiro or not data_fim:
+            return []
+
+        data_inicio = datetime.date(2020, 1, 1)
+        eng_norm = normalizar(engenheiro)
+
+        # Busca sem filtro exato no banco para não perder registros antigos
+        # gravados com diferença de caixa/espaços no nome do supervisor.
+        try:
+            registros = (
+                supabase.table("convocacoes")
+                .select("*")
+                .gte("data", data_inicio.isoformat())
+                .lte("data", data_fim.isoformat())
+                .execute()
+                .data
+                or []
+            )
+        except Exception:
+            registros = _buscar_convocacoes_intervalo(
+                data_inicio,
+                data_fim,
+                None,
+            ) or []
+
+        registros = [
+            r
+            for r in registros
+            if normalizar(r.get("engenheiro") or "") == eng_norm
+        ]
+
+        if not registros:
+            return []
+
+        ids_apontados = set()
+
+        # Quando a tabela estruturada existir, ela é o sinal mais confiável.
+        try:
+            apontamentos_salvos = (
+                supabase.table("apontamentos")
+                .select("*")
+                .gte("data_servico", data_inicio.isoformat())
+                .lte("data_servico", data_fim.isoformat())
+                .execute()
+                .data
+                or []
+            )
+            for ap in apontamentos_salvos:
+                if normalizar(ap.get("engenheiro") or "") != eng_norm:
+                    continue
+                conv_id = str(ap.get("convocacao_id") or "").strip()
+                if conv_id:
+                    ids_apontados.add(conv_id)
+        except Exception:
+            # Compatibilidade com instalações sem a tabela estruturada.
+            ids_apontados = set()
+
+        pendentes = []
+        for conv in _enriquecer_convocacoes_campo(registros):
+            conv_id = str(conv.get("id") or "").strip()
+            meta = obter_metadata_operacional(
+                conv.get("observacao") or ""
+            )
+
+            apontado = bool(
+                (conv_id and conv_id in ids_apontados)
+                or meta.get("apontado_em")
+                or conv.get("custos_separados") is True
+            )
+
+            # Para registros legados em que não há metadata nem tabela
+            # estruturada, mantém a regra antiga como último fallback.
+            if not apontado:
+                obra = conv.get("dados_obra") or dict_obras.get(
+                    conv.get("obra_id"),
+                    {},
+                )
+                if (
+                    obra
+                    and not eh_obra_placeholder(obra)
+                    and conv.get("custos_separados") is not None
+                ):
+                    apontado = True
+
+            if not apontado:
+                pendentes.append(conv)
+
+        return pendentes
 
     def _servicos_convocacao_mobile(conv):
         """
@@ -13193,25 +13748,23 @@ elif modo_campo:
 
     st.markdown(
         f"""
-        <div class="engm-head">
+        <div class="engm-head engm-head-v2">
             <div class="engm-brand">
-                <div class="engm-kicker">APROAR · Campo</div>
-                <div class="engm-title">Minha equipe</div>
+                <div class="engm-brand-top">
+                    <div class="engm-brand-logo-wrap"><img class="engm-brand-logo-img" src="data:image/png;base64,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" alt="Logo APROAR"></div>
+                    <div class="engm-brand-copy">
+                        <div class="engm-kicker">Portal do Supervisor</div>
+                        <div class="engm-title engm-title-stack">Minha equipe</div>
+                    </div>
+                </div>
             </div>
-            <div class="engm-date">
-                Hoje<br><b>{hoje_campo.strftime('%d/%m')}</b>
-                &nbsp;·&nbsp;
-                Próximo<br><b>{amanha_campo.strftime('%d/%m')}</b>
+            <div class="engm-head-side">
+                <div class="engm-date engm-date-v2">
+                    <div class="engm-date-chip-label">Data</div>
+                    <b>{hoje_campo.strftime('%d/%m/%Y')}</b>
+                </div>
+                <a class="engm-logout-link" href="?logout=1">Sair</a>
             </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    st.markdown(
-        """
-        <div class="engm-logout-row">
-            <a class="engm-logout-link" href="?logout=1">Sair</a>
         </div>
         """,
         unsafe_allow_html=True,
@@ -13228,7 +13781,7 @@ elif modo_campo:
 
     with nav_c1:
         if st.button(
-            "Hoje",
+            "Apontamentos",
             type=("primary" if area_campo == "Hoje" else "secondary"),
             use_container_width=True,
             key="eng_nav_hoje_v16",
@@ -13238,7 +13791,7 @@ elif modo_campo:
 
     with nav_c2:
         if st.button(
-            "Amanhã",
+            "Convocação",
             type=("primary" if area_campo == "Amanhã" else "secondary"),
             use_container_width=True,
             key="eng_nav_amanha_v16",
@@ -13262,8 +13815,28 @@ elif modo_campo:
     # HOJE — RESUMO + CONVOCADOS + APONTAMENTO NA MESMA TELA
     # =====================================================================
     if area_campo == "Hoje":
+        # Quando o supervisor escolhe uma pendência antiga, a data é aplicada
+        # antes de criar o widget. Isso evita conflito com o estado do Streamlit.
+        _data_pendente_destino = st.session_state.pop(
+            "_engm_data_pendente_destino",
+            None,
+        )
+        if _data_pendente_destino is not None:
+            st.session_state["engm_data_apont"] = (
+                _data_pendente_destino
+            )
+
+        if st.session_state.pop(
+            "_engm_limpar_unidade_ao_ir_pendente",
+            False,
+        ):
+            st.session_state.pop(
+                "engm_unidade_apont_top",
+                None,
+            )
+
         c_ap_eng, c_ap_unid, c_ap_data = st.columns(
-            [1.05, 1.05, .82]
+            [.96, .98, .78]
         )
 
         with c_ap_eng:
@@ -13274,12 +13847,22 @@ elif modo_campo:
             )
 
         with c_ap_data:
-            data_apont = st.date_input(
-                "Data",
-                value=hoje_campo,
-                format="DD/MM/YYYY",
-                key="engm_data_apont",
-            )
+            # Se a data veio de um clique em uma pendência, não passamos
+            # `value=` novamente. Assim o estado escolhido pelo botão não é
+            # sobrescrito pelo valor padrão do Streamlit.
+            if "engm_data_apont" in st.session_state:
+                data_apont = st.date_input(
+                    "Data",
+                    format="DD/MM/YYYY",
+                    key="engm_data_apont",
+                )
+            else:
+                data_apont = st.date_input(
+                    "Data",
+                    value=hoje_campo,
+                    format="DD/MM/YYYY",
+                    key="engm_data_apont",
+                )
 
         convocacoes_todas_unidades = _enriquecer_convocacoes_campo(
             _buscar_convocacoes_campo(
@@ -13363,28 +13946,151 @@ elif modo_campo:
         classe_pend = "warn" if pendentes_data else ""
         classe_aus = "danger" if ausencias_data else ""
 
-        st.markdown(
-            f"""
-            <div class="engm-summary">
-                <div class="engm-summary-item">
-                    <div class="engm-summary-label">Equipe</div>
-                    <div class="engm-summary-value">{total_data}</div>
-                    <div class="engm-summary-note">na data</div>
-                </div>
-                <div class="engm-summary-item {classe_pend}">
-                    <div class="engm-summary-label">Pendentes</div>
-                    <div class="engm-summary-value">{pendentes_data}</div>
-                    <div class="engm-summary-note">{apontados_data} concluído(s)</div>
-                </div>
-                <div class="engm-summary-item {classe_aus}">
-                    <div class="engm-summary-label">Ausências</div>
-                    <div class="engm-summary-value">{ausencias_data}</div>
-                    <div class="engm-summary-note">falta / atestado</div>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
+        # Pendências gerais do supervisor selecionado, em qualquer unidade,
+        # até hoje. O terceiro card usa esse total e é o próprio botão.
+        pendencias_supervisor = (
+            _buscar_pendencias_anteriores_supervisor_campo(
+                engenheiro_campo,
+                hoje_campo,
+            )
+            or []
         )
+
+        pendencias_por_data = {}
+        for conv in pendencias_supervisor:
+            data_txt = str(conv.get("data") or "").strip()
+            try:
+                data_conv = datetime.date.fromisoformat(
+                    data_txt[:10]
+                )
+            except Exception:
+                continue
+
+            item_data = pendencias_por_data.setdefault(
+                data_conv,
+                {
+                    "qtd": 0,
+                    "unidades": set(),
+                },
+            )
+            item_data["qtd"] += 1
+
+            for unid in _unidades_convocacao_mobile(conv):
+                if str(unid).strip():
+                    item_data["unidades"].add(
+                        str(unid).strip()
+                    )
+
+        total_pendencias_supervisor = sum(
+            item["qtd"]
+            for item in pendencias_por_data.values()
+        )
+
+        c_sum_conv, c_sum_apont, c_sum_pend = st.columns(3)
+
+        with c_sum_conv:
+            st.markdown(
+                f"""
+                <div class="engm-summary-item engm-summary-static">
+                    <div class="engm-summary-value">{total_data}</div>
+                    <div class="engm-summary-label">convocados</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        with c_sum_apont:
+            st.markdown(
+                f"""
+                <div class="engm-summary-item engm-summary-static">
+                    <div class="engm-summary-value">{apontados_data}</div>
+                    <div class="engm-summary-label">apontados</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        with c_sum_pend:
+            if total_pendencias_supervisor > 0:
+                if st.button(
+                    (
+                        f"**{total_pendencias_supervisor}**  \
+"
+                        "pendentes  \
+"
+                        "*Ver minhas pendências*"
+                    ),
+                    key="engm_pendentes_card",
+                    use_container_width=True,
+                ):
+                    st.session_state[
+                        "_engm_mostrar_pendencias"
+                    ] = not st.session_state.get(
+                        "_engm_mostrar_pendencias",
+                        False,
+                    )
+
+                if st.session_state.get(
+                    "_engm_mostrar_pendencias",
+                    False,
+                ):
+                    def _engm_ir_para_pendencia(data_destino):
+                        st.session_state[
+                            "_engm_data_pendente_destino"
+                        ] = data_destino
+                        st.session_state[
+                            "_engm_limpar_unidade_ao_ir_pendente"
+                        ] = True
+                        st.session_state[
+                            "_engm_mostrar_pendencias"
+                        ] = False
+
+                    for data_pend in sorted(
+                        pendencias_por_data.keys(),
+                        reverse=True,
+                    ):
+                        info_pend = pendencias_por_data[data_pend]
+                        unidades_pend = sorted(
+                            info_pend["unidades"]
+                        )
+                        unidades_txt = (
+                            " · ".join(unidades_pend)
+                            if unidades_pend
+                            else "Unidade não identificada"
+                        )
+
+                        rotulo_pend = (
+                            f"{data_pend.strftime('%d/%m/%Y')} · "
+                            f"{info_pend['qtd']} pend. · "
+                            f"{unidades_txt}"
+                        )
+
+                        st.button(
+                            rotulo_pend,
+                            use_container_width=True,
+                            key=(
+                                "engm_ir_pend_"
+                                + data_pend.isoformat()
+                                + "_"
+                                + re.sub(
+                                    r"[^A-Za-z0-9]+",
+                                    "_",
+                                    str(engenheiro_campo),
+                                )
+                            ),
+                            on_click=_engm_ir_para_pendencia,
+                            args=(data_pend,),
+                        )
+            else:
+                st.markdown(
+                    """
+                    <div class="engm-summary-item engm-summary-static">
+                        <div class="engm-summary-value">0</div>
+                        <div class="engm-summary-label">pendentes</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
 
         if data_apont < hoje_campo:
             st.markdown(
@@ -13407,9 +14113,9 @@ elif modo_campo:
             )
 
         st.markdown(
-            '<div class="engm-section-title">Apontar equipe</div>'
+            '<div class="engm-section-title">Equipe do dia</div>'
             '<div class="engm-section-sub">'
-            'Campos compactos para celular. Você pode adicionar quantos serviços forem necessários e salvar tudo de uma vez.'
+            'Preencha os apontamentos e salve tudo de uma vez.'
             '</div>',
             unsafe_allow_html=True,
         )
@@ -14293,7 +14999,7 @@ elif modo_campo:
                         )
 
                         c_status, c_periodo = st.columns(
-                            [1.12, .88]
+                            [.96, .74]
                         )
 
                         with c_status:
@@ -14403,12 +15109,12 @@ elif modo_campo:
                             )
 
                         pg1, pg2 = st.columns(
-                            [1, 1.12]
+                            [.86, 1.0]
                         )
 
                         with pg1:
                             tipo_diaria_sel = st.selectbox(
-                                "Tipo de diária",
+                                "Diária / Meia",
                                 TIPOS_DIARIA,
                                 key=tipo_key,
                                 on_change=_ajustar_diaria_mobile,
@@ -14418,7 +15124,7 @@ elif modo_campo:
                         with pg2:
                             valor_diaria_financeiro = (
                                 st.number_input(
-                                    "Valor acordado (R$)",
+                                    "Diária (R$)",
                                     min_value=0.0,
                                     step=10.0,
                                     disabled=(
@@ -14427,14 +15133,10 @@ elif modo_campo:
                                         )
                                     ),
                                     key=diaria_key,
-                                    help=(
-                                        "Valor acordado para o Financeiro. "
-                                        "O padrão depende da categoria, mas pode ser alterado."
-                                    ),
                                 )
                             )
 
-                        pg3, pg4 = st.columns(2)
+                        pg3, pg4 = st.columns([.96, .96])
 
                         with pg3:
                             valor_extra = st.number_input(
@@ -14450,27 +15152,33 @@ elif modo_campo:
                             )
 
                         if eh_sebrae_card:
-                            valor_adicional_noturno = (
-                                VALOR_ADICIONAL_NOTURNO_SEBRAE
-                                if status_eh_presenca(
-                                    status_sel
+                            if (
+                                adicional_noturno_key
+                                not in st.session_state
+                            ):
+                                st.session_state[
+                                    adicional_noturno_key
+                                ] = (
+                                    adicional_noturno_atual
+                                    if adicional_noturno_atual > 0
+                                    else VALOR_ADICIONAL_NOTURNO_SEBRAE
                                 )
-                                else 0.0
-                            )
 
                             with pg4:
-                                st.markdown(
-                                    (
-                                        "<div style='padding-top:3px'>"
-                                        "<div style='font-size:10px;color:#667085;"
-                                        "margin-bottom:4px'>Adic. noturno</div>"
-                                        "<div style='min-height:38px;padding:9px 10px;"
-                                        "border:1px solid #DCE3EC;border-radius:8px;"
-                                        "background:#F7F9FC;font-weight:700'>"
-                                        f"{formatar_reais(valor_adicional_noturno)}"
-                                        "</div></div>"
-                                    ),
-                                    unsafe_allow_html=True,
+                                valor_adicional_noturno = (
+                                    st.number_input(
+                                        "Adic. noturno (R$)",
+                                        min_value=0.0,
+                                        step=10.0,
+                                        disabled=(
+                                            not status_eh_presenca(
+                                                status_sel
+                                            )
+                                        ),
+                                        key=(
+                                            adicional_noturno_key
+                                        ),
+                                    )
                                 )
 
                             valor_acordo = st.number_input(
@@ -14556,7 +15264,7 @@ elif modo_campo:
 
                         resumo_pag = (
                             f"{categoria_pag} · "
-                            f"Valor acordado {formatar_reais(valor_diaria_financeiro)} · "
+                            f"Diária {formatar_reais(valor_diaria_financeiro)} · "
                             f"Extra {formatar_reais(valor_extra)}"
                         )
 
@@ -16199,7 +16907,7 @@ elif modo_financeiro:
             )
         else:
             resumo_view = resumo_fin.copy()
-            for _c in ["Valor acordado (R$)", "Extra (R$)", "Adic. noturno (R$)", "Acordos / Bonificações (R$)", "Total a Pagar (R$)"]:
+            for _c in ["Diária (R$)", "Extra (R$)", "Adic. noturno (R$)", "Acordos / Bonificações (R$)", "Total a Pagar (R$)"]:
                 if _c in resumo_view.columns:
                     resumo_view[_c.replace(" (R$)", "")] = resumo_view[_c].apply(formatar_reais)
                     resumo_view = resumo_view.drop(columns=[_c])
@@ -17178,7 +17886,7 @@ else:
     elif menu_escolhido == "📊 RELATÓRIOS":
         cabecalho_pagina_aproar(
             "Relatórios",
-            "Controladoria: custo diário individual importado na planilha do colaborador (meia diária = 50%) + Extra + Adicional noturno + Acordos/Bonificações. O Total de cada colaborador é a soma desses valores. No SEBRAE, o adicional noturno é sempre R$ 90,00 por colaborador presente.",
+            "Controladoria: Profissional R$ 241,74 / Ajudante R$ 182,34 + Extra + Adicional noturno + Acordos/Bonificações. O Total de cada colaborador é a soma desses valores. No SEBRAE, o adicional noturno é sempre R$ 90,00 por colaborador presente.",
             categoria="ANÁLISE E FECHAMENTO",
         )
         
@@ -20157,9 +20865,11 @@ else:
                 "**Cobranças de apontamentos no Teams**"
             )
             st.caption(
-                "Automático geral: 16:00 no dia do serviço, 09:30 e 15:00 no dia seguinte. "
-                "SEBRAE: um único lembrete automático às 21:00 no dia do serviço. "
-                "A cobrança manual continua disponível a qualquer momento."
+                "Automático: demais unidades às 16:00 no próprio dia e, "
+                "se continuar pendente, às 09:30 e 15:00 do dia seguinte. "
+                "SEBRAE: um único lembrete às 21:00 do próprio dia; "
+                "o prazo operacional do apontamento vai até 09:29 do dia seguinte. "
+                "Depois disso, se continuar pendente, fica atrasado e disponível para cobrança manual."
             )
 
             st.info(
@@ -20261,8 +20971,9 @@ else:
 
                 st.markdown("**Supervisores e unidades**")
                 st.caption(
-                    "Ativo controla somente a cobrança automática. "
-                    "O botão Cobrar agora funciona manualmente."
+                    "Ativo controla a cobrança automática. "
+                    "O botão Cobrar agora funciona em qualquer pendência, "
+                    "mesmo antes ou depois do automático."
                 )
 
                 configs_teams_form = []
@@ -20499,7 +21210,8 @@ else:
                     "**Pendências de apontamento e destinatários**"
                 )
                 st.caption(
-                    "Todas as pendências até hoje ficam visíveis aqui, mesmo antes do horário automático. Você pode cobrar manualmente quando quiser."
+                    "A pendência fica nesta lista até ser regularizada. "
+                    "Ela aparece inclusive no próprio dia do serviço."
                 )
 
                 try:
@@ -20580,6 +21292,15 @@ else:
                                     observador
                                 )
 
+                        (
+                            situacao_ref,
+                            automatico_ref,
+                        ) = _situacao_pendencia_teams(
+                            data_ref,
+                            unidade_ref,
+                            agora_ref=agora_preview,
+                        )
+
                         linhas_preview.append({
                             "Data": (
                                 data_ref.strftime("%d/%m/%Y")
@@ -20595,16 +21316,8 @@ else:
                             "Unidade": unidade_ref,
                             "Colaborador": colaborador_ref,
                             "Turno": turno_ref or "-",
-                            "Situação": situacao_pendencia_teams(
-                                data_ref,
-                                unidade_ref,
-                                agora_preview,
-                            ),
-                            "Próxima automática": proxima_cobranca_automatica_teams(
-                                data_ref,
-                                unidade_ref,
-                                agora_preview,
-                            ),
+                            "Situação": situacao_ref,
+                            "Automático": automatico_ref,
                             "Responsável": responsavel_ref,
                             "Será enviado para": (
                                 " · ".join(
@@ -20629,29 +21342,42 @@ else:
                             ).sum()
                         )
 
-                        c_prev1, c_prev2, c_prev3 = st.columns(3)
+                        qtd_atrasados = int(
+                            (
+                                df_preview_teams["Situação"]
+                                == "Atrasado"
+                            ).sum()
+                        )
+                        qtd_hoje = int(
+                            (
+                                df_preview_teams["Situação"]
+                                == "Pendente hoje"
+                            ).sum()
+                        )
+
+                        c_prev1, c_prev2, c_prev3, c_prev4 = st.columns(4)
 
                         with c_prev1:
                             st.metric(
-                                "Pendências visíveis",
-                                len(
-                                    df_preview_teams
-                                ),
+                                "Pendências",
+                                len(df_preview_teams),
                             )
 
                         with c_prev2:
                             st.metric(
-                                "Unidades afetadas",
-                                int(
-                                    df_preview_teams[
-                                        "Unidade"
-                                    ].nunique()
-                                ),
+                                "Pendentes hoje",
+                                qtd_hoje,
                             )
 
                         with c_prev3:
                             st.metric(
-                                "Sem destinatário ativo",
+                                "Atrasados",
+                                qtd_atrasados,
+                            )
+
+                        with c_prev4:
+                            st.metric(
+                                "Sem destinatário",
                                 qtd_sem_destino,
                             )
 
@@ -20668,7 +21394,7 @@ else:
 
                     else:
                         st.success(
-                            "Não há apontamentos atrasados neste momento."
+                            "Não há pendências de apontamento neste momento."
                         )
 
                 except Exception as e:
@@ -20844,10 +21570,10 @@ else:
 
                 st.markdown("---")
                 st.caption(
-                    "Automático geral: 16:00 no dia + 09:30 e 15:00 no dia seguinte. "
-                    "SEBRAE: somente 21:00 no dia do serviço. "
-                    "Depois do ciclo automático, a pendência continua visível para cobrança manual. "
-                    "PAULO e HELENA recebem cópia de todas as pendências quando ativos."
+                    "Automático — demais unidades: 16:00 no dia do serviço, "
+                    "09:30 e 15:00 no dia seguinte. SEBRAE: 21:00 no próprio dia, "
+                    "uma única vez. Manual: disponível enquanto a pendência existir. "
+                    "PAULO e HELENA recebem todas as pendências quando ativos."
                 )
 
         with tab_limpeza:
