@@ -11830,6 +11830,13 @@ elif modo_campo:
         background:transparent !important;
     }
 
+    .engm-pending-history-sub{
+        margin-top:3px;
+        font-size:10px;
+        font-weight:600;
+        color:#7A5B00;
+    }
+
     div[class*="st-key-engm_pendencias_anteriores"] [data-testid="stExpander"] summary{
         min-height:34px !important;
         padding-top:4px !important;
@@ -13917,19 +13924,19 @@ elif modo_campo:
             else []
         )
 
-        # Enquanto o supervisor estiver olhando uma data antiga, aquela data
-        # já está na tela principal e não precisa ser repetida no aviso.
-        pendencias_outros_dias = [
-            conv
-            for conv in pendencias_anteriores
-            if str(conv.get("data") or "")
-            != data_apont.isoformat()
-        ]
+        # A lista deve mostrar TODAS as datas pendentes do supervisor,
+        # inclusive a data que já estiver aberta no apontamento. Isso evita
+        # o caso em que o card mostra "5 pendentes", mas nenhum item aparece
+        # para clicar porque a data selecionada foi excluída da lista.
+        pendencias_supervisor = list(
+            pendencias_anteriores
+            or []
+        )
 
-        if pendencias_outros_dias:
+        if pendencias_supervisor:
             pendencias_por_data = {}
 
-            for conv in pendencias_outros_dias:
+            for conv in pendencias_supervisor:
                 data_txt = str(conv.get("data") or "").strip()
                 try:
                     data_conv = datetime.date.fromisoformat(
@@ -13969,13 +13976,16 @@ elif modo_campo:
                             '<div class="engm-pending-history-head">'
                             f'<strong>{total_pendencias_anteriores}</strong> '
                             'apontamento(s) pendente(s)'
+                            '<div class="engm-pending-history-sub">'
+                            'Clique para ver seus apontamentos pendentes'
+                            '</div>'
                             '</div>'
                         ),
                         unsafe_allow_html=True,
                     )
 
                     with st.expander(
-                        "Clique para ver seus apontamentos pendentes",
+                        "Ver pendências",
                         expanded=False,
                     ):
                         for data_pend in sorted(
