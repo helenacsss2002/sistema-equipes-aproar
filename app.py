@@ -11798,65 +11798,90 @@ elif modo_campo:
         color:#FFD84D !important;
     }
 
-    /* Pendências de outros dias do supervisor selecionado */
-    div[class*="st-key-engm_pendencias_anteriores"]{
-        margin:2px 0 8px !important;
-        padding:10px 12px 8px !important;
-        border:1px solid #F0D58B !important;
-        border-radius:12px !important;
-        background:#FFF8DD !important;
-        box-shadow:none !important;
-    }
-
-    div[class*="st-key-engm_pendencias_anteriores"] > div{
-        gap:.35rem !important;
-    }
-
-    .engm-pending-history-head{
-        font-size:12px;
-        line-height:1.3;
-        color:#5D4811;
-        margin:0;
-    }
-
-    .engm-pending-history-head strong{
-        font-size:15px;
-        color:#3F310B;
-    }
-
-    div[class*="st-key-engm_pendencias_anteriores"] [data-testid="stExpander"]{
+    /* Card azul de pendências: o próprio card é clicável. */
+    div[class*="st-key-engm_pendentes_card"]{
+        height:100% !important;
         margin:0 !important;
-        border:0 !important;
-        background:transparent !important;
     }
 
-    .engm-pending-history-sub{
-        margin-top:3px;
-        font-size:10px;
-        font-weight:600;
-        color:#7A5B00;
+    div[class*="st-key-engm_pendentes_card"] .stButton,
+    div[class*="st-key-engm_pendentes_card"] .stButton > button{
+        width:100% !important;
+        height:100% !important;
     }
 
-    div[class*="st-key-engm_pendencias_anteriores"] [data-testid="stExpander"] summary{
-        min-height:34px !important;
-        padding-top:4px !important;
-        padding-bottom:4px !important;
-        background:transparent !important;
-        color:#8A6410 !important;
+    div[class*="st-key-engm_pendentes_card"] button{
+        min-height:86px !important;
+        border-radius:16px !important;
+        border:none !important;
+        background:linear-gradient(135deg,#0C3176 0%, #1250BA 100%) !important;
+        color:#FFFFFF !important;
+        box-shadow:none !important;
+        padding:10px 8px !important;
+        white-space:normal !important;
+    }
+
+    div[class*="st-key-engm_pendentes_card"] button:hover{
+        border:none !important;
+        filter:brightness(1.04);
+    }
+
+    div[class*="st-key-engm_pendentes_card"] button p{
+        margin:0 !important;
+        color:#FFD84D !important;
+        -webkit-text-fill-color:#FFD84D !important;
         font-size:11px !important;
         font-weight:700 !important;
+        line-height:1.35 !important;
+        white-space:normal !important;
+        text-align:center !important;
     }
 
-    div[class*="st-key-engm_pendencias_anteriores"] .stButton > button{
+    div[class*="st-key-engm_pendentes_card"] button strong{
+        display:block !important;
+        margin-bottom:2px !important;
+        color:#FFFFFF !important;
+        -webkit-text-fill-color:#FFFFFF !important;
+        font-size:32px !important;
+        line-height:1 !important;
+        font-weight:800 !important;
+    }
+
+    div[class*="st-key-engm_pendentes_card"] button em{
+        display:block !important;
+        margin-top:3px !important;
+        color:#EAF1FF !important;
+        -webkit-text-fill-color:#EAF1FF !important;
+        font-size:9px !important;
+        font-style:normal !important;
+        font-weight:600 !important;
+        opacity:.95;
+    }
+
+    /* Lista que só aparece depois do clique no card. */
+    .engm-pending-list-title{
+        margin:2px 0 6px;
+        color:#172235;
+        font-size:11px;
+        font-weight:700;
+    }
+
+    div[class*="st-key-engm_ir_pend_"] button{
         min-height:38px !important;
         text-align:left !important;
         justify-content:flex-start !important;
         background:#FFFFFF !important;
-        border-color:#E6D59F !important;
+        border:1px solid #DCE3EC !important;
+        border-radius:9px !important;
         color:#26364D !important;
         font-size:10.5px !important;
         font-weight:650 !important;
         box-shadow:none !important;
+    }
+
+    div[class*="st-key-engm_ir_pend_"] button *{
+        color:#26364D !important;
+        -webkit-text-fill-color:#26364D !important;
     }
 
     /* Seletor do engenheiro */
@@ -13888,149 +13913,158 @@ elif modo_campo:
         classe_pend = "warn" if pendentes_data else ""
         classe_aus = "danger" if ausencias_data else ""
 
-        st.markdown(
-            f"""
-            <div class="engm-summary-host">
-                <div class="engm-summary engm-summary-v2">
-                    <div class="engm-summary-item">
-                        <div class="engm-summary-value">{total_data}</div>
-                        <div class="engm-summary-label">convocados</div>
-                    </div>
-                    <div class="engm-summary-item">
-                        <div class="engm-summary-value">{apontados_data}</div>
-                        <div class="engm-summary-label">apontados</div>
-                    </div>
-                    <div class="engm-summary-item {classe_pend}">
-                        <div class="engm-summary-value">{pendentes_data}</div>
-                        <div class="engm-summary-label">pendentes</div>
-                    </div>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-        # Pendências de dias anteriores: SEMPRE filtradas pelo supervisor
-        # atualmente selecionado em "Engenheiro".
-        data_limite_pendencias = hoje_campo - datetime.timedelta(
-            days=1
-        )
-        pendencias_anteriores = (
+        # Pendências gerais do supervisor selecionado, em qualquer unidade,
+        # até hoje. O terceiro card usa esse total e é o próprio botão.
+        pendencias_supervisor = (
             _buscar_pendencias_anteriores_supervisor_campo(
                 engenheiro_campo,
-                data_limite_pendencias,
+                hoje_campo,
             )
-            if data_limite_pendencias >= datetime.date(2020, 1, 1)
-            else []
-        )
-
-        # A lista deve mostrar TODAS as datas pendentes do supervisor,
-        # inclusive a data que já estiver aberta no apontamento. Isso evita
-        # o caso em que o card mostra "5 pendentes", mas nenhum item aparece
-        # para clicar porque a data selecionada foi excluída da lista.
-        pendencias_supervisor = list(
-            pendencias_anteriores
             or []
         )
 
-        if pendencias_supervisor:
-            pendencias_por_data = {}
-
-            for conv in pendencias_supervisor:
-                data_txt = str(conv.get("data") or "").strip()
-                try:
-                    data_conv = datetime.date.fromisoformat(
-                        data_txt[:10]
-                    )
-                except Exception:
-                    continue
-
-                item_data = pendencias_por_data.setdefault(
-                    data_conv,
-                    {
-                        "qtd": 0,
-                        "unidades": set(),
-                    },
+        pendencias_por_data = {}
+        for conv in pendencias_supervisor:
+            data_txt = str(conv.get("data") or "").strip()
+            try:
+                data_conv = datetime.date.fromisoformat(
+                    data_txt[:10]
                 )
-                item_data["qtd"] += 1
+            except Exception:
+                continue
 
-                for unid in _unidades_convocacao_mobile(
-                    conv
-                ):
-                    if str(unid).strip():
-                        item_data["unidades"].add(
-                            str(unid).strip()
-                        )
+            item_data = pendencias_por_data.setdefault(
+                data_conv,
+                {
+                    "qtd": 0,
+                    "unidades": set(),
+                },
+            )
+            item_data["qtd"] += 1
 
-            total_pendencias_anteriores = sum(
-                item["qtd"]
-                for item in pendencias_por_data.values()
+            for unid in _unidades_convocacao_mobile(conv):
+                if str(unid).strip():
+                    item_data["unidades"].add(
+                        str(unid).strip()
+                    )
+
+        total_pendencias_supervisor = sum(
+            item["qtd"]
+            for item in pendencias_por_data.values()
+        )
+
+        c_sum_conv, c_sum_apont, c_sum_pend = st.columns(3)
+
+        with c_sum_conv:
+            st.markdown(
+                f"""
+                <div class="engm-summary-item">
+                    <div class="engm-summary-value">{total_data}</div>
+                    <div class="engm-summary-label">convocados</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
             )
 
-            if total_pendencias_anteriores:
-                with st.container(
-                    key="engm_pendencias_anteriores"
+        with c_sum_apont:
+            st.markdown(
+                f"""
+                <div class="engm-summary-item">
+                    <div class="engm-summary-value">{apontados_data}</div>
+                    <div class="engm-summary-label">apontados</div>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+
+        with c_sum_pend:
+            if total_pendencias_supervisor > 0:
+                if st.button(
+                    (
+                        f"**{total_pendencias_supervisor}**  \n"
+                        "pendentes  \n"
+                        "*Ver minhas pendências*"
+                    ),
+                    key="engm_pendentes_card",
+                    use_container_width=True,
                 ):
-                    st.markdown(
-                        (
-                            '<div class="engm-pending-history-head">'
-                            f'<strong>{total_pendencias_anteriores}</strong> '
-                            'apontamento(s) pendente(s)'
-                            '<div class="engm-pending-history-sub">'
-                            'Clique para ver seus apontamentos pendentes'
-                            '</div>'
-                            '</div>'
-                        ),
-                        unsafe_allow_html=True,
+                    st.session_state[
+                        "_engm_mostrar_pendencias"
+                    ] = not st.session_state.get(
+                        "_engm_mostrar_pendencias",
+                        False,
                     )
+                    st.rerun()
+            else:
+                st.markdown(
+                    """
+                    <div class="engm-summary-item">
+                        <div class="engm-summary-value">0</div>
+                        <div class="engm-summary-label">pendentes</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
 
-                    with st.expander(
-                        "Ver pendências",
-                        expanded=False,
-                    ):
-                        for data_pend in sorted(
-                            pendencias_por_data.keys(),
-                            reverse=True,
-                        ):
-                            info_pend = pendencias_por_data[
-                                data_pend
-                            ]
-                            unidades_pend = sorted(
-                                info_pend["unidades"]
-                            )
-                            unidades_txt = (
-                                " · ".join(unidades_pend)
-                                if unidades_pend
-                                else "Unidade não identificada"
-                            )
+        # A lista fica invisível até o próprio card azul ser tocado.
+        if (
+            total_pendencias_supervisor > 0
+            and st.session_state.get(
+                "_engm_mostrar_pendencias",
+                False,
+            )
+        ):
+            st.markdown(
+                '<div class="engm-pending-list-title">'
+                'Seus apontamentos pendentes'
+                '</div>',
+                unsafe_allow_html=True,
+            )
 
-                            rotulo_pend = (
-                                f"{data_pend.strftime('%d/%m/%Y')} · "
-                                f"{info_pend['qtd']} pendente(s) · "
-                                f"{unidades_txt}"
-                            )
+            for data_pend in sorted(
+                pendencias_por_data.keys(),
+                reverse=True,
+            ):
+                info_pend = pendencias_por_data[data_pend]
+                unidades_pend = sorted(
+                    info_pend["unidades"]
+                )
+                unidades_txt = (
+                    " · ".join(unidades_pend)
+                    if unidades_pend
+                    else "Unidade não identificada"
+                )
 
-                            if st.button(
-                                rotulo_pend,
-                                use_container_width=True,
-                                key=(
-                                    "engm_ir_pend_"
-                                    + data_pend.isoformat()
-                                    + "_"
-                                    + re.sub(
-                                        r"[^A-Za-z0-9]+",
-                                        "_",
-                                        str(engenheiro_campo),
-                                    )
-                                ),
-                            ):
-                                st.session_state[
-                                    "_engm_data_pendente_destino"
-                                ] = data_pend
-                                st.session_state[
-                                    "_engm_limpar_unidade_ao_ir_pendente"
-                                ] = True
-                                st.rerun()
+                rotulo_pend = (
+                    f"{data_pend.strftime('%d/%m/%Y')} · "
+                    f"{info_pend['qtd']} pendente(s) · "
+                    f"{unidades_txt}"
+                )
+
+                if st.button(
+                    rotulo_pend,
+                    use_container_width=True,
+                    key=(
+                        "engm_ir_pend_"
+                        + data_pend.isoformat()
+                        + "_"
+                        + re.sub(
+                            r"[^A-Za-z0-9]+",
+                            "_",
+                            str(engenheiro_campo),
+                        )
+                    ),
+                ):
+                    st.session_state[
+                        "_engm_data_pendente_destino"
+                    ] = data_pend
+                    st.session_state[
+                        "_engm_limpar_unidade_ao_ir_pendente"
+                    ] = True
+                    st.session_state[
+                        "_engm_mostrar_pendencias"
+                    ] = False
+                    st.rerun()
 
         if data_apont < hoje_campo:
             st.markdown(
