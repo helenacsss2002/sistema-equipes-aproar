@@ -65,9 +65,8 @@ def pendencia_entra_no_slot(
 
     DEMAIS UNIDADES
     ----------------
-    D    16:00
-    D+1  09:30
-    D+1  15:00
+    D    16:00  (lembrete preventivo; ainda pendente)
+    D+1  09:30  (já atrasado)
 
     SEBRAE
     ------
@@ -105,10 +104,7 @@ def pendencia_entra_no_slot(
             and data_servico == hoje
         )
 
-    if slot in {
-        "09:30",
-        "15:00",
-    }:
+    if slot == "09:30":
         return (
             unidade != "SEBRAE"
             and data_servico == ontem
@@ -125,7 +121,6 @@ def slot_atual() -> str:
 
     if manual in {
         "09:30",
-        "15:00",
         "16:00",
         "21:00",
     }:
@@ -135,9 +130,6 @@ def slot_atual() -> str:
 
     if agora.hour < 12:
         return "09:30"
-
-    if agora.hour < 16:
-        return "15:00"
 
     if agora.hour < 21:
         return "16:00"
@@ -348,11 +340,9 @@ def montar_mensagem(engenheiro, pendentes, slot):
         linhas_visiveis.append(f"• + {len(linhas) - max_linhas} grupo(s) pendente(s)")
 
     if slot == "16:00":
-        etapa = "Cobrança do próprio dia · 16:00"
+        etapa = "Lembrete do próprio dia · 16:00 · ainda pendente"
     elif slot == "09:30":
-        etapa = "Cobrança do dia seguinte · 09:30"
-    elif slot == "15:00":
-        etapa = "Última cobrança automática · 15:00"
+        etapa = "Cobrança em atraso · dia seguinte · 09:30"
     else:
         etapa = "Lembrete SEBRAE · 21:00"
 
@@ -479,7 +469,7 @@ def main():
                 )
 
                 if not pendentes:
-                    print(f"- {engenheiro}: sem apontamentos atrasados.")
+                    print(f"- {engenheiro}: sem pendências nesta janela automática.")
                     sem_pendencia += 1
                     continue
 
