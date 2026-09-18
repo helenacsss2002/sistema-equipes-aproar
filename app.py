@@ -2550,6 +2550,13 @@ def _garantir_estrutura_cadastros_admin():
 
                 cur.execute(
                     """
+                    ALTER TABLE colaboradores
+                    ADD COLUMN IF NOT EXISTS atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    """
+                )
+
+                cur.execute(
+                    """
                     UPDATE colaboradores
                        SET categoria_diaria =
                            CASE
@@ -3927,12 +3934,11 @@ def _atualizar_colaborador_admin_rapido(
     antes=None,
 ):
     """
-    UPDATE administrativo otimizado.
+    Atualiza o cadastro do colaborador de forma confiável.
 
-    - reutiliza a conexão PostgreSQL da sessão;
-    - UPDATE + auditoria na mesma transação;
-    - limpa apenas o cache de colaboradores;
-    - se a conexão estiver velha, reconecta automaticamente.
+    O ID do colaborador é a referência fixa da edição; portanto o próprio
+    nome pode ser alterado sem perder o vínculo. No Neon, a gravação é feita
+    diretamente por SQL e a auditoria não bloqueia a atualização caso falhe.
     """
     campos_permitidos = {
         "ativo",
@@ -3949,227 +3955,136 @@ def _atualizar_colaborador_admin_rapido(
         if k in campos_permitidos
     }
 
-    if not payload:
+    if not payload or colaborador_id is None:
         return False
 
-    if DB_BACKEND == "NEON":
-        for _tentativa in range(2):
-            conn = _get_conexao_admin_rapida()
-
-            if conn is None:
-                break
-
-            try:
+    if DB_BACKEND == "NEON" and hasattr(supabase, "_connect"):
+        try:
+            with supabase._connect() as conn:
                 with conn.cursor() as cur:
                     atribuicoes = ", ".join(
-                        f"{campo} = %s"
+                        f'{_identificador_sql(campo)} = %s'
                         for campo in payload.keys()
                     )
-
-                    valores = list(payload.values())
-                    valores.append(colaborador_id)
+                    valores = list(payload.values()) + [colaborador_id]
 
                     cur.execute(
                         f"""
                         UPDATE colaboradores
-                           SET {atribuicoes},
-                               atualizado_em = NOW()
+                           SET {atribuicoes}
                          WHERE id = %s
+                        RETURNING id
                         """,
                         tuple(valores),
                     )
+                    atualizado = cur.fetchone()
 
-                    if int(cur.rowcount or 0) != 1:
-                        raise RuntimeError(
-                            "O cadastro selecionado não foi encontrado para atualização."
-                        )
+                    if not atualizado:
+                        conn.rollback()
+                        return False
 
-                    # Auditoria na mesma conexão.
+                    # Atualiza o carimbo de data somente se a coluna existir.
                     try:
                         cur.execute(
-                            "SAVEPOINT audit_colab_inline"
-                        )
-
-                        cur.execute(
                             """
-                            INSERT INTO auditoria
-                                (
-                                    entidade,
-                                    entidade_id,
-                                    acao,
-                                    usuario,
-                                    antes,
-                                    depois,
-                                    contexto
-                                )
-                            VALUES
-                                (
-                                    %s,
-                                    %s,
-                                    %s,
-                                    %s,
-                                    %s::jsonb,
-                                    %s::jsonb,
-                                    %s::jsonb
-                                )
+                            UPDATE colaboradores
+                               SET atualizado_em = NOW()
+                             WHERE id = %s
                             """,
-                            (
-                                "colaboradores",
-                                str(colaborador_id),
-                                str(acao),
-                                "ADMIN",
-                                (
-                                    _json_db(antes)
-                                    if antes is not None
-                                    else None
-                                ),
-                                _json_db(payload),
-                                _json_db({
-                                    "origem": (
-                                        "banco_funcionarios_inline"
-                                    )
-                                }),
-                            ),
+                            (colaborador_id,),
                         )
-
-                        cur.execute(
-                            "RELEASE SAVEPOINT audit_colab_inline"
-                        )
-
                     except Exception:
+                        # Não deixa uma coluna opcional impedir a edição.
                         try:
-                            cur.execute(
-                                "ROLLBACK TO SAVEPOINT audit_colab_inline"
-                            )
-                            cur.execute(
-                                "RELEASE SAVEPOINT audit_colab_inline"
-                            )
+                            conn.rollback()
                         except Exception:
                             pass
+                        # Reexecuta a alteração principal em transação limpa.
+                        with conn.cursor() as cur2:
+                            cur2.execute(
+                                f"""
+                                UPDATE colaboradores
+                                   SET {atribuicoes}
+                                 WHERE id = %s
+                                RETURNING id
+                                """,
+                                tuple(valores),
+                            )
+                            atualizado = cur2.fetchone()
+                            if not atualizado:
+                                return False
 
-                conn.commit()
-                limpar_cache_colaboradores()
-                return True
+                    conn.commit()
 
+            limpar_cache_colaboradores()
+
+            # Auditoria é secundária e não pode desfazer uma edição válida.
+            try:
+                registrar_auditoria_prod(
+                    "colaboradores",
+                    colaborador_id,
+                    acao,
+                    "ADMIN",
+                    antes=antes,
+                    depois=payload,
+                    contexto={"origem": "banco_funcionarios_inline"},
+                )
             except Exception:
-                try:
-                    conn.rollback()
-                except Exception:
-                    pass
+                pass
 
-                _descartar_conexao_admin_rapida()
+            return True
 
-    # Fallback compatível.
+        except Exception:
+            # Se o caminho direto falhar, tenta o adaptador compatível abaixo.
+            pass
+
     try:
-        (
+        resposta = (
             supabase.table("colaboradores")
             .update(payload)
             .eq("id", colaborador_id)
             .execute()
         )
 
-        verificacao = (
-            supabase.table("colaboradores")
-            .select("id,nome,funcao,valor_diaria,local_moradia,ativo")
-            .eq("id", colaborador_id)
-            .execute()
-            .data
-            or []
-        )
-        if not verificacao:
-            return False
-        if "nome" in payload and normalizar(
-            verificacao[0].get("nome")
-        ) != normalizar(payload.get("nome")):
+        dados = list(getattr(resposta, "data", None) or [])
+        if dados:
+            registro = dados[0]
+        else:
+            verificacao = (
+                supabase.table("colaboradores")
+                .select("id,nome,funcao,valor_diaria,local_moradia,ativo")
+                .eq("id", colaborador_id)
+                .execute()
+                .data
+                or []
+            )
+            if not verificacao:
+                return False
+            registro = verificacao[0]
+
+        if "nome" in payload and normalizar(registro.get("nome")) != normalizar(payload.get("nome")):
             return False
 
         limpar_cache_colaboradores()
 
-        registrar_auditoria_prod(
-            "colaboradores",
-            colaborador_id,
-            acao,
-            "ADMIN",
-            antes=antes,
-            depois=payload,
-            contexto={
-                "origem": "banco_funcionarios_inline"
-            },
-        )
+        try:
+            registrar_auditoria_prod(
+                "colaboradores",
+                colaborador_id,
+                acao,
+                "ADMIN",
+                antes=antes,
+                depois=payload,
+                contexto={"origem": "banco_funcionarios_inline"},
+            )
+        except Exception:
+            pass
 
         return True
 
     except Exception:
         return False
 
-
-# --- FUNÇÕES DE LIMPEZA E PADRONIZAÇÃO ---
-def identificar_unidade(nome_card):
-    if not nome_card: return "GERAL"
-    texto = unicodedata.normalize('NFKD', str(nome_card)).encode('ASCII', 'ignore').decode('utf-8').upper()
-    
-    if "APRL005" in texto or "MARACANAU" in texto: return "MARACANAÚ"
-    if "SEBRAE" in texto: return "SEBRAE"
-    if "UNIFOR" in texto: return "UNIFOR"
-    if "IDALYA" in texto or "MATHEUS" in texto: return "IDALYA E MATHEUS"
-    if "COLISEU" in texto: return "COLISEU"
-    if "BARRA" in texto: return "BARRA DO CEARÁ"
-    if "MUSEU" in texto: return "MUSEU"
-    if "HORIZONTE" in texto: return "HORIZONTE"
-    if "ESCRITORIO" in texto: return "ESCRITÓRIO"
-    if "CASA DA INDUSTRIA" in texto or "FIEC" in texto or " DR " in texto or "| SESI DR |" in texto or "| SESI DR" in texto: return "FIEC"
-    if "CENTRO" in texto: return "CENTRO"
-    
-    partes = str(nome_card).split('|')
-    if len(partes) >= 2:
-        return partes[1].strip().upper()
-    return "GERAL"
-
-def limpar_funcao(texto):
-    if not texto or str(texto).upper() == 'NAN': return "INDEFINIDA"
-    texto_limpo = str(texto).upper().strip()
-    texto_limpo = re.sub(r'^\d+\s*-\s*', '', texto_limpo)
-    texto_limpo = unicodedata.normalize('NFKD', texto_limpo).encode('ASCII', 'ignore').decode('utf-8')
-    return texto_limpo
-
-def normalizar(texto):
-    if not texto: return ""
-    return ''.join(c for c in unicodedata.normalize('NFD', str(texto)) if unicodedata.category(c) != 'Mn').upper().strip()
-
-def get_cor_funcao(funcao):
-    cores = ["🟥", "🟧", "🟨", "🟩", "🟦", "🟪", "🟫", "⬛"]
-    hash_num = sum(ord(c) for c in str(funcao))
-    return cores[hash_num % len(cores)]
-
-# ---------------------------------------------------------------------------
-# REGRAS DE DIÁRIA POR CATEGORIA
-# ---------------------------------------------------------------------------
-# CONTROLADORIA — custo padrão com encargos.
-VALOR_DIARIA_PROFISSIONAL = 241.74
-VALOR_DIARIA_AJUDANTE = 182.34
-
-# FINANCEIRO — valor líquido padrão pago ao colaborador.
-VALOR_FIN_DIARIA_PROFISSIONAL = 120.00
-VALOR_FIN_MEIA_PROFISSIONAL = 60.00
-VALOR_FIN_DIARIA_AJUDANTE = 80.00
-VALOR_FIN_MEIA_AJUDANTE = 40.00
-
-# Compatibilidade com trechos antigos que assumiam Profissional.
-VALOR_LIMPO_DIARIA = VALOR_FIN_DIARIA_PROFISSIONAL
-VALOR_LIMPO_MEIA_DIARIA = VALOR_FIN_MEIA_PROFISSIONAL
-
-TIPOS_DIARIA = ["Diária", "Meia diária"]
-
-# Regras de prazo/cobrança:
-# - Demais unidades: 16:00 é lembrete preventivo; atraso começa às 09:30 de D+1.
-# - SEBRAE: jornada 17h–02h continua sendo DIÁRIA INTEGRAL;
-#   o apontamento pode ser concluído até 09:29 do dia seguinte sem atraso.
-# - Para o Teams, o SEBRAE recebe apenas UM lembrete automático às 21:00
-#   do próprio dia do serviço. Depois disso continua visível para cobrança manual.
-VALOR_ADICIONAL_NOTURNO_SEBRAE = 90.00
-HORA_LEMBRETE_TEAMS_GERAL = datetime.time(16, 0)
-HORA_LIMITE_APONTAMENTO_SEBRAE = datetime.time(9, 30)
-HORA_LEMBRETE_TEAMS_SEBRAE = datetime.time(21, 0)
 
 
 def eh_unidade_sebrae(unidade):
@@ -10117,7 +10032,7 @@ def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
 
                 with p1:
                     tipo_diaria_sel = st.selectbox(
-                        "Diária / Meia diária",
+                        "EXTRA",
                         TIPOS_DIARIA,
                         key=tipo_key,
                         disabled=eh_sebrae_card,
@@ -14918,7 +14833,7 @@ elif modo_campo:
 
                         with pg1:
                             tipo_diaria_sel = st.selectbox(
-                                "Diária / Meia diária",
+                                "EXTRA",
                                 TIPOS_DIARIA,
                                 key=tipo_key,
                                 disabled=eh_sebrae_card,
