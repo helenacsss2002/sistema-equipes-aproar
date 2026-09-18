@@ -18911,6 +18911,12 @@ else:
 
                             current_row = 1
 
+                            ws.merge_cells(
+                                start_row=current_row,
+                                start_column=1,
+                                end_row=current_row,
+                                end_column=11,
+                            )
                             ws.cell(
                                 row=current_row,
                                 column=1,
@@ -18927,8 +18933,9 @@ else:
                                 row=current_row,
                                 column=1,
                             ).alignment = Alignment(
-                                horizontal="center",
+                                horizontal="left",
                                 vertical="center",
+                                wrap_text=False,
                             )
                             current_row += 2
 
@@ -18943,7 +18950,14 @@ else:
                                 unidade_nome,
                             ), df_obra in grupos:
 
-                                # Apenas um cabeçalho da obra para todos os colaboradores.
+                                # Cabeçalho da obra ocupa toda a largura da tabela.
+                                # Mantém alinhamento à esquerda para nomes longos não serem cortados.
+                                ws.merge_cells(
+                                    start_row=current_row,
+                                    start_column=1,
+                                    end_row=current_row,
+                                    end_column=11,
+                                )
                                 ws.cell(
                                     row=current_row,
                                     column=1,
@@ -18957,8 +18971,9 @@ else:
                                     row=current_row,
                                     column=1,
                                 ).alignment = Alignment(
-                                    horizontal="center",
+                                    horizontal="left",
                                     vertical="center",
+                                    wrap_text=False,
                                 )
 
                                 for c_idx in range(1, 12):
