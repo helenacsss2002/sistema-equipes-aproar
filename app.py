@@ -10832,6 +10832,7 @@ def carregar_dados_financeiro(data_inicio, data_fim):
         _ch_fin = (
             str(_reg_fin.get("data") or ""),
             str(_reg_fin.get("colaborador_id") or ""),
+            str(_reg_fin.get("engenheiro") or "N/A").strip(),
         )
         _id_fin = str(_reg_fin.get("id") or "").strip()
         if _id_fin:
@@ -10846,41 +10847,44 @@ def carregar_dados_financeiro(data_inicio, data_fim):
     if linhas_rateadas:
         df = pd.DataFrame(linhas_rateadas)
 
-        # O Financeiro recebe exatamente os valores lançados no apontamento.
-        # Não existe mais comparação com 120/60 ou 80/40: todo lançamento
-        # com valor financeiro compõe o relatório.
-        total_fin = pd.to_numeric(
-            df["Total Financeiro (R$)"],
+        # O relatório financeiro não deve listar toda a equipe apontada.
+        # Ele mostra somente quem efetivamente possui algum valor adicional
+        # a pagar: Financeiro, adicional noturno ou Acordos/Bonificações.
+        # Isso também evita que registros antigos, nos quais Tipo = "Diária"
+        # era apenas um valor padrão, apareçam com total R$ 0,00.
+        _base_fin = pd.to_numeric(
+            df.get("Base Financeiro (R$)", 0.0),
+            errors="coerce",
+        ).fillna(0.0)
+        _noturno_fin = pd.to_numeric(
+            df.get("Adicional noturno (R$)", 0.0),
+            errors="coerce",
+        ).fillna(0.0)
+        _acordo_fin = pd.to_numeric(
+            df.get("Acordos / Bonificações (R$)", 0.0),
             errors="coerce",
         ).fillna(0.0)
 
-        # Um lançamento com Extra = Diária/Meia diária precisa aparecer para
-        # o Financeiro mesmo que o supervisor tenha deixado o valor em R$ 0,00,
-        # pois é justamente no Financeiro que esse valor poderá ser corrigido.
-        if "Tipo" in df.columns:
-            _tem_extra_fin = df["Tipo"].astype(str).apply(
-                lambda v: normalizar_tipo_diaria(v) != "Não"
-            )
-        else:
-            _tem_extra_fin = pd.Series(
-                False,
-                index=df.index,
-            )
-
         df = df[
-            (total_fin > 0.005)
-            | _tem_extra_fin
+            (_base_fin > 0.005)
+            | (_noturno_fin > 0.005)
+            | (_acordo_fin > 0.005)
         ].copy()
 
         if not df.empty:
             agrupados = (
                 df.groupby(
-                    ["Data", "_colaborador_id", "Colaborador", "Função"],
+                    [
+                        "Data",
+                        "_colaborador_id",
+                        "Colaborador",
+                        "Função",
+                        "Engenheiro",
+                    ],
                     dropna=False,
                 )
                 .agg(
                     Unidades=("Unidade", lambda s: ", ".join(sorted(set(str(v) for v in s if str(v).strip())))),
-                    Engenheiros=("Engenheiro", lambda s: " / ".join(sorted(set(str(v) for v in s if str(v).strip())))),
                     Tipo=("Tipo", lambda s: " / ".join(dict.fromkeys(str(v) for v in s if str(v).strip()))),
                     **{
                         "Base Financeiro (R$)": ("Base Financeiro (R$)", "sum"),
@@ -10903,7 +10907,7 @@ def carregar_dados_financeiro(data_inicio, data_fim):
                     "_colaborador_id": str(row["_colaborador_id"]),
                     "Função": row["Função"],
                     "Unidade": row["Unidades"],
-                    "Engenheiro": row["Engenheiros"],
+                    "Engenheiro": str(row["Engenheiro"] or "N/A"),
                     "Tipo": row["Tipo"],
                     "Base Financeiro (R$)": round(float(row["Base Financeiro (R$)"]), 2),
                     "Financeiro (R$)": round(float(row["Base Financeiro (R$)"]), 2),
@@ -10916,6 +10920,7 @@ def carregar_dados_financeiro(data_inicio, data_fim):
                                 (
                                     str(row["Data"]),
                                     str(row["_colaborador_id"]),
+                                    str(row["Engenheiro"] or "N/A").strip(),
                                 ),
                                 [],
                             )
@@ -10945,21 +10950,32 @@ def carregar_dados_financeiro(data_inicio, data_fim):
             "Status": status,
         })
 
-    pagamentos.sort(key=lambda x: (x.get("Data ISO", ""), normalizar(x.get("Colaborador", ""))))
+    pagamentos.sort(
+        key=lambda x: (
+            normalizar(x.get("Engenheiro", "")),
+            x.get("Data ISO", ""),
+            normalizar(x.get("Colaborador", "")),
+        )
+    )
     ausencias.sort(key=lambda x: (x.get("Data ISO", ""), normalizar(x.get("Colaborador", ""))))
     return pagamentos, ausencias
 
 
 def resumir_pagamentos_financeiro(pagamentos):
+    """Resume pagamentos sem misturar lançamentos de supervisores diferentes."""
     if not pagamentos:
         return pd.DataFrame(columns=[
-            "Colaborador", "Função", "Unidades", "Dias/Lançamentos",
-            "Financeiro (R$)", "Adic. noturno (R$)", "Acordos / Bonificações (R$)", "Total a Pagar (R$)"
+            "Supervisor", "Colaborador", "Função", "Unidades", "Dias/Lançamentos",
+            "Financeiro (R$)", "Adic. noturno (R$)",
+            "Acordos / Bonificações (R$)", "Total a Pagar (R$)"
         ])
 
     df = pd.DataFrame(pagamentos)
-    return (
-        df.groupby(["Colaborador", "Função"], dropna=False)
+    if "Engenheiro" not in df.columns:
+        df["Engenheiro"] = "N/A"
+
+    resumo = (
+        df.groupby(["Engenheiro", "Colaborador", "Função"], dropna=False)
         .agg(
             Unidades=("Unidade", lambda s: ", ".join(sorted(set(str(v) for v in s if str(v).strip())))),
             **{
@@ -10971,7 +10987,12 @@ def resumir_pagamentos_financeiro(pagamentos):
             },
         )
         .reset_index()
-        .sort_values(by=["Total a Pagar (R$)", "Colaborador"], ascending=[False, True])
+        .rename(columns={"Engenheiro": "Supervisor"})
+    )
+
+    return resumo.sort_values(
+        by=["Supervisor", "Total a Pagar (R$)", "Colaborador"],
+        ascending=[True, False, True],
     )
 
 
@@ -11005,7 +11026,7 @@ def gerar_excel_financeiro(pagamentos, ausencias, data_inicio, data_fim, data_pa
         f"Pagamento: {data_pagamento.strftime('%d/%m/%Y')} | Total: {formatar_reais(total_pagar)}"
     )
     headers_resumo = [
-        "Colaborador", "Função", "Unidades", "Dias/Lançamentos",
+        "Supervisor", "Colaborador", "Função", "Unidades", "Dias/Lançamentos",
         "Financeiro (R$)", "Adic. noturno (R$)", "Acordos / Bonificações (R$)", "Total a Pagar (R$)"
     ]
     cabecalho_planilha(ws_resumo, "APROAR - RELATÓRIO FINANCEIRO", subtitulo, len(headers_resumo))
@@ -11030,7 +11051,7 @@ def gerar_excel_financeiro(pagamentos, ausencias, data_inicio, data_fim, data_pa
 
     ws_det = wb.create_sheet("Detalhe Pagamentos")
     headers_det = [
-        "Data", "Colaborador", "Função", "Unidade", "Engenheiro", "Tipo",
+        "Data", "Supervisor", "Colaborador", "Função", "Unidade", "Tipo",
         "Financeiro (R$)", "Adicional noturno (R$)",
         "Acordos / Bonificações (R$)", "Total a Pagar (R$)"
     ]
@@ -11045,7 +11066,18 @@ def gerar_excel_financeiro(pagamentos, ausencias, data_inicio, data_fim, data_pa
             wrap_text=True,
         )
     for ri, item in enumerate(pagamentos, 5):
-        vals = [item.get(h, "") for h in headers_det]
+        vals = [
+            item.get("Data", ""),
+            item.get("Engenheiro", ""),
+            item.get("Colaborador", ""),
+            item.get("Função", ""),
+            item.get("Unidade", ""),
+            item.get("Tipo", ""),
+            item.get("Financeiro (R$)", 0.0),
+            item.get("Adicional noturno (R$)", 0.0),
+            item.get("Acordos / Bonificações (R$)", 0.0),
+            item.get("Total a Pagar (R$)", 0.0),
+        ]
         for ci, val in enumerate(vals, 1):
             cell = ws_det.cell(ri, ci, val)
             cell.border = borda
@@ -11091,8 +11123,8 @@ def gerar_excel_financeiro(pagamentos, ausencias, data_inicio, data_fim, data_pa
 
     # Ajustes específicos das colunas longas do Financeiro.
     if "Resumo Pagamentos" in wb.sheetnames:
-        ws_resumo.column_dimensions["G"].width = 24
-        ws_resumo.column_dimensions["H"].width = 19
+        ws_resumo.column_dimensions["H"].width = 24
+        ws_resumo.column_dimensions["I"].width = 19
         ws_resumo.row_dimensions[4].height = 30
 
     if "Detalhe Pagamentos" in wb.sheetnames:
@@ -11127,49 +11159,78 @@ def gerar_pdf_financeiro(pagamentos, ausencias, data_inicio, data_fim, data_paga
     pdf.set_font("Arial", "B", 11)
     pdf.cell(0, 7, to_latin(f"TOTAL A PAGAR: {formatar_reais(total_pagar)}"), ln=True)
 
-    # A4 paisagem: larguras compactas para evitar estouro do cabeçalho.
     widths = [50, 34, 38, 16, 26, 26, 36, 30]
     headers = [
-        "Colaborador",
-        "Função",
-        "Unidade(s)",
-        "Dias",
-        "Financeiro",
-        "Adic. not.",
-        "Acordos / Bonif.",
-        "Total",
+        "Colaborador", "Função", "Unidade(s)", "Dias",
+        "Financeiro", "Adic. not.", "Acordos / Bonif.", "Total",
     ]
-    pdf.set_font("Arial", "B", 7.5)
-    for w, h in zip(widths, headers):
-        pdf.cell(w, 6, to_latin(h), border=1, align="C")
-    pdf.ln()
-    pdf.set_font("Arial", "", 7.5)
+
+    def _cabecalho_tabela_pagamentos():
+        pdf.set_font("Arial", "B", 7.5)
+        for w, h in zip(widths, headers):
+            pdf.cell(w, 6, to_latin(h), border=1, align="C")
+        pdf.ln()
+        pdf.set_font("Arial", "", 7.5)
+
+    def _linha_pagamento(r):
+        vals = [
+            str(r["Colaborador"])[:27],
+            str(r["Função"])[:17],
+            str(r["Unidades"])[:20],
+            str(int(r["Dias/Lançamentos"])),
+            formatar_reais(float(r["Financeiro (R$)"])),
+            formatar_reais(float(r["Adic. noturno (R$)"])),
+            formatar_reais(float(r["Acordos / Bonificações (R$)"])),
+            formatar_reais(float(r["Total a Pagar (R$)"])),
+        ]
+        aligns = ["L", "L", "L", "C", "R", "R", "R", "R"]
+        for w, v, a in zip(widths, vals, aligns):
+            pdf.cell(w, 6, to_latin(v), border=1, align=a)
+        pdf.ln()
+
     if resumo.empty:
+        _cabecalho_tabela_pagamentos()
         pdf.cell(
             sum(widths),
             6,
-            to_latin(
-                "Nenhum pagamento, adicional noturno ou Acordo / Bonificação lançado neste ciclo."
-            ),
+            to_latin("Nenhum Extra, adicional noturno ou Acordo / Bonificação com valor neste ciclo."),
             border=1,
             ln=True,
         )
     else:
-        for _, r in resumo.iterrows():
-            vals = [
-                str(r["Colaborador"])[:27],
-                str(r["Função"])[:17],
-                str(r["Unidades"])[:20],
-                str(int(r["Dias/Lançamentos"])),
-                formatar_reais(float(r["Financeiro (R$)"])),
-                formatar_reais(float(r["Adic. noturno (R$)"])),
-                formatar_reais(float(r["Acordos / Bonificações (R$)"])),
-                formatar_reais(float(r["Total a Pagar (R$)"])),
-            ]
-            aligns = ["L", "L", "L", "C", "R", "R", "R", "R"]
-            for w, v, a in zip(widths, vals, aligns):
-                pdf.cell(w, 6, to_latin(v), border=1, align=a)
-            pdf.ln()
+        supervisores = [
+            str(x) for x in resumo["Supervisor"].dropna().unique().tolist()
+        ]
+        separar_supervisores = len(supervisores) > 1
+
+        if separar_supervisores:
+            for idx_sup, supervisor in enumerate(supervisores):
+                bloco = resumo[resumo["Supervisor"].astype(str) == supervisor]
+                subtotal = float(bloco["Total a Pagar (R$)"].sum())
+
+                if idx_sup > 0:
+                    pdf.ln(5)
+
+                # Evita deixar o título sozinho no fim da página.
+                if pdf.get_y() > 178:
+                    pdf.add_page()
+
+                pdf.set_font("Arial", "B", 10)
+                pdf.cell(
+                    0,
+                    7,
+                    to_latin(
+                        f"SUPERVISOR: {supervisor} | SUBTOTAL: {formatar_reais(subtotal)}"
+                    ),
+                    ln=True,
+                )
+                _cabecalho_tabela_pagamentos()
+                for _, r in bloco.iterrows():
+                    _linha_pagamento(r)
+        else:
+            _cabecalho_tabela_pagamentos()
+            for _, r in resumo.iterrows():
+                _linha_pagamento(r)
 
     pdf.ln(5)
     pdf.set_font("Arial", "B", 11)
@@ -17236,8 +17297,9 @@ elif modo_financeiro:
             f"Pagamento previsto em **{data_pag_fin.strftime('%d/%m/%Y')}**."
         )
         st.caption(
-            "O relatório considera o valor de Financeiro informado no apontamento, "
-            "somado ao adicional noturno e Acordos / Bonificações quando houver."
+            "O relatório mostra somente colaboradores com algum valor financeiro a pagar "
+            "(Financeiro, adicional noturno ou Acordos / Bonificações). "
+            "Quando houver mais de um supervisor, os pagamentos são separados por supervisor."
         )
         st.info(
             f"Total a pagar: {formatar_reais(total_pagar_fin)} • "
