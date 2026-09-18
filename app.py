@@ -10977,6 +10977,10 @@ def gerar_excel_financeiro(pagamentos, ausencias, data_inicio, data_fim, data_pa
         c.alignment = Alignment(horizontal="center")
         ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=total_colunas)
         ws.cell(2, 1, subtitulo).font = Font(name="Arial", size=9, italic=True, color="64748B")
+        ws.cell(2, 1).alignment = Alignment(
+            horizontal="center",
+            vertical="center",
+        )
 
     resumo = resumir_pagamentos_financeiro(pagamentos)
     total_pagar = sum(float(x.get("Total a Pagar (R$)") or 0) for x in pagamentos)
@@ -11004,6 +11008,11 @@ def gerar_excel_financeiro(pagamentos, ausencias, data_inicio, data_fim, data_pa
             cell = ws_resumo.cell(ri, ci, val)
             cell.border = borda
             cell.font = Font(name="Arial", size=9)
+            cell.alignment = Alignment(
+                horizontal="center",
+                vertical="center",
+                wrap_text=True,
+            )
             if "(R$)" in headers_resumo[ci-1]:
                 cell.number_format = 'R$ #,##0.00'
     ws_resumo.freeze_panes = "A5"
@@ -11042,6 +11051,11 @@ def gerar_excel_financeiro(pagamentos, ausencias, data_inicio, data_fim, data_pa
             cell = ws_det.cell(ri, ci, val)
             cell.border = borda
             cell.font = Font(name="Arial", size=9)
+            cell.alignment = Alignment(
+                horizontal="center",
+                vertical="center",
+                wrap_text=True,
+            )
             if "(R$)" in headers_det[ci-1]:
                 cell.number_format = 'R$ #,##0.00'
     ws_det.freeze_panes = "A5"
@@ -11068,6 +11082,11 @@ def gerar_excel_financeiro(pagamentos, ausencias, data_inicio, data_fim, data_pa
             cell = ws_aus.cell(ri, ci, item.get(h, ""))
             cell.border = borda
             cell.font = Font(name="Arial", size=9)
+            cell.alignment = Alignment(
+                horizontal="center",
+                vertical="center",
+                wrap_text=True,
+            )
 
     for ws in wb.worksheets:
         for col in ws.columns:
@@ -11119,9 +11138,11 @@ def gerar_pdf_financeiro(pagamentos, ausencias, data_inicio, data_fim, data_paga
     pdf.set_font("Arial", "B", 11)
     pdf.cell(0, 7, to_latin(f"TOTAL A PAGAR: {formatar_reais(total_pagar)}"), ln=True)
 
-    widths = [50, 34, 38, 16, 26, 26, 36, 30]
+    # PDF financeiro: mostra também o número da obra ao lado da Unidade.
+    # O resumo já possui a coluna "Obras"; faltava apenas levá-la para o PDF.
+    widths = [46, 30, 32, 24, 14, 24, 24, 32, 26]
     headers = [
-        "Colaborador", "Função", "Unidade(s)", "Dias",
+        "Colaborador", "Função", "Unidade(s)", "Obra", "Dias",
         "Financeiro", "Adic. not.", "Acordos / Bonif.", "Total",
     ]
 
@@ -11134,16 +11155,17 @@ def gerar_pdf_financeiro(pagamentos, ausencias, data_inicio, data_fim, data_paga
 
     def _linha_pagamento(r):
         vals = [
-            str(r["Colaborador"])[:27],
-            str(r["Função"])[:17],
-            str(r["Unidades"])[:20],
+            str(r["Colaborador"])[:25],
+            str(r["Função"])[:15],
+            str(r["Unidades"])[:17],
+            str(r.get("Obras") or "-")[:13],
             str(int(r["Dias/Lançamentos"])),
             formatar_reais(float(r["Financeiro (R$)"])),
             formatar_reais(float(r["Adic. noturno (R$)"])),
             formatar_reais(float(r["Acordos / Bonificações (R$)"])),
             formatar_reais(float(r["Total a Pagar (R$)"])),
         ]
-        aligns = ["L", "L", "L", "C", "R", "R", "R", "R"]
+        aligns = ["L", "L", "L", "C", "C", "R", "R", "R", "R"]
         for w, v, a in zip(widths, vals, aligns):
             pdf.cell(w, 6, to_latin(v), border=1, align=a)
         pdf.ln()
@@ -18901,6 +18923,13 @@ else:
                                 size=12,
                                 bold=True,
                             )
+                            ws.cell(
+                                row=current_row,
+                                column=1,
+                            ).alignment = Alignment(
+                                horizontal="center",
+                                vertical="center",
+                            )
                             current_row += 2
 
                             grupos = df_dia.groupby(
@@ -18924,6 +18953,13 @@ else:
                                         f"PERÍODO: {periodo_rotulo_excel}"
                                     ),
                                 ).font = font_obra_hdr
+                                ws.cell(
+                                    row=current_row,
+                                    column=1,
+                                ).alignment = Alignment(
+                                    horizontal="center",
+                                    vertical="center",
+                                )
 
                                 for c_idx in range(1, 12):
                                     ws.cell(
@@ -19024,16 +19060,15 @@ else:
                                         c_cell.border = borda_fina
                                         c_cell.fill = fill_engenheiro
 
+                                        c_cell.alignment = Alignment(
+                                            horizontal="center",
+                                            vertical="center",
+                                            wrap_text=True,
+                                        )
+
                                         if c_idx in [6, 7, 8, 9, 10]:
                                             c_cell.number_format = (
                                                 'R$ #,##0.00'
-                                            )
-                                            c_cell.alignment = Alignment(
-                                                horizontal="right"
-                                            )
-                                        elif c_idx in [3, 4, 5]:
-                                            c_cell.alignment = Alignment(
-                                                horizontal="center"
                                             )
 
                                     current_row += 1
@@ -19055,7 +19090,8 @@ else:
                                     row=current_row,
                                     column=9,
                                 ).alignment = Alignment(
-                                    horizontal="right"
+                                    horizontal="center",
+                                    vertical="center",
                                 )
 
                                 celula_subtotal = ws.cell(
@@ -19075,6 +19111,10 @@ else:
                                     'R$ #,##0.00'
                                 )
                                 celula_subtotal.border = borda_fina
+                                celula_subtotal.alignment = Alignment(
+                                    horizontal="center",
+                                    vertical="center",
+                                )
 
                                 current_row += 2
 
