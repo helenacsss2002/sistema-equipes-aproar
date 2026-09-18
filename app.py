@@ -14029,12 +14029,22 @@ elif modo_campo:
                         "_engm_mostrar_pendencias",
                         False,
                     )
-                    st.rerun()
 
                 if st.session_state.get(
                     "_engm_mostrar_pendencias",
                     False,
                 ):
+                    def _engm_ir_para_pendencia(data_destino):
+                        st.session_state[
+                            "_engm_data_pendente_destino"
+                        ] = data_destino
+                        st.session_state[
+                            "_engm_limpar_unidade_ao_ir_pendente"
+                        ] = True
+                        st.session_state[
+                            "_engm_mostrar_pendencias"
+                        ] = False
+
                     for data_pend in sorted(
                         pendencias_por_data.keys(),
                         reverse=True,
@@ -14055,7 +14065,7 @@ elif modo_campo:
                             f"{unidades_txt}"
                         )
 
-                        if st.button(
+                        st.button(
                             rotulo_pend,
                             use_container_width=True,
                             key=(
@@ -14068,17 +14078,9 @@ elif modo_campo:
                                     str(engenheiro_campo),
                                 )
                             ),
-                        ):
-                            st.session_state[
-                                "_engm_data_pendente_destino"
-                            ] = data_pend
-                            st.session_state[
-                                "_engm_limpar_unidade_ao_ir_pendente"
-                            ] = True
-                            st.session_state[
-                                "_engm_mostrar_pendencias"
-                            ] = False
-                            st.rerun()
+                            on_click=_engm_ir_para_pendencia,
+                            args=(data_pend,),
+                        )
             else:
                 st.markdown(
                     """
