@@ -4295,7 +4295,7 @@ VALOR_FIN_MEIA_AJUDANTE = 40.00
 VALOR_LIMPO_DIARIA = VALOR_FIN_DIARIA_PROFISSIONAL
 VALOR_LIMPO_MEIA_DIARIA = VALOR_FIN_MEIA_PROFISSIONAL
 
-TIPOS_DIARIA = ["Não", "Diária", "Meia diária"]
+TIPOS_DIARIA = ["Não", "Meia diária", "Diária", "Uma e meia diária", "Duas diárias"]
 
 # Regras de prazo/cobrança:
 # - Demais unidades: 16:00 é lembrete preventivo; atraso começa às 09:30 de D+1.
@@ -4446,12 +4446,31 @@ def situacao_pendencia_teams(
 
 
 def normalizar_tipo_diaria(valor):
+    """Normaliza a seleção do campo Extra."""
     bruto = normalizar(valor or "")
 
     if not bruto or bruto in {"NAO", "N", "SEM EXTRA", "SEM"}:
         return "Não"
+
+    # Ordem importa: "uma e meia" contém a palavra "meia".
+    if (
+        "UMA E MEIA" in bruto
+        or "1 E MEIA" in bruto
+        or "1,5" in bruto
+        or "1.5" in bruto
+    ):
+        return "Uma e meia diária"
+
+    if (
+        "DUAS" in bruto
+        or "2 DIARIA" in bruto
+        or "2DIARIA" in bruto
+    ):
+        return "Duas diárias"
+
     if "MEIA" in bruto:
         return "Meia diária"
+
     if "DIARIA" in bruto or "DIA" in bruto:
         return "Diária"
 
@@ -4459,19 +4478,25 @@ def normalizar_tipo_diaria(valor):
     return "Diária"
 
 
+def multiplicador_extra_por_tipo(tipo_diaria):
+    """Quantidade de diárias adicionais representada pelo campo Extra."""
+    tipo = normalizar_tipo_diaria(tipo_diaria)
+    return {
+        "Não": 0.0,
+        "Meia diária": 0.5,
+        "Diária": 1.0,
+        "Uma e meia diária": 1.5,
+        "Duas diárias": 2.0,
+    }.get(tipo, 1.0)
+
+
 def valor_limpo_por_tipo_diaria(tipo_diaria):
     """
-    Compatibilidade: retorna o padrão de Profissional.
-    Para cálculos reais, use valor_financeiro_padrao_colaborador().
+    Compatibilidade: retorna o padrão de Profissional multiplicado pelo Extra.
+    Para o valor real do Financeiro, prevalece o que foi digitado no apontamento.
     """
-    tipo = normalizar_tipo_diaria(tipo_diaria)
-    if tipo == "Não":
-        return 0.0
-    return (
-        VALOR_FIN_MEIA_PROFISSIONAL
-        if tipo == "Meia diária"
-        else VALOR_FIN_DIARIA_PROFISSIONAL
-    )
+    mult = multiplicador_extra_por_tipo(tipo_diaria)
+    return round(VALOR_FIN_DIARIA_PROFISSIONAL * mult, 2)
 
 
 def categoria_diaria_colaborador(colab):
@@ -4525,29 +4550,29 @@ def valor_financeiro_padrao_colaborador(
     colab,
     tipo_diaria,
 ):
-    tipo = normalizar_tipo_diaria(tipo_diaria)
-    if tipo == "Não":
+    """Fallback legado para o Financeiro; o apontamento real continua livre."""
+    mult = multiplicador_extra_por_tipo(tipo_diaria)
+    if mult <= 0:
         return 0.0
 
-    meia = (tipo == "Meia diária")
+    if categoria_diaria_colaborador(colab) == "Ajudante":
+        valor_cheio = VALOR_FIN_DIARIA_AJUDANTE
+    else:
+        valor_cheio = VALOR_FIN_DIARIA_PROFISSIONAL
 
-    if (
-        categoria_diaria_colaborador(
-            colab
-        )
-        == "Ajudante"
-    ):
-        return (
-            VALOR_FIN_MEIA_AJUDANTE
-            if meia
-            else VALOR_FIN_DIARIA_AJUDANTE
-        )
+    return round(float(valor_cheio) * mult, 2)
 
-    return (
-        VALOR_FIN_MEIA_PROFISSIONAL
-        if meia
-        else VALOR_FIN_DIARIA_PROFISSIONAL
-    )
+
+def _valor_diario_controladoria_colaborador(colab):
+    """Valor diário com encargos cadastrado/importado para a Controladoria."""
+    valor_cheio = obter_valor_diaria_colaborador(colab or {})
+    if valor_cheio <= 0:
+        valor_cheio = (
+            VALOR_DIARIA_AJUDANTE
+            if categoria_diaria_colaborador(colab) == "Ajudante"
+            else VALOR_DIARIA_PROFISSIONAL
+        )
+    return round(float(valor_cheio), 2)
 
 
 def valor_controladoria_padrao_colaborador(
@@ -4555,44 +4580,25 @@ def valor_controladoria_padrao_colaborador(
     tipo_diaria,
 ):
     """
-    Base da Controladoria para o EXTRA.
-    - Não: sem custo de extra;
-    - Diária: 100% do valor diário cadastrado/importado;
-    - Meia diária: 50% do valor diário cadastrado/importado.
-    Se a planilha não trouxer valor, usa o padrão da categoria apenas como fallback.
+    Custo do EXTRA na Controladoria.
+
+    O campo Extra é adicional ao dia normal trabalhado:
+      - Não: 0 diária adicional;
+      - Meia diária: 0,5 diária;
+      - Diária: 1 diária;
+      - Uma e meia diária: 1,5 diária;
+      - Duas diárias: 2 diárias.
     """
-    tipo = normalizar_tipo_diaria(tipo_diaria)
-    if tipo == "Não":
-        return 0.0
-
-    valor_cheio = obter_valor_diaria_colaborador(colab or {})
-
-    if valor_cheio <= 0:
-        valor_cheio = (
-            VALOR_DIARIA_AJUDANTE
-            if categoria_diaria_colaborador(
-                colab
-            )
-            == "Ajudante"
-            else VALOR_DIARIA_PROFISSIONAL
-        )
-
     return round(
-        float(valor_cheio)
-        * (
-            0.5
-            if tipo == "Meia diária"
-            else 1.0
-        ),
+        _valor_diario_controladoria_colaborador(colab)
+        * multiplicador_extra_por_tipo(tipo_diaria),
         2,
     )
 
 
 def fracao_encargos_por_tipo_diaria(tipo_diaria):
-    tipo = normalizar_tipo_diaria(tipo_diaria)
-    if tipo == "Não":
-        return 0.0
-    return 0.5 if tipo == "Meia diária" else 1.0
+    """Compatibilidade: agora representa o multiplicador do Extra."""
+    return multiplicador_extra_por_tipo(tipo_diaria)
 
 
 def registro_tem_servico_sebrae(registro):
@@ -4875,10 +4881,8 @@ def valor_adicional_noturno_registro(registro):
             2,
         )
 
-    return round(
-        salvo,
-        2,
-    )
+    # Adicional noturno existe exclusivamente no SEBRAE.
+    return 0.0
 
 
 def valor_acordo_registro(registro):
@@ -4893,47 +4897,67 @@ def valor_acordo_registro(registro):
         return 0.0
 
 
-def custo_encargos_base_registro(
+def custo_dia_controladoria_registro(
     registro,
     colab=None,
 ):
-    """
-    Custo-base da Controladoria por categoria.
-
-    Profissional:
-      diária R$ 241,74
-      meia   R$ 120,87
-
-    Ajudante:
-      diária R$ 182,34
-      meia   R$ 91,17
-    """
+    """Custo do período NORMAL trabalhado, independente do campo Extra."""
     registro = registro or {}
+    status = normalizar_status_operacional(registro.get("status") or "")
+    if not status_eh_presenca(status):
+        return 0.0
 
+    if colab is None:
+        try:
+            colab = dict_colaboradores.get(registro.get("colaborador_id"), {})
+        except Exception:
+            colab = {}
+
+    valor_dia = _valor_diario_controladoria_colaborador(colab or {})
+
+    # Só manhã / só tarde / saída antecipada equivalem a meia jornada.
+    if status in {
+        "Presente (Só Manhã)",
+        "Presente (Só Tarde)",
+        "Saída Antecipada",
+    }:
+        return round(valor_dia * 0.5, 2)
+
+    return round(valor_dia, 2)
+
+
+def valor_extra_controladoria_registro(
+    registro,
+    colab=None,
+):
+    """Custo apenas do Extra selecionado no apontamento."""
+    registro = registro or {}
     if not status_eh_presenca(
-        normalizar_status_operacional(
-            registro.get("status")
-            or ""
-        )
+        normalizar_status_operacional(registro.get("status") or "")
     ):
         return 0.0
 
     if colab is None:
         try:
-            colab = dict_colaboradores.get(
-                registro.get(
-                    "colaborador_id"
-                ),
-                {},
-            )
+            colab = dict_colaboradores.get(registro.get("colaborador_id"), {})
         except Exception:
             colab = {}
 
     return valor_controladoria_padrao_colaborador(
         colab or {},
-        tipo_diaria_registro(
-            registro
-        ),
+        tipo_diaria_registro(registro),
+    )
+
+
+def custo_encargos_base_registro(
+    registro,
+    colab=None,
+):
+    """Custo Controladoria = dia trabalhado + Extra, ambos com encargos."""
+    return round(
+        custo_dia_controladoria_registro(registro, colab)
+        + valor_extra_controladoria_registro(registro, colab),
+        2,
     )
 
 
@@ -8159,7 +8183,9 @@ def _processar_registro_operacional(registro):
     colab = dict_colaboradores.get(registro.get("colaborador_id"), {"nome": "Desconhecido", "funcao": "-"})
     status = normalizar_status_operacional(registro.get("status"))
     tipo_diaria = tipo_diaria_registro(registro)
-    custo_encargos = custo_encargos_base_registro(registro, colab)
+    custo_dia_ctrl = custo_dia_controladoria_registro(registro, colab)
+    extra_ctrl = valor_extra_controladoria_registro(registro, colab)
+    custo_encargos = round(custo_dia_ctrl + extra_ctrl, 2)
     adicional_noturno = valor_adicional_noturno_registro(registro)
     acordo = valor_acordo_registro(registro)
     total_controladoria = (
@@ -8192,8 +8218,10 @@ def _processar_registro_operacional(registro):
         "Status": status,
         "Tipo": tipo_diaria,
         "Diária Financeiro (R$)": float(diaria_financeiro),
+        "Custo dia c/ encargos (R$)": float(custo_dia_ctrl),
+        "Extra c/ encargos (R$)": float(extra_ctrl),
         "Custo c/ encargos (R$)": float(custo_encargos),
-        "Extra (R$)": 0.0,  # legado: não é mais lançado no apontamento
+        "Extra (R$)": 0.0,  # legado: não é mais lançado em campo monetário separado
         "Adicional noturno (R$)": float(adicional_noturno),
         "Acordos / Bonificações (R$)": float(acordo),
         "Custo (R$)": float(total_controladoria),
@@ -8382,18 +8410,34 @@ def _servicos_do_registro_relatorio(registro):
     return saida
 
 
+def numero_obra_relatorio(nome_obra):
+    """Extrai o código/número curto da obra para relatórios financeiros."""
+    texto = str(nome_obra or "").strip()
+    if not texto:
+        return ""
+
+    # Ex.: APR9C019 - REFORMA... -> APR9C019; 140 - EXPANSÃO... -> 140.
+    prefixo = re.split(r"\s+(?:-|–|—|\||•)\s+", texto, maxsplit=1)[0].strip()
+    if prefixo and len(prefixo) <= 24 and any(ch.isdigit() for ch in prefixo):
+        return prefixo
+
+    achado = re.search(r"\b(?:[A-Za-z]{1,6}[A-Za-z0-9]*\d[A-Za-z0-9]*|\d{2,6})\b", texto)
+    return achado.group(0) if achado else prefixo[:24]
+
+
 def ratear_registros_por_servico(registros):
     """
-    Rateia custos por serviço preservando duas visões:
+    Rateia custos por serviço preservando três conceitos distintos:
 
-    Financeiro = valor informado pelo supervisor no apontamento + Adicional noturno + Acordos/Bonificações.
-    Controladoria = custo diário cadastrado/importado do colaborador (50% na meia diária) + Adicional noturno + Acordos/Bonificações.
+    Financeiro = valor livre informado no apontamento + noturno SEBRAE + acordos.
+    Controladoria/dia = custo cadastrado/importado do período normal trabalhado.
+    Controladoria/extra = multiplicador escolhido no campo Extra sobre a diária cadastrada.
 
-    Se a mesma meia-diária tiver 2 serviços na mesma manhã, a base é dividida
-    entre eles; não é duplicada.
+    MAX por bloco evita duplicar custo quando há mais de um registro da mesma
+    pessoa no mesmo período. Depois os valores são divididos entre os serviços
+    que participaram daquele bloco.
     """
     grupos = {}
-
     for registro in registros or []:
         data = str(registro.get("data") or "")
         colaborador_id = str(registro.get("colaborador_id") or "")
@@ -8409,11 +8453,10 @@ def ratear_registros_por_servico(registros):
         acordo_por_servico = {}
         tipos_por_servico = {}
 
-        # Orçamentos monetários por bloco M/T/N. MAX impede duplicar a mesma
-        # meia-diária quando existem dois registros no mesmo bloco.
         base_fin_bloco = {}
         base_fin_padrao_bloco = {}
-        base_ctrl_bloco = {}
+        base_dia_ctrl_bloco = {}
+        extra_ctrl_bloco = {}
 
         for reg in regs:
             status_reg = normalizar_status_operacional(reg.get("status"))
@@ -8423,36 +8466,30 @@ def ratear_registros_por_servico(registros):
 
             tipo_reg = tipo_diaria_registro(reg)
             presente = status_eh_presenca(status_reg)
+
             base_fin_reg = (
-                valor_diaria_financeiro_registro(
-                    reg,
-                    colab,
-                )
+                valor_diaria_financeiro_registro(reg, colab)
                 if presente
                 else 0.0
             )
-
             base_fin_padrao_reg = (
-                valor_financeiro_padrao_colaborador(
-                    colab,
-                    tipo_reg,
-                )
+                valor_financeiro_padrao_colaborador(colab, tipo_reg)
                 if presente
                 else 0.0
             )
-
-            base_ctrl_reg = (
-                custo_encargos_base_registro(
-                    reg,
-                    colab,
-                )
+            extra_ctrl_reg = (
+                valor_controladoria_padrao_colaborador(colab, tipo_reg)
                 if presente
                 else 0.0
             )
-            adicional_noturno_reg = valor_adicional_noturno_registro(reg) if presente else 0.0
+            adicional_noturno_reg = (
+                valor_adicional_noturno_registro(reg)
+                if presente
+                else 0.0
+            )
             acordo_reg = valor_acordo_registro(reg) if presente else 0.0
 
-            # Descobre os blocos reais do registro a partir dos períodos dos serviços.
+            # Blocos dos serviços usados para distribuir Financeiro e Extra.
             blocos_reg = []
             for item in itens_reg:
                 periodo_item = normalizar_turno_convocacao(
@@ -8462,93 +8499,55 @@ def ratear_registros_por_servico(registros):
                     if bloco not in blocos_reg:
                         blocos_reg.append(bloco)
 
+            blocos_presenca = _blocos_presenca_registro_relatorio(reg)
             if not blocos_reg:
-                blocos_reg = list(_blocos_presenca_registro_relatorio(reg).keys()) or ["M"]
+                blocos_reg = list(blocos_presenca.keys()) or ["M"]
 
-            # A opção Diária/Meia diária é a fonte do valor. Os blocos servem
-            # somente para não duplicar e para distribuir o custo entre serviços.
-            parte_fin_bloco = (
-                base_fin_reg / len(blocos_reg)
-                if blocos_reg
-                else 0.0
-            )
-
+            # Financeiro e Extra são um orçamento do lançamento: dividimos pelos
+            # blocos para que múltiplos serviços não dupliquem o mesmo valor.
+            parte_fin_bloco = base_fin_reg / len(blocos_reg) if blocos_reg else 0.0
             parte_fin_padrao_bloco = (
-                base_fin_padrao_reg / len(blocos_reg)
-                if blocos_reg
-                else 0.0
+                base_fin_padrao_reg / len(blocos_reg) if blocos_reg else 0.0
             )
-
-            parte_ctrl_bloco = (
-                base_ctrl_reg / len(blocos_reg)
-                if blocos_reg
-                else 0.0
+            parte_extra_ctrl_bloco = (
+                extra_ctrl_reg / len(blocos_reg) if blocos_reg else 0.0
             )
 
             for bloco in blocos_reg:
                 base_fin_bloco[bloco] = max(
-                    float(
-                        base_fin_bloco.get(
-                            bloco,
-                            0.0,
-                        )
-                    ),
-                    float(
-                        parte_fin_bloco
-                    ),
+                    float(base_fin_bloco.get(bloco, 0.0)),
+                    float(parte_fin_bloco),
                 )
-
                 base_fin_padrao_bloco[bloco] = max(
-                    float(
-                        base_fin_padrao_bloco.get(
-                            bloco,
-                            0.0,
-                        )
-                    ),
-                    float(
-                        parte_fin_padrao_bloco
-                    ),
+                    float(base_fin_padrao_bloco.get(bloco, 0.0)),
+                    float(parte_fin_padrao_bloco),
+                )
+                extra_ctrl_bloco[bloco] = max(
+                    float(extra_ctrl_bloco.get(bloco, 0.0)),
+                    float(parte_extra_ctrl_bloco),
                 )
 
-                base_ctrl_bloco[bloco] = max(
-                    float(
-                        base_ctrl_bloco.get(
-                            bloco,
-                            0.0,
-                        )
-                    ),
-                    float(
-                        parte_ctrl_bloco
-                    ),
+            # O custo do dia normal NÃO depende do Extra. Ele nasce do valor
+            # cadastrado/importado do colaborador e da presença efetiva.
+            valor_dia_cheio = _valor_diario_controladoria_colaborador(colab)
+            for bloco, peso in blocos_presenca.items():
+                base_dia_ctrl_bloco[bloco] = max(
+                    float(base_dia_ctrl_bloco.get(bloco, 0.0)),
+                    round(float(valor_dia_cheio) * float(peso), 2),
                 )
-
 
             itens_sebrae_reg = [
-                item
-                for item in itens_reg
-                if eh_unidade_sebrae(
-                    item.get("unidade")
-                    or ""
-                )
+                item for item in itens_reg
+                if eh_unidade_sebrae(item.get("unidade") or "")
             ]
-
             adicional_noturno_por_item_sebrae = (
-                adicional_noturno_reg
-                / len(itens_sebrae_reg)
+                adicional_noturno_reg / len(itens_sebrae_reg)
                 if itens_sebrae_reg
                 else 0.0
             )
+            acordo_por_item = acordo_reg / len(itens_reg) if itens_reg else 0.0
 
-            acordo_por_item = (
-                acordo_reg / len(itens_reg)
-                if itens_reg
-                else 0.0
-            )
-
-            _, obs_livre = decompor_observacao_operacional(
-                reg.get("observacao")
-                or ""
-            )
+            _, obs_livre = decompor_observacao_operacional(reg.get("observacao") or "")
 
             for item in itens_reg:
                 chave_serv = (
@@ -8570,7 +8569,9 @@ def ratear_registros_por_servico(registros):
                     },
                 )
 
-                periodo = normalizar_turno_convocacao(item.get("periodo") or turno_da_convocacao(reg))
+                periodo = normalizar_turno_convocacao(
+                    item.get("periodo") or turno_da_convocacao(reg)
+                )
                 atual["periodos"].add(periodo)
                 atual["engenheiros"].add(str(reg.get("engenheiro") or "N/A"))
                 atual["status"].append(status_reg)
@@ -8578,52 +8579,39 @@ def ratear_registros_por_servico(registros):
                 if obs_livre:
                     atual["observacoes"].append(obs_livre)
 
+                # Noturno é exclusivamente SEBRAE.
                 adicional_noturno_por_servico[chave_serv] = (
-                    float(
-                        adicional_noturno_por_servico.get(
-                            chave_serv,
-                            0.0,
-                        )
-                    )
+                    float(adicional_noturno_por_servico.get(chave_serv, 0.0))
                     + (
                         adicional_noturno_por_item_sebrae
-                        if eh_unidade_sebrae(
-                            item.get("unidade")
-                            or ""
-                        )
+                        if eh_unidade_sebrae(item.get("unidade") or "")
                         else 0.0
                     )
                 )
-                acordo_por_servico[chave_serv] = float(acordo_por_servico.get(chave_serv, 0.0)) + acordo_por_item
+                acordo_por_servico[chave_serv] = (
+                    float(acordo_por_servico.get(chave_serv, 0.0))
+                    + acordo_por_item
+                )
                 tipos_por_servico.setdefault(chave_serv, []).append(tipo_reg)
 
         if not servicos:
             continue
 
-        # Distribui cada orçamento de bloco entre os serviços que realmente
-        # participaram daquele bloco.
-        base_fin_por_servico = {
-            chave: 0.0
-            for chave in servicos
-        }
-        base_fin_padrao_por_servico = {
-            chave: 0.0
-            for chave in servicos
-        }
-        base_ctrl_por_servico = {
-            chave: 0.0
-            for chave in servicos
-        }
+        base_fin_por_servico = {chave: 0.0 for chave in servicos}
+        base_fin_padrao_por_servico = {chave: 0.0 for chave in servicos}
+        base_dia_ctrl_por_servico = {chave: 0.0 for chave in servicos}
+        extra_ctrl_por_servico = {chave: 0.0 for chave in servicos}
 
         blocos_todos = (
             set(base_fin_bloco)
             | set(base_fin_padrao_bloco)
-            | set(base_ctrl_bloco)
+            | set(base_dia_ctrl_bloco)
+            | set(extra_ctrl_bloco)
         )
+
         for bloco in blocos_todos:
             participantes = [
-                chave
-                for chave, serv in servicos.items()
+                chave for chave, serv in servicos.items()
                 if bloco in serv.get("blocos", set())
             ]
             if not participantes:
@@ -8631,87 +8619,39 @@ def ratear_registros_por_servico(registros):
             if not participantes:
                 continue
 
-            parte_fin = (
-                float(
-                    base_fin_bloco.get(
-                        bloco,
-                        0.0,
-                    )
-                )
-                / len(participantes)
-            )
-
-            parte_fin_padrao = (
-                float(
-                    base_fin_padrao_bloco.get(
-                        bloco,
-                        0.0,
-                    )
-                )
-                / len(participantes)
-            )
-
-            parte_ctrl = (
-                float(
-                    base_ctrl_bloco.get(
-                        bloco,
-                        0.0,
-                    )
-                )
-                / len(participantes)
-            )
+            divisor = len(participantes)
+            parte_fin = float(base_fin_bloco.get(bloco, 0.0)) / divisor
+            parte_fin_padrao = float(base_fin_padrao_bloco.get(bloco, 0.0)) / divisor
+            parte_dia_ctrl = float(base_dia_ctrl_bloco.get(bloco, 0.0)) / divisor
+            parte_extra_ctrl = float(extra_ctrl_bloco.get(bloco, 0.0)) / divisor
 
             for chave in participantes:
-                base_fin_por_servico[
-                    chave
-                ] += parte_fin
-                base_fin_padrao_por_servico[
-                    chave
-                ] += parte_fin_padrao
-                base_ctrl_por_servico[
-                    chave
-                ] += parte_ctrl
+                base_fin_por_servico[chave] += parte_fin
+                base_fin_padrao_por_servico[chave] += parte_fin_padrao
+                base_dia_ctrl_por_servico[chave] += parte_dia_ctrl
+                extra_ctrl_por_servico[chave] += parte_extra_ctrl
 
         for chave_serv, serv in servicos.items():
-            base_fin_rateada = round(
-                float(
-                    base_fin_por_servico.get(
-                        chave_serv,
-                        0.0,
-                    )
-                ),
-                2,
-            )
-
+            base_fin_rateada = round(float(base_fin_por_servico.get(chave_serv, 0.0)), 2)
             base_fin_padrao_rateada = round(
-                float(
-                    base_fin_padrao_por_servico.get(
-                        chave_serv,
-                        0.0,
-                    )
-                ),
-                2,
+                float(base_fin_padrao_por_servico.get(chave_serv, 0.0)), 2
             )
-
-            base_ctrl_rateada = round(
-                float(
-                    base_ctrl_por_servico.get(
-                        chave_serv,
-                        0.0,
-                    )
-                ),
+            base_dia_ctrl_rateada = round(
+                float(base_dia_ctrl_por_servico.get(chave_serv, 0.0)), 2
+            )
+            extra_ctrl_rateada = round(
+                float(extra_ctrl_por_servico.get(chave_serv, 0.0)), 2
+            )
+            custo_ctrl_rateado = round(
+                base_dia_ctrl_rateada + extra_ctrl_rateada,
                 2,
             )
             adicional_noturno_rateado = round(
-                float(
-                    adicional_noturno_por_servico.get(
-                        chave_serv,
-                        0.0,
-                    )
-                ),
-                2,
+                float(adicional_noturno_por_servico.get(chave_serv, 0.0)), 2
             )
-            acordo_rateado = round(float(acordo_por_servico.get(chave_serv, 0.0)), 2)
+            acordo_rateado = round(
+                float(acordo_por_servico.get(chave_serv, 0.0)), 2
+            )
 
             periodos = sorted(
                 serv["periodos"],
@@ -8724,12 +8664,17 @@ def ratear_registros_por_servico(registros):
                 else " / ".join(dict.fromkeys(statuses))
             )
             tipos_unicos = list(dict.fromkeys(tipos_por_servico.get(chave_serv, [])))
-            tipo_exibido = tipos_unicos[0] if len(tipos_unicos) == 1 else " / ".join(tipos_unicos)
+            tipo_exibido = (
+                tipos_unicos[0]
+                if len(tipos_unicos) == 1
+                else " / ".join(tipos_unicos)
+            )
 
             linhas.append({
                 "Data": data,
                 "obra_id": serv["obra_id"],
                 "Obra": serv["obra"],
+                "Número da Obra": numero_obra_relatorio(serv["obra"]),
                 "Unidade": serv["unidade"],
                 "Período do serviço": " + ".join(periodos),
                 "Engenheiro": " / ".join(sorted(serv["engenheiros"])),
@@ -8740,33 +8685,25 @@ def ratear_registros_por_servico(registros):
                 "Base Financeiro (R$)": base_fin_rateada,
                 "Base Padrão Financeiro (R$)": base_fin_padrao_rateada,
                 "Diária Financeiro (R$)": base_fin_rateada,
-                "Custo c/ encargos (R$)": base_ctrl_rateada,
-                "Extra (R$)": 0.0,  # legado: mantido apenas por compatibilidade interna
+                "Custo dia c/ encargos (R$)": base_dia_ctrl_rateada,
+                "Extra c/ encargos (R$)": extra_ctrl_rateada,
+                "Custo c/ encargos (R$)": custo_ctrl_rateado,
+                "Extra (R$)": 0.0,
                 "Adicional noturno (R$)": adicional_noturno_rateado,
                 "Acordos / Bonificações (R$)": acordo_rateado,
                 "Total Financeiro (R$)": round(
-                    base_fin_rateada
-                    + adicional_noturno_rateado
-                    + acordo_rateado,
+                    base_fin_rateada + adicional_noturno_rateado + acordo_rateado,
                     2,
                 ),
                 "Custo (R$)": round(
-                    base_ctrl_rateada
-                    + adicional_noturno_rateado
-                    + acordo_rateado,
+                    custo_ctrl_rateado + adicional_noturno_rateado + acordo_rateado,
                     2,
                 ),
                 "Observação": (
-                    " | ".join(
-                        dict.fromkeys(
-                            serv["observacoes"]
-                        )
-                    )
+                    " | ".join(dict.fromkeys(serv["observacoes"]))
                     or (
                         "Jornada noturna 17h–02h"
-                        if eh_unidade_sebrae(
-                            serv["unidade"]
-                        )
+                        if eh_unidade_sebrae(serv["unidade"])
                         else ""
                     )
                 ),
@@ -10407,9 +10344,24 @@ def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
                         )
                         valor_acordo_final = float(valor_acordo) if presente_final else 0.0
                         custo_encargos_final = (
-                            valor_controladoria_padrao_colaborador(
-                                colab,
-                                tipo_diaria_final,
+                            round(
+                                (
+                                    _valor_diario_controladoria_colaborador(colab)
+                                    * (
+                                        0.5
+                                        if normalizar_status_operacional(status_sel) in {
+                                            "Presente (Só Manhã)",
+                                            "Presente (Só Tarde)",
+                                            "Saída Antecipada",
+                                        }
+                                        else 1.0
+                                    )
+                                )
+                                + valor_controladoria_padrao_colaborador(
+                                    colab,
+                                    tipo_diaria_final,
+                                ),
+                                2,
                             )
                             if presente_final
                             else 0.0
@@ -10681,6 +10633,10 @@ def salvar_ajuste_financeiro_lancamento(
     noturno = round(max(0.0, float(valor_adicional_noturno or 0.0)), 2)
     acordo = round(max(0.0, float(valor_acordo or 0.0)), 2)
 
+    # Adicional noturno é exclusivo de lançamentos que envolvem SEBRAE.
+    if "SEBRAE" not in normalizar(item.get("Unidade") or ""):
+        noturno = 0.0
+
     # Garante as colunas antes de qualquer gravação.
     try:
         _garantir_colunas_financeiras_essenciais.clear()
@@ -10885,6 +10841,7 @@ def carregar_dados_financeiro(data_inicio, data_fim):
                 )
                 .agg(
                     Unidades=("Unidade", lambda s: ", ".join(sorted(set(str(v) for v in s if str(v).strip())))),
+                    Obras=("Número da Obra", lambda s: ", ".join(sorted(set(str(v) for v in s if str(v).strip())))),
                     Tipo=("Tipo", lambda s: " / ".join(dict.fromkeys(str(v) for v in s if str(v).strip()))),
                     **{
                         "Base Financeiro (R$)": ("Base Financeiro (R$)", "sum"),
@@ -10907,6 +10864,7 @@ def carregar_dados_financeiro(data_inicio, data_fim):
                     "_colaborador_id": str(row["_colaborador_id"]),
                     "Função": row["Função"],
                     "Unidade": row["Unidades"],
+                    "Obra": row["Obras"],
                     "Engenheiro": str(row["Engenheiro"] or "N/A"),
                     "Tipo": row["Tipo"],
                     "Base Financeiro (R$)": round(float(row["Base Financeiro (R$)"]), 2),
@@ -10965,7 +10923,7 @@ def resumir_pagamentos_financeiro(pagamentos):
     """Resume pagamentos sem misturar lançamentos de supervisores diferentes."""
     if not pagamentos:
         return pd.DataFrame(columns=[
-            "Supervisor", "Colaborador", "Função", "Unidades", "Dias/Lançamentos",
+            "Supervisor", "Colaborador", "Função", "Unidades", "Obras", "Dias/Lançamentos",
             "Financeiro (R$)", "Adic. noturno (R$)",
             "Acordos / Bonificações (R$)", "Total a Pagar (R$)"
         ])
@@ -10978,6 +10936,7 @@ def resumir_pagamentos_financeiro(pagamentos):
         df.groupby(["Engenheiro", "Colaborador", "Função"], dropna=False)
         .agg(
             Unidades=("Unidade", lambda s: ", ".join(sorted(set(str(v) for v in s if str(v).strip())))),
+            Obras=("Obra", lambda s: ", ".join(sorted(set(str(v) for v in s if str(v).strip())))),
             **{
                 "Dias/Lançamentos": ("Data", "size"),
                 "Financeiro (R$)": ("Base Financeiro (R$)", "sum"),
@@ -11026,7 +10985,7 @@ def gerar_excel_financeiro(pagamentos, ausencias, data_inicio, data_fim, data_pa
         f"Pagamento: {data_pagamento.strftime('%d/%m/%Y')} | Total: {formatar_reais(total_pagar)}"
     )
     headers_resumo = [
-        "Supervisor", "Colaborador", "Função", "Unidades", "Dias/Lançamentos",
+        "Supervisor", "Colaborador", "Função", "Unidades", "Obras", "Dias/Lançamentos",
         "Financeiro (R$)", "Adic. noturno (R$)", "Acordos / Bonificações (R$)", "Total a Pagar (R$)"
     ]
     cabecalho_planilha(ws_resumo, "APROAR - RELATÓRIO FINANCEIRO", subtitulo, len(headers_resumo))
@@ -11051,7 +11010,7 @@ def gerar_excel_financeiro(pagamentos, ausencias, data_inicio, data_fim, data_pa
 
     ws_det = wb.create_sheet("Detalhe Pagamentos")
     headers_det = [
-        "Data", "Supervisor", "Colaborador", "Função", "Unidade", "Tipo",
+        "Data", "Supervisor", "Colaborador", "Função", "Unidade", "Obra", "Extra",
         "Financeiro (R$)", "Adicional noturno (R$)",
         "Acordos / Bonificações (R$)", "Total a Pagar (R$)"
     ]
@@ -11072,6 +11031,7 @@ def gerar_excel_financeiro(pagamentos, ausencias, data_inicio, data_fim, data_pa
             item.get("Colaborador", ""),
             item.get("Função", ""),
             item.get("Unidade", ""),
+            item.get("Obra", ""),
             item.get("Tipo", ""),
             item.get("Financeiro (R$)", 0.0),
             item.get("Adicional noturno (R$)", 0.0),
@@ -11123,13 +11083,13 @@ def gerar_excel_financeiro(pagamentos, ausencias, data_inicio, data_fim, data_pa
 
     # Ajustes específicos das colunas longas do Financeiro.
     if "Resumo Pagamentos" in wb.sheetnames:
-        ws_resumo.column_dimensions["H"].width = 24
-        ws_resumo.column_dimensions["I"].width = 19
+        ws_resumo.column_dimensions["I"].width = 24
+        ws_resumo.column_dimensions["J"].width = 19
         ws_resumo.row_dimensions[4].height = 30
 
     if "Detalhe Pagamentos" in wb.sheetnames:
-        ws_det.column_dimensions["I"].width = 24
-        ws_det.column_dimensions["J"].width = 19
+        ws_det.column_dimensions["J"].width = 24
+        ws_det.column_dimensions["K"].width = 19
         ws_det.row_dimensions[4].height = 30
 
     buffer = io.BytesIO()
@@ -15964,9 +15924,28 @@ elif modo_campo:
                         )
                         valor_acordo_final = float(item["valor_acordo"]) if presente_final else 0.0
                         custo_encargos_final = (
-                            valor_controladoria_padrao_colaborador(
-                                item["colab"],
-                                tipo_diaria_final,
+                            round(
+                                (
+                                    _valor_diario_controladoria_colaborador(
+                                        item["colab"]
+                                    )
+                                    * (
+                                        0.5
+                                        if normalizar_status_operacional(
+                                            item["status_sel"]
+                                        ) in {
+                                            "Presente (Só Manhã)",
+                                            "Presente (Só Tarde)",
+                                            "Saída Antecipada",
+                                        }
+                                        else 1.0
+                                    )
+                                )
+                                + valor_controladoria_padrao_colaborador(
+                                    item["colab"],
+                                    tipo_diaria_final,
+                                ),
+                                2,
                             )
                             if presente_final
                             else 0.0
@@ -18330,7 +18309,7 @@ else:
     elif menu_escolhido == "📊 RELATÓRIOS":
         cabecalho_pagina_aproar(
             "Relatórios",
-            "Controladoria: o custo-base vem do cadastro/importação do colaborador e respeita Diária ou Meia diária. Adicional noturno e Acordos/Bonificações são somados quando houver. No SEBRAE, o adicional noturno é sempre R$ 90,00 por colaborador presente.",
+            "Controladoria: o custo do dia normal vem do cadastro/importação do colaborador. O campo Extra é calculado separadamente conforme Não, Meia diária, Diária, Uma e meia diária ou Duas diárias. Adicional noturno existe somente no SEBRAE; Acordos/Bonificações são somados quando houver.",
             categoria="ANÁLISE E FECHAMENTO",
         )
         
@@ -18946,7 +18925,7 @@ else:
                                     ),
                                 ).font = font_obra_hdr
 
-                                for c_idx in range(1, 11):
+                                for c_idx in range(1, 12):
                                     ws.cell(
                                         row=current_row,
                                         column=c_idx,
@@ -18959,8 +18938,9 @@ else:
                                     "Função",
                                     "Engenheiro Resp.",
                                     "Status",
-                                    "Tipo",
-                                    "Custo c/ Encargos (R$)",
+                                    "Extra",
+                                    "Custo do Dia c/ Encargos (R$)",
+                                    "Extra c/ Encargos (R$)",
                                     "Adicional Noturno (R$)",
                                     "Acordos / Bonificações (R$)",
                                     "Total (R$)",
@@ -19011,7 +18991,7 @@ else:
                                     )
 
                                     celula_custo_formula = (
-                                        f"=F{current_row}+G{current_row}+H{current_row}"
+                                        f"=F{current_row}+G{current_row}+H{current_row}+I{current_row}"
                                     )
 
                                     linha_dados = [
@@ -19020,7 +19000,8 @@ else:
                                         r["Engenheiro"],
                                         r["Status"],
                                         r.get("Tipo", ""),
-                                        float(r["Custo c/ encargos (R$)"]),
+                                        float(r.get("Custo dia c/ encargos (R$)") or 0.0),
+                                        float(r.get("Extra c/ encargos (R$)") or 0.0),
                                         float(r.get("Adicional noturno (R$)") or 0.0),
                                         float(r["Acordos / Bonificações (R$)"]),
                                         celula_custo_formula,
