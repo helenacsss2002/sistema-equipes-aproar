@@ -10218,12 +10218,6 @@ def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
                     if status_eh_presenca(status_sel)
                     else 0.0
                 )
-
-                st.caption(
-                    f"Financeiro: {formatar_reais(total_fin_preview)} · "
-                    f"Controladoria base automática: {formatar_reais(custo_ctrl_preview)}"
-                )
-
                 if eh_sebrae_card:
                     st.caption(
                         "🌙 SEBRAE: 17h–02h = diária integral. "
