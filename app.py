@@ -11577,16 +11577,26 @@ elif modo_campo:
         box-shadow:0 14px 32px rgba(16,36,66,.18);
     }
 
-    .engm-brand-logo{
-        font-size:34px;
-        line-height:1;
-        font-weight:860;
-        letter-spacing:-1px;
-        color:#FFFFFF;
-        margin:0 0 4px;
+    .engm-brand-logo-wrap{
+        display:inline-flex;
+        align-items:center;
+        justify-content:center;
+        width:78px;
+        height:78px;
+        margin:0 0 6px;
+        border-radius:18px;
+        background:rgba(255,255,255,.94);
+        border:1px solid rgba(255,255,255,.22);
+        box-shadow:0 8px 18px rgba(8,24,56,.16);
+        overflow:hidden;
     }
 
-    .engm-brand-logo span{ color:#4DA0FF; }
+    .engm-brand-logo-img{
+        display:block;
+        width:62px;
+        height:62px;
+        object-fit:contain;
+    }
 
     .engm-head-v2 .engm-kicker,
     .engm-head-v2 .engm-title,
@@ -13381,7 +13391,7 @@ elif modo_campo:
         f"""
         <div class="engm-head engm-head-v2">
             <div class="engm-brand">
-                <div class="engm-brand-logo">APRO<span>AR</span></div>
+                <div class="engm-brand-logo-wrap"><img class="engm-brand-logo-img" src="data:image/png;base64,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" alt="Logo APROAR"></div>
                 <div class="engm-kicker">Portal do Supervisor</div>
                 <div class="engm-title">Minha equipe</div>
             </div>
@@ -13414,7 +13424,7 @@ elif modo_campo:
 
     with nav_c1:
         if st.button(
-            "Hoje",
+            "Apontamentos",
             type=("primary" if area_campo == "Hoje" else "secondary"),
             use_container_width=True,
             key="eng_nav_hoje_v16",
@@ -13424,7 +13434,7 @@ elif modo_campo:
 
     with nav_c2:
         if st.button(
-            "Amanhã",
+            "Convocação",
             type=("primary" if area_campo == "Amanhã" else "secondary"),
             use_container_width=True,
             key="eng_nav_amanha_v16",
