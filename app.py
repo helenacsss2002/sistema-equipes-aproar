@@ -3575,13 +3575,174 @@ def fracao_encargos_por_tipo_diaria(tipo_diaria):
     return 0.5 if normalizar_tipo_diaria(tipo_diaria) == "Meia diária" else 1.0
 
 
+def registro_tem_servico_sebrae(registro):
+    """
+    Identifica SEBRAE tanto pela obra principal quanto por serviços adicionais.
+
+    Isso é importante porque um apontamento pode conter vários serviços/unidades.
+    """
+    registro = registro or {}
+
+    # Alguns fluxos já carregam a unidade diretamente.
+    if eh_unidade_sebrae(
+        registro.get("unidade")
+        or registro.get("Unidade")
+        or ""
+    ):
+        return True
+
+    # Obra principal.
+    obra_id = registro.get("obra_id")
+    obra = {}
+
+    try:
+        obra = dict_obras.get(obra_id, {})
+        if not obra and obra_id is not None:
+            obra = dict_obras.get(str(obra_id), {})
+    except Exception:
+        obra = {}
+
+    if eh_unidade_sebrae(
+        (obra or {}).get("unidade")
+        or ""
+    ):
+        return True
+
+    # Serviços adicionais guardados nos metadados da observação.
+    try:
+        func_meta = globals().get(
+            "obter_metadata_operacional"
+        )
+
+        if callable(func_meta):
+            meta = func_meta(
+                registro.get("observacao")
+                or ""
+            ) or {}
+
+            adicionais = (
+                meta.get("servicos_adicionais")
+                or []
+            )
+
+            for adicional in adicionais:
+                if not isinstance(
+                    adicional,
+                    dict,
+                ):
+                    continue
+
+                if eh_unidade_sebrae(
+                    adicional.get("unidade")
+                    or ""
+                ):
+                    return True
+
+                obra_id_add = str(
+                    adicional.get("obra_id")
+                    or ""
+                ).strip()
+
+                if obra_id_add:
+                    obra_add = {}
+
+                    try:
+                        obra_add = (
+                            dict_obras.get(
+                                obra_id_add,
+                                {},
+                            )
+                            or dict_obras.get(
+                                adicional.get(
+                                    "obra_id"
+                                ),
+                                {},
+                            )
+                        )
+                    except Exception:
+                        obra_add = {}
+
+                    if eh_unidade_sebrae(
+                        (obra_add or {}).get(
+                            "unidade"
+                        )
+                        or ""
+                    ):
+                        return True
+
+                nome_add = normalizar(
+                    adicional.get("servico")
+                    or ""
+                )
+
+                if nome_add:
+                    try:
+                        for _obra in obras:
+                            if (
+                                normalizar(
+                                    _obra.get("nome")
+                                    or ""
+                                )
+                                == nome_add
+                                and eh_unidade_sebrae(
+                                    _obra.get("unidade")
+                                    or ""
+                                )
+                            ):
+                                return True
+                    except Exception:
+                        pass
+
+    except Exception:
+        pass
+
+    return False
+
+
+def _adicional_noturno_salvo_registro(
+    registro,
+):
+    try:
+        return max(
+            0.0,
+            float(
+                (registro or {}).get(
+                    "valor_adicional_noturno"
+                )
+                or 0.0
+            ),
+        )
+    except Exception:
+        return 0.0
+
+
 def tipo_diaria_registro(registro):
-    valor = str((registro or {}).get("tipo_diaria") or "").strip()
+    registro = registro or {}
+
+    status = normalizar_status_operacional(
+        registro.get("status")
+        or ""
+    )
+
+    # Regra fixa do SEBRAE:
+    # jornada 17h–02h = diária integral.
+    if (
+        status_eh_presenca(status)
+        and registro_tem_servico_sebrae(
+            registro
+        )
+    ):
+        return "Diária"
+
+    valor = str(
+        registro.get("tipo_diaria")
+        or ""
+    ).strip()
+
     if valor:
         return normalizar_tipo_diaria(valor)
 
     # Compatibilidade com apontamentos antigos.
-    status = normalizar_status_operacional((registro or {}).get("status") or "")
     if status in [
         "Presente (Só Manhã)",
         "Presente (Só Tarde)",
@@ -3592,27 +3753,93 @@ def tipo_diaria_registro(registro):
 
 
 def custo_pago_total_registro(registro):
-    """Valor líquido base + extra; Acordo fica separado."""
+    """
+    Valor líquido base + Extra.
+
+    Adicional noturno e Acordos / Bonificações ficam separados.
+
+    Para registros antigos do SEBRAE, os primeiros R$ 90 que estavam
+    misturados no antigo Extra são retirados daqui e classificados como
+    Adicional noturno.
+    """
     registro = registro or {}
+
+    status = normalizar_status_operacional(
+        registro.get("status")
+        or ""
+    )
+
     if not status_eh_presenca(
-        normalizar_status_operacional(registro.get("status") or "")
+        status
     ):
         return 0.0
 
+    base = valor_limpo_por_tipo_diaria(
+        tipo_diaria_registro(
+            registro
+        )
+    )
+
     valor = registro.get("custo_pago")
+
     if valor not in (None, ""):
         try:
-            return max(0.0, float(valor))
+            total = max(
+                0.0,
+                float(valor),
+            )
         except Exception:
-            pass
+            total = base
+    else:
+        try:
+            extra_legado = max(
+                0.0,
+                float(
+                    registro.get(
+                        "valor_extra"
+                    )
+                    or 0.0
+                ),
+            )
+        except Exception:
+            extra_legado = 0.0
 
-    # Legado: base limpa conforme diária/meia + extra antigo.
-    base = valor_limpo_por_tipo_diaria(tipo_diaria_registro(registro))
-    try:
-        extra = max(0.0, float(registro.get("valor_extra") or 0.0))
-    except Exception:
-        extra = 0.0
-    return base + extra
+        total = base + extra_legado
+
+    # Registro legado do SEBRAE:
+    # se o adicional noturno ainda não está em coluna própria, separamos
+    # R$ 90 do antigo Custo+Extra.
+    if (
+        registro_tem_servico_sebrae(
+            registro
+        )
+        and _adicional_noturno_salvo_registro(
+            registro
+        ) <= 0.005
+    ):
+        excedente = max(
+            0.0,
+            total - base,
+        )
+
+        if (
+            excedente
+            >= (
+                VALOR_ADICIONAL_NOTURNO_SEBRAE
+                - 0.005
+            )
+        ):
+            total -= (
+                VALOR_ADICIONAL_NOTURNO_SEBRAE
+            )
+
+    return round(
+        max(
+            base,
+            total,
+        ),
+        2,
+    )
 
 
 def valor_extra_registro(registro):
@@ -3629,21 +3856,48 @@ def valor_extra_registro(registro):
 
 
 def valor_adicional_noturno_registro(registro):
+    """
+    Regra definitiva:
+    qualquer presença no SEBRAE recebe R$ 90,00 de adicional noturno.
+
+    Se um valor maior tiver sido lançado manualmente no futuro, ele é
+    preservado.
+    """
     registro = registro or {}
+
+    status = normalizar_status_operacional(
+        registro.get("status")
+        or ""
+    )
+
     if not status_eh_presenca(
-        normalizar_status_operacional(registro.get("status") or "")
+        status
     ):
         return 0.0
-    try:
-        return max(
-            0.0,
-            float(
-                registro.get("valor_adicional_noturno")
-                or 0.0
-            ),
+
+    salvo = (
+        _adicional_noturno_salvo_registro(
+            registro
         )
-    except Exception:
-        return 0.0
+    )
+
+    if registro_tem_servico_sebrae(
+        registro
+    ):
+        return round(
+            max(
+                float(
+                    VALOR_ADICIONAL_NOTURNO_SEBRAE
+                ),
+                salvo,
+            ),
+            2,
+        )
+
+    return round(
+        salvo,
+        2,
+    )
 
 
 def valor_acordo_registro(registro):
@@ -3660,28 +3914,53 @@ def valor_acordo_registro(registro):
 
 def custo_encargos_base_registro(registro, colab=None):
     """
-    Custo da Controladoria ANTES de extra/acordo.
+    Custo-base usado pela Controladoria.
 
-    Para novos apontamentos usamos snapshot salvo no momento do apontamento.
-    Para registros antigos, usamos o valor individual atualmente cadastrado.
+    REGRA:
+    O valor vem SEMPRE do cadastro atual do colaborador, ou seja,
+    da coluna de custo/valor importada pela planilha de colaboradores.
+
+    Não usamos mais o snapshot antigo salvo no apontamento para montar
+    o relatório da Controladoria. Assim, o custo exibido fica alinhado
+    exatamente com a última planilha importada.
+
+    - Diária: 100% do custo cadastrado/importado.
+    - Meia diária: 50% do custo cadastrado/importado.
+    - Falta/Atestado/outros sem presença: R$ 0,00.
+
+    O rateio entre obras/serviços continua acontecendo depois, sem
+    alterar o custo total diário do colaborador.
     """
     registro = registro or {}
+
     if not status_eh_presenca(
-        normalizar_status_operacional(registro.get("status") or "")
+        normalizar_status_operacional(
+            registro.get("status")
+            or ""
+        )
     ):
         return 0.0
 
-    snap = registro.get("custo_encargos_base")
-    if snap not in (None, ""):
-        try:
-            return max(0.0, float(snap))
-        except Exception:
-            pass
+    valor_diario_planilha = (
+        obter_valor_diaria_colaborador(
+            colab or {}
+        )
+    )
 
-    valor_diario = obter_valor_diaria_colaborador(colab or {})
+    if valor_diario_planilha <= 0:
+        # Não inventa valor padrão na Controladoria:
+        # se não veio custo da planilha/cadastro, o relatório mostra zero.
+        return 0.0
+
+    fracao = fracao_encargos_por_tipo_diaria(
+        tipo_diaria_registro(
+            registro
+        )
+    )
+
     return round(
-        float(valor_diario)
-        * fracao_encargos_por_tipo_diaria(tipo_diaria_registro(registro)),
+        float(valor_diario_planilha)
+        * float(fracao),
         2,
     )
 
@@ -7111,7 +7390,7 @@ def ratear_registros_por_servico(registros):
     Rateia custos por serviço preservando duas visões:
 
     Financeiro = Base líquida (120/60) + Extra + Adicional noturno + Acordo.
-    Controladoria = Custo individual com encargos + Extra + Adicional noturno + Acordo.
+    Controladoria = Custo importado da planilha do colaborador + Extra + Adicional noturno + Acordos / Bonificações.
 
     Se a mesma meia-diária tiver 2 serviços na mesma manhã, a base é dividida
     entre eles; não é duplicada.
@@ -7174,14 +7453,38 @@ def ratear_registros_por_servico(registros):
                 base_fin_bloco[bloco] = max(float(base_fin_bloco.get(bloco, 0.0)), float(parte_fin_bloco))
                 base_ctrl_bloco[bloco] = max(float(base_ctrl_bloco.get(bloco, 0.0)), float(parte_ctrl_bloco))
 
-            extra_por_item = extra_reg / len(itens_reg) if itens_reg else 0.0
-            adicional_noturno_por_item = (
-                adicional_noturno_reg / len(itens_reg)
+            extra_por_item = (
+                extra_reg / len(itens_reg)
                 if itens_reg
                 else 0.0
             )
-            acordo_por_item = acordo_reg / len(itens_reg) if itens_reg else 0.0
-            _, obs_livre = decompor_observacao_operacional(reg.get("observacao") or "")
+
+            itens_sebrae_reg = [
+                item
+                for item in itens_reg
+                if eh_unidade_sebrae(
+                    item.get("unidade")
+                    or ""
+                )
+            ]
+
+            adicional_noturno_por_item_sebrae = (
+                adicional_noturno_reg
+                / len(itens_sebrae_reg)
+                if itens_sebrae_reg
+                else 0.0
+            )
+
+            acordo_por_item = (
+                acordo_reg / len(itens_reg)
+                if itens_reg
+                else 0.0
+            )
+
+            _, obs_livre = decompor_observacao_operacional(
+                reg.get("observacao")
+                or ""
+            )
 
             for item in itens_reg:
                 chave_serv = (
@@ -7219,7 +7522,14 @@ def ratear_registros_por_servico(registros):
                             0.0,
                         )
                     )
-                    + adicional_noturno_por_item
+                    + (
+                        adicional_noturno_por_item_sebrae
+                        if eh_unidade_sebrae(
+                            item.get("unidade")
+                            or ""
+                        )
+                        else 0.0
+                    )
                 )
                 acordo_por_servico[chave_serv] = float(acordo_por_servico.get(chave_serv, 0.0)) + acordo_por_item
                 tipos_por_servico.setdefault(chave_serv, []).append(tipo_reg)
@@ -15683,7 +15993,7 @@ else:
     elif menu_escolhido == "📊 RELATÓRIOS":
         cabecalho_pagina_aproar(
             "Relatórios",
-            "Controladoria: custo com encargos por colaborador + Extra + Acordo, rateado por obra/serviço.",
+            "Controladoria: custo cadastrado/importado na planilha do colaborador + Extra + Adicional noturno + Acordos/Bonificações. No SEBRAE, o adicional noturno é sempre R$ 90,00 por colaborador presente.",
             categoria="ANÁLISE E FECHAMENTO",
         )
         
