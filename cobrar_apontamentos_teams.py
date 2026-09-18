@@ -55,9 +55,6 @@ SUPERVISORES_ATIVOS = (
     | OBSERVADORES_GERAIS
 )
 
-HORA_LIMITE_SEBRAE = time(9, 30)
-
-
 def pendencia_entra_no_slot(
     item,
     agora,
@@ -68,20 +65,20 @@ def pendencia_entra_no_slot(
 
     DEMAIS UNIDADES
     ----------------
-    Serviço em D:
-      D    16:00
-      D+1  09:30
-      D+1  15:00
+    D    16:00
+    D+1  09:30
+    D+1  15:00
 
     SEBRAE
     ------
-    Serviço em D:
-      D    21:00  -> único lembrete automático.
+    D    21:00 (única automática)
 
-    Depois dessas janelas, a pendência continua disponível no sistema
-    para conferência e cobrança MANUAL, mas não recebe spam automático.
+    Depois dessas janelas a pendência continua no sistema para cobrança
+    manual, mas não recebe spam automático indefinidamente.
     """
-    data_servico = item.get("data")
+    data_servico = item.get(
+        "data"
+    )
     unidade = str(
         item.get("unidade")
         or ""
@@ -91,11 +88,20 @@ def pendencia_entra_no_slot(
         return False
 
     hoje = agora.date()
-    ontem = hoje - timedelta(days=1)
+    ontem = (
+        hoje
+        - timedelta(days=1)
+    )
 
     if slot == "16:00":
         return (
             unidade != "SEBRAE"
+            and data_servico == hoje
+        )
+
+    if slot == "21:00":
+        return (
+            unidade == "SEBRAE"
             and data_servico == hoje
         )
 
@@ -106,12 +112,6 @@ def pendencia_entra_no_slot(
         return (
             unidade != "SEBRAE"
             and data_servico == ontem
-        )
-
-    if slot == "21:00":
-        return (
-            unidade == "SEBRAE"
-            and data_servico == hoje
         )
 
     return False
@@ -135,10 +135,13 @@ def slot_atual() -> str:
 
     if agora.hour < 12:
         return "09:30"
+
     if agora.hour < 16:
         return "15:00"
+
     if agora.hour < 21:
         return "16:00"
+
     return "21:00"
 
 
@@ -346,22 +349,18 @@ def montar_mensagem(engenheiro, pendentes, slot):
 
     if slot == "16:00":
         etapa = "Cobrança do próprio dia · 16:00"
-        titulo_status = "pendente"
     elif slot == "09:30":
         etapa = "Cobrança do dia seguinte · 09:30"
-        titulo_status = "atrasado"
     elif slot == "15:00":
         etapa = "Última cobrança automática · 15:00"
-        titulo_status = "atrasado"
     else:
-        etapa = "Lembrete único SEBRAE · 21:00"
-        titulo_status = "pendente"
+        etapa = "Lembrete SEBRAE · 21:00"
 
     total = len(pendentes)
     termo = (
-        f"apontamento {titulo_status}"
+        "apontamento pendente"
         if total == 1
-        else f"apontamentos {titulo_status}s"
+        else "apontamentos pendentes"
     )
 
     corpo_linhas = "<br>".join(linhas_visiveis)
@@ -480,7 +479,7 @@ def main():
                 )
 
                 if not pendentes:
-                    print(f"- {engenheiro}: sem pendências para este horário.")
+                    print(f"- {engenheiro}: sem apontamentos atrasados.")
                     sem_pendencia += 1
                     continue
 
