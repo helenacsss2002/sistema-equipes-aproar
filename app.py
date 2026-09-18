@@ -4697,6 +4697,20 @@ def valor_adicional_noturno_registro(registro):
     if registro_tem_servico_sebrae(
         registro
     ):
+        # Enquanto o Financeiro não ajustar o lançamento, aplica o padrão
+        # de R$ 90,00. Depois de um ajuste financeiro, o valor gravado passa
+        # a prevalecer em todos os portais/relatórios, inclusive se for menor
+        # que o padrão ou zero.
+        if bool(
+            registro.get(
+                "custo_pago_definido_financeiro"
+            )
+        ):
+            return round(
+                max(0.0, salvo),
+                2,
+            )
+
         return round(
             max(
                 float(
@@ -10483,9 +10497,158 @@ def salvar_base_financeiro_lancamento(item, valor, usuario="FINANCEIRO"):
         return False, f"Não foi possível atualizar o valor-base: {str(exc)[:120]}"
 
 
+
+
+def salvar_ajuste_financeiro_lancamento(
+    item,
+    valor_financeiro,
+    valor_adicional_noturno,
+    valor_acordo,
+    usuario="FINANCEIRO",
+):
+    """
+    Ajusta os valores financeiros de um colaborador em um dia.
+
+    A alteração é gravada nas tabelas ``convocacoes`` e ``apontamentos``.
+    Como o portal, os relatórios e a Controladoria leem essas mesmas fontes,
+    o ajuste passa a aparecer em todo o sistema.
+
+    Quando existem várias convocações do mesmo colaborador no mesmo dia,
+    os valores monetários ficam no primeiro registro e os demais são zerados,
+    evitando duplicidade no total diário.
+    """
+    ids = [
+        str(x).strip()
+        for x in (item.get("IDs") or [])
+        if str(x).strip()
+    ]
+
+    if not ids:
+        return False, "Nenhum apontamento foi encontrado para este lançamento."
+
+    financeiro = round(max(0.0, float(valor_financeiro or 0.0)), 2)
+    noturno = round(max(0.0, float(valor_adicional_noturno or 0.0)), 2)
+    acordo = round(max(0.0, float(valor_acordo or 0.0)), 2)
+
+    try:
+        for pos, conv_id in enumerate(ids):
+            # Um único registro carrega o total diário; isso impede que duas
+            # convocações da mesma pessoa no dia dupliquem o pagamento.
+            fin_reg = financeiro if pos == 0 else 0.0
+            noturno_reg = noturno if pos == 0 else 0.0
+            acordo_reg = acordo if pos == 0 else 0.0
+
+            antes = None
+            try:
+                resposta_antes = (
+                    supabase.table("convocacoes")
+                    .select("*")
+                    .eq("id", conv_id)
+                    .limit(1)
+                    .execute()
+                )
+                dados_antes = list(
+                    getattr(resposta_antes, "data", None)
+                    or []
+                )
+                antes = dados_antes[0] if dados_antes else None
+            except Exception:
+                antes = None
+
+            payload = {
+                "custo_pago": fin_reg,
+                "custo_pago_definido_financeiro": True,
+                "valor_adicional_noturno": noturno_reg,
+                "valor_acordo": acordo_reg,
+            }
+
+            supabase.table("convocacoes").update(
+                payload
+            ).eq("id", conv_id).execute()
+
+            if schema_producao_disponivel():
+                try:
+                    with supabase._connect() as conn:
+                        with conn.cursor() as cur:
+                            cur.execute(
+                                """
+                                UPDATE apontamentos
+                                   SET custo_pago = %s,
+                                       custo_pago_definido_financeiro = TRUE,
+                                       valor_adicional_noturno = %s,
+                                       valor_acordo = %s,
+                                       atualizado_em = NOW()
+                                 WHERE convocacao_id = %s
+                                """,
+                                (
+                                    fin_reg,
+                                    noturno_reg,
+                                    acordo_reg,
+                                    conv_id,
+                                ),
+                            )
+                        conn.commit()
+                except Exception:
+                    # A convocação é a fonte operacional primária; manter a
+                    # edição mesmo se uma instalação antiga ainda não tiver
+                    # todas as colunas na tabela estruturada.
+                    pass
+
+            try:
+                registrar_auditoria_prod(
+                    "convocacao",
+                    conv_id,
+                    "AJUSTE_FINANCEIRO",
+                    usuario,
+                    antes=antes,
+                    depois=payload,
+                    contexto={
+                        "origem": "portal_financeiro",
+                        "data": str(item.get("Data ISO") or ""),
+                        "colaborador_id": str(
+                            item.get("_colaborador_id")
+                            or ""
+                        ),
+                    },
+                )
+            except Exception:
+                pass
+
+        limpar_cache_operacional()
+        return True, "Ajuste salvo e sincronizado em todo o sistema."
+
+    except Exception as exc:
+        return False, (
+            "Não foi possível salvar o ajuste financeiro: "
+            + str(exc)[:180]
+        )
+
 def carregar_dados_financeiro(data_inicio, data_fim):
     """Retorna pagamentos líquidos e ausências do período."""
     registros = _buscar_convocacoes_intervalo(data_inicio, data_fim)
+
+    # IDs reais por colaborador/dia. Eles ficam ocultos na interface e servem
+    # apenas para o Financeiro gravar a alteração exatamente nos registros
+    # que originaram cada linha.
+    ids_financeiro_por_chave = {}
+    for _reg_fin in registros or []:
+        if not status_eh_presenca(
+            normalizar_status_operacional(
+                _reg_fin.get("status") or ""
+            )
+        ):
+            continue
+        _ch_fin = (
+            str(_reg_fin.get("data") or ""),
+            str(_reg_fin.get("colaborador_id") or ""),
+        )
+        _id_fin = str(_reg_fin.get("id") or "").strip()
+        if _id_fin:
+            ids_financeiro_por_chave.setdefault(
+                _ch_fin,
+                []
+            ).append(_id_fin)
+
     linhas_rateadas = ratear_registros_por_servico(registros)
 
     pagamentos = []
@@ -10500,7 +10663,23 @@ def carregar_dados_financeiro(data_inicio, data_fim):
             errors="coerce",
         ).fillna(0.0)
 
-        df = df[total_fin > 0.005].copy()
+        # Um lançamento com Extra = Diária/Meia diária precisa aparecer para
+        # o Financeiro mesmo que o supervisor tenha deixado o valor em R$ 0,00,
+        # pois é justamente no Financeiro que esse valor poderá ser corrigido.
+        if "Tipo" in df.columns:
+            _tem_extra_fin = df["Tipo"].astype(str).apply(
+                lambda v: normalizar_tipo_diaria(v) != "Não"
+            )
+        else:
+            _tem_extra_fin = pd.Series(
+                False,
+                index=df.index,
+            )
+
+        df = df[
+            (total_fin > 0.005)
+            | _tem_extra_fin
+        ].copy()
 
         if not df.empty:
             agrupados = (
@@ -10540,6 +10719,17 @@ def carregar_dados_financeiro(data_inicio, data_fim):
                     "Adicional noturno (R$)": round(float(row["Adicional noturno (R$)"]), 2),
                     "Acordos / Bonificações (R$)": round(float(row["Acordos / Bonificações (R$)"]), 2),
                     "Total a Pagar (R$)": round(float(row["Total a Pagar (R$)"]), 2),
+                    "IDs": list(
+                        dict.fromkeys(
+                            ids_financeiro_por_chave.get(
+                                (
+                                    str(row["Data"]),
+                                    str(row["_colaborador_id"]),
+                                ),
+                                [],
+                            )
+                        )
+                    ),
                 })
 
     ausencias = []
@@ -16604,10 +16794,11 @@ elif modo_financeiro:
             st.rerun()
     st.caption(
         "Conferência semanal de pagamentos. "
-        "O valor do Financeiro vem do apontamento feito pelo supervisor/engenheiro; "
-        "adicional noturno e Acordos / Bonificações permanecem separados. "
-        "O custo de serviço da Controladoria é calculado à parte com o valor "
-        "cadastrado/importado do colaborador. Ciclo de terça-feira a segunda-feira."
+        "Os valores vêm do apontamento e podem ser corrigidos pelo Financeiro. "
+        "Quando o Financeiro salva um ajuste, a alteração é refletida nos "
+        "apontamentos e relatórios do sistema. O custo-base da Controladoria "
+        "continua vindo do cadastro/importação do colaborador. "
+        "Ciclo de terça-feira a segunda-feira."
     )
 
     ciclos_fin = listar_ciclos_financeiros(26)
@@ -16662,20 +16853,195 @@ elif modo_financeiro:
             tabela_aproar(resumo_view, key="tbl_fin_resumo")
 
             st.markdown("### Detalhamento por dia")
-            detalhe_extra_view = pd.DataFrame(pagamentos_fin)[[
-                "Data", "Colaborador", "Função", "Unidade", "Engenheiro", "Tipo",
-                "Financeiro (R$)", "Adicional noturno (R$)",
-                "Acordos / Bonificações (R$)", "Total a Pagar (R$)"
-            ]].copy()
-            for _c in [
-                "Financeiro (R$)",
-                "Adicional noturno (R$)",
-                "Acordos / Bonificações (R$)",
-                "Total a Pagar (R$)",
-            ]:
-                detalhe_extra_view[_c.replace(" (R$)", "")] = detalhe_extra_view[_c].apply(formatar_reais)
-                detalhe_extra_view = detalhe_extra_view.drop(columns=[_c])
-            tabela_aproar(detalhe_extra_view, key="tbl_fin_detalhe")
+            st.caption(
+                "Edite Financeiro, adicional noturno ou acordos/bonificações. "
+                "Ao salvar, o valor passa a valer em todo o sistema."
+            )
+
+            detalhe_fin_editor = pd.DataFrame([
+                {
+                    "Data": item.get("Data", ""),
+                    "Colaborador": item.get("Colaborador", ""),
+                    "Função": item.get("Função", ""),
+                    "Unidade": item.get("Unidade", ""),
+                    "Extra": item.get("Tipo", "Não"),
+                    "Financeiro (R$)": float(
+                        item.get("Financeiro (R$)")
+                        or 0.0
+                    ),
+                    "Adic. noturno (R$)": float(
+                        item.get("Adicional noturno (R$)")
+                        or 0.0
+                    ),
+                    "Acordos / Bonificações (R$)": float(
+                        item.get("Acordos / Bonificações (R$)")
+                        or 0.0
+                    ),
+                }
+                for item in pagamentos_fin
+            ])
+
+            detalhe_fin_editado = st.data_editor(
+                detalhe_fin_editor,
+                hide_index=True,
+                use_container_width=True,
+                num_rows="fixed",
+                key="editor_financeiro_pagamentos",
+                disabled=[
+                    "Data",
+                    "Colaborador",
+                    "Função",
+                    "Unidade",
+                    "Extra",
+                ],
+                column_config={
+                    "Financeiro (R$)": st.column_config.NumberColumn(
+                        "Financeiro (R$)",
+                        min_value=0.0,
+                        step=1.0,
+                        format="R$ %.2f",
+                    ),
+                    "Adic. noturno (R$)": st.column_config.NumberColumn(
+                        "Adic. noturno (R$)",
+                        min_value=0.0,
+                        step=1.0,
+                        format="R$ %.2f",
+                    ),
+                    "Acordos / Bonificações (R$)": st.column_config.NumberColumn(
+                        "Acordos / Bonificações (R$)",
+                        min_value=0.0,
+                        step=1.0,
+                        format="R$ %.2f",
+                    ),
+                },
+            )
+
+            if st.button(
+                "Salvar ajustes do Financeiro",
+                type="primary",
+                use_container_width=True,
+                key="btn_salvar_ajustes_financeiro",
+            ):
+                alterados_fin = 0
+                erros_fin = []
+
+                for _idx_fin, _row_fin in detalhe_fin_editado.iterrows():
+                    if _idx_fin >= len(pagamentos_fin):
+                        continue
+
+                    _orig_fin = pagamentos_fin[_idx_fin]
+                    _novo_base = round(
+                        max(
+                            0.0,
+                            float(
+                                _row_fin.get(
+                                    "Financeiro (R$)",
+                                    0.0,
+                                )
+                                or 0.0
+                            ),
+                        ),
+                        2,
+                    )
+                    _novo_not = round(
+                        max(
+                            0.0,
+                            float(
+                                _row_fin.get(
+                                    "Adic. noturno (R$)",
+                                    0.0,
+                                )
+                                or 0.0
+                            ),
+                        ),
+                        2,
+                    )
+                    _novo_acordo = round(
+                        max(
+                            0.0,
+                            float(
+                                _row_fin.get(
+                                    "Acordos / Bonificações (R$)",
+                                    0.0,
+                                )
+                                or 0.0
+                            ),
+                        ),
+                        2,
+                    )
+
+                    _mudou_fin = any([
+                        abs(
+                            _novo_base
+                            - float(
+                                _orig_fin.get(
+                                    "Financeiro (R$)"
+                                )
+                                or 0.0
+                            )
+                        ) > 0.004,
+                        abs(
+                            _novo_not
+                            - float(
+                                _orig_fin.get(
+                                    "Adicional noturno (R$)"
+                                )
+                                or 0.0
+                            )
+                        ) > 0.004,
+                        abs(
+                            _novo_acordo
+                            - float(
+                                _orig_fin.get(
+                                    "Acordos / Bonificações (R$)"
+                                )
+                                or 0.0
+                            )
+                        ) > 0.004,
+                    ])
+
+                    if not _mudou_fin:
+                        continue
+
+                    _ok_fin, _msg_fin = salvar_ajuste_financeiro_lancamento(
+                        _orig_fin,
+                        _novo_base,
+                        _novo_not,
+                        _novo_acordo,
+                        usuario="FINANCEIRO",
+                    )
+
+                    if _ok_fin:
+                        alterados_fin += 1
+                    else:
+                        erros_fin.append(
+                            f"{_orig_fin.get('Colaborador', '-')}: {_msg_fin}"
+                        )
+
+                if erros_fin:
+                    st.error(
+                        "Alguns ajustes não foram salvos: "
+                        + " | ".join(erros_fin[:4])
+                    )
+                elif alterados_fin:
+                    st.session_state[
+                        "_fin_ajuste_salvo_msg"
+                    ] = (
+                        f"{alterados_fin} lançamento(s) atualizado(s). "
+                        "Os novos valores já valem em todo o sistema."
+                    )
+                    st.rerun()
+                else:
+                    st.info(
+                        "Nenhum valor foi alterado."
+                    )
+
+            _msg_fin_salvo = st.session_state.pop(
+                "_fin_ajuste_salvo_msg",
+                None,
+            )
+            if _msg_fin_salvo:
+                st.success(_msg_fin_salvo)
 
     with tab_fin_aus:
         fa1, fa2, fa3 = st.columns(3)
