@@ -4141,7 +4141,7 @@ VALOR_FIN_MEIA_AJUDANTE = 40.00
 VALOR_LIMPO_DIARIA = VALOR_FIN_DIARIA_PROFISSIONAL
 VALOR_LIMPO_MEIA_DIARIA = VALOR_FIN_MEIA_PROFISSIONAL
 
-TIPOS_DIARIA = ["Diária", "Meia diária"]
+TIPOS_DIARIA = ["Não", "Diária", "Meia diária"]
 
 # Regras de prazo/cobrança:
 # - Demais unidades: 16:00 é lembrete preventivo; atraso começa às 09:30 de D+1.
@@ -4293,8 +4293,15 @@ def situacao_pendencia_teams(
 
 def normalizar_tipo_diaria(valor):
     bruto = normalizar(valor or "")
+
+    if not bruto or bruto in {"NAO", "N", "SEM EXTRA", "SEM"}:
+        return "Não"
     if "MEIA" in bruto:
         return "Meia diária"
+    if "DIARIA" in bruto or "DIA" in bruto:
+        return "Diária"
+
+    # Compatibilidade com valores antigos inesperados.
     return "Diária"
 
 
@@ -4303,11 +4310,12 @@ def valor_limpo_por_tipo_diaria(tipo_diaria):
     Compatibilidade: retorna o padrão de Profissional.
     Para cálculos reais, use valor_financeiro_padrao_colaborador().
     """
+    tipo = normalizar_tipo_diaria(tipo_diaria)
+    if tipo == "Não":
+        return 0.0
     return (
         VALOR_FIN_MEIA_PROFISSIONAL
-        if normalizar_tipo_diaria(
-            tipo_diaria
-        ) == "Meia diária"
+        if tipo == "Meia diária"
         else VALOR_FIN_DIARIA_PROFISSIONAL
     )
 
@@ -4363,12 +4371,11 @@ def valor_financeiro_padrao_colaborador(
     colab,
     tipo_diaria,
 ):
-    meia = (
-        normalizar_tipo_diaria(
-            tipo_diaria
-        )
-        == "Meia diária"
-    )
+    tipo = normalizar_tipo_diaria(tipo_diaria)
+    if tipo == "Não":
+        return 0.0
+
+    meia = (tipo == "Meia diária")
 
     if (
         categoria_diaria_colaborador(
@@ -4394,9 +4401,16 @@ def valor_controladoria_padrao_colaborador(
     tipo_diaria,
 ):
     """
-    Base da Controladoria = valor diário cadastrado/importado do colaborador.
+    Base da Controladoria para o EXTRA.
+    - Não: sem custo de extra;
+    - Diária: 100% do valor diário cadastrado/importado;
+    - Meia diária: 50% do valor diário cadastrado/importado.
     Se a planilha não trouxer valor, usa o padrão da categoria apenas como fallback.
     """
+    tipo = normalizar_tipo_diaria(tipo_diaria)
+    if tipo == "Não":
+        return 0.0
+
     valor_cheio = obter_valor_diaria_colaborador(colab or {})
 
     if valor_cheio <= 0:
@@ -4413,10 +4427,7 @@ def valor_controladoria_padrao_colaborador(
         float(valor_cheio)
         * (
             0.5
-            if normalizar_tipo_diaria(
-                tipo_diaria
-            )
-            == "Meia diária"
+            if tipo == "Meia diária"
             else 1.0
         ),
         2,
@@ -4424,7 +4435,10 @@ def valor_controladoria_padrao_colaborador(
 
 
 def fracao_encargos_por_tipo_diaria(tipo_diaria):
-    return 0.5 if normalizar_tipo_diaria(tipo_diaria) == "Meia diária" else 1.0
+    tipo = normalizar_tipo_diaria(tipo_diaria)
+    if tipo == "Não":
+        return 0.0
+    return 0.5 if tipo == "Meia diária" else 1.0
 
 
 def registro_tem_servico_sebrae(registro):
@@ -4576,16 +4590,7 @@ def tipo_diaria_registro(registro):
         or ""
     )
 
-    # Regra fixa do SEBRAE:
-    # jornada 17h–02h = diária integral.
-    if (
-        status_eh_presenca(status)
-        and registro_tem_servico_sebrae(
-            registro
-        )
-    ):
-        return "Diária"
-
+    # Se já existe escolha salva, ela prevalece — inclusive "Não".
     valor = str(
         registro.get("tipo_diaria")
         or ""
@@ -4594,14 +4599,21 @@ def tipo_diaria_registro(registro):
     if valor:
         return normalizar_tipo_diaria(valor)
 
-    # Compatibilidade com apontamentos antigos.
+    # Compatibilidade com apontamentos antigos que não gravavam o campo.
     if status in [
         "Presente (Só Manhã)",
         "Presente (Só Tarde)",
         "Saída Antecipada",
     ]:
         return "Meia diária"
-    return "Diária"
+
+    if status_eh_presenca(status):
+        # Registros antigos de presença sem tipo explícito eram tratados
+        # como diária integral. Mantemos isso apenas para o histórico.
+        return "Diária"
+
+    # Novo apontamento ainda não preenchido: por padrão, sem extra.
+    return "Não"
 
 
 def valor_diaria_financeiro_registro(
@@ -10068,9 +10080,7 @@ def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
                 )
                 eh_sebrae_card = eh_unidade_sebrae(unidade)
 
-                if eh_sebrae_card:
-                    st.session_state[tipo_key] = "Diária"
-                elif tipo_key not in st.session_state:
+                if tipo_key not in st.session_state:
                     st.session_state[tipo_key] = tipo_atual
 
                 if diaria_key not in st.session_state:
@@ -10100,11 +10110,17 @@ def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
 
                 with p1:
                     tipo_diaria_sel = st.selectbox(
-                        "EXTRA",
+                        "Extra",
                         TIPOS_DIARIA,
                         key=tipo_key,
-                        disabled=eh_sebrae_card,
                     )
+
+                sem_extra = (
+                    normalizar_tipo_diaria(tipo_diaria_sel)
+                    == "Não"
+                )
+                if sem_extra:
+                    st.session_state[diaria_key] = 0.0
 
                 with p2:
                     valor_diaria_financeiro = st.number_input(
@@ -10112,7 +10128,10 @@ def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
                         min_value=0.0,
                         step=1.0,
                         format="%.2f",
-                        disabled=(not status_eh_presenca(status_sel)),
+                        disabled=(
+                            (not status_eh_presenca(status_sel))
+                            or sem_extra
+                        ),
                         key=diaria_key,
                         help=(
                             "Valor que será enviado ao Financeiro. "
@@ -10179,10 +10198,11 @@ def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
                     st.warning("O 2º serviço deve ser diferente do serviço principal.")
                 elif (
                     status_eh_presenca(status_sel)
+                    and normalizar_tipo_diaria(tipo_diaria_sel) != "Não"
                     and float(valor_diaria_financeiro or 0.0) <= 0
                 ):
                     st.warning(
-                        "Informe o Financeiro antes de salvar o apontamento."
+                        "Informe o Financeiro quando houver Extra."
                     )
                 else:
                     adicionais = []
@@ -10202,14 +10222,15 @@ def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
                     nova_obs = montar_observacao_operacional(turno, obs_nova, meta)
                     try:
                         presente_final = status_eh_presenca(status_sel)
-                        tipo_diaria_final = (
-                            "Diária"
-                            if eh_sebrae_card
-                            else normalizar_tipo_diaria(tipo_diaria_sel)
+                        tipo_diaria_final = normalizar_tipo_diaria(
+                            tipo_diaria_sel
                         )
                         custo_pago_final = (
                             float(valor_diaria_financeiro)
-                            if presente_final
+                            if (
+                                presente_final
+                                and tipo_diaria_final != "Não"
+                            )
                             else 0.0
                         )
                         valor_extra_final = 0.0
@@ -14871,7 +14892,7 @@ elif modo_campo:
                         servicos_adicionais_editados = []
 
                         # Apontamento operacional:
-                        # o supervisor escolhe Diária/Meia e informa o valor-base
+                        # o supervisor informa se houve Extra (Não/Diária/Meia diária) e o valor-base
                         # que será enviado ao Financeiro. O custo da Controladoria
                         # vem separadamente da planilha de colaboradores.
                         tipo_key = f"engm_tipo_diaria_{c_id}"
@@ -14886,9 +14907,7 @@ elif modo_campo:
                         adicional_noturno_atual = valor_adicional_noturno_registro(conv)
                         eh_sebrae_card = eh_unidade_sebrae(unidade)
 
-                        if eh_sebrae_card:
-                            st.session_state[tipo_key] = "Diária"
-                        elif tipo_key not in st.session_state:
+                        if tipo_key not in st.session_state:
                             st.session_state[tipo_key] = tipo_atual_pag
 
                         if diaria_key not in st.session_state:
@@ -14901,11 +14920,17 @@ elif modo_campo:
 
                         with pg1:
                             tipo_diaria_sel = st.selectbox(
-                                "EXTRA",
+                                "Extra",
                                 TIPOS_DIARIA,
                                 key=tipo_key,
-                                disabled=eh_sebrae_card,
                             )
+
+                        sem_extra = (
+                            normalizar_tipo_diaria(tipo_diaria_sel)
+                            == "Não"
+                        )
+                        if sem_extra:
+                            st.session_state[diaria_key] = 0.0
 
                         with pg2:
                             valor_diaria_financeiro = st.number_input(
@@ -14913,7 +14938,10 @@ elif modo_campo:
                                 min_value=0.0,
                                 step=1.0,
                                 format="%.2f",
-                                disabled=(not status_eh_presenca(status_sel)),
+                                disabled=(
+                                    (not status_eh_presenca(status_sel))
+                                    or sem_extra
+                                ),
                                 key=diaria_key,
                                 help=(
                                     "Valor que será enviado ao Financeiro. "
@@ -14974,7 +15002,7 @@ elif modo_campo:
                         custo_ctrl_preview = (
                             valor_controladoria_padrao_colaborador(
                                 colab,
-                                "Diária" if eh_sebrae_card else tipo_diaria_sel,
+                                tipo_diaria_sel,
                             )
                             if status_eh_presenca(status_sel)
                             else 0.0
@@ -15296,13 +15324,16 @@ elif modo_campo:
 
                     if (
                         status_eh_presenca(item["status_sel"])
+                        and normalizar_tipo_diaria(
+                            item.get("tipo_diaria_sel")
+                        ) != "Não"
                         and float(
                             item.get("valor_diaria_financeiro")
                             or 0.0
                         ) <= 0
                     ):
                         erros_validacao.append(
-                            f"{nome_pessoa}: informe o Financeiro."
+                            f"{nome_pessoa}: informe o Financeiro quando houver Extra."
                         )
 
                     obras_usadas = {
@@ -15503,16 +15534,17 @@ elif modo_campo:
                         )
 
                         presente_final = status_eh_presenca(item["status_sel"])
-                        tipo_diaria_final = (
-                            "Diária"
-                            if eh_unidade_sebrae(item["unidade_contexto"])
-                            else normalizar_tipo_diaria(item["tipo_diaria_sel"])
+                        tipo_diaria_final = normalizar_tipo_diaria(
+                            item["tipo_diaria_sel"]
                         )
                         custo_pago_final = (
                             float(
                                 item["valor_diaria_financeiro"]
                             )
-                            if presente_final
+                            if (
+                                presente_final
+                                and tipo_diaria_final != "Não"
+                            )
                             else 0.0
                         )
                         valor_extra_final = 0.0
