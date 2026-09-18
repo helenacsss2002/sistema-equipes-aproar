@@ -17948,6 +17948,117 @@ else:
                     )
                     mapa_convs_corr[rotulo] = item
 
+                # Exclusão em lote: o formulário segura as seleções no navegador
+                # e só envia tudo ao Streamlit quando o usuário confirma.
+                with st.expander("🗑️ Excluir várias convocações de uma vez"):
+                    st.caption(
+                        "Selecione quantas convocações quiser. A página não recarrega "
+                        "a cada seleção; a exclusão acontece de uma vez ao confirmar."
+                    )
+
+                    with st.form(
+                        "form_exclusao_convocacoes_lote",
+                        clear_on_submit=False,
+                    ):
+                        convs_excluir_rotulos = st.multiselect(
+                            "Convocações para excluir:",
+                            list(mapa_convs_corr.keys()),
+                            key="convs_excluir_lote",
+                            placeholder="Selecione os colaboradores/convocações",
+                        )
+
+                        confirmar_exclusao_lote = st.checkbox(
+                            "Confirmo a exclusão das convocações selecionadas",
+                            value=False,
+                            key="confirma_exclusao_conv_lote",
+                        )
+
+                        excluir_lote_submit = st.form_submit_button(
+                            "🗑️ EXCLUIR SELECIONADOS",
+                            type="primary",
+                            use_container_width=True,
+                        )
+
+                    if excluir_lote_submit:
+                        if not convs_excluir_rotulos:
+                            st.warning("Selecione pelo menos uma convocação para excluir.")
+                        elif not confirmar_exclusao_lote:
+                            st.warning("Marque a confirmação antes de excluir.")
+                        else:
+                            registros_excluir = [
+                                mapa_convs_corr[rotulo]
+                                for rotulo in convs_excluir_rotulos
+                                if rotulo in mapa_convs_corr
+                            ]
+
+                            ids_excluir = [
+                                str(reg.get("id"))
+                                for reg in registros_excluir
+                                if reg.get("id") is not None
+                            ]
+
+                            try:
+                                if not ids_excluir:
+                                    st.warning("Nenhuma convocação válida foi selecionada.")
+                                else:
+                                    # Exclui uma única vez no banco quando o backend suporta IN.
+                                    # Se não suportar, cai no caminho individual sem rerun intermediário.
+                                    try:
+                                        (
+                                            supabase.table("convocacoes")
+                                            .delete()
+                                            .in_("id", ids_excluir)
+                                            .execute()
+                                        )
+                                    except Exception:
+                                        for _id_exc in ids_excluir:
+                                            (
+                                                supabase.table("convocacoes")
+                                                .delete()
+                                                .eq("id", _id_exc)
+                                                .execute()
+                                            )
+
+                                    for reg_exc in registros_excluir:
+                                        colab_exc = dict_colaboradores.get(
+                                            reg_exc.get("colaborador_id"),
+                                            {},
+                                        )
+                                        try:
+                                            registrar_auditoria_prod(
+                                                "convocacao",
+                                                reg_exc.get("id"),
+                                                "EXCLUIR_ADMIN_LOTE",
+                                                "ADMIN",
+                                                antes=dict(reg_exc),
+                                                contexto={
+                                                    "origem": "correcao_administrativa_lote",
+                                                    "colaborador_nome": colab_exc.get(
+                                                        "nome",
+                                                        "N/A",
+                                                    ),
+                                                    "data": data_corr.isoformat(),
+                                                },
+                                            )
+                                        except Exception:
+                                            pass
+
+                                    limpar_cache_operacional()
+                                    st.session_state["msg_corr_admin"] = (
+                                        f"✅ {len(ids_excluir)} convocação(ões) excluída(s) com sucesso."
+                                    )
+                                    st.session_state.pop("convs_excluir_lote", None)
+                                    st.session_state.pop("confirma_exclusao_conv_lote", None)
+                                    st.rerun()
+
+                            except Exception as e:
+                                exibir_erro_amigavel(
+                                    "convocacao",
+                                    "excluir_lote",
+                                    e,
+                                    "Não foi possível excluir as convocações selecionadas.",
+                                )
+
                 with c_corr2:
                     conv_selecionada_rotulo = st.selectbox(
                         "Selecione o colaborador/convocação:",
