@@ -13299,32 +13299,102 @@ elif modo_campo:
         data_fim,
     ):
         """
-        Busca convocações anteriores ainda sem apontamento para o supervisor
-        selecionado. O filtro de engenheiro é exato: um supervisor nunca vê
-        pendências pertencentes a outro supervisor.
+        Retorna SOMENTE as pendências do supervisor selecionado.
+
+        A checagem não depende apenas do obra_id/placeholder. Primeiro usamos
+        os sinais reais de que o apontamento foi salvo: registro na tabela
+        `apontamentos`, metadata `apontado_em` e, como compatibilidade,
+        `custos_separados`. Isso evita esconder convocações antigas que já
+        nasceram vinculadas a uma obra real.
         """
         if not engenheiro or not data_fim:
             return []
 
-        # O sistema atual é recente, mas usamos uma janela ampla para não
-        # esconder pendências antigas do supervisor.
         data_inicio = datetime.date(2020, 1, 1)
+        eng_norm = normalizar(engenheiro)
 
-        registros = _buscar_convocacoes_intervalo(
-            data_inicio,
-            data_fim,
-            engenheiro,
-        ) or []
+        # Busca sem filtro exato no banco para não perder registros antigos
+        # gravados com diferença de caixa/espaços no nome do supervisor.
+        try:
+            registros = (
+                supabase.table("convocacoes")
+                .select("*")
+                .gte("data", data_inicio.isoformat())
+                .lte("data", data_fim.isoformat())
+                .execute()
+                .data
+                or []
+            )
+        except Exception:
+            registros = _buscar_convocacoes_intervalo(
+                data_inicio,
+                data_fim,
+                None,
+            ) or []
 
-        enriquecidos = _enriquecer_convocacoes_campo(
-            registros
-        )
-
-        return [
-            conv
-            for conv in enriquecidos
-            if not _convocacao_apontada_campo(conv)
+        registros = [
+            r
+            for r in registros
+            if normalizar(r.get("engenheiro") or "") == eng_norm
         ]
+
+        if not registros:
+            return []
+
+        ids_apontados = set()
+
+        # Quando a tabela estruturada existir, ela é o sinal mais confiável.
+        try:
+            apontamentos_salvos = (
+                supabase.table("apontamentos")
+                .select("*")
+                .gte("data_servico", data_inicio.isoformat())
+                .lte("data_servico", data_fim.isoformat())
+                .execute()
+                .data
+                or []
+            )
+            for ap in apontamentos_salvos:
+                if normalizar(ap.get("engenheiro") or "") != eng_norm:
+                    continue
+                conv_id = str(ap.get("convocacao_id") or "").strip()
+                if conv_id:
+                    ids_apontados.add(conv_id)
+        except Exception:
+            # Compatibilidade com instalações sem a tabela estruturada.
+            ids_apontados = set()
+
+        pendentes = []
+        for conv in _enriquecer_convocacoes_campo(registros):
+            conv_id = str(conv.get("id") or "").strip()
+            meta = obter_metadata_operacional(
+                conv.get("observacao") or ""
+            )
+
+            apontado = bool(
+                (conv_id and conv_id in ids_apontados)
+                or meta.get("apontado_em")
+                or conv.get("custos_separados") is True
+            )
+
+            # Para registros legados em que não há metadata nem tabela
+            # estruturada, mantém a regra antiga como último fallback.
+            if not apontado:
+                obra = conv.get("dados_obra") or dict_obras.get(
+                    conv.get("obra_id"),
+                    {},
+                )
+                if (
+                    obra
+                    and not eh_obra_placeholder(obra)
+                    and conv.get("custos_separados") is not None
+                ):
+                    apontado = True
+
+            if not apontado:
+                pendentes.append(conv)
+
+        return pendentes
 
     def _servicos_convocacao_mobile(conv):
         """
@@ -13712,12 +13782,22 @@ elif modo_campo:
             )
 
         with c_ap_data:
-            data_apont = st.date_input(
-                "Data",
-                value=hoje_campo,
-                format="DD/MM/YYYY",
-                key="engm_data_apont",
-            )
+            # Se a data veio de um clique em uma pendência, não passamos
+            # `value=` novamente. Assim o estado escolhido pelo botão não é
+            # sobrescrito pelo valor padrão do Streamlit.
+            if "engm_data_apont" in st.session_state:
+                data_apont = st.date_input(
+                    "Data",
+                    format="DD/MM/YYYY",
+                    key="engm_data_apont",
+                )
+            else:
+                data_apont = st.date_input(
+                    "Data",
+                    value=hoje_campo,
+                    format="DD/MM/YYYY",
+                    key="engm_data_apont",
+                )
 
         convocacoes_todas_unidades = _enriquecer_convocacoes_campo(
             _buscar_convocacoes_campo(
@@ -13888,7 +13968,7 @@ elif modo_campo:
                         (
                             '<div class="engm-pending-history-head">'
                             f'<strong>{total_pendencias_anteriores}</strong> '
-                            'apontamento(s) pendente(s) em outros dias'
+                            'apontamento(s) pendente(s)'
                             '</div>'
                         ),
                         unsafe_allow_html=True,
