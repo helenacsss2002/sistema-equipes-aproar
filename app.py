@@ -6860,8 +6860,10 @@ def _testar_banco_ativo():
         return False, f"{type(e).__name__}: {str(e)[:220]}"
 
 
-# --- SINCRONIZAÇÃO COM TRELLO (MÊS VIGENTE OU SELEÇÃO MANUAL) ---
+# --- SINCRONIZAÇÃO COM TRELLO ---
 TRELLO_JSON_URL = "https://trello.com/b/TX8hGvmI.json"
+TRELLO_LISTA_PRINCIPAL = "EM EXECUÇÃO"
+TRELLO_SYNC_TTL_SEGUNDOS = 120
 
 
 def _garantir_tabela_snapshot_trello():
@@ -6957,7 +6959,7 @@ def _carregar_snapshot_trello():
     return [], [], None
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=TRELLO_SYNC_TTL_SEGUNDOS, show_spinner=False)
 def _baixar_trello_publico():
     """
     Leitura pública do mesmo .json usado pela Torre de Controle.
@@ -6970,7 +6972,7 @@ def _baixar_trello_publico():
         try:
             # Timeout separado: conexão rápida, mas tolerância maior para leitura
             # do JSON completo quando o Trello estiver mais lento.
-            timeout_leitura = 35 if tentativa == 0 else 65
+            timeout_leitura = 12 if tentativa == 0 else 20
 
             resposta = requests.get(
                 TRELLO_JSON_URL,
@@ -6995,7 +6997,7 @@ def _baixar_trello_publico():
             ultimo_erro = e
 
             if tentativa == 0:
-                time.sleep(1.2)
+                time.sleep(0.5)
 
     raise ultimo_erro
 
@@ -7003,7 +7005,7 @@ def _baixar_trello_publico():
 def obter_listas_trello():
     """
     Ordem de prioridade:
-      1. Trello público ao vivo / cache de 5 minutos;
+      1. Trello público ao vivo / cache de 2 minutos;
       2. última leitura válida da sessão;
       3. último snapshot persistido no Neon.
 
@@ -7059,7 +7061,37 @@ def obter_listas_trello():
     return [], []
 
 
-def executar_sincronizacao_trello(id_lista_target=None, id_card_target=None, listas_precarregadas=None, cards_precarregados=None):
+
+def _localizar_lista_principal_trello(listas):
+    """
+    A origem operacional oficial das obras é a lista EM EXECUÇÃO.
+    Primeiro exige correspondência exata normalizada; depois aceita variações
+    de nome como "EM EXECUÇÃO - OBRAS".
+    """
+    alvo = normalizar(TRELLO_LISTA_PRINCIPAL)
+
+    exata = next(
+        (
+            lst for lst in (listas or [])
+            if not lst.get("closed", False)
+            and normalizar(lst.get("name", "")) == alvo
+        ),
+        None,
+    )
+    if exata:
+        return exata
+
+    return next(
+        (
+            lst for lst in (listas or [])
+            if not lst.get("closed", False)
+            and alvo in normalizar(lst.get("name", ""))
+        ),
+        None,
+    )
+
+
+def executar_sincronizacao_trello(id_lista_target=None, id_card_target=None, listas_precarregadas=None, cards_precarregados=None, forcar_atualizacao=False):
     """
     Sincroniza cards/listas do Trello com a tabela 'obras'.
 
@@ -7067,10 +7099,22 @@ def executar_sincronizacao_trello(id_lista_target=None, id_card_target=None, lis
     A leitura do Trello é sempre renovada ao executar uma sincronização.
     """
     try:
-        # A tela de Configurações já leu o Trello para montar os dropdowns.
-        # Reutilizamos exatamente esse payload no clique do botão, evitando
-        # uma segunda requisição que era a causa do ReadTimeout.
-        if listas_precarregadas is not None and cards_precarregados is not None:
+        # Em sincronização manual podemos ignorar o cache e buscar o quadro
+        # novamente, para que uma obra recém-criada no Trello apareça já.
+        if forcar_atualizacao:
+            try:
+                _baixar_trello_publico.clear()
+            except Exception:
+                pass
+            st.session_state.pop("trello_snapshot_sessao", None)
+
+        # Quando não é necessário forçar atualização, reaproveita a leitura
+        # já feita pela tela para evitar uma requisição duplicada.
+        if (
+            not forcar_atualizacao
+            and listas_precarregadas is not None
+            and cards_precarregados is not None
+        ):
             lists = list(listas_precarregadas)
             cards = list(cards_precarregados)
         else:
@@ -7104,22 +7148,12 @@ def executar_sincronizacao_trello(id_lista_target=None, id_card_target=None, lis
             id_lista_execucao = id_lista_target
             nome_lista_alvo = ""
 
-            # Sem seleção manual: procura primeiro a medição do mês vigente.
+            # Sem seleção manual: a lista operacional oficial é EM EXECUÇÃO.
+            # Antes o código priorizava "MEDIÇÃO <mês>", então cards que estavam
+            # apenas em EM EXECUÇÃO (como uma obra nova) podiam nunca chegar ao
+            # portal do supervisor.
             if not id_lista_execucao:
-                hoje = datetime.date.today()
-                mes_vigente = MESES_PT.get(hoje.month, "")
-                ano_vigente = str(hoje.year)
-                termo_busca = f"MEDICAO {mes_vigente} {ano_vigente}"
-
-                lista_mes = next(
-                    (lst for lst in lists if termo_busca in normalizar(lst.get("name", ""))),
-                    None
-                )
-                lista_fallback = next(
-                    (lst for lst in lists if "EM EXECUCAO" in normalizar(lst.get("name", ""))),
-                    None
-                )
-                lista_alvo = lista_mes or lista_fallback
+                lista_alvo = _localizar_lista_principal_trello(lists)
 
                 if lista_alvo:
                     id_lista_execucao = lista_alvo.get("id")
@@ -7133,7 +7167,7 @@ def executar_sincronizacao_trello(id_lista_target=None, id_card_target=None, lis
                     nome_lista_alvo = lista_alvo.get("name", "")
 
             if not id_lista_execucao:
-                return False, "Nenhuma lista do mês vigente ou de execução foi encontrada no Trello."
+                return False, f'A lista principal "{TRELLO_LISTA_PRINCIPAL}" não foi encontrada no Trello.'
 
             cards_execucao = [
                 c for c in cards
@@ -9526,6 +9560,10 @@ def incluir_multiplos_servicos_direto_apontamento(
     servicos,
     existentes_data=None,
     indisponiveis_map=None,
+    tipo_extra="Não",
+    valor_financeiro=0.0,
+    valor_acordo=0.0,
+    valor_adicional_noturno=0.0,
 ):
     """
     Inclui um ou vários serviços para o mesmo colaborador.
@@ -9535,7 +9573,17 @@ def incluir_multiplos_servicos_direto_apontamento(
       para que a meia diária daquele turno seja rateada entre as obras.
     - Turnos compatíveis diferentes (Manhã + Tarde, etc.) viram registros separados.
     - Integral + outro turno diferente continua bloqueado.
+    - Em inclusão retroativa, Extra/Financeiro/Acordos podem ser informados
+      já nesta etapa, sem precisar criar o registro e editar depois.
     """
+    tipo_extra = normalizar_tipo_diaria(tipo_extra)
+    valor_financeiro = round(max(0.0, float(valor_financeiro or 0.0)), 2)
+    valor_acordo = round(max(0.0, float(valor_acordo or 0.0)), 2)
+    valor_adicional_noturno = round(
+        max(0.0, float(valor_adicional_noturno or 0.0)),
+        2,
+    )
+
     itens = []
     vistos = set()
 
@@ -9849,6 +9897,11 @@ def incluir_multiplos_servicos_direto_apontamento(
     payloads = []
     grupos_payload = []
 
+    # Financeiro/Extra pertencem ao colaborador no dia, não a cada serviço.
+    # Quando houver mais de um turno/registro, ficam somente no primeiro para
+    # não duplicar valores nos relatórios.
+    primeiro_registro_financeiro = True
+
     for turno_novo, itens_turno in grupos_turno.items():
         principal = itens_turno[0]
         adicionais = []
@@ -9892,13 +9945,54 @@ def incluir_multiplos_servicos_direto_apontamento(
             "Presente (Integral)",
         )
 
+        unidades_grupo = {
+            str(x.get("unidade") or "").strip()
+            for x in itens_turno
+            if str(x.get("unidade") or "").strip()
+        }
+        grupo_tem_sebrae = any(
+            eh_unidade_sebrae(unidade_item)
+            for unidade_item in unidades_grupo
+        )
+
+        tipo_extra_reg = (
+            tipo_extra
+            if primeiro_registro_financeiro
+            else "Não"
+        )
+        financeiro_reg = (
+            valor_financeiro
+            if primeiro_registro_financeiro
+            else 0.0
+        )
+        acordo_reg = (
+            valor_acordo
+            if primeiro_registro_financeiro
+            else 0.0
+        )
+        noturno_reg = (
+            valor_adicional_noturno
+            if (
+                primeiro_registro_financeiro
+                and grupo_tem_sebrae
+            )
+            else 0.0
+        )
+
         payload = {
             "obra_id": principal["obra_id"],
             "colaborador_id": colaborador_id,
             "data": data_servico.isoformat(),
             "engenheiro": engenheiro,
             "status": status_inicial,
+            "tipo_diaria": tipo_extra_reg,
+            "custo_pago": financeiro_reg,
+            "custo_pago_definido_financeiro": False,
             "valor_extra": 0,
+            "valor_acordo": acordo_reg,
+            "valor_adicional_noturno": noturno_reg,
+            "custos_separados": True,
+            "migracao_sebrae_noturno_v2": True,
             "observacao": montar_observacao_operacional(
                 turno_novo,
                 "",
@@ -9914,6 +10008,7 @@ def incluir_multiplos_servicos_direto_apontamento(
             })
 
         payloads.append(payload)
+        primeiro_registro_financeiro = False
         grupos_payload.append({
             "turno": turno_novo,
             "servicos": itens_turno,
@@ -9958,6 +10053,19 @@ def incluir_multiplos_servicos_direto_apontamento(
                         agora.date() > data_servico
                     ),
                     "origem": "portal_engenheiro_multisservico",
+                    "extra": tipo_extra,
+                    "financeiro": valor_financeiro,
+                    "acordos_bonificacoes": valor_acordo,
+                    "adicional_noturno": (
+                        valor_adicional_noturno
+                        if any(
+                            eh_unidade_sebrae(
+                                str(x.get("unidade") or "")
+                            )
+                            for x in grupo["servicos"]
+                        )
+                        else 0.0
+                    ),
                 },
             )
 
@@ -11768,6 +11876,47 @@ elif modo_campo:
     # PORTAL DO ENGENHEIRO — MOBILE FIRST / MENOS CLIQUES
     # =====================================================================
     import html as _html
+
+    # Mantém as obras do portal alinhadas à lista EM EXECUÇÃO do Trello.
+    # Faz no máximo uma tentativa a cada 2 minutos por sessão para não pesar.
+    _agora_sync_trello = time.time()
+    _ultimo_sync_trello = float(
+        st.session_state.get("_trello_auto_sync_campo_ts", 0) or 0
+    )
+    if (
+        _agora_sync_trello - _ultimo_sync_trello
+        >= TRELLO_SYNC_TTL_SEGUNDOS
+    ):
+        st.session_state["_trello_auto_sync_campo_ts"] = _agora_sync_trello
+        try:
+            _ok_sync_campo, _msg_sync_campo = executar_sincronizacao_trello()
+            st.session_state["_trello_auto_sync_campo_ok"] = bool(
+                _ok_sync_campo
+            )
+            st.session_state["_trello_auto_sync_campo_msg"] = str(
+                _msg_sync_campo or ""
+            )
+
+            if _ok_sync_campo:
+                # A sincronização limpa o cache de obras. Recarregamos os
+                # objetos globais usados nos selectboxes ainda neste mesmo run.
+                obras_todas = buscar_obras() or []
+                obras = [
+                    o
+                    for o in obras_todas
+                    if not eh_registro_indisponibilidade(o)
+                ]
+                dict_obras = (
+                    {o["id"]: o for o in obras}
+                    if obras
+                    else {}
+                )
+        except Exception as _erro_sync_campo:
+            st.session_state["_trello_auto_sync_campo_ok"] = False
+            st.session_state["_trello_auto_sync_campo_msg"] = (
+                f"{type(_erro_sync_campo).__name__}: "
+                f"{str(_erro_sync_campo)[:180]}"
+            )
 
     # Limpa elementos visuais do próprio Streamlit no Portal do Supervisor.
     # Isso não altera a lógica dos widgets; remove apenas chrome/menu/toolbar.
@@ -14829,6 +14978,86 @@ elif modo_campo:
                         "mapa": mapa_inc,
                     })
 
+            # Valores do apontamento retroativo.
+            # Antes a inclusão criava o colaborador com Extra = Não e exigia
+            # uma segunda edição. Agora tudo pode ser informado de uma vez.
+            tipo_extra_inc = "Não"
+            financeiro_inc = 0.0
+            acordo_inc = 0.0
+            adicional_noturno_inc = 0.0
+
+            if eh_retroativo:
+                st.markdown(
+                    '<div class="engm-service-title">'
+                    'Valores do apontamento retroativo'
+                    '</div>',
+                    unsafe_allow_html=True,
+                )
+
+                c_retro_extra, c_retro_fin = st.columns(
+                    [.86, 1.14]
+                )
+
+                with c_retro_extra:
+                    tipo_extra_inc = st.selectbox(
+                        "Extra",
+                        TIPOS_DIARIA,
+                        key="engm_inc_extra_retro",
+                    )
+
+                with c_retro_fin:
+                    financeiro_inc = st.number_input(
+                        "Financeiro (R$)",
+                        min_value=0.0,
+                        step=1.0,
+                        format="%.2f",
+                        key="engm_inc_financeiro_retro",
+                        help=(
+                            "Valor informado pelo supervisor para o Financeiro. "
+                            "É independente de haver ou não Extra."
+                        ),
+                    )
+
+                tem_sebrae_inc = any(
+                    eh_unidade_sebrae(
+                        str(item.get("unidade") or "")
+                    )
+                    for item in servicos_inc_ui
+                )
+
+                if tem_sebrae_inc:
+                    c_retro_acordo, c_retro_not = st.columns(2)
+
+                    with c_retro_acordo:
+                        acordo_inc = st.number_input(
+                            "Acordos / Bonificações (R$)",
+                            min_value=0.0,
+                            step=1.0,
+                            format="%.2f",
+                            key="engm_inc_acordo_retro",
+                        )
+
+                    with c_retro_not:
+                        adicional_noturno_inc = st.number_input(
+                            "Adic. noturno (R$)",
+                            min_value=0.0,
+                            step=1.0,
+                            format="%.2f",
+                            value=float(
+                                VALOR_ADICIONAL_NOTURNO_SEBRAE
+                            ),
+                            key="engm_inc_noturno_retro",
+                        )
+                else:
+                    acordo_inc = st.number_input(
+                        "Acordos / Bonificações (R$)",
+                        min_value=0.0,
+                        step=1.0,
+                        format="%.2f",
+                        key="engm_inc_acordo_retro",
+                    )
+                    adicional_noturno_inc = 0.0
+
             if st.button(
                 "Adicionar ao apontamento",
                 use_container_width=True,
@@ -14980,6 +15209,10 @@ elif modo_campo:
                                     servicos_inc,
                                     existentes_data=existentes_todos_data,
                                     indisponiveis_map=indisp_map_apont,
+                                    tipo_extra=tipo_extra_inc,
+                                    valor_financeiro=financeiro_inc,
+                                    valor_acordo=acordo_inc,
+                                    valor_adicional_noturno=adicional_noturno_inc,
                                 )
                             )
 
@@ -15004,6 +15237,17 @@ elif modo_campo:
                             st.session_state[
                                 qtd_inc_key
                             ] = 1
+
+                            for _campo_retro_limpar in (
+                                "engm_inc_extra_retro",
+                                "engm_inc_financeiro_retro",
+                                "engm_inc_acordo_retro",
+                                "engm_inc_noturno_retro",
+                            ):
+                                st.session_state.pop(
+                                    _campo_retro_limpar,
+                                    None,
+                                )
 
                             st.session_state[
                                 "_engm_success_message"
@@ -16170,7 +16414,24 @@ elif modo_campo:
             key="engenheiro_campo_mobile",
         )
 
-        data_conv_auto = amanha_campo
+        if normalizar(engenheiro_campo) == "PAULO":
+            data_conv_auto = st.date_input(
+                "Data da convocação",
+                value=amanha_campo,
+                format="DD/MM/YYYY",
+                key="engm_conv_data_paulo",
+                help=(
+                    "Paulo pode lançar convocações retroativas quando for "
+                    "necessário regularizar uma equipe."
+                ),
+            )
+
+            if data_conv_auto < hoje_campo:
+                st.caption(
+                    "↩ Convocação retroativa liberada para Paulo."
+                )
+        else:
+            data_conv_auto = amanha_campo
 
         # Se a convocação anterior foi salva, limpa somente os campos de pessoas
         # ANTES de recriar os widgets. Isso evita conflito com o Session State.
@@ -16226,7 +16487,15 @@ elif modo_campo:
                     <div class="engm-summary-value" style="font-size:17px">
                         {data_conv_auto.strftime('%d/%m')}
                     </div>
-                    <div class="engm-summary-note">próximo dia útil</div>
+                    <div class="engm-summary-note">{
+                        "retroativa"
+                        if data_conv_auto < hoje_campo
+                        else (
+                            "hoje"
+                            if data_conv_auto == hoje_campo
+                            else "data da convocação"
+                        )
+                    }</div>
                 </div>
                 <div class="engm-summary-item">
                     <div class="engm-summary-label">Convocados</div>
@@ -17876,7 +18145,7 @@ else:
     elif menu_escolhido == "📋 CONVOCAÇÃO":
         cabecalho_pagina_aproar(
             "Convocação",
-            "Monte a equipe do próximo dia e faça correções administrativas quando necessário.",
+            "Monte a equipe e faça correções administrativas quando necessário. Paulo também pode lançar convocação retroativa.",
             categoria="OPERAÇÃO",
         )
         tab_nova_conv, tab_corrigir_conv = st.tabs(["➕ Nova Convocação", "✏️ Correção / Exclusão Administrativa"])
@@ -17887,9 +18156,34 @@ else:
                 with col_eng:
                     engenheiro_conv = st.selectbox("Engenheiro responsável:", ENGENHEIROS, key="eng_conv_adm")
 
-                data_conv_auto = proximo_dia_util(datetime.date.today())
+                data_conv_padrao = proximo_dia_util(
+                    datetime.date.today()
+                )
+
                 with col_info:
-                    st.info(f"📅 **Próximo dia:** {data_conv_auto.strftime('%d/%m/%Y')}")
+                    if normalizar(engenheiro_conv) == "PAULO":
+                        data_conv_auto = st.date_input(
+                            "Data da convocação:",
+                            value=data_conv_padrao,
+                            format="DD/MM/YYYY",
+                            key="data_conv_adm_paulo",
+                            help=(
+                                "Paulo pode selecionar datas anteriores para "
+                                "regularizar convocações retroativas."
+                            ),
+                        )
+
+                        if data_conv_auto < datetime.date.today():
+                            st.caption(
+                                "↩ Convocação retroativa autorizada para Paulo."
+                            )
+                    else:
+                        data_conv_auto = data_conv_padrao
+                        st.info(
+                            f"📅 **Próximo dia:** "
+                            f"{data_conv_auto.strftime('%d/%m/%Y')}"
+                        )
+
                 with col_turno:
                     turno_conv_adm = st.selectbox("Turno:", ["Integral", "Manhã", "Tarde", "Noite"], key="turno_conv_adm")
 
@@ -17985,7 +18279,7 @@ else:
                     if nomes_ja_alocados:
                         st.caption("Já escalados por este engenheiro nesta data: " + ", ".join([n for n in nomes_ja_alocados if n]))
                     else:
-                        st.caption("Nenhum escalado por este engenheiro ainda para o próximo dia.")
+                        st.caption("Nenhum escalado por este engenheiro nesta data.")
                     st.caption("A demanda específica será escolhida individualmente no Apontamento Diário.")
 
                 if st.button("CONFIRMAR CONVOCAÇÃO", type="primary", use_container_width=True, key="btn_confirm_conv_adm"):
@@ -19365,10 +19659,10 @@ else:
         with st.expander("🧾 Histórico de auditoria", expanded=False):
             render_historico_auditoria()
         
-        # Sincronização Dinâmica Trello (mês vigente, lista manual ou busca de card/lista)
+        # Sincronização Trello (EM EXECUÇÃO como origem principal, lista manual ou busca)
         with st.container(border=True):
             st.markdown("**Sincronização com o Trello**")
-            st.write("Sincronize o mês vigente ou localize manualmente listas e cards de medições anteriores.")
+            st.write("A lista principal é **EM EXECUÇÃO**. Use a busca manual apenas para listas/cards históricos.")
 
             lists_trello, cards_trello = obter_listas_trello()
             mapa_nome_lista = {l.get('id'): l.get('name', 'Lista sem nome') for l in lists_trello}
@@ -19381,9 +19675,11 @@ else:
 
             c_tr1, c_tr2 = st.columns(2)
             with c_tr1:
-                if st.button("🚀 SINCRONIZAR MÊS VIGENTE (AUTOMÁTICO)", type="primary"):
-                    with st.spinner("Sincronizando mês vigente..."):
-                        sucesso, me = executar_sincronizacao_trello(listas_precarregadas=lists_trello, cards_precarregados=cards_trello)
+                if st.button("🚀 SINCRONIZAR EM EXECUÇÃO AGORA", type="primary"):
+                    with st.spinner("Atualizando a lista EM EXECUÇÃO diretamente do Trello..."):
+                        sucesso, me = executar_sincronizacao_trello(
+                            forcar_atualizacao=True
+                        )
                         if sucesso:
                             st.success(me)
                             st.rerun()
@@ -19398,7 +19694,7 @@ else:
                     if st.button("🔄 SINCRONIZAR LISTA SELECIONADA"):
                         id_sel = mapa_listas[lista_manual_sel]
                         with st.spinner(f"Sincronizando {lista_manual_sel}..."):
-                            sucesso, me = executar_sincronizacao_trello(id_lista_target=id_sel, listas_precarregadas=lists_trello, cards_precarregados=cards_trello)
+                            sucesso, me = executar_sincronizacao_trello(id_lista_target=id_sel, forcar_atualizacao=True)
                             if sucesso:
                                 st.success(me)
                                 st.rerun()
@@ -19444,9 +19740,9 @@ else:
                     if st.button("➕ SINCRONIZAR RESULTADO DA BUSCA", type="primary", use_container_width=True):
                         with st.spinner("Sincronizando resultado selecionado..."):
                             if tipo_resultado == "lista":
-                                sucesso, me = executar_sincronizacao_trello(id_lista_target=id_resultado, listas_precarregadas=lists_trello, cards_precarregados=cards_trello)
+                                sucesso, me = executar_sincronizacao_trello(id_lista_target=id_resultado, forcar_atualizacao=True)
                             else:
-                                sucesso, me = executar_sincronizacao_trello(id_card_target=id_resultado, listas_precarregadas=lists_trello, cards_precarregados=cards_trello)
+                                sucesso, me = executar_sincronizacao_trello(id_card_target=id_resultado, forcar_atualizacao=True)
                             if sucesso:
                                 st.success(me)
                                 st.rerun()
