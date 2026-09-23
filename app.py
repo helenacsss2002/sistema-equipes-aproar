@@ -16414,24 +16414,10 @@ elif modo_campo:
             key="engenheiro_campo_mobile",
         )
 
-        if normalizar(engenheiro_campo) == "PAULO":
-            data_conv_auto = st.date_input(
-                "Data da convocação",
-                value=amanha_campo,
-                format="DD/MM/YYYY",
-                key="engm_conv_data_paulo",
-                help=(
-                    "Paulo pode lançar convocações retroativas quando for "
-                    "necessário regularizar uma equipe."
-                ),
-            )
-
-            if data_conv_auto < hoje_campo:
-                st.caption(
-                    "↩ Convocação retroativa liberada para Paulo."
-                )
-        else:
-            data_conv_auto = amanha_campo
+        # No Portal do Supervisor a convocação continua sendo para o
+        # próximo dia útil. Convocações retroativas ficam restritas à
+        # Controladoria.
+        data_conv_auto = amanha_campo
 
         # Se a convocação anterior foi salva, limpa somente os campos de pessoas
         # ANTES de recriar os widgets. Isso evita conflito com o Session State.
@@ -18145,7 +18131,7 @@ else:
     elif menu_escolhido == "📋 CONVOCAÇÃO":
         cabecalho_pagina_aproar(
             "Convocação",
-            "Monte a equipe e faça correções administrativas quando necessário. Paulo também pode lançar convocação retroativa.",
+            "Monte a equipe e faça correções administrativas quando necessário. A Controladoria pode ajustar a data da convocação.",
             categoria="OPERAÇÃO",
         )
         tab_nova_conv, tab_corrigir_conv = st.tabs(["➕ Nova Convocação", "✏️ Correção / Exclusão Administrativa"])
@@ -18161,27 +18147,24 @@ else:
                 )
 
                 with col_info:
-                    if normalizar(engenheiro_conv) == "PAULO":
-                        data_conv_auto = st.date_input(
-                            "Data da convocação:",
-                            value=data_conv_padrao,
-                            format="DD/MM/YYYY",
-                            key="data_conv_adm_paulo",
-                            help=(
-                                "Paulo pode selecionar datas anteriores para "
-                                "regularizar convocações retroativas."
-                            ),
-                        )
+                    # Na Controladoria, a data da convocação pode ser ajustada
+                    # livremente. Isso permite ao Paulo regularizar uma
+                    # convocação retroativa mesmo quando o engenheiro
+                    # responsável selecionado é Eduardo, Soares, Gabriel etc.
+                    data_conv_auto = st.date_input(
+                        "Data da convocação:",
+                        value=data_conv_padrao,
+                        format="DD/MM/YYYY",
+                        key="data_conv_adm_controladoria",
+                        help=(
+                            "A Controladoria pode selecionar uma data anterior "
+                            "para regularizar convocações retroativas."
+                        ),
+                    )
 
-                        if data_conv_auto < datetime.date.today():
-                            st.caption(
-                                "↩ Convocação retroativa autorizada para Paulo."
-                            )
-                    else:
-                        data_conv_auto = data_conv_padrao
-                        st.info(
-                            f"📅 **Próximo dia:** "
-                            f"{data_conv_auto.strftime('%d/%m/%Y')}"
+                    if data_conv_auto < datetime.date.today():
+                        st.caption(
+                            "↩ Convocação retroativa pela Controladoria."
                         )
 
                 with col_turno:
