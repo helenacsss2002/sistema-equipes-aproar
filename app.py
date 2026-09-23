@@ -4248,6 +4248,7 @@ def identificar_unidade(nome_card):
     texto = unicodedata.normalize('NFKD', str(nome_card)).encode('ASCII', 'ignore').decode('utf-8').upper()
     
     if "APRL005" in texto or "MARACANAU" in texto: return "MARACANAÚ"
+    if "APARTAMENTO 701" in texto or "PARTICULAR" in texto: return "PARTICULAR"
     if "SEBRAE" in texto: return "SEBRAE"
     if "UNIFOR" in texto: return "UNIFOR"
     if "IDALYA" in texto or "MATHEUS" in texto: return "IDALYA E MATHEUS"
@@ -5963,7 +5964,7 @@ def formatar_unidade_whatsapp(unidade):
     texto = " ".join(str(unidade or "").strip().split())
     if not texto:
         return "Unidade não identificada"
-    siglas = {"FIEC", "SEBRAE", "UNIFOR"}
+    siglas = {"FIEC", "SEBRAE", "UNIFOR", "PARTICULAR"}
     if normalizar(texto) in siglas:
         return normalizar(texto)
     titulo = texto.title()
@@ -7494,8 +7495,145 @@ UNIDADES_APROAR = [
     "UNIFOR",
     "SEBRAE",
     "PARANGABA",
-    "APARTAMENTO 701",
+    "PARTICULAR",
 ]
+
+def unidades_disponiveis_plataforma():
+    """
+    Une as unidades padrão às unidades criadas manualmente na aba Obras.
+
+    Assim, se futuramente for cadastrada uma obra com uma nova unidade,
+    essa unidade passa a aparecer nos seletores sem precisar alterar código.
+    APARTAMENTO 701 é obra/serviço da unidade PARTICULAR, não uma unidade.
+    """
+    saida = []
+    vistos = set()
+
+    candidatas = list(UNIDADES_APROAR)
+    candidatas.extend(
+        sorted(
+            {
+                str(o.get("unidade") or "").strip()
+                for o in (obras if "obras" in globals() else [])
+                if str(o.get("unidade") or "").strip()
+            },
+            key=lambda x: normalizar(x),
+        )
+    )
+
+    for unidade in candidatas:
+        unidade_limpa = " ".join(
+            str(unidade or "").strip().split()
+        ).upper()
+        unidade_norm = normalizar(unidade_limpa)
+
+        if unidade_norm == "APARTAMENTO 701":
+            continue
+
+        if not unidade_limpa or unidade_norm in vistos:
+            continue
+
+        vistos.add(unidade_norm)
+        saida.append(unidade_limpa)
+
+    return saida
+
+
+@st.cache_resource(show_spinner=False)
+def _garantir_particular_apartamento_701():
+    """
+    Migração idempotente:
+    - transforma a antiga unidade APARTAMENTO 701 em PARTICULAR;
+    - garante a obra APARTAMENTO 701 dentro de PARTICULAR.
+    """
+    try:
+        if DB_BACKEND == "NEON" and hasattr(supabase, "_connect"):
+            with supabase._connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE obras
+                           SET unidade = 'PARTICULAR'
+                         WHERE UPPER(TRIM(COALESCE(unidade, '')))
+                               = 'APARTAMENTO 701'
+                        """
+                    )
+
+                    cur.execute(
+                        """
+                        SELECT id
+                          FROM obras
+                         WHERE UPPER(TRIM(COALESCE(nome, '')))
+                               = 'APARTAMENTO 701'
+                           AND UPPER(TRIM(COALESCE(unidade, '')))
+                               = 'PARTICULAR'
+                         LIMIT 1
+                        """
+                    )
+                    existe = cur.fetchone()
+
+                    if not existe:
+                        cur.execute(
+                            """
+                            INSERT INTO obras (nome, unidade)
+                            VALUES ('APARTAMENTO 701', 'PARTICULAR')
+                            """
+                        )
+
+                conn.commit()
+
+        else:
+            antigos = (
+                supabase.table("obras")
+                .select("id,nome,unidade")
+                .eq("unidade", "APARTAMENTO 701")
+                .execute().data
+                or []
+            )
+            for item in antigos:
+                supabase.table("obras").update({
+                    "unidade": "PARTICULAR"
+                }).eq("id", item.get("id")).execute()
+
+            existentes = (
+                supabase.table("obras")
+                .select("id")
+                .eq("nome", "APARTAMENTO 701")
+                .eq("unidade", "PARTICULAR")
+                .limit(1)
+                .execute().data
+                or []
+            )
+            if not existentes:
+                supabase.table("obras").insert({
+                    "nome": "APARTAMENTO 701",
+                    "unidade": "PARTICULAR",
+                }).execute()
+
+        limpar_cache_operacional()
+        return True
+
+    except Exception as exc:
+        st.session_state[
+            "_erro_particular_apartamento701"
+        ] = f"{type(exc).__name__}: {str(exc)[:180]}"
+        return False
+
+
+# Garante a estrutura PARTICULAR/APARTAMENTO 701 uma única vez por processo.
+if _garantir_particular_apartamento_701():
+    obras_todas = buscar_obras() or []
+    obras = [
+        o
+        for o in obras_todas
+        if not eh_registro_indisponibilidade(o)
+    ]
+    dict_obras = (
+        {o["id"]: o for o in obras}
+        if obras
+        else {}
+    )
+
 
 # Responsáveis oficiais usados nas cobranças automáticas e manuais.
 RESPONSAVEIS_UNIDADES_TEAMS = {
@@ -7513,7 +7651,7 @@ RESPONSAVEIS_UNIDADES_TEAMS = {
     "GABRIEL": [
         "FIEC",
         "PARANGABA",
-        "APARTAMENTO 701",
+        "PARTICULAR",
     ],
     "VICTOR": [
         "CENTRO",
@@ -16523,18 +16661,7 @@ elif modo_campo:
                 "Nenhuma obra/unidade cadastrada."
             )
         else:
-            unidades_reais = sorted(
-                {
-                    str(o.get("unidade"))
-                    for o in obras
-                    if o.get("unidade")
-                }
-            )
-
-            unidades_opcoes = []
-            for u in UNIDADES_APROAR + unidades_reais:
-                if u and u not in unidades_opcoes:
-                    unidades_opcoes.append(u)
+            unidades_opcoes = unidades_disponiveis_plataforma()
 
             unidade_selecionada = st.selectbox(
                 "Unidade",
@@ -18170,7 +18297,7 @@ else:
                 with col_turno:
                     turno_conv_adm = st.selectbox("Turno:", ["Integral", "Manhã", "Tarde", "Noite"], key="turno_conv_adm")
 
-                unidades_unicas = UNIDADES_APROAR.copy()
+                unidades_unicas = unidades_disponiveis_plataforma()
                 unidade_selecionada = st.selectbox("Unidade:", unidades_unicas, key="u_adm_sel")
 
                 funcoes_disponiveis = sorted(list(set([c.get('funcao', '') for c in colaboradores if c.get('funcao')])))
@@ -18489,7 +18616,7 @@ else:
 
                 st.markdown(f"**Colaborador:** {colab_corr.get('nome', 'N/A')}")
 
-                unidades_disponiveis = UNIDADES_APROAR.copy()
+                unidades_disponiveis = unidades_disponiveis_plataforma()
                 idx_unidade = unidades_disponiveis.index(unidade_atual_corr) if unidade_atual_corr in unidades_disponiveis else 0
 
                 c_dest1, c_dest2, c_dest3 = st.columns(3)
@@ -19747,7 +19874,9 @@ else:
             st.markdown("**Cadastrar nova obra**")
             st.caption(
                 "O mesmo nome pode existir em unidades diferentes. "
-                "Nome + unidade iguais não serão duplicados."
+                "Nome + unidade iguais não serão duplicados. "
+                "Você também pode digitar uma unidade nova manualmente; "
+                "ela passará a aparecer nos seletores da plataforma."
             )
 
             if st.session_state.get("msg_cadastro_obra_admin"):
