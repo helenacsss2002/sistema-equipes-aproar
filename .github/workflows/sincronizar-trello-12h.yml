@@ -1,0 +1,28 @@
+name: Sincronizar Trello a cada 12h
+
+on:
+  schedule:
+    - cron: "0 */12 * * *"
+  workflow_dispatch:
+
+jobs:
+  sincronizar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Baixar repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Instalar dependências
+        run: pip install requests "psycopg[binary]>=3.2"
+
+      - name: Sincronizar lista EM EXECUÇÃO
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python sincronizar_trello_12h.py
