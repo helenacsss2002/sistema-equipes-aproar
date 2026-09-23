@@ -12447,6 +12447,825 @@ elif modo_campo:
     hoje_campo = agora_aproar().date()
     amanha_campo = proximo_dia_util(hoje_campo)
 
+    def _feedback_salvo_mobile(mensagem):
+        """Confirmação pequena, previsível e independente do tema do aparelho."""
+        st.markdown(
+            (
+                '<div class="engm-success-message">'
+                '<span class="engm-success-icon">✓</span>'
+                f'<span>{_html.escape(str(mensagem).replace("✓", "").strip())}</span>'
+                '</div>'
+            ),
+            unsafe_allow_html=True,
+        )
+
+    def _mostrar_confirmacao_campo():
+        """Exibe uma confirmação pequena e confiável após o rerun."""
+        mensagem = st.session_state.pop(
+            "_engm_success_message",
+            None,
+        )
+        if mensagem:
+            _feedback_salvo_mobile(mensagem)
+
+    def _salvar_apontamentos_lote_mobile(
+        itens,
+        data_servico,
+        engenheiro,
+    ):
+        """
+        Salva a equipe de uma vez e só retorna sucesso depois de confirmar
+        no banco que TODAS as convocações foram atualizadas.
+
+        No Neon, as operações principais são enviadas em lote dentro de uma
+        única transação. Se qualquer parte falhar, há rollback completo:
+        nunca exibimos "salvo" para um lote parcialmente gravado.
+        """
+        itens = list(itens or [])
+        if not itens:
+            return 0, []
+
+        schema_ok, schema_detalhe = _garantir_schema_apontamento_runtime()
+        if not schema_ok:
+            return 0, [
+                "Não foi possível preparar o banco para salvar o apontamento. "
+                f"Campos pendentes: {schema_detalhe}"
+            ]
+
+        if (
+            DB_BACKEND == "NEON"
+            and hasattr(supabase, "_connect")
+        ):
+            try:
+                usar_estrutura = schema_producao_disponivel()
+                agora_lote = agora_aproar()
+
+                updates_conv = []
+                upserts_apont = []
+                servicos_rows = []
+                auditoria_rows = []
+                ids_lote = []
+
+                for item in itens:
+                    conv = item["conv"]
+                    conv_id = str(conv.get("id") or "").strip()
+                    colab_id = str(conv.get("colaborador_id") or "").strip()
+
+                    if not conv_id:
+                        raise RuntimeError(
+                            f"{item.get('nome_pessoa') or 'Colaborador'}: "
+                            "convocação sem ID."
+                        )
+
+                    ids_lote.append(conv_id)
+
+                    retroativo_item = apontamento_esta_atrasado(
+                        data_servico,
+                        unidade=item.get("unidade_contexto") or "",
+                        agora=agora_lote,
+                    )
+
+                    updates_conv.append((
+                        item["obra_id_final"],
+                        item["status"],
+                        item["tipo_diaria_final"],
+                        float(item["custo_pago_final"] or 0),
+                        float(item["valor_extra_final"] or 0),
+                        float(item["valor_adicional_noturno_final"] or 0),
+                        float(item["valor_acordo_final"] or 0),
+                        float(item["custo_encargos_final"] or 0),
+                        item["nova_obs"],
+                        conv_id,
+                    ))
+
+                    if usar_estrutura:
+                        upserts_apont.append((
+                            conv_id,
+                            data_servico,
+                            colab_id,
+                            str(engenheiro),
+                            str(item["status"]),
+                            float(item["valor_extra_final"] or 0),
+                            str(item["obs_livre"] or ""),
+                            str(engenheiro),
+                            retroativo_item,
+                            item["tipo_diaria_final"],
+                            float(item["custo_pago_final"] or 0),
+                            float(item["valor_acordo_final"] or 0),
+                            float(item["valor_adicional_noturno_final"] or 0),
+                            float(item["custo_encargos_final"] or 0),
+                        ))
+
+                        obra_principal = dict_obras.get(
+                            item["obra_id_final"],
+                            {},
+                        )
+                        servicos_rows.append((
+                            conv_id,
+                            str(item["obra_id_final"] or ""),
+                            str(obra_principal.get("nome") or ""),
+                            str(obra_principal.get("unidade") or ""),
+                            str(item["periodo_principal"] or ""),
+                            True,
+                        ))
+
+                        for adicional in item["adicionais"] or []:
+                            nome = str(
+                                adicional.get("servico") or ""
+                            ).strip()
+                            if not nome:
+                                continue
+
+                            obra_id_adic = str(
+                                adicional.get("obra_id") or ""
+                            ).strip()
+                            obra_adic = (
+                                dict_obras.get(obra_id_adic, {})
+                                if obra_id_adic
+                                else {}
+                            )
+
+                            if not obra_adic:
+                                obra_adic = next(
+                                    (
+                                        o for o in obras
+                                        if normalizar(o.get("nome"))
+                                        == normalizar(nome)
+                                    ),
+                                    {},
+                                )
+
+                            servicos_rows.append((
+                                conv_id,
+                                str(
+                                    obra_adic.get("id")
+                                    or obra_id_adic
+                                    or ""
+                                ),
+                                nome,
+                                str(
+                                    adicional.get("unidade")
+                                    or obra_adic.get("unidade")
+                                    or obra_principal.get("unidade")
+                                    or ""
+                                ),
+                                str(adicional.get("periodo") or ""),
+                                False,
+                            ))
+
+                        auditoria_rows.append((
+                            "apontamento",
+                            conv_id,
+                            "SALVAR",
+                            str(engenheiro),
+                            None,
+                            _json_db({
+                                "data_servico": data_servico,
+                                "status": item["status"],
+                                "tipo_diaria": item["tipo_diaria_final"],
+                                "custo_pago": item["custo_pago_final"],
+                                "valor_extra": item["valor_extra_final"],
+                                "valor_adicional_noturno": item["valor_adicional_noturno_final"],
+                                "valor_acordo": item["valor_acordo_final"],
+                                "custo_encargos_base": item["custo_encargos_final"],
+                                "obra_principal_id": str(item["obra_id_final"]),
+                                "periodo_principal": item["periodo_principal"],
+                                "servicos_adicionais": item["adicionais"],
+                                "retroativo": retroativo_item,
+                            }),
+                            _json_db({
+                                "origem": "portal_engenheiro_lote",
+                            }),
+                        ))
+
+                ids_unicos = list(dict.fromkeys(ids_lote))
+
+                with supabase._connect() as conn:
+                    try:
+                        with conn.cursor() as cur:
+                            # Atualiza todas as convocações na mesma transação.
+                            cur.executemany(
+                                """
+                                UPDATE convocacoes
+                                   SET obra_id = %s,
+                                       status = %s,
+                                       tipo_diaria = %s,
+                                       custo_pago = %s,
+                                       valor_extra = %s,
+                                       valor_adicional_noturno = %s,
+                                       valor_acordo = %s,
+                                       custo_encargos_base = %s,
+                                       custos_separados = TRUE,
+                                       migracao_sebrae_noturno_v2 = TRUE,
+                                       observacao = %s
+                                 WHERE CAST(id AS TEXT) = %s
+                                """,
+                                updates_conv,
+                            )
+
+                            if usar_estrutura:
+                                cur.executemany(
+                                    """
+                                    INSERT INTO apontamentos (
+                                        convocacao_id, data_servico, colaborador_id,
+                                        engenheiro, status, valor_extra, observacao,
+                                        apontado_em, apontado_por, retroativo, atualizado_em,
+                                        tipo_diaria, custo_pago, valor_acordo,
+                                        valor_adicional_noturno, custo_encargos_base,
+                                        custos_separados
+                                    )
+                                    VALUES (
+                                        %s,%s,%s,%s,%s,%s,%s,
+                                        NOW(),%s,%s,NOW(),%s,%s,%s,%s,%s,TRUE
+                                    )
+                                    ON CONFLICT (convocacao_id) DO UPDATE SET
+                                        data_servico = EXCLUDED.data_servico,
+                                        colaborador_id = EXCLUDED.colaborador_id,
+                                        engenheiro = EXCLUDED.engenheiro,
+                                        status = EXCLUDED.status,
+                                        valor_extra = EXCLUDED.valor_extra,
+                                        observacao = EXCLUDED.observacao,
+                                        apontado_por = EXCLUDED.apontado_por,
+                                        retroativo = EXCLUDED.retroativo,
+                                        tipo_diaria = EXCLUDED.tipo_diaria,
+                                        custo_pago = EXCLUDED.custo_pago,
+                                        valor_acordo = EXCLUDED.valor_acordo,
+                                        valor_adicional_noturno = EXCLUDED.valor_adicional_noturno,
+                                        custo_encargos_base = EXCLUDED.custo_encargos_base,
+                                        custos_separados = TRUE,
+                                        migracao_sebrae_noturno_v2 = TRUE,
+                                        atualizado_em = NOW()
+                                    """,
+                                    upserts_apont,
+                                )
+
+                                cur.execute(
+                                    """
+                                    DELETE FROM servicos_apontamento
+                                     WHERE CAST(convocacao_id AS TEXT) = ANY(%s)
+                                    """,
+                                    (ids_unicos,),
+                                )
+
+                                if servicos_rows:
+                                    cur.executemany(
+                                        """
+                                        INSERT INTO servicos_apontamento (
+                                            convocacao_id, obra_id, obra_nome_snapshot,
+                                            unidade_snapshot, periodo, principal
+                                        )
+                                        VALUES (%s,%s,%s,%s,%s,%s)
+                                        """,
+                                        servicos_rows,
+                                    )
+
+                                if auditoria_rows:
+                                    cur.executemany(
+                                        """
+                                        INSERT INTO auditoria
+                                            (entidade, entidade_id, acao, usuario,
+                                             antes, depois, contexto)
+                                        VALUES
+                                            (%s,%s,%s,%s,%s::jsonb,%s::jsonb,%s::jsonb)
+                                        """,
+                                        auditoria_rows,
+                                    )
+
+                            # Confirma ANTES do commit que todas as convocações
+                            # do lote existem e receberam o marcador de gravação.
+                            cur.execute(
+                                """
+                                SELECT COUNT(*) AS qtd
+                                  FROM convocacoes
+                                 WHERE CAST(id AS TEXT) = ANY(%s)
+                                   AND custos_separados = TRUE
+                                """,
+                                (ids_unicos,),
+                            )
+                            row_conf = cur.fetchone() or {}
+                            qtd_conv = (
+                                int(row_conf.get("qtd") or 0)
+                                if isinstance(row_conf, dict)
+                                else int(row_conf[0] or 0)
+                            )
+
+                            if qtd_conv != len(ids_unicos):
+                                raise RuntimeError(
+                                    "O banco não confirmou todos os registros "
+                                    f"({qtd_conv}/{len(ids_unicos)})."
+                                )
+
+                            if usar_estrutura:
+                                cur.execute(
+                                    """
+                                    SELECT COUNT(*) AS qtd
+                                      FROM apontamentos
+                                     WHERE CAST(convocacao_id AS TEXT) = ANY(%s)
+                                    """,
+                                    (ids_unicos,),
+                                )
+                                row_ap = cur.fetchone() or {}
+                                qtd_ap = (
+                                    int(row_ap.get("qtd") or 0)
+                                    if isinstance(row_ap, dict)
+                                    else int(row_ap[0] or 0)
+                                )
+
+                                if qtd_ap != len(ids_unicos):
+                                    raise RuntimeError(
+                                        "A confirmação estruturada do apontamento "
+                                        f"falhou ({qtd_ap}/{len(ids_unicos)})."
+                                    )
+
+                        conn.commit()
+
+                    except Exception:
+                        conn.rollback()
+                        raise
+
+                limpar_cache_convocacoes()
+                return len(ids_unicos), []
+
+            except Exception as exc:
+                return 0, [
+                    "O apontamento NÃO foi confirmado no banco. "
+                    f"Nenhuma confirmação de sucesso foi exibida. Detalhe: {str(exc)[:220]}"
+                ]
+
+        # Fallback REST: confirma individualmente cada atualização.
+        salvos = 0
+        falhas = []
+
+        for item in itens:
+            conv = item["conv"]
+            nome_pessoa = item["nome_pessoa"]
+
+            try:
+                resposta = (
+                    supabase.table("convocacoes")
+                    .update({
+                        "obra_id": item["obra_id_final"],
+                        "status": item["status"],
+                        "tipo_diaria": item["tipo_diaria_final"],
+                        "custo_pago": item["custo_pago_final"],
+                        "valor_extra": item["valor_extra_final"],
+                        "valor_adicional_noturno": item["valor_adicional_noturno_final"],
+                        "valor_acordo": item["valor_acordo_final"],
+                        "custo_encargos_base": item["custo_encargos_final"],
+                        "custos_separados": True,
+                        "migracao_sebrae_noturno_v2": True,
+                        "observacao": item["nova_obs"],
+                    })
+                    .eq("id", conv.get("id"))
+                    .execute()
+                )
+
+                dados_resp = list(getattr(resposta, "data", None) or [])
+                if not dados_resp:
+                    raise RuntimeError(
+                        "o banco não confirmou a atualização da convocação"
+                    )
+
+                salvar_apontamento_estruturado(
+                    conv,
+                    data_servico,
+                    engenheiro,
+                    item["status"],
+                    item["valor_extra_final"],
+                    item["obs_livre"],
+                    item["obra_id_final"],
+                    item["periodo_principal"],
+                    item["adicionais"],
+                    tipo_diaria=item["tipo_diaria_final"],
+                    custo_pago=item["custo_pago_final"],
+                    valor_acordo=item["valor_acordo_final"],
+                    valor_adicional_noturno=item["valor_adicional_noturno_final"],
+                    custo_encargos_base=item["custo_encargos_final"],
+                )
+
+                salvos += 1
+
+            except Exception as exc:
+                falhas.append(
+                    f"{nome_pessoa}: {str(exc)[:150]}"
+                )
+
+        limpar_cache_convocacoes()
+        return salvos, falhas
+
+    def _buscar_convocacoes_campo(engenheiro, data_ref):
+        return _buscar_convocacoes_intervalo(
+            data_ref,
+            data_ref,
+            engenheiro,
+        ) or []
+
+    def _enriquecer_convocacoes_campo(registros):
+        saida = []
+        for registro in registros or []:
+            item = dict(registro)
+            item["dados_obra"] = dict_obras.get(
+                item.get("obra_id"),
+                {
+                    "unidade": "Desconhecida",
+                    "nome": NOME_OBRA_PLACEHOLDER,
+                },
+            )
+            saida.append(item)
+        return saida
+
+    def _convocacao_apontada_campo(conv):
+        obra = conv.get("dados_obra") or dict_obras.get(
+            conv.get("obra_id"),
+            {},
+        )
+        return bool(obra) and not eh_obra_placeholder(obra)
+
+    def _buscar_pendencias_anteriores_supervisor_campo(
+        engenheiro,
+        data_fim,
+    ):
+        """
+        Retorna SOMENTE as pendências do supervisor selecionado.
+
+        A checagem não depende apenas do obra_id/placeholder. Primeiro usamos
+        os sinais reais de que o apontamento foi salvo: registro na tabela
+        `apontamentos`, metadata `apontado_em` e, como compatibilidade,
+        `custos_separados`. Isso evita esconder convocações antigas que já
+        nasceram vinculadas a uma obra real.
+        """
+        if not engenheiro or not data_fim:
+            return []
+
+        data_inicio = datetime.date(2020, 1, 1)
+        eng_norm = normalizar(engenheiro)
+
+        # Busca sem filtro exato no banco para não perder registros antigos
+        # gravados com diferença de caixa/espaços no nome do supervisor.
+        try:
+            registros = (
+                supabase.table("convocacoes")
+                .select("*")
+                .gte("data", data_inicio.isoformat())
+                .lte("data", data_fim.isoformat())
+                .execute()
+                .data
+                or []
+            )
+        except Exception:
+            registros = _buscar_convocacoes_intervalo(
+                data_inicio,
+                data_fim,
+                None,
+            ) or []
+
+        registros = [
+            r
+            for r in registros
+            if normalizar(r.get("engenheiro") or "") == eng_norm
+        ]
+
+        if not registros:
+            return []
+
+        ids_apontados = set()
+
+        # Quando a tabela estruturada existir, ela é o sinal mais confiável.
+        try:
+            apontamentos_salvos = (
+                supabase.table("apontamentos")
+                .select("*")
+                .gte("data_servico", data_inicio.isoformat())
+                .lte("data_servico", data_fim.isoformat())
+                .execute()
+                .data
+                or []
+            )
+            for ap in apontamentos_salvos:
+                if normalizar(ap.get("engenheiro") or "") != eng_norm:
+                    continue
+                conv_id = str(ap.get("convocacao_id") or "").strip()
+                if conv_id:
+                    ids_apontados.add(conv_id)
+        except Exception:
+            # Compatibilidade com instalações sem a tabela estruturada.
+            ids_apontados = set()
+
+        pendentes = []
+        for conv in _enriquecer_convocacoes_campo(registros):
+            conv_id = str(conv.get("id") or "").strip()
+            meta = obter_metadata_operacional(
+                conv.get("observacao") or ""
+            )
+
+            apontado = bool(
+                (conv_id and conv_id in ids_apontados)
+                or meta.get("apontado_em")
+                or conv.get("custos_separados") is True
+            )
+
+            # Para registros legados em que não há metadata nem tabela
+            # estruturada, mantém a regra antiga como último fallback.
+            if not apontado:
+                obra = conv.get("dados_obra") or dict_obras.get(
+                    conv.get("obra_id"),
+                    {},
+                )
+                if (
+                    obra
+                    and not eh_obra_placeholder(obra)
+                    and conv.get("custos_separados") is not None
+                ):
+                    apontado = True
+
+            if not apontado:
+                pendentes.append(conv)
+
+        return pendentes
+
+    def _servicos_convocacao_mobile(conv):
+        """
+        Retorna todos os serviços reais vinculados ao registro:
+        principal + adicionais, preservando unidade/obra_id.
+        """
+        servicos = []
+
+        obra_principal = (
+            conv.get("dados_obra")
+            or dict_obras.get(conv.get("obra_id"), {})
+            or {}
+        )
+
+        if obra_principal and not eh_obra_placeholder(obra_principal):
+            servicos.append({
+                "principal": True,
+                "obra_id": str(
+                    obra_principal.get("id")
+                    or conv.get("obra_id")
+                    or ""
+                ),
+                "obra": str(
+                    obra_principal.get("nome")
+                    or ""
+                ),
+                "unidade": str(
+                    obra_principal.get("unidade")
+                    or ""
+                ),
+                "periodo": turno_da_convocacao(conv),
+            })
+
+        meta = obter_metadata_operacional(
+            conv.get("observacao")
+            or ""
+        )
+
+        for adicional in _normalizar_servicos_adicionais(meta):
+            nome = str(
+                adicional.get("servico")
+                or ""
+            ).strip()
+            obra_id = str(
+                adicional.get("obra_id")
+                or ""
+            ).strip()
+            unidade = str(
+                adicional.get("unidade")
+                or ""
+            ).strip()
+
+            obra_ref = (
+                dict_obras.get(obra_id, {})
+                if obra_id
+                else {}
+            )
+
+            if not obra_ref and nome:
+                obra_ref = next(
+                    (
+                        o for o in obras
+                        if normalizar(
+                            o.get("nome")
+                        ) == normalizar(nome)
+                        and (
+                            not unidade
+                            or normalizar(
+                                o.get("unidade")
+                            ) == normalizar(unidade)
+                        )
+                    ),
+                    {},
+                )
+
+            servicos.append({
+                "principal": False,
+                "obra_id": str(
+                    obra_ref.get("id")
+                    or obra_id
+                    or ""
+                ),
+                "obra": str(
+                    nome
+                    or obra_ref.get("nome")
+                    or ""
+                ),
+                "unidade": str(
+                    unidade
+                    or obra_ref.get("unidade")
+                    or ""
+                ),
+                "periodo": str(
+                    adicional.get("periodo")
+                    or turno_da_convocacao(conv)
+                ),
+            })
+
+        # Remove duplicatas reais.
+        saida = []
+        vistos = set()
+        for item in servicos:
+            chave = (
+                str(item.get("obra_id") or ""),
+                normalizar(item.get("obra") or ""),
+                normalizar(item.get("unidade") or ""),
+                bool(item.get("principal")),
+            )
+            if chave in vistos:
+                continue
+            vistos.add(chave)
+            saida.append(item)
+
+        return saida
+
+    def _unidades_convocacao_mobile(conv):
+        """
+        Unidades vinculadas à convocação.
+
+        IMPORTANTE:
+        antes do apontamento a obra principal é um placeholder da unidade.
+        Mesmo sendo placeholder, a unidade precisa aparecer no seletor para
+        que o engenheiro consiga escolher a obra/serviço real.
+        """
+        unidades = []
+
+        obra_principal = (
+            conv.get("dados_obra")
+            or dict_obras.get(conv.get("obra_id"), {})
+            or {}
+        )
+
+        unidade_principal = str(
+            obra_principal.get("unidade")
+            or ""
+        ).strip()
+
+        if (
+            unidade_principal
+            and normalizar(unidade_principal)
+            not in {"", "desconhecida", "desconhecido"}
+        ):
+            unidades.append(unidade_principal)
+
+        for serv in _servicos_convocacao_mobile(conv):
+            unidade_serv = str(
+                serv.get("unidade")
+                or ""
+            ).strip()
+
+            if (
+                unidade_serv
+                and normalizar(unidade_serv)
+                not in {
+                    normalizar(u)
+                    for u in unidades
+                }
+            ):
+                unidades.append(unidade_serv)
+
+        return unidades
+
+    def _convocacao_tem_unidade_mobile(conv, unidade):
+        alvo = normalizar(unidade or "")
+        if not alvo:
+            return False
+
+        return any(
+            normalizar(unid) == alvo
+            for unid in _unidades_convocacao_mobile(conv)
+        )
+
+    def _servico_contexto_unidade_mobile(conv, unidade):
+        alvo = normalizar(unidade or "")
+        servicos = _servicos_convocacao_mobile(conv)
+
+        # Se houver serviço real principal nessa unidade, ele tem prioridade.
+        for serv in servicos:
+            if (
+                serv.get("principal")
+                and normalizar(serv.get("unidade") or "") == alvo
+            ):
+                return serv
+
+        # Depois, procura serviço adicional real nessa unidade.
+        for serv in servicos:
+            if normalizar(serv.get("unidade") or "") == alvo:
+                return serv
+
+        # Se ainda não há serviço real definido, usa o placeholder apenas
+        # como contexto de UNIDADE. A obra continuará vazia para o engenheiro
+        # escolher no apontamento.
+        obra_principal = (
+            conv.get("dados_obra")
+            or dict_obras.get(conv.get("obra_id"), {})
+            or {}
+        )
+
+        unidade_principal = str(
+            obra_principal.get("unidade")
+            or ""
+        ).strip()
+
+        if (
+            unidade_principal
+            and normalizar(unidade_principal) == alvo
+        ):
+            return {
+                "principal": True,
+                "placeholder": eh_obra_placeholder(
+                    obra_principal
+                ),
+                "obra_id": (
+                    ""
+                    if eh_obra_placeholder(
+                        obra_principal
+                    )
+                    else str(
+                        obra_principal.get("id")
+                        or conv.get("obra_id")
+                        or ""
+                    )
+                ),
+                "obra": (
+                    ""
+                    if eh_obra_placeholder(
+                        obra_principal
+                    )
+                    else str(
+                        obra_principal.get("nome")
+                        or ""
+                    )
+                ),
+                "unidade": unidade_principal,
+                "periodo": turno_da_convocacao(conv),
+            }
+
+        return None
+
+    def _lista_convocados_mobile(registros, mostrar_status=False):
+        if not registros:
+            st.caption("Nenhuma pessoa convocada.")
+            return
+
+        itens_html = []
+        for conv in registros:
+            colab = dict_colaboradores.get(
+                conv.get("colaborador_id"),
+                {},
+            )
+            obra = conv.get("dados_obra") or dict_obras.get(
+                conv.get("obra_id"),
+                {},
+            )
+            nome = str(colab.get("nome") or "Não identificado")
+            funcao = str(colab.get("funcao") or "-")
+            unidade = str(obra.get("unidade") or "-")
+            turno = turno_da_convocacao(conv)
+            status = normalizar_status_operacional(
+                conv.get("status")
+            )
+
+            lado = status if mostrar_status else turno
+            itens_html.append(
+                f"""
+                <div class="engm-list-item">
+                    <div class="engm-list-main">
+                        <div class="engm-list-name">{_html.escape(nome)}</div>
+                        <div class="engm-list-meta">
+                            {_html.escape(funcao)} · {_html.escape(unidade)} · {_html.escape(turno)}
+                        </div>
+                    </div>
+                    <div class="engm-list-side">{_html.escape(str(lado))}</div>
+                </div>
+                """
+            )
+
+        st.html(
+            '<div class="engm-list">'
+            + "".join(itens_html)
+            + "</div>"
+        )
+
+
     st.markdown(
         f"""
         <div class="engm-head engm-head-v2">
