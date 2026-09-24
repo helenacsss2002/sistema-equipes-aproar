@@ -21193,6 +21193,64 @@ else:
                                     ),
                                 )
 
+        # Lista compacta das obras efetivamente vinculadas aos cards do Trello.
+        # Fica recolhida para não ocupar espaço no cadastro.
+        with st.expander("📋 Obras puxadas do Trello", expanded=False):
+            try:
+                obras_trello_cfg = [
+                    o for o in (buscar_obras() or [])
+                    if str(o.get("trello_card_id") or "").strip()
+                ]
+
+                if obras_trello_cfg:
+                    obras_trello_cfg.sort(
+                        key=lambda o: (
+                            normalizar(o.get("unidade") or ""),
+                            normalizar(o.get("nome") or ""),
+                        )
+                    )
+
+                    rows_trello_cfg = []
+                    for o in obras_trello_cfg:
+                        lista_trello = mapa_nome_lista.get(
+                            o.get("trello_list_id"),
+                            "Trello",
+                        )
+                        sync_em = o.get("trello_sync_em")
+                        if sync_em:
+                            try:
+                                sync_dt = sync_em
+                                sync_txt = sync_dt.strftime("%d/%m/%Y %H:%M") if hasattr(sync_dt, "strftime") else str(sync_dt)[:16]
+                            except Exception:
+                                sync_txt = str(sync_em)
+                        else:
+                            sync_txt = "—"
+
+                        rows_trello_cfg.append({
+                            "Obra": str(o.get("nome") or "").strip(),
+                            "Unidade": str(o.get("unidade") or "").strip(),
+                            "Lista": lista_trello,
+                            "Última sincronização": sync_txt,
+                        })
+
+                    st.caption(f"{len(rows_trello_cfg)} obra(s) vinculada(s) a cards do Trello.")
+                    st.dataframe(
+                        rows_trello_cfg,
+                        use_container_width=True,
+                        hide_index=True,
+                        height=min(280, 46 + (len(rows_trello_cfg) * 35)),
+                        column_config={
+                            "Obra": st.column_config.TextColumn("Obra", width="small"),
+                            "Unidade": st.column_config.TextColumn("Unidade", width="medium"),
+                            "Lista": st.column_config.TextColumn("Lista", width="medium"),
+                            "Última sincronização": st.column_config.TextColumn("Última sincronização", width="medium"),
+                        },
+                    )
+                else:
+                    st.info("Nenhuma obra vinculada a um card do Trello foi encontrada.")
+            except Exception as e:
+                st.caption(f"Não foi possível carregar a lista de obras do Trello: {e}")
+
         with tab_cad_colab:
             MORADIAS_COLAB = [
                 "Fortaleza",
