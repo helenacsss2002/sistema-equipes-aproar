@@ -195,10 +195,9 @@ def main():
                     if len(candidatos) == 1:
                         match = candidatos[0]
 
-                if not match:
-                    candidatos = por_nome.get(nn, [])
-                    if len(candidatos) == 1:
-                        match = candidatos[0]
+                # NÃO vincular por nome sozinho. O mesmo número de obra pode
+                # existir em unidades diferentes. A identidade do Trello é o
+                # card_id; para registros legados, usamos apenas nome + unidade.
 
                 if match:
                     mudou = (
