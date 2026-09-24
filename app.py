@@ -7424,12 +7424,11 @@ def executar_sincronizacao_trello(id_lista_target=None, id_card_target=None, lis
                                 if len(candidatos) == 1:
                                     obra_match = candidatos[0]
 
-                            # Se só existe um registro com esse nome no banco,
-                            # podemos ligá-lo ao card sem criar duplicidade.
-                            if not obra_match:
-                                candidatos_nome = por_nome.get(nome_norm, [])
-                                if len(candidatos_nome) == 1:
-                                    obra_match = candidatos_nome[0]
+                            # NÃO vincular por nome sozinho. O mesmo número de obra
+                            # pode existir em unidades diferentes; usar apenas o nome
+                            # faria um card do Trello sobrescrever/vincular a outra obra.
+                            # Para registros antigos sem trello_card_id, a combinação
+                            # nome + unidade é a única chave de migração segura.
 
                             if obra_match:
                                 obra_id = obra_match.get("id")
