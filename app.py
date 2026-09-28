@@ -6928,7 +6928,8 @@ def _garantir_schema_trello_obras():
                     ALTER TABLE obras
                         ADD COLUMN IF NOT EXISTS trello_card_id TEXT,
                         ADD COLUMN IF NOT EXISTS trello_list_id TEXT,
-                        ADD COLUMN IF NOT EXISTS trello_sync_em TIMESTAMPTZ
+                        ADD COLUMN IF NOT EXISTS trello_sync_em TIMESTAMPTZ,
+                        ADD COLUMN IF NOT EXISTS trello_unidade_manual BOOLEAN NOT NULL DEFAULT FALSE
                     """
                 )
                 cur.execute(
@@ -6958,7 +6959,7 @@ TRELLO_UNIDADES_CANONICAS = (
     ("CENTRO", ("CENTRO",)),
     # FIEC é tratada como entidade administrativa/responsável e só deve
     # prevalecer quando for a única unidade identificada no campo.
-    ("FIEC", ("CASA DA INDUSTRIA", "CASA DA INDÚSTRIA", "FIEC", "SESI DR")),
+    ("FIEC", ("CASA DA INDUSTRIA", "CASA DA INDÚSTRIA", "FIEC", "SESI DR", "CONDOMINIO", "CONDOMÍNIO")),
 )
 
 
@@ -8296,7 +8297,7 @@ def unidades_disponiveis_plataforma():
         ).upper()
         unidade_norm = normalizar(unidade_limpa)
 
-        if unidade_norm == "APARTAMENTO 701":
+        if unidade_norm in {"APARTAMENTO 701", "CONDOMINIO"}:
             continue
 
         if not unidade_limpa or unidade_norm in vistos:
@@ -8306,6 +8307,51 @@ def unidades_disponiveis_plataforma():
         saida.append(unidade_limpa)
 
     return saida
+
+
+@st.cache_resource(show_spinner=False)
+def _migrar_condominio_para_fiec():
+    """Consolida a antiga unidade CONDOMÍNIO dentro de FIEC."""
+    try:
+        if DB_BACKEND == "NEON" and hasattr(supabase, "_connect"):
+            with supabase._connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE obras
+                           SET unidade = 'FIEC'
+                         WHERE UPPER(TRIM(COALESCE(unidade, ''))) = 'CONDOMINIO'
+                        """
+                    )
+                conn.commit()
+        else:
+            antigos = (
+                supabase.table("obras")
+                .select("id,unidade")
+                .eq("unidade", "CONDOMÍNIO")
+                .execute().data
+                or []
+            )
+            if antigos:
+                for item in antigos:
+                    supabase.table("obras").update({"unidade": "FIEC"}).eq("id", item.get("id")).execute()
+            antigos_sem_acento = (
+                supabase.table("obras")
+                .select("id,unidade")
+                .eq("unidade", "CONDOMINIO")
+                .execute().data
+                or []
+            )
+            for item in antigos_sem_acento:
+                supabase.table("obras").update({"unidade": "FIEC"}).eq("id", item.get("id")).execute()
+        limpar_cache_operacional()
+        return True
+    except Exception as exc:
+        st.session_state["_erro_migracao_condominio"] = f"{type(exc).__name__}: {str(exc)[:180]}"
+        return False
+
+
+_migrar_condominio_para_fiec()
 
 
 @st.cache_resource(show_spinner=False)
@@ -21595,29 +21641,100 @@ else:
                             "Última sincronização": sync_txt,
                         })
 
-                    qtd_unidades_nao_identificadas = sum(
-                        1
-                        for row in rows_trello_cfg
-                        if "NÃO IDENTIFICADA" in str(row.get("Unidade") or "")
-                    )
-                    if qtd_unidades_nao_identificadas:
+                    nao_identificadas_idx = [
+                        i for i, row in enumerate(rows_trello_cfg)
+                        if normalizar(row.get("Unidade") or "") == "NAO IDENTIFICADA"
+                    ]
+                    identificadas_rows = [
+                        row for i, row in enumerate(rows_trello_cfg)
+                        if i not in set(nao_identificadas_idx)
+                    ]
+                    nao_identificadas_rows = [rows_trello_cfg[i] for i in nao_identificadas_idx]
+
+                    if nao_identificadas_rows:
                         st.warning(
-                            f"{qtd_unidades_nao_identificadas} obra(s) do Trello estão sem unidade identificada. "
-                            "Revise o título ou a descrição do card."
+                            f"{len(nao_identificadas_rows)} obra(s) do Trello estão sem unidade identificada. "
+                            "Selecione a unidade diretamente na tabela abaixo para corrigir."
                         )
-                    st.caption(f"{len(rows_trello_cfg)} obra(s) vinculada(s) a cards do Trello.")
-                    st.dataframe(
-                        rows_trello_cfg,
-                        use_container_width=True,
-                        hide_index=True,
-                        height=min(280, 46 + (len(rows_trello_cfg) * 35)),
-                        column_config={
-                            "Obra": st.column_config.TextColumn("Obra", width="small"),
-                            "Unidade": st.column_config.TextColumn("Unidade", width="medium"),
-                            "Lista": st.column_config.TextColumn("Lista", width="medium"),
-                            "Última sincronização": st.column_config.TextColumn("Última sincronização", width="medium"),
-                        },
-                    )
+                        st.caption("Unidade editável — a escolha manual fica gravada na obra e pode ser corrigida depois.")
+                        nao_identificadas_obras = [
+                            o for o in obras_trello_cfg
+                            if normalizar(o.get("unidade") or "") == "NAO IDENTIFICADA"
+                        ]
+                        edit_rows = [
+                            {
+                                "Obra": str(o.get("nome") or "").strip(),
+                                "Unidade": "⚠️ NÃO IDENTIFICADA",
+                                "Lista": mapa_nome_lista.get(o.get("trello_list_id"), "Trello"),
+                                "Última sincronização": (
+                                    o.get("trello_sync_em").strftime("%d/%m/%Y %H:%M")
+                                    if hasattr(o.get("trello_sync_em"), "strftime")
+                                    else (str(o.get("trello_sync_em"))[:16] if o.get("trello_sync_em") else "—")
+                                ),
+                            }
+                            for o in nao_identificadas_obras
+                        ]
+                        edit_ids = [str(o.get("id") or "").strip() for o in nao_identificadas_obras]
+                        edit_df = pd.DataFrame(edit_rows)
+                        before_units = edit_df["Unidade"].astype(str).tolist() if not edit_df.empty else []
+                        edited_df = st.data_editor(
+                            edit_df.drop(columns=["_obra_id"]),
+                            use_container_width=True,
+                            hide_index=True,
+                            key="editor_unidades_nao_identificadas_trello",
+                            column_config={
+                                "Obra": st.column_config.TextColumn("Obra", disabled=True, width="large"),
+                                "Unidade": st.column_config.SelectboxColumn(
+                                    "Unidade",
+                                    options=unidades_disponiveis_plataforma(),
+                                    required=True,
+                                    width="medium",
+                                ),
+                                "Lista": st.column_config.TextColumn("Lista", disabled=True, width="medium"),
+                                "Última sincronização": st.column_config.TextColumn("Última sincronização", disabled=True, width="medium"),
+                            },
+                        )
+                        after_units = edited_df["Unidade"].astype(str).tolist() if not edited_df.empty else []
+                        if before_units != after_units:
+                            alteradas = 0
+                            for row_idx, new_unit in enumerate(after_units):
+                                new_unit = str(new_unit or "").strip().upper()
+                                if not new_unit or normalizar(new_unit) == "NAO IDENTIFICADA":
+                                    continue
+                                if row_idx >= len(edit_ids) or new_unit == before_units[row_idx].strip().upper():
+                                    continue
+                                obra_id = edit_ids[row_idx]
+                                if not obra_id:
+                                    continue
+                                try:
+                                    _executar_supabase_com_retry(
+                                        lambda sb, oid=obra_id, nu=new_unit: sb.table("obras").update({"unidade": nu}).eq("id", oid).execute(),
+                                        tentativas=3,
+                                    )
+                                    alteradas += 1
+                                except Exception:
+                                    pass
+                            if alteradas:
+                                limpar_cache_operacional()
+                                st.success(f"{alteradas} unidade(s) atualizada(s).")
+                                st.rerun()
+
+                    if identificadas_rows:
+                        st.caption(f"{len(identificadas_rows)} obra(s) vinculada(s) a cards do Trello.")
+                        st.dataframe(
+                            identificadas_rows,
+                            use_container_width=True,
+                            hide_index=True,
+                            height=min(280, 46 + (len(identificadas_rows) * 35)),
+                            column_config={
+                                "Obra": st.column_config.TextColumn("Obra", width="small"),
+                                "Unidade": st.column_config.TextColumn("Unidade", width="medium"),
+                                "Lista": st.column_config.TextColumn("Lista", width="medium"),
+                                "Última sincronização": st.column_config.TextColumn("Última sincronização", width="medium"),
+                            },
+                        )
+                    elif not nao_identificadas_rows:
+                        st.caption(f"{len(rows_trello_cfg)} obra(s) vinculada(s) a cards do Trello.")
                 else:
                     st.info("Nenhuma obra vinculada a um card do Trello foi encontrada.")
             except Exception as e:
