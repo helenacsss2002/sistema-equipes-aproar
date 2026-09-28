@@ -6943,27 +6943,65 @@ def _garantir_schema_trello_obras():
         return False
 
 
-def _identificar_unidade_card_trello(card):
+def _identificar_unidade_texto_trello(texto):
     """
-    Usa nome + descrição + labels do card.
-    Isso é mais completo do que olhar apenas o título da obra.
+    Identifica somente unidades conhecidas, sem inferir valores arbitrários.
+
+    Retorna None quando o texto não contém nenhuma unidade reconhecida.
+    A função é deliberadamente separada de identificar_unidade(), porque a
+    regra do Trello precisa diferenciar "não identificado" de "GERAL".
     """
-    partes = [
-        str((card or {}).get("name") or ""),
-        str((card or {}).get("desc") or ""),
+    texto_norm = normalizar(texto or "")
+    if not texto_norm:
+        return None
+
+    regras = [
+        (("APRL005", "MARACANAU"), "MARACANAÚ"),
+        (("APARTAMENTO 701", "PARTICULAR"), "PARTICULAR"),
+        (("SEBRAE",), "SEBRAE"),
+        (("UNIFOR",), "UNIFOR"),
+        (("IDALYA", "MATHEUS"), "IDALYA E MATHEUS"),
+        (("COLISEU",), "COLISEU"),
+        (("BARRA", "BARRA DO CEARA"), "BARRA DO CEARÁ"),
+        (("MUSEU",), "MUSEU"),
+        (("HORIZONTE",), "HORIZONTE"),
+        (("ESCRITORIO",), "ESCRITÓRIO"),
+        (("CASA DA INDUSTRIA", "FIEC", "SESI DR"), "FIEC"),
+        (("PARANGABA",), "PARANGABA"),
+        (("CENTRO",), "CENTRO"),
     ]
 
-    for label in (card or {}).get("labels") or []:
-        if isinstance(label, dict):
-            partes.append(str(label.get("name") or ""))
+    for termos, unidade in regras:
+        if any(termo in texto_norm for termo in termos):
+            return unidade
 
-    # Alguns exports do Trello trazem valores de campos personalizados.
-    for item in (card or {}).get("customFieldItems") or []:
-        if isinstance(item, dict):
-            partes.append(json.dumps(item, ensure_ascii=False))
+    return None
 
-    unidade = identificar_unidade(" | ".join(p for p in partes if p))
-    return str(unidade or "GERAL").strip().upper() or "GERAL"
+
+def _identificar_unidade_card_trello(card):
+    """
+    Regra determinística para a sincronização das obras do Trello:
+
+      1. procura a unidade no TÍTULO do card;
+      2. se não encontrar, procura na DESCRIÇÃO;
+      3. se não encontrar em nenhum dos dois, retorna "NÃO IDENTIFICADA".
+
+    Labels e campos personalizados não são usados para decidir a unidade,
+    evitando que metadados secundários sobrescrevam o título/descrição.
+    """
+    card = card or {}
+    titulo = str(card.get("name") or "").strip()
+    descricao = str(card.get("desc") or "").strip()
+
+    unidade_titulo = _identificar_unidade_texto_trello(titulo)
+    if unidade_titulo:
+        return unidade_titulo
+
+    unidade_descricao = _identificar_unidade_texto_trello(descricao)
+    if unidade_descricao:
+        return unidade_descricao
+
+    return "NÃO IDENTIFICADA"
 
 
 def _registrar_estado_sync_trello(
@@ -7423,6 +7461,22 @@ def executar_sincronizacao_trello(id_lista_target=None, id_card_target=None, lis
                                 )
                                 if len(candidatos) == 1:
                                     obra_match = candidatos[0]
+
+                            # Migração segura de registros antigos que receberam
+                            # "GERAL" por falta de identificação. Reutiliza a
+                            # obra somente quando houver um único candidato com
+                            # o mesmo nome e unidade antiga vazia/GERAL.
+                            if not obra_match:
+                                candidatos_legacy = [
+                                    o
+                                    for o in por_nome.get(nome_norm, [])
+                                    if normalizar(o.get("unidade") or "") in {
+                                        "",
+                                        "GERAL",
+                                    }
+                                ]
+                                if len(candidatos_legacy) == 1:
+                                    obra_match = candidatos_legacy[0]
 
                             # NÃO vincular por nome sozinho. O mesmo número de obra
                             # pode existir em unidades diferentes; usar apenas o nome
@@ -7900,6 +7954,7 @@ dict_obras = (
 
 ENGENHEIROS = [
     "EDUARDO",
+    "FELIPE",
     "GABRIEL",
     "JOEL",
     "NETO",
@@ -8095,6 +8150,7 @@ OBSERVADORES_TEAMS = [
 SUPERVISORES_TEAMS = (
     list(RESPONSAVEIS_UNIDADES_TEAMS.keys())
     + OBSERVADORES_TEAMS
+    + ["FELIPE"]
 )
 
 
@@ -21226,13 +21282,30 @@ else:
                         else:
                             sync_txt = "—"
 
+                        unidade_tabela = str(o.get("unidade") or "").strip()
+                        unidade_display = (
+                            "⚠️ NÃO IDENTIFICADA"
+                            if normalizar(unidade_tabela) == "NAO IDENTIFICADA"
+                            else unidade_tabela
+                        )
+
                         rows_trello_cfg.append({
                             "Obra": str(o.get("nome") or "").strip(),
-                            "Unidade": str(o.get("unidade") or "").strip(),
+                            "Unidade": unidade_display,
                             "Lista": lista_trello,
                             "Última sincronização": sync_txt,
                         })
 
+                    qtd_unidades_nao_identificadas = sum(
+                        1
+                        for row in rows_trello_cfg
+                        if "NÃO IDENTIFICADA" in str(row.get("Unidade") or "")
+                    )
+                    if qtd_unidades_nao_identificadas:
+                        st.warning(
+                            f"{qtd_unidades_nao_identificadas} obra(s) do Trello estão sem unidade identificada. "
+                            "Revise o título ou a descrição do card."
+                        )
                     st.caption(f"{len(rows_trello_cfg)} obra(s) vinculada(s) a cards do Trello.")
                     st.dataframe(
                         rows_trello_cfg,
