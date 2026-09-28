@@ -6943,38 +6943,104 @@ def _garantir_schema_trello_obras():
         return False
 
 
+TRELLO_UNIDADES_CANONICAS = (
+    ("MARACANAÚ", ("APRL005", "MARACANAU", "MARACANAÚ")),
+    ("PARTICULAR", ("APARTAMENTO 701", "PARTICULAR")),
+    ("SEBRAE", ("SEBRAE",)),
+    ("UNIFOR", ("UNIFOR",)),
+    ("IDALYA E MATHEUS", ("IDALYA E MATHEUS", "IDALYA", "MATHEUS")),
+    ("COLISEU", ("COLISEU",)),
+    ("BARRA DO CEARÁ", ("BARRA DO CEARA", "BARRA DO CEARÁ")),
+    ("MUSEU", ("MUSEU",)),
+    ("HORIZONTE", ("HORIZONTE",)),
+    ("ESCRITÓRIO", ("ESCRITORIO", "ESCRITÓRIO")),
+    ("FIEC", ("CASA DA INDUSTRIA", "CASA DA INDÚSTRIA", "FIEC", "SESI DR")),
+    ("PARANGABA", ("PARANGABA",)),
+    ("CENTRO", ("CENTRO",)),
+)
+
+
+def _unidade_match_em_texto_trello(texto):
+    """Retorna a unidade canônica para um trecho que contenha uma unidade."""
+    texto_norm = normalizar(texto or "")
+    for unidade, aliases in TRELLO_UNIDADES_CANONICAS:
+        for alias in aliases:
+            alias_norm = normalizar(alias)
+            if alias_norm and re.search(
+                rf"(?<![A-Z0-9]){re.escape(alias_norm)}(?![A-Z0-9])",
+                texto_norm,
+            ):
+                return unidade
+    return None
+
+
+def _unidades_encontradas_trello(texto):
+    """Lista unidades distintas encontradas no texto, na ordem em que aparecem."""
+    texto_norm = normalizar(texto or "")
+    encontradas = []
+    posicoes = []
+    for unidade, aliases in TRELLO_UNIDADES_CANONICAS:
+        for alias in aliases:
+            alias_norm = normalizar(alias)
+            if not alias_norm:
+                continue
+            for match in re.finditer(
+                rf"(?<![A-Z0-9]){re.escape(alias_norm)}(?![A-Z0-9])",
+                texto_norm,
+            ):
+                posicoes.append((match.start(), unidade))
+    for _, unidade in sorted(posicoes):
+        if unidade not in encontradas:
+            encontradas.append(unidade)
+    return encontradas
+
+
 def _identificar_unidade_texto_trello(texto):
     """
-    Identifica somente unidades conhecidas, sem inferir valores arbitrários.
+    Identifica a unidade sem confundir menções genéricas na descrição com a
+    unidade efetivamente declarada no card.
 
-    Retorna None quando o texto não contém nenhuma unidade reconhecida.
-    A função é deliberadamente separada de identificar_unidade(), porque a
-    regra do Trello precisa diferenciar "não identificado" de "GERAL".
+    Ordem dentro de um mesmo campo:
+      1. padrões explícitos de "Unidade: ..." / "Unidade da obra: ...";
+      2. padrões explícitos com separadores ([CENTRO], (CENTRO), etc.);
+      3. uma única unidade encontrada no texto;
+      4. múltiplas unidades = ambíguo (None).
+
+    Isso evita o erro em que uma descrição cita FIEC/SESI DR em texto auxiliar,
+    mas informa que a obra é do CENTRO.
     """
-    texto_norm = normalizar(texto or "")
+    texto = str(texto or "")
+    texto_norm = normalizar(texto)
     if not texto_norm:
         return None
 
-    regras = [
-        (("APRL005", "MARACANAU"), "MARACANAÚ"),
-        (("APARTAMENTO 701", "PARTICULAR"), "PARTICULAR"),
-        (("SEBRAE",), "SEBRAE"),
-        (("UNIFOR",), "UNIFOR"),
-        (("IDALYA", "MATHEUS"), "IDALYA E MATHEUS"),
-        (("COLISEU",), "COLISEU"),
-        (("BARRA", "BARRA DO CEARA"), "BARRA DO CEARÁ"),
-        (("MUSEU",), "MUSEU"),
-        (("HORIZONTE",), "HORIZONTE"),
-        (("ESCRITORIO",), "ESCRITÓRIO"),
-        (("CASA DA INDUSTRIA", "FIEC", "SESI DR"), "FIEC"),
-        (("PARANGABA",), "PARANGABA"),
-        (("CENTRO",), "CENTRO"),
-    ]
+    # Primeiro: declaração explícita da unidade. O alias precisa aparecer logo
+    # após "UNIDADE"/"UNID" para impedir que uma menção posterior de FIEC tome
+    # o lugar da unidade real do card.
+    for match in re.finditer(
+        r"(?:UNIDADE(?:\s+DA\s+OBRA)?|UNID\.?)\s*[:=\-]\s*([^\n;|]+)",
+        texto_norm,
+    ):
+        encontrada = _unidade_match_em_texto_trello(match.group(1))
+        unidades = _unidades_encontradas_trello(match.group(1))
+        if len(unidades) == 1:
+            return unidades[0]
+        if encontrada and not unidades:
+            return encontrada
 
-    for termos, unidade in regras:
-        if any(termo in texto_norm for termo in termos):
-            return unidade
+    # Segundo: marcadores visuais comuns ([CENTRO], (CENTRO)).
+    for padrao in (r"\[([^\]]+)\]", r"\(([^)]+)\)"):
+        for match in re.finditer(padrao, texto_norm):
+            unidades = _unidades_encontradas_trello(match.group(1))
+            if len(unidades) == 1:
+                return unidades[0]
 
+    # Terceiro: somente uma unidade presente no campo inteiro.
+    unidades = _unidades_encontradas_trello(texto)
+    if len(unidades) == 1:
+        return unidades[0]
+
+    # Mais de uma unidade citada sem uma declaração explícita é ambíguo.
     return None
 
 
@@ -7462,27 +7528,20 @@ def executar_sincronizacao_trello(id_lista_target=None, id_card_target=None, lis
                                 if len(candidatos) == 1:
                                     obra_match = candidatos[0]
 
-                            # Migração segura de registros antigos que receberam
-                            # "GERAL" por falta de identificação. Reutiliza a
-                            # obra somente quando houver um único candidato com
-                            # o mesmo nome e unidade antiga vazia/GERAL.
+                            # Migração de registros antigos sem identidade Trello.
+                            # Se houver exatamente UMA obra com o mesmo nome, sem
+                            # trello_card_id, ela pode ser atualizada para a unidade
+                            # encontrada agora. Isso corrige registros legados que
+                            # foram gravados com FIEC/GERAL antes da regra correta.
+                            # Se houver mais de uma, não escolhe arbitrariamente.
                             if not obra_match:
                                 candidatos_legacy = [
                                     o
                                     for o in por_nome.get(nome_norm, [])
-                                    if normalizar(o.get("unidade") or "") in {
-                                        "",
-                                        "GERAL",
-                                    }
+                                    if not str(o.get("trello_card_id") or "").strip()
                                 ]
                                 if len(candidatos_legacy) == 1:
                                     obra_match = candidatos_legacy[0]
-
-                            # NÃO vincular por nome sozinho. O mesmo número de obra
-                            # pode existir em unidades diferentes; usar apenas o nome
-                            # faria um card do Trello sobrescrever/vincular a outra obra.
-                            # Para registros antigos sem trello_card_id, a combinação
-                            # nome + unidade é a única chave de migração segura.
 
                             if obra_match:
                                 obra_id = obra_match.get("id")
@@ -8140,6 +8199,8 @@ RESPONSAVEIS_UNIDADES_TEAMS = {
     "NETO": [
         "MARACANAÚ",
     ],
+    # Supervisor cadastrado, sem unidades atribuídas por enquanto.
+    "FELIPE": [],
 }
 
 OBSERVADORES_TEAMS = [
@@ -23555,10 +23616,14 @@ else:
                         "Unidades": (
                             "TODAS AS UNIDADES · CÓPIA"
                             if eng in OBSERVADORES_TEAMS
-                            else " · ".join(
-                                RESPONSAVEIS_UNIDADES_TEAMS[
-                                    eng
-                                ]
+                            else (
+                                " · ".join(
+                                    RESPONSAVEIS_UNIDADES_TEAMS.get(
+                                        eng,
+                                        [],
+                                    )
+                                )
+                                or "SEM UNIDADES ATRIBUÍDAS"
                             )
                         ),
                     }
