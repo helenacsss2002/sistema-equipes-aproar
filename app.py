@@ -6997,50 +6997,95 @@ def _unidades_encontradas_trello(texto):
 
 def _identificar_unidade_texto_trello(texto):
     """
-    Identifica a unidade sem confundir menções genéricas na descrição com a
-    unidade efetivamente declarada no card.
+    Identifica a unidade da obra usando apenas o conteúdo do campo recebido.
 
-    Ordem dentro de um mesmo campo:
-      1. padrões explícitos de "Unidade: ..." / "Unidade da obra: ...";
-      2. padrões explícitos com separadores ([CENTRO], (CENTRO), etc.);
+    Prioridade dentro do próprio campo:
+      1. declaração explícita próxima a "UNIDADE", "UNID", "LOCAL" ou "SITE";
+      2. marcadores explícitos ([CENTRO], (CENTRO), etc.);
       3. uma única unidade encontrada no texto;
-      4. múltiplas unidades = ambíguo (None).
+      4. várias unidades sem contexto suficiente = ambíguo (None).
 
-    Isso evita o erro em que uma descrição cita FIEC/SESI DR em texto auxiliar,
-    mas informa que a obra é do CENTRO.
+    A proximidade com o marcador é importante para descrições que citam a
+    organização responsável (ex.: FIEC) e, em outro trecho, informam a unidade
+    real da obra (ex.: CENTRO).
     """
     texto = str(texto or "")
     texto_norm = normalizar(texto)
     if not texto_norm:
         return None
 
-    # Primeiro: declaração explícita da unidade. O alias precisa aparecer logo
-    # após "UNIDADE"/"UNID" para impedir que uma menção posterior de FIEC tome
-    # o lugar da unidade real do card.
-    for match in re.finditer(
-        r"(?:UNIDADE(?:\s+DA\s+OBRA)?|UNID\.?)\s*[:=\-]\s*([^\n;|]+)",
-        texto_norm,
-    ):
-        encontrada = _unidade_match_em_texto_trello(match.group(1))
-        unidades = _unidades_encontradas_trello(match.group(1))
-        if len(unidades) == 1:
-            return unidades[0]
-        if encontrada and not unidades:
-            return encontrada
+    # 1) Declarações explícitas de unidade/local/site.
+    marcadores = re.compile(
+        r"(?:UNIDADE(?:\s+DA\s+OBRA)?|UNID\.?|LOCAL|SITE)"
+        r"\s*(?:DA\s+OBRA\s*)?[:=\-]?\s*",
+        flags=re.IGNORECASE,
+    )
+    candidatos_explicitos = []
+    for marcador in marcadores.finditer(texto_norm):
+        trecho = texto_norm[marcador.end(): marcador.end() + 140]
+        unidades = _unidades_encontradas_trello(trecho)
+        if not unidades:
+            continue
 
-    # Segundo: marcadores visuais comuns ([CENTRO], (CENTRO)).
-    for padrao in (r"\[([^\]]+)\]", r"\(([^)]+)\)"):
+        # Usa a primeira unidade após o marcador, desde que esteja perto dele.
+        pos_rel = []
+        for unidade, aliases in TRELLO_UNIDADES_CANONICAS:
+            for alias in aliases:
+                alias_norm = normalizar(alias)
+                if not alias_norm:
+                    continue
+                mm = re.search(
+                    rf"(?<![A-Z0-9]){re.escape(alias_norm)}(?![A-Z0-9])",
+                    trecho,
+                )
+                if mm:
+                    pos_rel.append((mm.start(), unidade))
+        if pos_rel:
+            pos_rel.sort(key=lambda x: x[0])
+            candidatos_explicitos.append(pos_rel[0][1])
+
+    if candidatos_explicitos:
+        return candidatos_explicitos[0]
+
+    # 2) Algumas descrições começam com a unidade em uma linha própria, por
+    # exemplo:
+    #   CENTRO
+    #   Empresa responsável: FIEC
+    # Nesse formato a primeira linha funciona como cabeçalho da unidade e deve
+    # prevalecer sobre menções administrativas posteriores.
+    for linha in texto_norm.splitlines():
+        linha = str(linha or "").strip(" *#-_:")
+        if not linha:
+            continue
+        unidades_linha = _unidades_encontradas_trello(linha)
+        if len(unidades_linha) == 1:
+            # Só aceita quando a linha contém essencialmente a própria unidade,
+            # evitando interpretar frases longas como declaração da unidade.
+            sem_unidade = linha
+            for unidade, aliases in TRELLO_UNIDADES_CANONICAS:
+                for alias in aliases:
+                    sem_unidade = re.sub(
+                        rf"(?<![A-Z0-9]){re.escape(normalizar(alias))}(?![A-Z0-9])",
+                        "",
+                        sem_unidade,
+                    )
+            if not sem_unidade.strip(" /\\|,;."):
+                return unidades_linha[0]
+        break
+
+    # 3) Marcadores visuais comuns: [CENTRO], (CENTRO), <CENTRO>.
+    for padrao in (r"\[([^\]]+)\]", r"\(([^)]+)\)", r"<([^>]+)>"):
         for match in re.finditer(padrao, texto_norm):
             unidades = _unidades_encontradas_trello(match.group(1))
             if len(unidades) == 1:
                 return unidades[0]
 
-    # Terceiro: somente uma unidade presente no campo inteiro.
-    unidades = _unidades_encontradas_trello(texto)
+    # 4) Se o campo tiver apenas uma unidade conhecida, ela é a unidade.
+    unidades = _unidades_encontradas_trello(texto_norm)
     if len(unidades) == 1:
         return unidades[0]
 
-    # Mais de uma unidade citada sem uma declaração explícita é ambíguo.
+    # 5) Várias unidades citadas sem declaração clara: não adivinha.
     return None
 
 
@@ -8208,11 +8253,10 @@ OBSERVADORES_TEAMS = [
     "HELENA",
 ]
 
-SUPERVISORES_TEAMS = (
+SUPERVISORES_TEAMS = list(dict.fromkeys(
     list(RESPONSAVEIS_UNIDADES_TEAMS.keys())
     + OBSERVADORES_TEAMS
-    + ["FELIPE"]
-)
+))
 
 
 def _responsavel_por_unidade_teams(unidade):
