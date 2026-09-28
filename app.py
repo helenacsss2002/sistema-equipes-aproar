@@ -7719,6 +7719,17 @@ def executar_sincronizacao_trello(id_lista_target=None, id_card_target=None, lis
                     for o in obras_atuais
                 }
 
+                # No backend legado (Supabase), algumas bases antigas ainda não
+                # possuem as colunas trello_card_id/trello_list_id. Nelas, não
+                # basta testar (nome, unidade): uma obra já cadastrada com a
+                # unidade errada (ex.: FIEC) precisa ser ATUALIZADA para a
+                # unidade encontrada no título/descrição do card.
+                por_nome_legacy = {}
+                for obra in obras_atuais:
+                    nome_norm = normalizar(obra.get("nome", ""))
+                    if nome_norm:
+                        por_nome_legacy.setdefault(nome_norm, []).append(obra)
+
                 for card in cards_execucao:
                     nome_card = str(card.get("name") or "").strip()
                     if not nome_card:
@@ -7732,6 +7743,36 @@ def executar_sincronizacao_trello(id_lista_target=None, id_card_target=None, lis
                         ja_existentes += 1
                         continue
 
+                    nome_norm_card = normalizar(nome_card)
+                    candidatos_mesmo_nome = por_nome_legacy.get(nome_norm_card, [])
+
+                    # Se existe uma única obra com o mesmo título, corrige a
+                    # unidade dessa obra em vez de tentar inserir outra. Isso é
+                    # justamente o caso de cards que ficaram gravados como
+                    # FIEC mas agora devem ser CENTRO (ex.: OBRA 1726.1).
+                    if len(candidatos_mesmo_nome) == 1:
+                        obra_existente = candidatos_mesmo_nome[0]
+                        obra_id = obra_existente.get("id")
+                        atualizacao = _executar_supabase_com_retry(
+                            lambda sb: sb.table("obras")
+                                .update({"nome": nome_card, "unidade": unidade_card})
+                                .eq("id", obra_id)
+                                .execute(),
+                            tentativas=3,
+                        )
+                        if getattr(atualizacao, "data", None) is not None:
+                            unidade_anterior = normalizar(obra_existente.get("unidade", ""))
+                            if unidade_anterior != normalizar(unidade_card) or normalizar(obra_existente.get("nome", "")) != nome_norm_card:
+                                atualizadas += 1
+                            else:
+                                ja_existentes += 1
+                            obra_existente["nome"] = nome_card
+                            obra_existente["unidade"] = unidade_card
+                            # Mantém os índices locais coerentes para os próximos cards.
+                            nomes_unidades.discard((nome_norm_card, unidade_anterior))
+                            nomes_unidades.add(chave)
+                            continue
+
                     ok, situacao = _inserir_obra_resiliente(
                         nome_obra=nome_card,
                         unidade=unidade_card,
@@ -7741,6 +7782,10 @@ def executar_sincronizacao_trello(id_lista_target=None, id_card_target=None, lis
                         falhas.append(nome_card)
                         continue
                     nomes_unidades.add(chave)
+                    por_nome_legacy.setdefault(nome_norm_card, []).append({
+                        "nome": nome_card,
+                        "unidade": unidade_card,
+                    })
                     novas_inseridas += 1
 
         except Exception as e:
@@ -7808,6 +7853,135 @@ def executar_sincronizacao_trello(id_lista_target=None, id_card_target=None, lis
             "O sistema continua funcionando com os dados já cadastrados. "
             "Aguarde alguns segundos e tente novamente."
         )
+
+
+def reconciliar_unidades_trello_existentes(cards):
+    """
+    Revalida as unidades das obras já vinculadas a cards do Trello.
+
+    Esta rotina é deliberadamente independente da janela de 12h da sincronização
+    completa: assim, uma correção de unidade feita no título/descrição do Trello
+    aparece na plataforma mesmo quando a última sincronização estrutural ainda
+    está dentro da janela automática.
+
+    Regra por card: TÍTULO -> DESCRIÇÃO -> NÃO IDENTIFICADA.
+    Nunca usa labels/campos personalizados para decidir a unidade.
+    """
+    cards = list(cards or [])
+    if not cards:
+        return 0, 0
+
+    cards_por_id = {
+        str(c.get("id") or "").strip(): c
+        for c in cards
+        if str(c.get("id") or "").strip()
+    }
+    cards_por_nome = {}
+    for c in cards:
+        nome = str(c.get("name") or "").strip()
+        if nome:
+            cards_por_nome.setdefault(normalizar(nome), []).append(c)
+
+    atualizadas = 0
+    ambiguas = 0
+
+    try:
+        if DB_BACKEND == "NEON" and hasattr(supabase, "_connect"):
+            _garantir_schema_trello_obras()
+            with supabase._connect() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT id, nome, unidade, trello_card_id
+                          FROM obras
+                         WHERE trello_card_id IS NOT NULL
+                           AND TRIM(trello_card_id) <> ''
+                        """
+                    )
+                    rows = cur.fetchall() or []
+
+                    for row in rows:
+                        if isinstance(row, dict):
+                            obra_id = row.get("id")
+                            nome_obra = str(row.get("nome") or "").strip()
+                            unidade_atual = str(row.get("unidade") or "").strip()
+                            card_id = str(row.get("trello_card_id") or "").strip()
+                        else:
+                            obra_id, nome_obra, unidade_atual, card_id = row[:4]
+                            nome_obra = str(nome_obra or "").strip()
+                            unidade_atual = str(unidade_atual or "").strip()
+                            card_id = str(card_id or "").strip()
+
+                        card = cards_por_id.get(card_id)
+                        if not card:
+                            # Fallback apenas para bases legadas onde a identidade
+                            # do card pode ter sido alterada/regravada. Só corrige
+                            # quando o nome aponta para um único card.
+                            candidatos = cards_por_nome.get(normalizar(nome_obra), [])
+                            card = candidatos[0] if len(candidatos) == 1 else None
+
+                        if not card:
+                            continue
+
+                        unidade_nova = _identificar_unidade_card_trello(card)
+                        if normalizar(unidade_atual) == normalizar(unidade_nova):
+                            continue
+
+                        cur.execute(
+                            """
+                            UPDATE obras
+                               SET unidade = %s,
+                                   nome = %s,
+                                   trello_sync_em = NOW()
+                             WHERE id = %s
+                            """,
+                            (unidade_nova, str(card.get("name") or nome_obra).strip(), obra_id),
+                        )
+                        atualizadas += 1
+
+                conn.commit()
+
+        else:
+            resposta = _executar_supabase_com_retry(
+                lambda sb: sb.table("obras")
+                    .select("id,nome,unidade")
+                    .execute(),
+                tentativas=3,
+            )
+            obras_atuais = resposta.data or []
+            for obra in obras_atuais:
+                nome_obra = str(obra.get("nome") or "").strip()
+                if not nome_obra:
+                    continue
+                candidatos = cards_por_nome.get(normalizar(nome_obra), [])
+                if len(candidatos) != 1:
+                    if len(candidatos) > 1:
+                        ambiguas += 1
+                    continue
+                card = candidatos[0]
+                unidade_nova = _identificar_unidade_card_trello(card)
+                unidade_atual = str(obra.get("unidade") or "").strip()
+                if normalizar(unidade_atual) == normalizar(unidade_nova):
+                    continue
+
+                _executar_supabase_com_retry(
+                    lambda sb, obra_id=obra.get("id"), nome_card=str(card.get("name") or nome_obra).strip(), unidade=unidade_nova: sb.table("obras")
+                        .update({"nome": nome_card, "unidade": unidade})
+                        .eq("id", obra_id)
+                        .execute(),
+                    tentativas=3,
+                )
+                atualizadas += 1
+
+        if atualizadas:
+            limpar_cache_operacional()
+        return atualizadas, ambiguas
+
+    except Exception as exc:
+        st.session_state["trello_erro_reconciliacao_unidades"] = (
+            f"{type(exc).__name__}: {str(exc)[:220]}"
+        )
+        return atualizadas, ambiguas
 
 
 def sincronizar_trello_automatico_12h():
@@ -21153,6 +21327,15 @@ else:
             st.write("A lista principal é **EM EXECUÇÃO**. A sincronização automática ocorre a cada **12 horas**; o botão abaixo força uma atualização imediata.")
 
             lists_trello, cards_trello = obter_listas_trello()
+
+            # Revalida as unidades mesmo quando a sincronização estrutural de 12h
+            # ainda não venceu. Isso corrige imediatamente registros antigos que
+            # ficaram salvos como FIEC quando o card do Trello informa, por exemplo,
+            # "SENAI CENTRO" no título.
+            _qtd_unidades_corrigidas, _qtd_unidades_ambiguas = reconciliar_unidades_trello_existentes(cards_trello)
+            if _qtd_unidades_corrigidas:
+                st.success(f"{_qtd_unidades_corrigidas} obra(s) tiveram a unidade corrigida conforme o Trello.")
+
             mapa_nome_lista = {l.get('id'): l.get('name', 'Lista sem nome') for l in lists_trello}
 
             if st.session_state.get("trello_usando_snapshot"):
