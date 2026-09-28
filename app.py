@@ -6954,31 +6954,18 @@ TRELLO_UNIDADES_CANONICAS = (
     ("MUSEU", ("MUSEU",)),
     ("HORIZONTE", ("HORIZONTE",)),
     ("ESCRITÓRIO", ("ESCRITORIO", "ESCRITÓRIO")),
-    ("FIEC", ("CASA DA INDUSTRIA", "CASA DA INDÚSTRIA", "FIEC", "SESI DR")),
     ("PARANGABA", ("PARANGABA",)),
     ("CENTRO", ("CENTRO",)),
+    # FIEC é tratada como entidade administrativa/responsável e só deve
+    # prevalecer quando for a única unidade identificada no campo.
+    ("FIEC", ("CASA DA INDUSTRIA", "CASA DA INDÚSTRIA", "FIEC", "SESI DR")),
 )
 
 
-def _unidade_match_em_texto_trello(texto):
-    """Retorna a unidade canônica para um trecho que contenha uma unidade."""
+def _tokens_unidade_trello(texto):
+    """Retorna ocorrências (posição, unidade) encontradas no texto."""
     texto_norm = normalizar(texto or "")
-    for unidade, aliases in TRELLO_UNIDADES_CANONICAS:
-        for alias in aliases:
-            alias_norm = normalizar(alias)
-            if alias_norm and re.search(
-                rf"(?<![A-Z0-9]){re.escape(alias_norm)}(?![A-Z0-9])",
-                texto_norm,
-            ):
-                return unidade
-    return None
-
-
-def _unidades_encontradas_trello(texto):
-    """Lista unidades distintas encontradas no texto, na ordem em que aparecem."""
-    texto_norm = normalizar(texto or "")
-    encontradas = []
-    posicoes = []
+    ocorrencias = []
     for unidade, aliases in TRELLO_UNIDADES_CANONICAS:
         for alias in aliases:
             alias_norm = normalizar(alias)
@@ -6988,8 +6975,27 @@ def _unidades_encontradas_trello(texto):
                 rf"(?<![A-Z0-9]){re.escape(alias_norm)}(?![A-Z0-9])",
                 texto_norm,
             ):
-                posicoes.append((match.start(), unidade))
-    for _, unidade in sorted(posicoes):
+                ocorrencias.append((match.start(), match.end(), unidade, alias_norm))
+    return sorted(ocorrencias, key=lambda x: (x[0], x[1]))
+
+
+def _unidade_match_em_texto_trello(texto):
+    """Retorna uma unidade canônica encontrada no trecho."""
+    ocorrencias = _tokens_unidade_trello(texto)
+    if not ocorrencias:
+        return None
+    # Quando FIEC e uma unidade física aparecem juntas, a unidade física
+    # prevalece. Ex.: "FIEC ... | SENAI CENTRO | ..." -> CENTRO.
+    nao_administrativas = [o for o in ocorrencias if o[2] != "FIEC"]
+    if nao_administrativas:
+        return nao_administrativas[0][2]
+    return ocorrencias[0][2]
+
+
+def _unidades_encontradas_trello(texto):
+    """Lista unidades distintas encontradas no texto, na ordem em que aparecem."""
+    encontradas = []
+    for _, _, unidade, _ in _tokens_unidade_trello(texto):
         if unidade not in encontradas:
             encontradas.append(unidade)
     return encontradas
@@ -7001,13 +7007,14 @@ def _identificar_unidade_texto_trello(texto):
 
     Prioridade dentro do próprio campo:
       1. declaração explícita próxima a "UNIDADE", "UNID", "LOCAL" ou "SITE";
-      2. marcadores explícitos ([CENTRO], (CENTRO), etc.);
-      3. uma única unidade encontrada no texto;
-      4. várias unidades sem contexto suficiente = ambíguo (None).
+      2. segmento separado por "|" que contenha uma unidade física explícita;
+      3. marcadores explícitos ([CENTRO], (CENTRO), etc.);
+      4. uma unidade física única encontrada no texto;
+      5. FIEC somente quando for a única unidade encontrada;
+      6. várias unidades sem contexto suficiente = ambíguo (None).
 
-    A proximidade com o marcador é importante para descrições que citam a
-    organização responsável (ex.: FIEC) e, em outro trecho, informam a unidade
-    real da obra (ex.: CENTRO).
+    A regra evita que "FIEC"/"SESI DR" (entidade responsável) sobrescreva
+    uma unidade física explicitamente indicada, como "SENAI CENTRO".
     """
     texto = str(texto or "")
     texto_norm = normalizar(texto)
@@ -7022,47 +7029,39 @@ def _identificar_unidade_texto_trello(texto):
     )
     candidatos_explicitos = []
     for marcador in marcadores.finditer(texto_norm):
-        trecho = texto_norm[marcador.end(): marcador.end() + 140]
-        unidades = _unidades_encontradas_trello(trecho)
-        if not unidades:
+        trecho = texto_norm[marcador.end(): marcador.end() + 160]
+        ocorrencias = _tokens_unidade_trello(trecho)
+        if not ocorrencias:
             continue
-
-        # Usa a primeira unidade após o marcador, desde que esteja perto dele.
-        pos_rel = []
-        for unidade, aliases in TRELLO_UNIDADES_CANONICAS:
-            for alias in aliases:
-                alias_norm = normalizar(alias)
-                if not alias_norm:
-                    continue
-                mm = re.search(
-                    rf"(?<![A-Z0-9]){re.escape(alias_norm)}(?![A-Z0-9])",
-                    trecho,
-                )
-                if mm:
-                    pos_rel.append((mm.start(), unidade))
-        if pos_rel:
-            pos_rel.sort(key=lambda x: x[0])
-            candidatos_explicitos.append(pos_rel[0][1])
-
+        # Unidade física primeiro; FIEC fica como fallback administrativo.
+        fisicas = [o for o in ocorrencias if o[2] != "FIEC"]
+        candidatos_explicitos.append((fisicas or ocorrencias)[0][2])
     if candidatos_explicitos:
         return candidatos_explicitos[0]
 
-    # 2) Algumas descrições começam com a unidade em uma linha própria, por
-    # exemplo:
-    #   CENTRO
-    #   Empresa responsável: FIEC
-    # Nesse formato a primeira linha funciona como cabeçalho da unidade e deve
-    # prevalecer sobre menções administrativas posteriores.
+    # 2) Títulos do Trello frequentemente usam pipes, por exemplo:
+    # "OBRA ... | SENAI CENTRO | 11936.76667".
+    # Cada segmento é tratado isoladamente para que uma menção administrativa
+    # anterior (FIEC/SESI DR) não capture a unidade física correta.
+    segmentos = [seg.strip() for seg in texto_norm.split("|")]
+    for segmento in segmentos:
+        ocorrencias = _tokens_unidade_trello(segmento)
+        if not ocorrencias:
+            continue
+        fisicas = [o for o in ocorrencias if o[2] != "FIEC"]
+        if fisicas:
+            return fisicas[0][2]
+
+    # 3) Algumas descrições começam com a unidade em uma linha própria.
     for linha in texto_norm.splitlines():
-        linha = str(linha or "").strip(" *#-_:")
+        linha = str(linha or "").strip(" *#-_:;")
         if not linha:
             continue
-        unidades_linha = _unidades_encontradas_trello(linha)
-        if len(unidades_linha) == 1:
-            # Só aceita quando a linha contém essencialmente a própria unidade,
-            # evitando interpretar frases longas como declaração da unidade.
+        ocorrencias = _tokens_unidade_trello(linha)
+        if len({o[2] for o in ocorrencias}) == 1 and ocorrencias:
+            unidade = ocorrencias[0][2]
             sem_unidade = linha
-            for unidade, aliases in TRELLO_UNIDADES_CANONICAS:
+            for _, aliases in TRELLO_UNIDADES_CANONICAS:
                 for alias in aliases:
                     sem_unidade = re.sub(
                         rf"(?<![A-Z0-9]){re.escape(normalizar(alias))}(?![A-Z0-9])",
@@ -7070,22 +7069,36 @@ def _identificar_unidade_texto_trello(texto):
                         sem_unidade,
                     )
             if not sem_unidade.strip(" /\\|,;."):
-                return unidades_linha[0]
+                return unidade
         break
 
-    # 3) Marcadores visuais comuns: [CENTRO], (CENTRO), <CENTRO>.
+    # 4) Marcadores visuais comuns: [CENTRO], (CENTRO), <CENTRO>.
     for padrao in (r"\[([^\]]+)\]", r"\(([^)]+)\)", r"<([^>]+)>"):
         for match in re.finditer(padrao, texto_norm):
-            unidades = _unidades_encontradas_trello(match.group(1))
-            if len(unidades) == 1:
-                return unidades[0]
+            ocorrencias = _tokens_unidade_trello(match.group(1))
+            fisicas = [o for o in ocorrencias if o[2] != "FIEC"]
+            if len({o[2] for o in fisicas}) == 1 and fisicas:
+                return fisicas[0][2]
+            if not fisicas and len({o[2] for o in ocorrencias}) == 1 and ocorrencias:
+                return ocorrencias[0][2]
 
-    # 4) Se o campo tiver apenas uma unidade conhecida, ela é a unidade.
-    unidades = _unidades_encontradas_trello(texto_norm)
-    if len(unidades) == 1:
-        return unidades[0]
+    # 5) Uma única unidade física em todo o campo.
+    ocorrencias = _tokens_unidade_trello(texto_norm)
+    unidades_fisicas = []
+    for _, _, unidade, _ in ocorrencias:
+        if unidade != "FIEC" and unidade not in unidades_fisicas:
+            unidades_fisicas.append(unidade)
+    if len(unidades_fisicas) == 1:
+        return unidades_fisicas[0]
 
-    # 5) Várias unidades citadas sem declaração clara: não adivinha.
+    # FIEC só é usada quando ela própria é a única unidade detectada.
+    unidades_todas = []
+    for _, _, unidade, _ in ocorrencias:
+        if unidade not in unidades_todas:
+            unidades_todas.append(unidade)
+    if unidades_todas == ["FIEC"]:
+        return "FIEC"
+
     return None
 
 
@@ -7097,8 +7110,7 @@ def _identificar_unidade_card_trello(card):
       2. se não encontrar, procura na DESCRIÇÃO;
       3. se não encontrar em nenhum dos dois, retorna "NÃO IDENTIFICADA".
 
-    Labels e campos personalizados não são usados para decidir a unidade,
-    evitando que metadados secundários sobrescrevam o título/descrição.
+    Labels e campos personalizados não são usados para decidir a unidade.
     """
     card = card or {}
     titulo = str(card.get("name") or "").strip()
@@ -7113,7 +7125,6 @@ def _identificar_unidade_card_trello(card):
         return unidade_descricao
 
     return "NÃO IDENTIFICADA"
-
 
 def _registrar_estado_sync_trello(
     *,
