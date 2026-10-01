@@ -10334,6 +10334,49 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
         })
     tabela_aproar(pd.DataFrame(resumo_unidades).sort_values("Taxa Absenteísmo (%)", ascending=False), key=f"{key_prefix}_tbl_abs_unidades")
 
+# --- RELATÓRIO: ENGENHEIROS SEM CONVOCAÇÕES POR DATA ---
+    titulo_secao_aproar(
+        "Engenheiros sem convocações registadas",
+        "Identifique quais os engenheiros que não realizaram convocações e em que datas específicas ocorreu a ausência de registo."
+    )
+    
+    # Lista fixa de engenheiros a monitorizar conforme solicitado
+    engenheiros_alvo = ["EDUARDO", "FELIPE", "GABRIEL", "JOEL", "NETO", "SOARES", "VICTOR"]
+    
+    # Mapeia quais engenheiros realizaram convocações em cada data do período carregado
+    eng_por_data = {}
+    for item in registros:
+        d_str = str(item["raw"].get("data") or "")
+        eng = str(item["engenheiro"]).strip().upper()
+        if d_str and eng in engenheiros_alvo:
+            eng_por_data.setdefault(d_str, set()).add(eng)
+            
+    # Percorre cada dia entre o início e o fim selecionados nos filtros (respeitando a data atual)
+    data_loop = inicio
+    data_limite = min(fim, agora_aproar().date())
+    ausencias_por_eng = {eng: [] for eng in engenheiros_alvo}
+    
+    while data_loop <= data_limite:
+        d_str = data_loop.isoformat()
+        engs_ativos_no_dia = eng_por_data.get(d_str, set())
+        for eng in engenheiros_alvo:
+            if eng not in engs_ativos_no_dia:
+                ausencias_por_eng[eng].append(data_loop.strftime("%d/%m/%Y"))
+        data_loop += datetime.timedelta(days=1)
+        
+    # Constrói o DataFrame para exibição utilizando a tabela padronizada da APROAR
+    linhas_ausencias = []
+    for eng, lista_datas in ausencias_por_eng.items():
+        linhas_ausencias.append({
+            "Engenheiro": eng,
+            "Total de dias em falta": len(lista_datas),
+            "Datas sem convocações": ", ".join(lista_datas) if lista_datas else "Nenhuma falta no período"
+        })
+        
+    df_ausencias = pd.DataFrame(linhas_ausencias).sort_values("Total de dias em falta", ascending=False)
+    tabela_aproar(df_ausencias, key=f"{key_prefix}_tbl_engenheiros_sem_convocacao")
+    st.markdown("---")
+
 
 def incluir_colaborador_direto_apontamento(
     colaborador_id,
