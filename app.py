@@ -10334,10 +10334,10 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
         })
     tabela_aproar(pd.DataFrame(resumo_unidades).sort_values("Taxa Absenteísmo (%)", ascending=False), key=f"{key_prefix}_tbl_abs_unidades")
 
-# --- RELATÓRIO: ENGENHEIROS SEM CONVOCAÇÕES POR DATA ---
+# --- RELATÓRIO: ENGENHEIROS SEM CONVOCAÇÕES POR DATA (A partir de 16/09) ---
     titulo_secao_aproar(
-        "Engenheiros sem convocações registadas",
-        "Identifique quais os engenheiros que não realizaram convocações e em que datas específicas ocorreu a ausência de registo."
+        "Engenheiros sem convocações registadas (Desde 16/09)",
+        "Identifique quais os engenheiros que não realizaram convocações desde o dia 16/09 até à data atual."
     )
     
     # Lista fixa de engenheiros a monitorizar conforme solicitado
@@ -10351,8 +10351,8 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
         if d_str and eng in engenheiros_alvo:
             eng_por_data.setdefault(d_str, set()).add(eng)
             
-    # Percorre cada dia entre o início e o fim selecionados nos filtros (respeitando a data atual)
-    data_loop = inicio
+    # Inicia a contagem obrigatoriamente a partir de 16/09/2026 até à data de hoje (ou ao limite do filtro de fim)
+    data_loop = datetime.date(2026, 9, 16)
     data_limite = min(fim, agora_aproar().date())
     ausencias_por_eng = {eng: [] for eng in engenheiros_alvo}
     
@@ -10374,10 +10374,9 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
         })
         
     df_ausencias = pd.DataFrame(linhas_ausencias).sort_values("Total de dias em falta", ascending=False)
-    tabela_aproar(df_ausencias, key=f"{key_prefix}_tbl_engenheiros_sem_convocacao")
+    tabela_aproar(df_ausencias, key=f"{key_prefix}_tbl_engenheiros_sem_convocacao_16_09")
     st.markdown("---")
-
-
+    
 def incluir_colaborador_direto_apontamento(
     colaborador_id,
     engenheiro,
