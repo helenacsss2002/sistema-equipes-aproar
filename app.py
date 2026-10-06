@@ -6453,7 +6453,7 @@ def listar_conflitos_convocacao_pendentes(dias=90):
     return saida
 
 
-def inserir_convocacao_segura(obra_id, colaborador_id, data_convocacao, engenheiro, turno):
+def inserir_convocacao_segura(obra_id, colaborador_id, data_convocacao, engenheiro, turno, executor=None):
     """
     Bloqueia apenas indisponibilidade ou sobreposição real de turno.
 
@@ -6526,9 +6526,13 @@ def inserir_convocacao_segura(obra_id, colaborador_id, data_convocacao, engenhei
     _garantir_multiturno_neon()
 
     agora = agora_aproar()
+    executor_convocacao = str(
+        executor or engenheiro or ""
+    ).strip().upper() or str(engenheiro)
+
     meta = {
         "convocado_em": agora.isoformat(),
-        "convocado_por": str(engenheiro),
+        "convocado_por": executor_convocacao,
         "convocacao_atrasada": bool(
             agora.hour >= 16 and data_convocacao == proximo_dia_util(agora.date())
         ),
@@ -6548,12 +6552,12 @@ def inserir_convocacao_segura(obra_id, colaborador_id, data_convocacao, engenhei
             payload_conv.update({
                 "turno": turno_tentativa,
                 "criado_em": agora.isoformat(),
-                "criado_por": str(engenheiro),
+                "criado_por": executor_convocacao,
             })
         retorno_conv = supabase.table("convocacoes").insert(payload_conv).execute().data or []
         novo_id = (retorno_conv[0].get("id") if retorno_conv else "")
         registrar_auditoria_prod(
-            "convocacao", novo_id, "CRIAR", engenheiro,
+            "convocacao", novo_id, "CRIAR", executor_convocacao,
             depois={
                 "colaborador_id": str(colaborador_id), "data": data_convocacao,
                 "turno": turno_tentativa, "obra_id": str(obra_id),
@@ -8293,6 +8297,16 @@ ENGENHEIROS = [
     "PAULO",
     "SOARES",
     "VICTOR",
+]
+
+# Paulo é o operador/organizador da plataforma. Ele pode lançar uma
+# convocação administrativa em nome de um supervisor, mas não entra nos
+# indicadores de desempenho dos supervisores.
+PAULO_OPERADOR = "PAULO"
+SUPERVISORES_INDICADORES = [
+    nome
+    for nome in ENGENHEIROS
+    if normalizar(nome) != normalizar(PAULO_OPERADOR)
 ]
 
 UNIDADES_APROAR = [
@@ -10194,6 +10208,206 @@ def render_relatorio_visualizador(key_prefix="rel_view", engenheiro_fixo=None):
     )
 
 
+
+def executor_da_convocacao(registro, meta=None):
+    """Identifica quem efetivamente lançou a convocação."""
+    meta = meta or obter_metadata_operacional(
+        registro.get("observacao") or ""
+    )
+    executor = (
+        meta.get("convocado_por")
+        or registro.get("criado_por")
+        or registro.get("created_by")
+        or registro.get("criado_por_usuario")
+        or registro.get("engenheiro")
+        or ""
+    )
+    return str(executor).strip().upper()
+
+
+def gerar_pdf_relatorio_resultados(
+    data_inicio,
+    data_fim,
+    resumo_supervisores,
+    faltas_supervisores,
+    convocacoes_paulo,
+    total_apontamentos,
+    total_apontamentos_atrasados,
+):
+    """Gera o relatório executivo em PDF dos resultados operacionais."""
+    class _RelatorioResultadosPDF(FPDF):
+        def footer(self):
+            self.set_y(-9)
+            self.set_font("Arial", "", 7)
+            self.set_text_color(145, 155, 170)
+            self.cell(
+                0,
+                4,
+                to_latin(
+                    f"APROAR • Relatório de Resultados • Página {self.page_no()}"
+                ),
+                align="C",
+            )
+
+    pdf = _RelatorioResultadosPDF(orientation="L", unit="mm", format="A4")
+    pdf.set_auto_page_break(auto=True, margin=14)
+    pdf.alias_nb_pages()
+    pdf.add_page()
+
+    def texto(v):
+        return to_latin(str(v or ""))
+
+    def titulo(txt, subtitulo=None):
+        pdf.set_font("Arial", "B", 16)
+        pdf.set_text_color(20, 32, 51)
+        pdf.cell(0, 9, texto(txt), ln=1)
+        if subtitulo:
+            pdf.set_font("Arial", "", 8.5)
+            pdf.set_text_color(110, 124, 145)
+            pdf.cell(0, 5, texto(subtitulo), ln=1)
+        pdf.ln(3)
+
+    def tabela(colunas, linhas, larguras):
+        pdf.set_font("Arial", "B", 8)
+        pdf.set_text_color(255, 255, 255)
+        pdf.set_fill_color(37, 99, 235)
+        for col, largura in zip(colunas, larguras):
+            pdf.cell(largura, 7, texto(col), border=1, fill=True, align="C")
+        pdf.ln()
+
+        pdf.set_font("Arial", "", 7.6)
+        for i, linha in enumerate(linhas):
+            pdf.set_text_color(35, 48, 68)
+            pdf.set_fill_color(247, 249, 252) if i % 2 == 0 else pdf.set_fill_color(255, 255, 255)
+            for valor, largura in zip(linha, larguras):
+                pdf.cell(largura, 6.5, texto(valor)[:85], border=1, fill=True)
+            pdf.ln()
+
+    total_feitas = sum(int(x.get("Convocações feitas", 0)) for x in resumo_supervisores)
+    total_atrasadas = sum(int(x.get("Convocações atrasadas", 0)) for x in resumo_supervisores)
+    total_nao_feitas = sum(int(x.get("Convocações não feitas", 0)) for x in faltas_supervisores)
+    total_paulo = len(convocacoes_paulo)
+    percentual = ((total_feitas - total_atrasadas) / total_feitas * 100) if total_feitas else 0
+
+    pdf.set_font("Arial", "B", 20)
+    pdf.set_text_color(20, 32, 51)
+    pdf.cell(0, 11, texto("APROAR • RELATÓRIO DE RESULTADOS"), ln=1)
+    pdf.set_font("Arial", "", 9)
+    pdf.set_text_color(100, 116, 139)
+    pdf.cell(
+        0, 6,
+        texto(f"Período analisado: {data_inicio.strftime('%d/%m/%Y')} a {data_fim.strftime('%d/%m/%Y')}"),
+        ln=1,
+    )
+    pdf.ln(5)
+
+    kpis = [
+        ("CONVOCAÇÕES DOS SUPERVISORES", total_feitas),
+        ("NO PRAZO", f"{percentual:.1f}%"),
+        ("ATRASADAS", total_atrasadas),
+        ("NÃO FEITAS", total_nao_feitas),
+        ("LANÇADAS PELO PAULO", total_paulo),
+    ]
+    for i, (label, valor) in enumerate(kpis):
+        x = 10 + i * 55
+        y = pdf.get_y()
+        pdf.set_xy(x, y)
+        pdf.set_fill_color(247, 249, 252)
+        pdf.set_draw_color(225, 231, 239)
+        pdf.rect(x, y, 52, 23, style="DF")
+        pdf.set_xy(x + 3, y + 3)
+        pdf.set_font("Arial", "B", 7)
+        pdf.set_text_color(100, 116, 139)
+        pdf.cell(46, 4, texto(label))
+        pdf.set_xy(x + 3, y + 10)
+        pdf.set_font("Arial", "B", 15)
+        pdf.set_text_color(20, 32, 51)
+        pdf.cell(46, 7, texto(valor))
+    pdf.set_y(y + 29)
+
+    titulo(
+        "1. Desempenho dos supervisores",
+        "Uma convocação = um supervisor + um dia, independentemente da quantidade de funcionários.",
+    )
+    linhas = []
+    for x in sorted(resumo_supervisores, key=lambda r: r.get("Engenheiro", "")):
+        pct = x.get("No prazo (%)")
+        linhas.append([
+            x.get("Engenheiro", ""),
+            x.get("Convocações feitas", 0),
+            x.get("Convocações atrasadas", 0),
+            f"{pct:.1f}%" if pct is not None else "—",
+            x.get("Apontamentos feitos", 0),
+            x.get("Apontamentos atrasados", 0),
+        ])
+    tabela(
+        ["Supervisor", "Convocações", "Atrasadas", "No prazo", "Apontamentos", "Apt. atrasados"],
+        linhas, [62, 34, 30, 28, 34, 36],
+    )
+
+    pdf.add_page()
+    titulo(
+        "2. Convocações não realizadas",
+        "Verificação desde 16/09/2026. Só contam como realizadas pelo supervisor as convocações efetivamente lançadas por ele.",
+    )
+    linhas = []
+    for x in sorted(
+        faltas_supervisores,
+        key=lambda r: (-int(r.get("Convocações não feitas", 0)), r.get("Supervisor", "")),
+    ):
+        linhas.append([
+            x.get("Supervisor", ""),
+            x.get("Convocações não feitas", 0),
+            x.get("Dias sem convocação", "Nenhuma"),
+        ])
+    tabela(["Supervisor", "Não feitas", "Dias sem convocação"], linhas, [70, 35, 195])
+
+    pdf.add_page()
+    titulo(
+        "3. Atuação administrativa • Paulo",
+        "Lançamentos administrativos feitos pelo Paulo em nome de supervisores. Eles ficam separados do desempenho dos supervisores.",
+    )
+    linhas = []
+    for x in sorted(convocacoes_paulo, key=lambda r: (r.get("Data", ""), r.get("Supervisor", ""))):
+        situacao = "Fora do prazo" if x.get("Atrasada") else "No prazo"
+        linhas.append([
+            x.get("Data", ""),
+            x.get("Supervisor", ""),
+            x.get("Unidade", ""),
+            situacao,
+        ])
+    if linhas:
+        tabela(["Data", "Supervisor", "Unidade(s)", "Situação"], linhas, [35, 60, 150, 55])
+    else:
+        pdf.set_font("Arial", "", 9)
+        pdf.set_text_color(100, 116, 139)
+        pdf.cell(0, 7, texto("Nenhuma convocação administrativa lançada pelo Paulo no período."), ln=1)
+
+    pdf.ln(5)
+    titulo("4. Apontamentos", "Resumo dos registros de apontamento identificados no período selecionado.")
+    pdf.set_font("Arial", "", 9)
+    pdf.set_text_color(45, 58, 78)
+    pdf.cell(
+        0, 7,
+        texto(f"Total de apontamentos: {total_apontamentos} • Apontamentos atrasados: {total_apontamentos_atrasados}"),
+        ln=1,
+    )
+
+    pdf.ln(8)
+    pdf.set_font("Arial", "I", 7.5)
+    pdf.set_text_color(125, 138, 157)
+    pdf.multi_cell(
+        0, 4,
+        texto(
+            "Critério: o indicador do supervisor considera somente ações efetivamente lançadas "
+            "pelo próprio supervisor. Quando Paulo realiza a convocação administrativa, a ação "
+            "é registrada separadamente para não atribuir esse lançamento ao supervisor."
+        ),
+    )
+
+    return bytes(pdf.output(dest="S"))
+
+
 def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostrar_absenteismo=True):
     cabecalho_pagina_aproar(
         "Indicadores",
@@ -10215,6 +10429,7 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
     registros_brutos = _buscar_convocacoes_intervalo(inicio, fim, engenheiro_fixo)
     registros = []
     eventos_prazo = []
+    convocacoes_paulo_por_data = {}
 
     for r in registros_brutos:
         obra = dict_obras.get(r.get("obra_id"), {"unidade": "GERAL"})
@@ -10223,6 +10438,34 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
         colab = dict_colaboradores.get(r.get("colaborador_id"), {"nome": "Desconhecido", "valor_diaria": VALOR_DIARIA_PROFISSIONAL})
         status = normalizar_status_operacional(r.get("status"))
         meta = obter_metadata_operacional(r.get("observacao") or "")
+        executor = executor_da_convocacao(r, meta)
+        supervisor_registro = str(r.get("engenheiro") or "N/A").strip().upper()
+        if (
+            meta.get("convocado_em")
+            and executor == PAULO_OPERADOR
+        ):
+            data_paulo = pd.to_datetime(r.get("data"), errors="coerce")
+            if not pd.isna(data_paulo):
+                chave_paulo = (
+                    data_paulo.date(),
+                    supervisor_registro,
+                )
+                item_paulo = convocacoes_paulo_por_data.setdefault(
+                    chave_paulo,
+                    {
+                        "Data": data_paulo.strftime("%d/%m/%Y"),
+                        "Supervisor": supervisor_registro,
+                        "Unidades": set(),
+                        "Atrasada": False,
+                    },
+                )
+                item_paulo["Unidades"].add(
+                    str(obra.get("unidade") or "GERAL")
+                )
+                item_paulo["Atrasada"] = bool(
+                    item_paulo["Atrasada"]
+                    or meta.get("convocacao_atrasada")
+                )
         try:
             data_dt = pd.to_datetime(r.get("data"), errors="coerce")
         except Exception:
@@ -10240,7 +10483,7 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
             "meta": meta,
         })
 
-        if meta.get("convocado_em"):
+        if meta.get("convocado_em") and executor != PAULO_OPERADOR:
             eventos_prazo.append({
                 "Engenheiro": eng,
                 "Data do serviço": str(r.get("data") or ""),
@@ -10249,7 +10492,7 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
                 "Registrado em": str(meta.get("convocado_em") or "").replace("T", " ")[:19],
                 "Atrasado": "SIM" if meta.get("convocacao_atrasada") else "NÃO",
             })
-        if meta.get("apontado_em"):
+        if meta.get("apontado_em") and executor != PAULO_OPERADOR:
             eventos_prazo.append({
                 "Engenheiro": eng,
                 "Data do serviço": str(r.get("data") or ""),
@@ -10282,7 +10525,14 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
         chave = (eng, data_chave)
         meta = item["meta"]
 
-        if meta.get("convocado_em"):
+        if (
+            meta.get("convocado_em")
+            and executor_da_convocacao(item["raw"], meta) != PAULO_OPERADOR
+            and eng in {
+                str(nome).strip().upper()
+                for nome in SUPERVISORES_INDICADORES
+            }
+        ):
             info = convocacoes_por_eng_data.setdefault(
                 chave,
                 {"atrasada": False},
@@ -10290,7 +10540,14 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
             if meta.get("convocacao_atrasada"):
                 info["atrasada"] = True
 
-        if meta.get("apontado_em"):
+        if (
+            meta.get("apontado_em")
+            and executor_da_convocacao(item["raw"], meta) != PAULO_OPERADOR
+            and eng in {
+                str(nome).strip().upper()
+                for nome in SUPERVISORES_INDICADORES
+            }
+        ):
             info = apontamentos_por_eng_data.setdefault(
                 chave,
                 {"atrasado": False},
@@ -10306,7 +10563,7 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
             "Apontamentos feitos": 0,
             "Apontamentos atrasados": 0,
         }
-        for nome in ENGENHEIROS
+        for nome in SUPERVISORES_INDICADORES
         if str(nome).strip()
     }
 
@@ -10360,7 +10617,7 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
 
     titulo_secao_aproar(
         "Cumprimento por engenheiro",
-        "Quantidade de convocações feitas por dia e quantas foram realizadas fora do prazo.",
+        "Quantidade de convocações feitas pelo próprio supervisor, por dia, e quantas foram realizadas fora do prazo.",
     )
     st.caption(
         "Cada dia com convocação conta como 1 convocação, mesmo que vários "
@@ -10476,7 +10733,7 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
 
     engenheiros_alvo = [
         str(nome).strip().upper()
-        for nome in ENGENHEIROS
+        for nome in SUPERVISORES_INDICADORES
         if str(nome).strip()
     ]
 
@@ -10491,8 +10748,10 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
         data_raw = item["raw"].get("data")
         meta = item["meta"]
 
+        executor = executor_da_convocacao(item["raw"], meta)
         if (
             supervisor in engenheiros_alvo
+            and executor == supervisor
             and data_raw
             and meta.get("convocado_em")
         ):
@@ -10587,6 +10846,67 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
     st.caption(
         f"Período verificado: 16/09/2026 a {data_limite.strftime('%d/%m/%Y')}."
     )
+
+    # Atuação administrativa do Paulo fica fora do ranking dos supervisores.
+    convocacoes_paulo = []
+    for item in sorted(
+        convocacoes_paulo_por_data.values(),
+        key=lambda x: (x.get("Data", ""), x.get("Supervisor", "")),
+    ):
+        convocacoes_paulo.append({
+            "Data": item.get("Data", ""),
+            "Supervisor": item.get("Supervisor", ""),
+            "Unidade": ", ".join(sorted(item.get("Unidades") or [])),
+            "Atrasada": bool(item.get("Atrasada")),
+        })
+
+    titulo_secao_aproar(
+        "Atuação administrativa • Paulo",
+        "Convocações lançadas por Paulo em nome do supervisor. Esses lançamentos não contam como desempenho do supervisor.",
+    )
+    if convocacoes_paulo:
+        df_paulo = pd.DataFrame([
+            {
+                "Data": x["Data"],
+                "Supervisor": x["Supervisor"],
+                "Unidade(s)": x["Unidade"],
+                "Prazo": "ATRASADA" if x["Atrasada"] else "NO PRAZO",
+            }
+            for x in convocacoes_paulo
+        ])
+        tabela_aproar(
+            df_paulo.sort_values(["Data", "Supervisor"], ascending=[False, True]),
+            key=f"{key_prefix}_tbl_paulo",
+        )
+    else:
+        st.info("Nenhuma convocação administrativa lançada pelo Paulo no período.")
+
+    # O PDF é o fechamento executivo do mesmo conjunto de indicadores exibido acima.
+    resumo_pdf = df_prazos.to_dict("records")
+    faltas_pdf = df_ausencias.to_dict("records")
+    total_apontamentos_pdf = int(sum(x.get("Apontamentos feitos", 0) for x in resumo_pdf))
+    total_apontamentos_atrasados_pdf = int(sum(x.get("Apontamentos atrasados", 0) for x in resumo_pdf))
+    try:
+        pdf_resultados = gerar_pdf_relatorio_resultados(
+            inicio,
+            fim,
+            resumo_pdf,
+            faltas_pdf,
+            convocacoes_paulo,
+            total_apontamentos_pdf,
+            total_apontamentos_atrasados_pdf,
+        )
+        st.download_button(
+            "📄 BAIXAR RELATÓRIO EXECUTIVO EM PDF",
+            data=pdf_resultados,
+            file_name=f"relatorio_resultados_{inicio.isoformat()}_a_{fim.isoformat()}.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+            key=f"{key_prefix}_pdf_resultados",
+        )
+    except Exception as e:
+        st.warning(f"Não foi possível gerar o PDF executivo: {str(e)[:180]}")
+
     st.markdown("---")
 
 def incluir_colaborador_direto_apontamento(
@@ -20289,7 +20609,8 @@ else:
                                     c_id,
                                     data_conv_auto,
                                     engenheiro_conv,
-                                    turno_conv_adm
+                                    turno_conv_adm,
+                                    executor=PAULO_OPERADOR,
                                 )
                                 if ok:
                                     sucessos += 1
