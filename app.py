@@ -2815,7 +2815,7 @@ def _garantir_estrutura_cadastros_admin():
                     "'Extra'"
                 )
 
-                # 1) CONVOCACOES — é a fonte usada pelos relatórios atuais.
+                # 1) CONVOCAÇÕES — é a fonte usada pelos relatórios atuais.
                 cur.execute(
                     f"""
                     UPDATE convocacoes AS v
@@ -10230,185 +10230,330 @@ def gerar_pdf_relatorio_resultados(
     data_fim,
     resumo_supervisores,
     faltas_supervisores,
-    convocacoes_paulo,
     total_apontamentos,
     total_apontamentos_atrasados,
+    unidade_filtro="TODAS",
 ):
-    """Gera o relatório executivo em PDF dos resultados operacionais."""
+    """Gera o relatório executivo em PDF, com filtros e layout profissional."""
+
     class _RelatorioResultadosPDF(FPDF):
         def footer(self):
-            self.set_y(-9)
+            self.set_y(-10)
             self.set_font("Arial", "", 7)
-            self.set_text_color(145, 155, 170)
+            self.set_text_color(120, 130, 145)
             self.cell(
                 0,
                 4,
                 to_latin(
-                    f"APROAR • Relatório de Resultados • Página {self.page_no()}"
+                    f"APROAR | Relatório de Resultados | Página {self.page_no()}"
                 ),
                 align="C",
             )
 
-    pdf = _RelatorioResultadosPDF(orientation="L", unit="mm", format="A4")
-    pdf.set_auto_page_break(auto=True, margin=14)
+    pdf = _RelatorioResultadosPDF(
+        orientation="L",
+        unit="mm",
+        format="A4",
+    )
+    pdf.set_margins(12, 12, 12)
+    pdf.set_auto_page_break(auto=True, margin=15)
     pdf.alias_nb_pages()
     pdf.add_page()
 
-    def texto(v):
-        return to_latin(str(v or ""))
+    largura_util = 273  # A4 paisagem: 297 - 12 - 12
 
-    def titulo(txt, subtitulo=None):
-        pdf.set_font("Arial", "B", 16)
-        pdf.set_text_color(20, 32, 51)
-        pdf.cell(0, 9, texto(txt), ln=1)
+    def texto(valor):
+        return to_latin(str(valor if valor is not None else ""))
+
+    def titulo_secao(titulo, subtitulo=None, numero=None):
+        pdf.set_font("Arial", "B", 14)
+        pdf.set_text_color(25, 39, 61)
+        prefixo = f"{numero}. " if numero is not None else ""
+        pdf.cell(0, 8, texto(prefixo + titulo), ln=1)
         if subtitulo:
-            pdf.set_font("Arial", "", 8.5)
-            pdf.set_text_color(110, 124, 145)
-            pdf.cell(0, 5, texto(subtitulo), ln=1)
-        pdf.ln(3)
+            pdf.set_font("Arial", "", 8)
+            pdf.set_text_color(105, 120, 140)
+            pdf.multi_cell(0, 4.5, texto(subtitulo))
+        pdf.ln(2)
 
-    def tabela(colunas, linhas, larguras):
-        pdf.set_font("Arial", "B", 8)
+    def desenhar_cabecalho_tabela(colunas, larguras, alinhamentos):
+        pdf.set_font("Arial", "B", 7.5)
         pdf.set_text_color(255, 255, 255)
         pdf.set_fill_color(37, 99, 235)
-        for col, largura in zip(colunas, larguras):
-            pdf.cell(largura, 7, texto(col), border=1, fill=True, align="C")
+        pdf.set_draw_color(210, 218, 230)
+        for col, largura, align in zip(colunas, larguras, alinhamentos):
+            pdf.cell(
+                largura,
+                7,
+                texto(col),
+                border=1,
+                fill=True,
+                align=align,
+            )
         pdf.ln()
 
-        pdf.set_font("Arial", "", 7.6)
+    def tabela(colunas, linhas, larguras, alinhamentos=None):
+        if not linhas:
+            pdf.set_font("Arial", "", 8.5)
+            pdf.set_text_color(105, 120, 140)
+            pdf.cell(
+                0,
+                6,
+                texto("Nenhum registro encontrado para o filtro selecionado."),
+                ln=1,
+            )
+            return
+
+        alinhamentos = alinhamentos or ["L"] * len(colunas)
+        desenhar_cabecalho_tabela(colunas, larguras, alinhamentos)
+
+        pdf.set_font("Arial", "", 7.3)
         for i, linha in enumerate(linhas):
+            if pdf.get_y() > 185:
+                pdf.add_page()
+                desenhar_cabecalho_tabela(colunas, larguras, alinhamentos)
+                pdf.set_font("Arial", "", 7.3)
+
             pdf.set_text_color(35, 48, 68)
-            pdf.set_fill_color(247, 249, 252) if i % 2 == 0 else pdf.set_fill_color(255, 255, 255)
-            for valor, largura in zip(linha, larguras):
-                pdf.cell(largura, 6.5, texto(valor)[:85], border=1, fill=True)
+            pdf.set_fill_color(
+                248, 250, 252
+            ) if i % 2 == 0 else pdf.set_fill_color(255, 255, 255)
+
+            for valor, largura, align in zip(linha, larguras, alinhamentos):
+                valor_txt = texto(valor)
+                if len(valor_txt) > 90:
+                    valor_txt = valor_txt[:87] + "..."
+                pdf.cell(
+                    largura,
+                    6.2,
+                    valor_txt,
+                    border=1,
+                    fill=True,
+                    align=align,
+                )
             pdf.ln()
 
-    total_feitas = sum(int(x.get("Convocações feitas", 0)) for x in resumo_supervisores)
-    total_atrasadas = sum(int(x.get("Convocações atrasadas", 0)) for x in resumo_supervisores)
-    total_nao_feitas = sum(int(x.get("Convocações não feitas", 0)) for x in faltas_supervisores)
-    total_paulo = len(convocacoes_paulo)
-    percentual = ((total_feitas - total_atrasadas) / total_feitas * 100) if total_feitas else 0
+    total_feitas = sum(
+        int(x.get("Convocações feitas", 0) or 0)
+        for x in resumo_supervisores
+    )
+    total_atrasadas = sum(
+        int(x.get("Convocações atrasadas", 0) or 0)
+        for x in resumo_supervisores
+    )
+    total_nao_feitas = sum(
+        int(x.get("Convocações não feitas", 0) or 0)
+        for x in faltas_supervisores
+    )
+    percentual = (
+        (total_feitas - total_atrasadas) / total_feitas * 100
+        if total_feitas
+        else 0
+    )
 
-    pdf.set_font("Arial", "B", 20)
-    pdf.set_text_color(20, 32, 51)
-    pdf.cell(0, 11, texto("APROAR • RELATÓRIO DE RESULTADOS"), ln=1)
+    # ---------------- CABEÇALHO ----------------
+    pdf.set_font("Arial", "B", 21)
+    pdf.set_text_color(25, 39, 61)
+    pdf.cell(
+        0,
+        10,
+        texto("APROAR | RELATÓRIO DE RESULTADOS"),
+        ln=1,
+    )
+
+    unidade_texto = (
+        "Todas as unidades"
+        if str(unidade_filtro).upper() == "TODAS"
+        else str(unidade_filtro)
+    )
+
     pdf.set_font("Arial", "", 9)
     pdf.set_text_color(100, 116, 139)
     pdf.cell(
-        0, 6,
-        texto(f"Período analisado: {data_inicio.strftime('%d/%m/%Y')} a {data_fim.strftime('%d/%m/%Y')}"),
+        0,
+        5,
+        texto(
+            f"Período analisado: {data_inicio.strftime('%d/%m/%Y')} "
+            f"a {data_fim.strftime('%d/%m/%Y')}"
+        ),
+        ln=1,
+    )
+    pdf.cell(
+        0,
+        5,
+        texto(f"Unidade: {unidade_texto}"),
         ln=1,
     )
     pdf.ln(5)
 
+    # ---------------- KPIs ----------------
     kpis = [
-        ("CONVOCAÇÕES DOS SUPERVISORES", total_feitas),
+        ("CONVOCAÇÕES", total_feitas),
         ("NO PRAZO", f"{percentual:.1f}%"),
         ("ATRASADAS", total_atrasadas),
         ("NÃO FEITAS", total_nao_feitas),
-        ("LANÇADAS PELO PAULO", total_paulo),
     ]
+
+    gap = 4
+    card_w = (largura_util - gap * (len(kpis) - 1)) / len(kpis)
+    card_h = 25
+    y_cards = pdf.get_y()
+
+    # Todos os cards partem do MESMO Y. Isso corrige o efeito diagonal
+    # que aparecia no relatório anterior.
     for i, (label, valor) in enumerate(kpis):
-        x = 10 + i * 55
-        y = pdf.get_y()
-        pdf.set_xy(x, y)
+        x = 12 + i * (card_w + gap)
+
+        pdf.set_xy(x, y_cards)
         pdf.set_fill_color(247, 249, 252)
-        pdf.set_draw_color(225, 231, 239)
-        pdf.rect(x, y, 52, 23, style="DF")
-        pdf.set_xy(x + 3, y + 3)
-        pdf.set_font("Arial", "B", 7)
+        pdf.set_draw_color(221, 228, 237)
+        pdf.rect(x, y_cards, card_w, card_h, style="DF")
+
+        pdf.set_xy(x + 4, y_cards + 4)
+        pdf.set_font("Arial", "B", 7.2)
         pdf.set_text_color(100, 116, 139)
-        pdf.cell(46, 4, texto(label))
-        pdf.set_xy(x + 3, y + 10)
-        pdf.set_font("Arial", "B", 15)
-        pdf.set_text_color(20, 32, 51)
-        pdf.cell(46, 7, texto(valor))
-    pdf.set_y(y + 29)
+        pdf.cell(card_w - 8, 4, texto(label), ln=1)
 
-    titulo(
-        "1. Desempenho dos supervisores",
-        "Uma convocação = um supervisor + um dia, independentemente da quantidade de funcionários.",
+        pdf.set_xy(x + 4, y_cards + 11)
+        pdf.set_font("Arial", "B", 17)
+        pdf.set_text_color(25, 39, 61)
+        pdf.cell(card_w - 8, 8, texto(valor), ln=0)
+
+    pdf.set_xy(12, y_cards + card_h + 9)
+
+    # ---------------- DESEMPENHO ----------------
+    titulo_secao(
+        "Desempenho dos supervisores",
+        "Uma convocação corresponde a um supervisor + um dia, independentemente da quantidade de funcionários.",
+        numero=1,
     )
+
     linhas = []
-    for x in sorted(resumo_supervisores, key=lambda r: r.get("Engenheiro", "")):
-        pct = x.get("No prazo (%)")
+    for item in sorted(
+        resumo_supervisores,
+        key=lambda r: str(r.get("Engenheiro", "")),
+    ):
+        pct = item.get("No prazo (%)")
         linhas.append([
-            x.get("Engenheiro", ""),
-            x.get("Convocações feitas", 0),
-            x.get("Convocações atrasadas", 0),
-            f"{pct:.1f}%" if pct is not None else "—",
-            x.get("Apontamentos feitos", 0),
-            x.get("Apontamentos atrasados", 0),
+            item.get("Engenheiro", ""),
+            item.get("Convocações feitas", 0),
+            item.get("Convocações atrasadas", 0),
+            f"{float(pct):.1f}%" if pct is not None else "-",
+            item.get("Apontamentos feitos", 0),
+            item.get("Apontamentos atrasados", 0),
         ])
+
     tabela(
-        ["Supervisor", "Convocações", "Atrasadas", "No prazo", "Apontamentos", "Apt. atrasados"],
-        linhas, [62, 34, 30, 28, 34, 36],
+        [
+            "Supervisor",
+            "Convocações",
+            "Atrasadas",
+            "No prazo",
+            "Apontamentos",
+            "Apt. atrasados",
+        ],
+        linhas,
+        [70, 36, 34, 34, 48, 51],
+        ["L", "C", "C", "C", "C", "C"],
     )
 
-    pdf.add_page()
-    titulo(
-        "2. Convocações não realizadas",
-        "Verificação desde 16/09/2026. Só contam como realizadas pelo supervisor as convocações efetivamente lançadas por ele.",
+    # ---------------- NÃO REALIZADAS ----------------
+    pdf.ln(8)
+    titulo_secao(
+        "Convocações não realizadas",
+        "Dias em que não foi identificada uma convocação efetivamente registrada pelo próprio supervisor.",
+        numero=2,
     )
+
     linhas = []
-    for x in sorted(
+    for item in sorted(
         faltas_supervisores,
-        key=lambda r: (-int(r.get("Convocações não feitas", 0)), r.get("Supervisor", "")),
+        key=lambda r: (
+            -int(r.get("Convocações não feitas", 0) or 0),
+            str(r.get("Supervisor", "")),
+        ),
     ):
         linhas.append([
-            x.get("Supervisor", ""),
-            x.get("Convocações não feitas", 0),
-            x.get("Dias sem convocação", "Nenhuma"),
+            item.get("Supervisor", ""),
+            item.get("Convocações não feitas", 0),
+            item.get("Dias sem convocação", "Nenhum"),
         ])
-    tabela(["Supervisor", "Não feitas", "Dias sem convocação"], linhas, [70, 35, 195])
 
+    tabela(
+        ["Supervisor", "Não feitas", "Dias sem convocação"],
+        linhas,
+        [70, 35, 168],
+        ["L", "C", "L"],
+    )
+
+    # ---------------- APONTAMENTOS ----------------
+    # Mantém a seção inteira na página seguinte para evitar título órfão.
     pdf.add_page()
-    titulo(
-        "3. Atuação administrativa • Paulo",
-        "Lançamentos administrativos feitos pelo Paulo em nome de supervisores. Eles ficam separados do desempenho dos supervisores.",
+    titulo_secao(
+        "Apontamentos",
+        "Resumo dos apontamentos associados aos supervisores no período selecionado.",
+        numero=3,
     )
-    linhas = []
-    for x in sorted(convocacoes_paulo, key=lambda r: (r.get("Data", ""), r.get("Supervisor", ""))):
-        situacao = "Fora do prazo" if x.get("Atrasada") else "No prazo"
-        linhas.append([
-            x.get("Data", ""),
-            x.get("Supervisor", ""),
-            x.get("Unidade", ""),
-            situacao,
-        ])
-    if linhas:
-        tabela(["Data", "Supervisor", "Unidade(s)", "Situação"], linhas, [35, 60, 150, 55])
-    else:
-        pdf.set_font("Arial", "", 9)
+
+    resumo_h = 24
+    box_w = 130
+    y_box = pdf.get_y()
+
+    for x, label, valor in [
+        (12, "TOTAL DE APONTAMENTOS", total_apontamentos),
+        (155, "APONTAMENTOS ATRASADOS", total_apontamentos_atrasados),
+    ]:
+        pdf.set_fill_color(247, 249, 252)
+        pdf.set_draw_color(221, 228, 237)
+        pdf.rect(x, y_box, box_w, resumo_h, style="DF")
+
+        pdf.set_xy(x + 5, y_box + 4)
+        pdf.set_font("Arial", "B", 7.2)
         pdf.set_text_color(100, 116, 139)
-        pdf.cell(0, 7, texto("Nenhuma convocação administrativa lançada pelo Paulo no período."), ln=1)
+        pdf.cell(box_w - 10, 4, texto(label), ln=1)
 
-    pdf.ln(5)
-    titulo("4. Apontamentos", "Resumo dos registros de apontamento identificados no período selecionado.")
-    pdf.set_font("Arial", "", 9)
-    pdf.set_text_color(45, 58, 78)
-    pdf.cell(
-        0, 7,
-        texto(f"Total de apontamentos: {total_apontamentos} • Apontamentos atrasados: {total_apontamentos_atrasados}"),
-        ln=1,
+        pdf.set_xy(x + 5, y_box + 11)
+        pdf.set_font("Arial", "B", 16)
+        pdf.set_text_color(25, 39, 61)
+        pdf.cell(box_w - 10, 7, texto(valor), ln=0)
+
+    pdf.set_xy(12, y_box + resumo_h + 10)
+    linhas_apontamentos = []
+    for item in sorted(
+        resumo_supervisores,
+        key=lambda r: str(r.get("Engenheiro", "")),
+    ):
+        linhas_apontamentos.append([
+            item.get("Engenheiro", ""),
+            item.get("Apontamentos feitos", 0),
+            item.get("Apontamentos atrasados", 0),
+        ])
+
+    titulo_secao(
+        "Apontamentos por supervisor",
+        "Quantidade de apontamentos registrados e respectivos atrasos.",
+    )
+    tabela(
+        ["Supervisor", "Apontamentos", "Atrasados"],
+        linhas_apontamentos,
+        [150, 61, 62],
+        ["L", "C", "C"],
     )
 
-    pdf.ln(8)
+    pdf.ln(6)
     pdf.set_font("Arial", "I", 7.5)
     pdf.set_text_color(125, 138, 157)
     pdf.multi_cell(
-        0, 4,
+        0,
+        4,
         texto(
-            "Critério: o indicador do supervisor considera somente ações efetivamente lançadas "
-            "pelo próprio supervisor. Quando Paulo realiza a convocação administrativa, a ação "
-            "é registrada separadamente para não atribuir esse lançamento ao supervisor."
+            "Critério: o indicador do supervisor considera somente ações "
+            "efetivamente lançadas pelo próprio supervisor. Lançamentos "
+            "administrativos não são atribuídos ao desempenho do supervisor."
         ),
     )
 
-    # Compatibilidade com fpdf 1.x e fpdf2:
-    # fpdf 1.x retorna `str` em output(dest="S"), enquanto fpdf2
-    # retorna `bytearray`. `bytes(str)` causa o erro:
-    # "string argument without an encoding".
+    # Compatibilidade com fpdf 1.x e fpdf2.
     saida_pdf = pdf.output(dest="S")
     if isinstance(saida_pdf, str):
         return saida_pdf.encode("latin-1")
@@ -10436,7 +10581,6 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
     registros_brutos = _buscar_convocacoes_intervalo(inicio, fim, engenheiro_fixo)
     registros = []
     eventos_prazo = []
-    convocacoes_paulo_por_data = {}
 
     for r in registros_brutos:
         obra = dict_obras.get(r.get("obra_id"), {"unidade": "GERAL"})
@@ -10446,33 +10590,6 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
         status = normalizar_status_operacional(r.get("status"))
         meta = obter_metadata_operacional(r.get("observacao") or "")
         executor = executor_da_convocacao(r, meta)
-        supervisor_registro = str(r.get("engenheiro") or "N/A").strip().upper()
-        if (
-            meta.get("convocado_em")
-            and executor == PAULO_OPERADOR
-        ):
-            data_paulo = pd.to_datetime(r.get("data"), errors="coerce")
-            if not pd.isna(data_paulo):
-                chave_paulo = (
-                    data_paulo.date(),
-                    supervisor_registro,
-                )
-                item_paulo = convocacoes_paulo_por_data.setdefault(
-                    chave_paulo,
-                    {
-                        "Data": data_paulo.strftime("%d/%m/%Y"),
-                        "Supervisor": supervisor_registro,
-                        "Unidades": set(),
-                        "Atrasada": False,
-                    },
-                )
-                item_paulo["Unidades"].add(
-                    str(obra.get("unidade") or "GERAL")
-                )
-                item_paulo["Atrasada"] = bool(
-                    item_paulo["Atrasada"]
-                    or meta.get("convocacao_atrasada")
-                )
         try:
             data_dt = pd.to_datetime(r.get("data"), errors="coerce")
         except Exception:
@@ -10773,12 +10890,11 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
                     set(),
                 ).add(data_conv.date())
 
-    # Mantém a regra atual: verificar todos os dias desde 16/09/2026.
-    data_loop = datetime.date(2026, 9, 16)
-    data_limite = min(
-        fim,
-        agora_aproar().date(),
-    )
+    # A regra histórica começa em 16/09, mas respeita o filtro escolhido
+    # quando o usuário seleciona uma data posterior.
+    data_base_monitoramento = datetime.date(2026, 9, 16)
+    data_loop = max(inicio, data_base_monitoramento)
+    data_limite = min(fim, agora_aproar().date())
 
     datas_monitoradas = []
     while data_loop <= data_limite:
@@ -10854,39 +10970,16 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
         f"Período verificado: 16/09/2026 a {data_limite.strftime('%d/%m/%Y')}."
     )
 
-    # Atuação administrativa do Paulo fica fora do ranking dos supervisores.
-    convocacoes_paulo = []
-    for item in sorted(
-        convocacoes_paulo_por_data.values(),
-        key=lambda x: (x.get("Data", ""), x.get("Supervisor", "")),
-    ):
-        convocacoes_paulo.append({
-            "Data": item.get("Data", ""),
-            "Supervisor": item.get("Supervisor", ""),
-            "Unidade": ", ".join(sorted(item.get("Unidades") or [])),
-            "Atrasada": bool(item.get("Atrasada")),
-        })
-
-    titulo_secao_aproar(
-        "Atuação administrativa • Paulo",
-        "Convocações lançadas por Paulo em nome do supervisor. Esses lançamentos não contam como desempenho do supervisor.",
-    )
-    if convocacoes_paulo:
-        df_paulo = pd.DataFrame([
-            {
-                "Data": x["Data"],
-                "Supervisor": x["Supervisor"],
-                "Unidade(s)": x["Unidade"],
-                "Prazo": "ATRASADA" if x["Atrasada"] else "NO PRAZO",
-            }
-            for x in convocacoes_paulo
-        ])
-        tabela_aproar(
-            df_paulo.sort_values(["Data", "Supervisor"], ascending=[False, True]),
-            key=f"{key_prefix}_tbl_paulo",
+    data_inicio_verificado = max(inicio, data_base_monitoramento)
+    if data_inicio_verificado <= data_limite:
+        st.caption(
+            f"Período verificado: {data_inicio_verificado.strftime('%d/%m/%Y')} "
+            f"a {data_limite.strftime('%d/%m/%Y')}."
         )
     else:
-        st.info("Nenhuma convocação administrativa lançada pelo Paulo no período.")
+        st.caption(
+            "Não há dias concluídos para verificar dentro do período selecionado."
+        )
 
     # O PDF é o fechamento executivo do mesmo conjunto de indicadores exibido acima.
     resumo_pdf = df_prazos.to_dict("records")
@@ -10899,9 +10992,9 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
             fim,
             resumo_pdf,
             faltas_pdf,
-            convocacoes_paulo,
             total_apontamentos_pdf,
             total_apontamentos_atrasados_pdf,
+            unidade_filtro=unidade_filtro,
         )
         st.download_button(
             "📄 BAIXAR RELATÓRIO EXECUTIVO EM PDF",
