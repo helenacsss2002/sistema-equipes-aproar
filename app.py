@@ -10266,46 +10266,92 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
     # Cada linha retornada da tabela `convocacoes` representa uma convocação
     # concreta. Os indicadores, portanto, contam registros reais, e não
     # funcionários distintos.
-    por_eng = {}
+    # Uma convocação pode gerar várias linhas no banco (uma por funcionário).
+    # Para o indicador, a unidade de contagem é 1 supervisor + 1 data = 1 convocação.
+    convocacoes_por_eng_data = {}
+    apontamentos_por_eng_data = {}
+
     for item in registros:
-        eng = item["engenheiro"]
+        eng = str(item["engenheiro"] or "").strip().upper()
+        data_dt = item.get("data")
+
+        if not eng or pd.isna(data_dt):
+            continue
+
+        data_chave = pd.Timestamp(data_dt).date()
+        chave = (eng, data_chave)
         meta = item["meta"]
-        d = por_eng.setdefault(eng, {
-            "Engenheiro": eng,
+
+        if meta.get("convocado_em"):
+            info = convocacoes_por_eng_data.setdefault(
+                chave,
+                {"atrasada": False},
+            )
+            if meta.get("convocacao_atrasada"):
+                info["atrasada"] = True
+
+        if meta.get("apontado_em"):
+            info = apontamentos_por_eng_data.setdefault(
+                chave,
+                {"atrasado": False},
+            )
+            if meta.get("apontamento_atrasado"):
+                info["atrasado"] = True
+
+    por_eng = {
+        str(nome).strip().upper(): {
+            "Engenheiro": str(nome).strip().upper(),
             "Convocações feitas": 0,
             "Convocações atrasadas": 0,
             "Apontamentos feitos": 0,
             "Apontamentos atrasados": 0,
-        })
+        }
+        for nome in ENGENHEIROS
+        if str(nome).strip()
+    }
 
-        # Um registro no banco = uma convocação concreta.
-        d["Convocações feitas"] += 1
-        d["Convocações atrasadas"] += int(
-            bool(meta.get("convocacao_atrasada"))
+    for (eng, _data), info in convocacoes_por_eng_data.items():
+        d = por_eng.setdefault(
+            eng,
+            {
+                "Engenheiro": eng,
+                "Convocações feitas": 0,
+                "Convocações atrasadas": 0,
+                "Apontamentos feitos": 0,
+                "Apontamentos atrasados": 0,
+            },
         )
+        d["Convocações feitas"] += 1
+        d["Convocações atrasadas"] += int(info["atrasada"])
 
-        if meta.get("apontado_em"):
-            d["Apontamentos feitos"] += 1
-            d["Apontamentos atrasados"] += int(
-                bool(meta.get("apontamento_atrasado"))
-            )
+    for (eng, _data), info in apontamentos_por_eng_data.items():
+        d = por_eng.setdefault(
+            eng,
+            {
+                "Engenheiro": eng,
+                "Convocações feitas": 0,
+                "Convocações atrasadas": 0,
+                "Apontamentos feitos": 0,
+                "Apontamentos atrasados": 0,
+            },
+        )
+        d["Apontamentos feitos"] += 1
+        d["Apontamentos atrasados"] += int(info["atrasado"])
 
     linhas = []
     for d in por_eng.values():
-        total_eventos = (
-            d["Convocações feitas"]
-            + d["Apontamentos feitos"]
-        )
-        total_atrasos = (
-            d["Convocações atrasadas"]
-            + d["Apontamentos atrasados"]
-        )
+        # O percentual de cumprimento representa o prazo das convocações.
+        total_convocacoes = d["Convocações feitas"]
+        total_atrasadas = d["Convocações atrasadas"]
+
         d["No prazo (%)"] = (
             round(
-                ((total_eventos - total_atrasos) / total_eventos * 100),
+                (total_convocacoes - total_atrasadas)
+                / total_convocacoes
+                * 100,
                 1,
             )
-            if total_eventos
+            if total_convocacoes
             else None
         )
         linhas.append(d)
@@ -10314,14 +10360,17 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
 
     titulo_secao_aproar(
         "Cumprimento por engenheiro",
-        "Quantidade de convocações e apontamentos realizados e quantos ocorreram fora do prazo.",
+        "Quantidade de convocações feitas por dia e quantas foram realizadas fora do prazo.",
     )
     st.caption(
-        "Convocação atrasada = feita após 16h para o próximo dia útil. "
-        "Apontamento atrasado = pendente a partir de 09:30 do dia seguinte "
-        "ao serviço."
+        "Cada dia com convocação conta como 1 convocação, mesmo que vários "
+        "funcionários tenham sido convocados nesse dia. Convocação atrasada "
+        "= feita após 16h para o próximo dia útil."
     )
-    tabela_aproar(df_prazos, key=f"{key_prefix}_tbl_prazos")
+    tabela_aproar(
+        df_prazos,
+        key=f"{key_prefix}_tbl_prazos",
+    )
 
     # Detalhamento clicável/selecionável das datas que geraram atraso.
     df_eventos = pd.DataFrame(eventos_prazo)
@@ -10419,118 +10468,125 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
         })
     tabela_aproar(pd.DataFrame(resumo_unidades).sort_values("Taxa Absenteísmo (%)", ascending=False), key=f"{key_prefix}_tbl_abs_unidades")
 
-# --- RELATÓRIO: ENGENHEIROS SEM CONVOCAÇÕES POR DATA ---
+# --- RELATÓRIO: SUPERVISORES SEM CONVOCAÇÕES POR DATA ---
     titulo_secao_aproar(
-        "Engenheiros sem convocações registradas",
-        "Veja os dias em que cada engenheiro não registrou nenhuma convocação."
+        "Supervisores sem convocações registradas",
+        "Mostra quantas convocações deixaram de ser feitas e quais foram os dias sem convocação.",
     )
 
     engenheiros_alvo = [
-        "EDUARDO",
-        "FELIPE",
-        "GABRIEL",
-        "JOEL",
-        "NETO",
-        "SOARES",
-        "VICTOR",
+        str(nome).strip().upper()
+        for nome in ENGENHEIROS
+        if str(nome).strip()
     ]
 
-    # Esta análise possui um período próprio, iniciado em 16/09/2026,
-    # independentemente do "Início" escolhido no indicador principal.
-    data_loop = datetime.date(2026, 9, 16)
-    data_limite = min(fim, agora_aproar().date())
+    # Reduz os registros para uma única data por supervisor.
+    # Vários funcionários convocados no mesmo dia continuam valendo 1.
+    dias_com_convocacao = {}
 
-    registros_sem_convocacao = _buscar_convocacoes_intervalo(
-        data_loop,
-        data_limite,
-        engenheiro_fixo,
+    for item in registros:
+        supervisor = str(
+            item["engenheiro"] or ""
+        ).strip().upper()
+        data_raw = item["raw"].get("data")
+        meta = item["meta"]
+
+        if (
+            supervisor in engenheiros_alvo
+            and data_raw
+            and meta.get("convocado_em")
+        ):
+            data_conv = pd.to_datetime(
+                data_raw,
+                errors="coerce",
+            )
+
+            if not pd.isna(data_conv):
+                dias_com_convocacao.setdefault(
+                    supervisor,
+                    set(),
+                ).add(data_conv.date())
+
+    # Mantém a regra atual: verificar todos os dias desde 16/09/2026.
+    data_loop = datetime.date(2026, 9, 16)
+    data_limite = min(
+        fim,
+        agora_aproar().date(),
     )
 
-    # Mapeia quais engenheiros realizaram convocações em cada data.
-    eng_por_data = {}
-    for item in registros_sem_convocacao:
-        obra = dict_obras.get(
-            item.get("obra_id"),
-            {"unidade": "GERAL"},
-        )
-        if (
-            unidade_filtro != "TODAS"
-            and obra.get("unidade") != unidade_filtro
-        ):
-            continue
-
-        d_str = str(item.get("data") or "")
-        eng = str(item.get("engenheiro") or "").strip().upper()
-        if d_str and eng in engenheiros_alvo:
-            eng_por_data.setdefault(d_str, set()).add(eng)
-    ausencias_por_eng = {eng: [] for eng in engenheiros_alvo}
-
+    datas_monitoradas = []
     while data_loop <= data_limite:
-        d_str = data_loop.isoformat()
-        engs_ativos_no_dia = eng_por_data.get(d_str, set())
-        for eng in engenheiros_alvo:
-            if eng not in engs_ativos_no_dia:
-                ausencias_por_eng[eng].append(
-                    data_loop.strftime("%d/%m/%Y")
-                )
+        datas_monitoradas.append(data_loop)
         data_loop += datetime.timedelta(days=1)
 
-    # Uma data por linha evita que todas as datas fiquem espremidas
-    # em uma única célula horizontal.
     linhas_ausencias = []
-    ordem_eng = sorted(
-        ausencias_por_eng,
-        key=lambda eng: (-len(ausencias_por_eng[eng]), eng),
+
+    for supervisor in engenheiros_alvo:
+        dias_feitos = dias_com_convocacao.get(
+            supervisor,
+            set(),
+        )
+
+        datas_faltantes = [
+            data
+            for data in datas_monitoradas
+            if data not in dias_feitos
+        ]
+
+        linhas_ausencias.append({
+            "Supervisor": supervisor,
+            "Convocações não feitas": len(datas_faltantes),
+            "Dias sem convocação": (
+                ", ".join(
+                    data.strftime("%d/%m/%Y")
+                    for data in datas_faltantes
+                )
+                if datas_faltantes
+                else "Nenhuma",
+            ),
+        })
+
+    df_ausencias = (
+        pd.DataFrame(linhas_ausencias)
+        .sort_values(
+            ["Convocações não feitas", "Supervisor"],
+            ascending=[False, True],
+        )
+        .reset_index(drop=True)
     )
-
-    for eng in ordem_eng:
-        lista_datas = ausencias_por_eng[eng]
-
-        if not lista_datas:
-            linhas_ausencias.append({
-                "Engenheiro": eng,
-                "Dias sem convocação": 0,
-                "Data sem convocação": "Nenhuma",
-            })
-            continue
-
-        total = len(lista_datas)
-        for idx, data_str in enumerate(lista_datas):
-            linhas_ausencias.append({
-                "Engenheiro": eng,
-                "Dias sem convocação": total if idx == 0 else None,
-                "Data sem convocação": data_str,
-            })
-
-    df_ausencias = pd.DataFrame(linhas_ausencias)
 
     st.dataframe(
         df_ausencias,
         use_container_width=True,
         hide_index=True,
-        height=min(
-            620,
-            max(150, 42 * min(len(df_ausencias) + 1, 14)),
-        ),
-        row_height=36,
-        column_config={
-            "Engenheiro": st.column_config.TextColumn(
-                "Engenheiro",
-                width="medium",
+        height=max(
+            180,
+            min(
+                520,
+                48 * (len(df_ausencias) + 1),
             ),
-            "Dias sem convocação": st.column_config.NumberColumn(
-                "Dias sem convocação",
+        ),
+        column_config={
+            "Supervisor": st.column_config.TextColumn(
+                "Supervisor",
                 width="small",
+            ),
+            "Convocações não feitas": st.column_config.NumberColumn(
+                "Convocações não feitas",
+                width="medium",
                 format="%d",
             ),
-            "Data sem convocação": st.column_config.TextColumn(
-                "Data sem convocação",
-                width="medium",
+            "Dias sem convocação": st.column_config.TextColumn(
+                "Dias sem convocação",
+                width="large",
             ),
         },
-        key=f"{key_prefix}_tbl_engenheiros_sem_convocacao",
+        key=f"{key_prefix}_tbl_supervisores_sem_convocacao",
     )
 
+    st.caption(
+        f"Período verificado: 16/09/2026 a {data_limite.strftime('%d/%m/%Y')}."
+    )
     st.markdown("---")
 
 def incluir_colaborador_direto_apontamento(
