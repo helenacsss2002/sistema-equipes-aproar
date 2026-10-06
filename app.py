@@ -4276,6 +4276,48 @@ def normalizar(texto):
     if not texto: return ""
     return ''.join(c for c in unicodedata.normalize('NFD', str(texto)) if unicodedata.category(c) != 'Mn').upper().strip()
 
+
+# ---------------------------------------------------------------------------
+# PERICULOSIDADE DA CONTROLADORIA
+# ---------------------------------------------------------------------------
+# O adicional de 30% é aplicado SOMENTE nos custos da Controladoria.
+# O cálculo do Financeiro continua usando os valores originais do apontamento.
+PERCENTUAL_PERICULOSIDADE_CONTROLADORIA = 0.30
+
+
+def aplica_periculosidade_controladoria(colab):
+    """
+    Retorna o multiplicador da periculosidade para a Controladoria.
+
+    Elegíveis:
+      - ELETRICISTA
+      - AUXILIAR DE ELETRICISTA
+
+    O reconhecimento usa a função normalizada para tolerar diferenças de
+    maiúsculas/minúsculas e acentuação, sem alterar o cadastro original.
+    """
+    colab = colab or {}
+    funcao = normalizar(colab.get("funcao") or "")
+
+    eh_eletricista = (
+        funcao == "ELETRICISTA"
+        or (
+            "ELETRICISTA" in funcao
+            and (
+                "AUXILIAR" in funcao
+                or funcao.startswith("AUX ")
+                or funcao.startswith("AUX.")
+            )
+        )
+    )
+
+    return (
+        1.0 + PERCENTUAL_PERICULOSIDADE_CONTROLADORIA
+        if eh_eletricista
+        else 1.0
+    )
+
+
 def get_cor_funcao(funcao):
     cores = ["🟥", "🟧", "🟨", "🟩", "🟦", "🟪", "🟫", "⬛"]
     hash_num = sum(ord(c) for c in str(funcao))
@@ -9633,6 +9675,19 @@ def ratear_registros_por_servico(registros):
             extra_ctrl_rateada = round(
                 float(extra_ctrl_por_servico.get(chave_serv, 0.0)), 2
             )
+
+            # Periculosidade: +30% somente na Controladoria.
+            # O Financeiro permanece com base_fin_rateada intacta.
+            multiplicador_periculosidade = aplica_periculosidade_controladoria(colab)
+            base_dia_ctrl_rateada = round(
+                base_dia_ctrl_rateada * multiplicador_periculosidade,
+                2,
+            )
+            extra_ctrl_rateada = round(
+                extra_ctrl_rateada * multiplicador_periculosidade,
+                2,
+            )
+
             custo_ctrl_rateado = round(
                 base_dia_ctrl_rateada + extra_ctrl_rateada,
                 2,
@@ -21078,6 +21133,193 @@ else:
                             f"({periodicidade})"
                         )
 
+                        # -----------------------------------------------------------------
+                        # ABA CENTRAL: GERAL
+                        # -----------------------------------------------------------------
+                        # Reúne todos os dias do período selecionado em uma única aba.
+                        # As abas individuais por dia continuam sendo geradas logo depois.
+                        ws_geral = wb.create_sheet(title="GERAL")
+
+                        titulo_geral = (
+                            "APONTAMENTO DIÁRIO DE EQUIPES "
+                            f"- PERÍODO: {periodo_rotulo_excel}"
+                        )
+                        ws_geral.merge_cells(
+                            start_row=1,
+                            start_column=1,
+                            end_row=1,
+                            end_column=14,
+                        )
+                        ws_geral.cell(
+                            row=1,
+                            column=1,
+                            value=titulo_geral,
+                        ).font = Font(
+                            name="Arial",
+                            size=12,
+                            bold=True,
+                        )
+                        ws_geral.cell(
+                            row=1,
+                            column=1,
+                        ).alignment = Alignment(
+                            horizontal="left",
+                            vertical="center",
+                            wrap_text=False,
+                        )
+
+                        ws_geral.merge_cells(
+                            start_row=2,
+                            start_column=1,
+                            end_row=2,
+                            end_column=14,
+                        )
+                        ws_geral.cell(
+                            row=2,
+                            column=1,
+                            value=(
+                                "Periculosidade de 30% aplicada na Controladoria "
+                                "para ELETRICISTA e AUXILIAR DE ELETRICISTA."
+                            ),
+                        ).font = Font(
+                            name="Arial",
+                            size=9,
+                            italic=True,
+                            color="475569",
+                        )
+                        ws_geral.cell(
+                            row=2,
+                            column=1,
+                        ).alignment = Alignment(
+                            horizontal="left",
+                            vertical="center",
+                            wrap_text=False,
+                        )
+
+                        colunas_geral = [
+                            "Data",
+                            "Unidade",
+                            "Obra",
+                            "Colaborador",
+                            "Função",
+                            "Engenheiro Resp.",
+                            "Status",
+                            "Extra",
+                            "Custo do Dia c/ Encargos (R$)",
+                            "Extra c/ Encargos (R$)",
+                            "Adicional Noturno (R$)",
+                            "Acordos / Bonificações (R$)",
+                            "Total (R$)",
+                            "Observação",
+                        ]
+
+                        for c_idx, col_nome in enumerate(colunas_geral, 1):
+                            cell = ws_geral.cell(
+                                row=4,
+                                column=c_idx,
+                                value=col_nome,
+                            )
+                            cell.font = font_titulo
+                            cell.fill = fill_cabecalho
+                            cell.alignment = Alignment(
+                                horizontal="center",
+                                vertical="center",
+                                wrap_text=True,
+                            )
+                            cell.border = borda_fina
+
+                        df_geral = df_excel.sort_values(
+                            [
+                                "Data",
+                                "Unidade",
+                                "Obra",
+                                "Colaborador",
+                                "Período do serviço",
+                            ],
+                            kind="stable",
+                        )
+
+                        row_geral = 5
+                        for _, r in df_geral.iterrows():
+                            eng_resp = r.get("Engenheiro", "")
+                            eng_cor_chave = str(eng_resp).split(" / ")[0].upper()
+                            cor_hex = cores_engenheiros.get(
+                                eng_cor_chave,
+                                "FFFFFF",
+                            )
+                            fill_engenheiro = PatternFill(
+                                start_color=cor_hex,
+                                end_color=cor_hex,
+                                fill_type="solid",
+                            )
+
+                            celula_total_geral = (
+                                f"=I{row_geral}+J{row_geral}+K{row_geral}+L{row_geral}"
+                            )
+
+                            linha_geral = [
+                                r.get("Data", ""),
+                                r.get("Unidade", ""),
+                                r.get("Obra", ""),
+                                r.get("Colaborador", ""),
+                                r.get("Função", ""),
+                                r.get("Engenheiro", ""),
+                                r.get("Status", ""),
+                                r.get("Tipo", ""),
+                                float(r.get("Custo dia c/ encargos (R$)") or 0.0),
+                                float(r.get("Extra c/ encargos (R$)") or 0.0),
+                                float(r.get("Adicional noturno (R$)") or 0.0),
+                                float(r.get("Acordos / Bonificações (R$)") or 0.0),
+                                celula_total_geral,
+                                r.get("Observação", ""),
+                            ]
+
+                            for c_idx, val in enumerate(linha_geral, 1):
+                                cell = ws_geral.cell(
+                                    row=row_geral,
+                                    column=c_idx,
+                                    value=val,
+                                )
+                                cell.font = Font(
+                                    name="Arial",
+                                    size=9,
+                                )
+                                cell.border = borda_fina
+                                cell.fill = fill_engenheiro
+                                cell.alignment = Alignment(
+                                    horizontal="center",
+                                    vertical="center",
+                                    wrap_text=True,
+                                )
+                                if c_idx in [9, 10, 11, 12, 13]:
+                                    cell.number_format = "R$ #,##0.00"
+
+                            row_geral += 1
+
+                        for col in ws_geral.columns:
+                            max_len = 0
+                            col_letter = openpyxl.utils.get_column_letter(
+                                col[0].column
+                            )
+                            for cell in col:
+                                if cell.value is not None:
+                                    max_len = max(
+                                        max_len,
+                                        len(str(cell.value)),
+                                    )
+                            ws_geral.column_dimensions[col_letter].width = min(
+                                max(max_len + 3, 13),
+                                38,
+                            )
+
+                        ws_geral.freeze_panes = "A5"
+                        ws_geral.auto_filter.ref = (
+                            f"A4:N{max(4, row_geral - 1)}"
+                        )
+
+                        # -----------------------------------------------------------------
+                        # ABAS INDIVIDUAIS POR DIA — mantidas como estavam.
+                        # -----------------------------------------------------------------
                         for data_str in sorted(
                             df_excel["Data"].unique()
                         ):
@@ -24660,4 +24902,3 @@ else:
                 st.success(
                     st.session_state.pop("msg_limpeza_prod_v1")
                 )
-
