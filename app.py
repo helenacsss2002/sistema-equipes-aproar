@@ -10405,7 +10405,14 @@ def gerar_pdf_relatorio_resultados(
         ),
     )
 
-    return bytes(pdf.output(dest="S"))
+    # Compatibilidade com fpdf 1.x e fpdf2:
+    # fpdf 1.x retorna `str` em output(dest="S"), enquanto fpdf2
+    # retorna `bytearray`. `bytes(str)` causa o erro:
+    # "string argument without an encoding".
+    saida_pdf = pdf.output(dest="S")
+    if isinstance(saida_pdf, str):
+        return saida_pdf.encode("latin-1")
+    return bytes(saida_pdf)
 
 
 def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostrar_absenteismo=True):
