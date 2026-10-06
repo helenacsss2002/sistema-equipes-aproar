@@ -4364,22 +4364,12 @@ def apontamento_esta_atrasado(
     agora=None,
 ):
     """
-    Regra operacional de atraso.
+    Regra operacional de atraso para apontamentos.
 
-    DEMAIS UNIDADES
-    ----------------
-    O apontamento pertence ao dia D e deve ser feito no próprio dia.
-    Às 16:00 de D há uma cobrança preventiva, mas ele continua PENDENTE.
-    A tolerância termina às 09:30 de D+1:
-      - D inteiro -> PENDENTE;
-      - D+1 até 09:29 -> PENDENTE, em tolerância;
-      - D+1 a partir de 09:30 -> ATRASADO;
-      - depois de D+1 -> ATRASADO.
-
-    SEBRAE
-    ------
-    Jornada 17h–02h: o apontamento de D pode ser concluído até 09:29 de D+1.
-    Às 09:30 de D+1 passa a ATRASADO. O lembrete das 21:00 de D é preventivo.
+    Sábado e domingo nunca entram como atraso. Para um serviço de sexta-feira,
+    a tolerância atravessa o fim de semana e só vence na segunda-feira às 09:30.
+    Isso permite que o supervisor conclua a rotina na segunda sem o fim de
+    semana gerar um atraso artificial.
     """
     agora = agora or agora_aproar()
 
@@ -4389,15 +4379,69 @@ def apontamento_esta_atrasado(
         except Exception:
             return False
 
+    # Serviços realizados no fim de semana não geram atraso.
+    if not eh_dia_util_operacional(data_servico):
+        return False
+
+    # Ainda estamos no próprio dia do serviço.
     if agora.date() <= data_servico:
         return False
 
-    dia_seguinte = data_servico + datetime.timedelta(days=1)
+    # O prazo vence às 09:30 do próximo dia útil, pulando sábado e domingo.
+    dia_limite = proximo_dia_util(data_servico)
 
-    if agora.date() == dia_seguinte:
+    if agora.date() == dia_limite:
         return agora.time() >= datetime.time(9, 30)
 
-    return agora.date() > dia_seguinte
+    return agora.date() > dia_limite
+
+def convocacao_registro_esta_atrasada(data_servico, meta):
+    """Recalcula o atraso de uma convocação histórica pela data/hora do lançamento."""
+    if not eh_dia_util_operacional(data_servico):
+        return False
+    registrado_em = (meta or {}).get("convocado_em")
+    if not registrado_em:
+        return bool((meta or {}).get("convocacao_atrasada"))
+    try:
+        ts = pd.to_datetime(registrado_em, errors="coerce")
+        if pd.isna(ts):
+            return bool((meta or {}).get("convocacao_atrasada"))
+        if getattr(ts, "tzinfo", None) is not None:
+            ts = ts.tz_convert("America/Fortaleza").tz_localize(None)
+        data_lancamento = ts.date()
+        return bool(
+            eh_dia_util_operacional(data_lancamento)
+            and ts.time() >= datetime.time(16, 0)
+            and data_servico == proximo_dia_util(data_lancamento)
+        )
+    except Exception:
+        return bool((meta or {}).get("convocacao_atrasada"))
+
+
+def apontamento_registro_esta_atrasado(data_servico, meta):
+    """Recalcula o atraso de um apontamento histórico, ignorando fins de semana."""
+    if not eh_dia_util_operacional(data_servico):
+        return False
+    registrado_em = (meta or {}).get("apontado_em")
+    if not registrado_em:
+        return bool((meta or {}).get("apontamento_atrasado"))
+    try:
+        ts = pd.to_datetime(registrado_em, errors="coerce")
+        if pd.isna(ts):
+            return bool((meta or {}).get("apontamento_atrasado"))
+        if getattr(ts, "tzinfo", None) is not None:
+            ts = ts.tz_convert("America/Fortaleza").tz_localize(None)
+        data_lancamento = ts.date()
+        if data_lancamento <= data_servico:
+            return False
+        dia_limite = proximo_dia_util(data_servico)
+        return bool(
+            data_lancamento > dia_limite
+            or (data_lancamento == dia_limite and ts.time() >= datetime.time(9, 30))
+        )
+    except Exception:
+        return bool((meta or {}).get("apontamento_atrasado"))
+
 
 def pendencia_teams_esta_atrasada(
     data_servico,
@@ -5070,17 +5114,60 @@ def to_latin(texto):
     if not texto: return ""
     return str(texto).encode('latin-1', 'replace').decode('latin-1')
 
+def eh_dia_util_operacional(data_base):
+    """Retorna True somente para segunda a sexta-feira."""
+    if not isinstance(data_base, datetime.date):
+        try:
+            data_base = datetime.date.fromisoformat(str(data_base))
+        except Exception:
+            return False
+    return data_base.weekday() < 5
+
+
 def proximo_dia_util(data_base=None):
     """
-    Retorna o dia seguinte à data informada.
-    Convocações podem ocorrer em qualquer dia da semana,
-    inclusive sábado, domingo e feriado.
+    Retorna o próximo dia útil (segunda a sexta).
 
-    O nome da função foi mantido para compatibilidade
-    com o restante do sistema.
+    Sábados e domingos não são dias de cobrança/atraso operacional.
+    Ex.: sexta-feira -> segunda-feira.
     """
     data_ref = data_base or datetime.date.today()
-    return data_ref + datetime.timedelta(days=1)
+    if not isinstance(data_ref, datetime.date):
+        try:
+            data_ref = datetime.date.fromisoformat(str(data_ref))
+        except Exception:
+            data_ref = datetime.date.today()
+
+    proximo = data_ref + datetime.timedelta(days=1)
+    while proximo.weekday() >= 5:
+        proximo += datetime.timedelta(days=1)
+    return proximo
+
+
+def convocacao_esta_atrasada(data_convocacao, agora=None):
+    """
+    Considera atraso somente em dias úteis.
+
+    A convocação para o próximo dia útil feita a partir das 16h é
+    considerada fora do prazo. Sábado e domingo nunca são classificados
+    como convocação atrasada.
+    """
+    agora = agora or agora_aproar()
+    try:
+        if not isinstance(data_convocacao, datetime.date):
+            data_convocacao = datetime.date.fromisoformat(str(data_convocacao))
+    except Exception:
+        return False
+
+    # Serviços de fim de semana não entram como atraso.
+    if not eh_dia_util_operacional(data_convocacao):
+        return False
+
+    return bool(
+        agora.weekday() < 5
+        and agora.time() >= datetime.time(16, 0)
+        and data_convocacao == proximo_dia_util(agora.date())
+    )
 
 NOME_OBRA_PLACEHOLDER = "A DEFINIR NO APONTAMENTO"
 
@@ -6533,9 +6620,7 @@ def inserir_convocacao_segura(obra_id, colaborador_id, data_convocacao, engenhei
     meta = {
         "convocado_em": agora.isoformat(),
         "convocado_por": executor_convocacao,
-        "convocacao_atrasada": bool(
-            agora.hour >= 16 and data_convocacao == proximo_dia_util(agora.date())
-        ),
+        "convocacao_atrasada": convocacao_esta_atrasada(data_convocacao, agora=agora),
     }
 
     try:
@@ -6685,10 +6770,7 @@ def inserir_convocacoes_lote_mobile(
         meta = {
             "convocado_em": agora.isoformat(),
             "convocado_por": str(engenheiro),
-            "convocacao_atrasada": bool(
-                agora.hour >= 16
-                and data_convocacao == proximo_dia_util(agora.date())
-            ),
+            "convocacao_atrasada": convocacao_esta_atrasada(data_convocacao, agora=agora),
         }
 
         payload = {
@@ -8308,6 +8390,9 @@ SUPERVISORES_INDICADORES = [
     for nome in ENGENHEIROS
     if normalizar(nome) != normalizar(PAULO_OPERADOR)
 ]
+
+# Felipe é novato e passou a responder pelas convocações somente a partir de 28/09/2026.
+INICIO_INDICADOR_FELIPE = datetime.date(2026, 9, 28)
 
 UNIDADES_APROAR = [
     "BARRA DO CEARÁ",
@@ -10614,7 +10699,7 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
                 "Colaborador": nome_colab,
                 "Tipo": "Convocação",
                 "Registrado em": str(meta.get("convocado_em") or "").replace("T", " ")[:19],
-                "Atrasado": "SIM" if meta.get("convocacao_atrasada") else "NÃO",
+                "Atrasado": "SIM" if convocacao_registro_esta_atrasada(pd.to_datetime(r.get("data"), errors="coerce").date() if not pd.isna(pd.to_datetime(r.get("data"), errors="coerce")) else r.get("data"), meta) else "NÃO",
             })
         if meta.get("apontado_em") and executor != PAULO_OPERADOR:
             eventos_prazo.append({
@@ -10623,7 +10708,7 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
                 "Colaborador": nome_colab,
                 "Tipo": "Apontamento",
                 "Registrado em": str(meta.get("apontado_em") or "").replace("T", " ")[:19],
-                "Atrasado": "SIM" if meta.get("apontamento_atrasado") else "NÃO",
+                "Atrasado": "SIM" if apontamento_registro_esta_atrasado(pd.to_datetime(r.get("data"), errors="coerce").date() if not pd.isna(pd.to_datetime(r.get("data"), errors="coerce")) else r.get("data"), meta) else "NÃO",
             })
 
     if not registros:
@@ -10661,7 +10746,7 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
                 chave,
                 {"atrasada": False},
             )
-            if meta.get("convocacao_atrasada"):
+            if convocacao_registro_esta_atrasada(data_chave, meta):
                 info["atrasada"] = True
 
         if (
@@ -10676,7 +10761,7 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
                 chave,
                 {"atrasado": False},
             )
-            if meta.get("apontamento_atrasado"):
+            if apontamento_registro_esta_atrasado(data_chave, meta):
                 info["atrasado"] = True
 
     por_eng = {
@@ -10741,12 +10826,12 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
 
     titulo_secao_aproar(
         "Cumprimento por engenheiro",
-        "Quantidade de convocações feitas pelo próprio supervisor, por dia, e quantas foram realizadas fora do prazo.",
+        "Quantidade de convocações feitas pelo próprio supervisor, por dia, e quantas foram realizadas fora do prazo. Fins de semana não geram atraso.",
     )
     st.caption(
         "Cada dia com convocação conta como 1 convocação, mesmo que vários "
         "funcionários tenham sido convocados nesse dia. Convocação atrasada "
-        "= feita após 16h para o próximo dia útil."
+        "= feita após 16h para o próximo dia útil. Sábados e domingos não entram como atraso."
     )
     tabela_aproar(
         df_prazos,
@@ -10893,13 +10978,22 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
     # A regra histórica começa em 16/09, mas respeita o filtro escolhido
     # quando o usuário seleciona uma data posterior.
     data_base_monitoramento = datetime.date(2026, 9, 16)
-    data_loop = max(inicio, data_base_monitoramento)
     data_limite = min(fim, agora_aproar().date())
 
-    datas_monitoradas = []
-    while data_loop <= data_limite:
-        datas_monitoradas.append(data_loop)
-        data_loop += datetime.timedelta(days=1)
+    datas_monitoradas_por_supervisor = {}
+    for supervisor in engenheiros_alvo:
+        inicio_supervisor = max(inicio, data_base_monitoramento)
+        if normalizar(supervisor) == normalizar("FELIPE"):
+            inicio_supervisor = max(inicio_supervisor, INICIO_INDICADOR_FELIPE)
+
+        datas_monitoradas = []
+        data_loop = inicio_supervisor
+        while data_loop <= data_limite:
+            # Sábado e domingo não são dias cobrados como convocação ausente.
+            if eh_dia_util_operacional(data_loop):
+                datas_monitoradas.append(data_loop)
+            data_loop += datetime.timedelta(days=1)
+        datas_monitoradas_por_supervisor[supervisor] = datas_monitoradas
 
     linhas_ausencias = []
 
@@ -10911,7 +11005,7 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
 
         datas_faltantes = [
             data
-            for data in datas_monitoradas
+            for data in datas_monitoradas_por_supervisor.get(supervisor, [])
             if data not in dias_feitos
         ]
 
@@ -10966,19 +11060,16 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
         key=f"{key_prefix}_tbl_supervisores_sem_convocacao",
     )
 
-    st.caption(
-        f"Período verificado: 16/09/2026 a {data_limite.strftime('%d/%m/%Y')}."
-    )
-
     data_inicio_verificado = max(inicio, data_base_monitoramento)
     if data_inicio_verificado <= data_limite:
         st.caption(
-            f"Período verificado: {data_inicio_verificado.strftime('%d/%m/%Y')} "
-            f"a {data_limite.strftime('%d/%m/%Y')}."
+            f"Período-base verificado: {data_inicio_verificado.strftime('%d/%m/%Y')} "
+            f"a {data_limite.strftime('%d/%m/%Y')}. Sábados e domingos não entram na cobrança. "
+            "Para Felipe, a contagem começa em 28/09/2026."
         )
     else:
         st.caption(
-            "Não há dias concluídos para verificar dentro do período selecionado."
+            "Não há dias úteis concluídos para verificar dentro do período selecionado."
         )
 
     # O PDF é o fechamento executivo do mesmo conjunto de indicadores exibido acima.
@@ -11096,15 +11187,14 @@ def incluir_colaborador_direto_apontamento(
         "convocado_em": agora.isoformat(),
         "convocado_por": str(engenheiro),
         "incluido_direto_apontamento": True,
-        "convocacao_atrasada": bool(
-            agora.hour >= 16
-            and data_servico == proximo_dia_util(agora.date())
-        ),
+        "convocacao_atrasada": convocacao_esta_atrasada(data_servico, agora=agora),
         "apontado_em": agora.isoformat(),
         "ultimo_apontamento_em": agora.isoformat(),
         "apontado_por": str(engenheiro),
-        "apontamento_atrasado": bool(
-            agora.date() > data_servico
+        "apontamento_atrasado": apontamento_esta_atrasado(
+            data_servico,
+            unidade=unidade_nova,
+            agora=agora,
         ),
         "servicos_extras": [],
         "servicos_adicionais": [],
@@ -11547,16 +11637,17 @@ def incluir_multiplos_servicos_direto_apontamento(
             "convocado_em": agora.isoformat(),
             "convocado_por": str(engenheiro),
             "incluido_direto_apontamento": True,
-            "convocacao_atrasada": bool(
-                agora.hour >= 16
-                and data_servico
-                == proximo_dia_util(agora.date())
+            "convocacao_atrasada": convocacao_esta_atrasada(
+                data_servico,
+                agora=agora,
             ),
             "apontado_em": agora.isoformat(),
             "ultimo_apontamento_em": agora.isoformat(),
             "apontado_por": str(engenheiro),
-            "apontamento_atrasado": bool(
-                agora.date() > data_servico
+            "apontamento_atrasado": apontamento_esta_atrasado(
+                data_servico,
+                unidade=unidade_nova,
+                agora=agora,
             ),
             "periodo_servico_principal": turno_novo,
             "servicos_adicionais": adicionais,
