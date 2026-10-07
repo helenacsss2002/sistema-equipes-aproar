@@ -17858,6 +17858,7 @@ elif modo_campo:
                     tipo_extra_inc = st.selectbox(
                         "Extra",
                         TIPOS_DIARIA,
+                        index=0,  # "Não"
                         key="engm_inc_extra_retro",
                     )
 
@@ -18572,8 +18573,18 @@ elif modo_campo:
                         adicional_noturno_atual = valor_adicional_noturno_registro(conv)
                         eh_sebrae_card = eh_unidade_sebrae(unidade)
 
+                        # No portal do supervisor, um apontamento ainda não salvo
+                        # sempre abre com Extra = "Não". Se o apontamento já foi
+                        # salvo anteriormente, preservamos a escolha gravada para
+                        # que uma edição não apague um Extra existente.
+                        tipo_inicial_extra = (
+                            tipo_atual_pag
+                            if registro_tem_apontamento_real(conv)
+                            else "Não"
+                        )
+
                         if tipo_key not in st.session_state:
-                            st.session_state[tipo_key] = tipo_atual_pag
+                            st.session_state[tipo_key] = tipo_inicial_extra
 
                         if diaria_key not in st.session_state:
                             st.session_state[diaria_key] = float(
