@@ -10603,13 +10603,20 @@ def gerar_pdf_relatorio_resultados(
             item.get("Convocações não feitas", 0),
             item.get("Apontamentos não feitos", 0),
             item.get("Dias sem convocação", "Nenhum"),
+            item.get("Dias sem apontamento", "Nenhum"),
         ])
 
     _streamlit_silencio = tabela(
-        ["Supervisor", "Não feitas", "Apt. não feitos", "Dias sem convocação"],
+        [
+            "Supervisor",
+            "Não feitas",
+            "Apt. não feitos",
+            "Dias sem convocação",
+            "Dias sem apontamento",
+        ],
         linhas,
-        [52, 30, 42, 149],
-        ["L", "C", "C", "L"],
+        [38, 27, 34, 87, 87],
+        ["L", "C", "C", "L", "L"],
     )
 
     # ---------------- APONTAMENTOS ----------------
@@ -10978,7 +10985,7 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
 # --- RELATÓRIO: SUPERVISORES SEM CONVOCAÇÕES POR DATA ---
     titulo_secao_aproar(
         "Supervisores sem convocações registradas",
-        "Mostra quantas convocações deixaram de ser feitas e quais foram os dias sem convocação.",
+        "Mostra as convocações e os apontamentos não realizados, com as respectivas datas.",
     )
 
     engenheiros_alvo = [
@@ -11102,6 +11109,14 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
                 if datas_faltantes
                 else "Nenhuma"
             ),
+            "Dias sem apontamento": (
+                ", ".join(
+                    data.strftime("%d/%m/%Y")
+                    for data in datas_apontamento_faltante
+                )
+                if datas_apontamento_faltante
+                else "Nenhum"
+            ),
         })
 
     df_ausencias = (
@@ -11115,7 +11130,7 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
 
     st.dataframe(
         df_ausencias,
-        use_container_width=True,
+        use_container_width=False,
         hide_index=True,
         height=max(
             180,
@@ -11130,13 +11145,13 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
                 width="small",
             ),
             "Convocações não feitas": st.column_config.NumberColumn(
-                "Convocações não feitas",
-                width="medium",
+                "Conv. não feitas",
+                width="small",
                 format="%d",
             ),
             "Apontamentos não feitos": st.column_config.NumberColumn(
-                "Apontamentos não feitos",
-                width="medium",
+                "Apt. não feitos",
+                width="small",
                 format="%d",
                 help=(
                     "Conta somente dias em que existiu convocação, não houve apontamento "
@@ -11145,25 +11160,23 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
             ),
             "Dias sem convocação": st.column_config.TextColumn(
                 "Dias sem convocação",
-                width="large",
+                width="medium",
+            ),
+            "Dias sem apontamento": st.column_config.TextColumn(
+                "Dias sem apontamento",
+                width="medium",
+                help=(
+                    "Lista apenas as datas em que houve convocação, o apontamento não foi feito "
+                    "e o respectivo prazo já venceu."
+                ),
             ),
         },
         key=f"{key_prefix}_tbl_supervisores_sem_convocacao",
     )
 
-    data_inicio_verificado = max(inicio, data_base_monitoramento)
-    if data_inicio_verificado <= data_limite:
-        st.caption(
-            f"Período-base verificado: {data_inicio_verificado.strftime('%d/%m/%Y')} "
-            f"a {data_limite.strftime('%d/%m/%Y')}. Sábados e domingos aparecem na conferência de convocações, "
-            "mas continuam fora da regra de atraso. Apontamento só é esperado quando houve convocação; "
-            "para serviço de fim de semana, o prazo considera a segunda-feira. "
-            "Para Felipe, a contagem começa em 28/09/2026."
-        )
-    else:
-        st.caption(
-            "Não há datas concluídas para verificar dentro do período selecionado."
-        )
+    # 16/09/2026 é apenas o marco histórico inicial do indicador.
+    # Não é uma data final: a conferência continua avançando automaticamente
+    # até a data atual (respeitando o período/filtro selecionado na tela).
 
     # O PDF é o fechamento executivo do mesmo conjunto de indicadores exibido acima.
     resumo_pdf = df_prazos.to_dict("records")
