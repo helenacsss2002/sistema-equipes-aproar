@@ -5949,6 +5949,112 @@ def status_eh_presenca(status):
     return s in ["Presente (Integral)", "Presente (Só Manhã)", "Presente (Só Tarde)", "Saída Antecipada", "Presente"]
 
 
+def buscar_apontamentos_estruturados_periodo(data_inicio, data_fim, engenheiro=None):
+    """
+    Retorna os apontamentos realmente salvos, indexados por convocacao_id.
+
+    A tabela `convocacoes` nasce com status padrão de presença antes de o
+    supervisor fazer o apontamento. Por isso, status sozinho NÃO prova que
+    houve apontamento. Quando disponível, a tabela `apontamentos` é a fonte
+    principal para separar convocação de apontamento efetivamente salvo.
+    """
+    try:
+        q = (
+            supabase.table("apontamentos")
+            .select("*")
+            .gte("data_servico", data_inicio.isoformat())
+            .lte("data_servico", data_fim.isoformat())
+        )
+        if engenheiro:
+            q = q.eq("engenheiro", engenheiro)
+        linhas = q.execute().data or []
+    except Exception:
+        linhas = []
+
+    saida = {}
+    for ap in linhas:
+        conv_id = str(ap.get("convocacao_id") or "").strip()
+        if conv_id:
+            saida[conv_id] = ap
+    return saida
+
+
+def dados_apontamento_real(registro, apontamentos_estruturados=None):
+    """
+    Identifica se uma convocação possui apontamento efetivamente salvo.
+
+    Ordem de confiança:
+    1) linha na tabela estruturada `apontamentos`;
+    2) metadata legado `apontado_em`;
+    3) flag `custos_separados` usada pelas versões anteriores.
+
+    O campo `status` não entra nesta decisão, pois a convocação é criada
+    historicamente com `Presente (Integral)` antes do apontamento.
+    """
+    registro = registro or {}
+    conv_id = str(registro.get("id") or "").strip()
+    mapa = apontamentos_estruturados or {}
+
+    if conv_id and conv_id in mapa:
+        ap = mapa.get(conv_id) or {}
+        return {
+            "apontado": True,
+            "apontado_em": ap.get("apontado_em") or ap.get("atualizado_em"),
+            "apontado_por": ap.get("apontado_por") or ap.get("engenheiro"),
+            "atrasado": bool(ap.get("retroativo")),
+            "fonte": "apontamentos",
+        }
+
+    meta = obter_metadata_operacional(registro.get("observacao") or "")
+    if meta.get("apontado_em"):
+        data_raw = registro.get("data")
+        try:
+            data_servico = pd.to_datetime(data_raw, errors="coerce")
+            data_servico = None if pd.isna(data_servico) else data_servico.date()
+        except Exception:
+            data_servico = None
+        atraso = (
+            apontamento_registro_esta_atrasado(data_servico, meta)
+            if data_servico
+            else bool(meta.get("apontamento_atrasado"))
+        )
+        return {
+            "apontado": True,
+            "apontado_em": meta.get("apontado_em"),
+            "apontado_por": meta.get("apontado_por") or registro.get("engenheiro"),
+            "atrasado": bool(atraso),
+            "fonte": "metadata",
+        }
+
+    # Compatibilidade com versões intermediárias que marcavam o lançamento
+    # financeiro/controladoria sem ainda gravar `apontado_em`.
+    if registro.get("custos_separados") is True:
+        return {
+            "apontado": True,
+            "apontado_em": registro.get("atualizado_em") or registro.get("created_at"),
+            "apontado_por": registro.get("engenheiro"),
+            "atrasado": False,
+            "fonte": "legado",
+        }
+
+    return {
+        "apontado": False,
+        "apontado_em": None,
+        "apontado_por": None,
+        "atrasado": False,
+        "fonte": "nenhuma",
+    }
+
+
+def registro_tem_apontamento_real(registro, apontamentos_estruturados=None):
+    return bool(
+        dados_apontamento_real(
+            registro,
+            apontamentos_estruturados=apontamentos_estruturados,
+        ).get("apontado")
+    )
+
+
 def _normalizar_servicos_adicionais(meta):
     """Compatibilidade entre versões, preservando obra, unidade e período."""
     meta = meta or {}
@@ -9310,27 +9416,45 @@ def _periodo_por_tipo(tipo, data_base):
     return data_base, data_base
 
 
-def _processar_registro_operacional(registro):
+def _processar_registro_operacional(registro, apontamentos_estruturados=None):
     obra = dict_obras.get(registro.get("obra_id"), {"unidade": "GERAL", "nome": "Desconhecida"})
     colab = dict_colaboradores.get(registro.get("colaborador_id"), {"nome": "Desconhecido", "funcao": "-"})
-    status = normalizar_status_operacional(registro.get("status"))
+
+    # Convocação e apontamento são fatos diferentes. O registro de convocação
+    # pode nascer com status "Presente (Integral)" apenas como valor padrão;
+    # sem evidência real de apontamento ele deve aparecer como pendente.
+    apontamento_real = dados_apontamento_real(
+        registro,
+        apontamentos_estruturados=apontamentos_estruturados,
+    )
+    tem_apontamento = bool(apontamento_real.get("apontado"))
+    status = (
+        normalizar_status_operacional(registro.get("status"))
+        if tem_apontamento
+        else "Pendente de apontamento"
+    )
     tipo_diaria = tipo_diaria_registro(registro)
-    custo_dia_ctrl = custo_dia_controladoria_registro(registro, colab)
-    extra_ctrl = valor_extra_controladoria_registro(registro, colab)
+
+    if tem_apontamento:
+        custo_dia_ctrl = custo_dia_controladoria_registro(registro, colab)
+        extra_ctrl = valor_extra_controladoria_registro(registro, colab)
+        adicional_noturno = valor_adicional_noturno_registro(registro)
+        acordo = valor_acordo_registro(registro)
+        diaria_financeiro = valor_diaria_financeiro_registro(registro, colab)
+    else:
+        # Não antecipa presença nem custo antes de o apontamento ser salvo.
+        custo_dia_ctrl = 0.0
+        extra_ctrl = 0.0
+        adicional_noturno = 0.0
+        acordo = 0.0
+        diaria_financeiro = 0.0
+
     custo_encargos = round(custo_dia_ctrl + extra_ctrl, 2)
-    adicional_noturno = valor_adicional_noturno_registro(registro)
-    acordo = valor_acordo_registro(registro)
     total_controladoria = (
         custo_encargos
         + adicional_noturno
         + acordo
     ) if status_eh_presenca(status) else 0.0
-    diaria_financeiro = (
-        valor_diaria_financeiro_registro(
-            registro,
-            colab,
-        )
-    )
 
     total_financeiro = (
         diaria_financeiro
@@ -9361,7 +9485,8 @@ def _processar_registro_operacional(registro):
         "Observação": obs_livre,
         "Convocação após 16h": bool(meta.get("convocacao_atrasada")),
         "Apontamento atrasado": bool(meta.get("apontamento_atrasado")),
-        "Apontado em": str(meta.get("apontado_em") or ""),
+        "Apontado em": str(apontamento_real.get("apontado_em") or ""),
+        "Apontamento confirmado": bool(tem_apontamento),
     }
 
 
@@ -9919,6 +10044,8 @@ def gerar_excel_dashboard_consolidado(df, tipo, inicio, fim):
     ws.title = "Resumo"
 
     total = len(df)
+    pendentes = int((df["Status"] == "Pendente de apontamento").sum()) if not df.empty else 0
+    apontados_total = max(0, total - pendentes)
     presentes = int(df["Status"].apply(status_eh_presenca).sum()) if not df.empty else 0
     faltas = int((df["Status"] == "Falta").sum()) if not df.empty else 0
     atestados = int((df["Status"] == "Atestado").sum()) if not df.empty else 0
@@ -9932,7 +10059,7 @@ def gerar_excel_dashboard_consolidado(df, tipo, inicio, fim):
         )
         else 0.0
     )
-    taxa = (presentes / total * 100) if total else 0.0
+    taxa = (presentes / apontados_total * 100) if apontados_total else 0.0
 
     ws["A1"] = f"APROAR - DASHBOARD {str(tipo).upper()}"
     ws["A1"].font = Font(name="Arial", size=13, bold=True, color="FFFFFF")
@@ -9941,6 +10068,7 @@ def gerar_excel_dashboard_consolidado(df, tipo, inicio, fim):
     ws["A2"] = f"Período: {inicio.strftime('%d/%m/%Y')} a {fim.strftime('%d/%m/%Y')}"
     resumo = [
         ("Convocados / registros", total),
+        ("Pendentes de apontamento", pendentes),
         ("Presentes", presentes),
         ("Faltas", faltas),
         ("Atestados", atestados),
@@ -10053,14 +10181,24 @@ def render_dashboard_consulta(key_prefix="dash", engenheiro_fixo=None):
     st.markdown('</div>', unsafe_allow_html=True)
 
     registros = _buscar_convocacoes_intervalo(inicio, fim, None if engenheiro == "TODOS" else engenheiro)
+    apontamentos_estruturados = buscar_apontamentos_estruturados_periodo(
+        inicio,
+        fim,
+        None if engenheiro == "TODOS" else engenheiro,
+    )
     processados = []
     for r in registros:
-        item = _processar_registro_operacional(r)
+        item = _processar_registro_operacional(
+            r,
+            apontamentos_estruturados=apontamentos_estruturados,
+        )
         if unidade != "TODAS" and item["Unidade"] != unidade:
             continue
         processados.append(item)
 
     total = len(processados)
+    pendentes = sum(1 for x in processados if x["Status"] == "Pendente de apontamento")
+    apontados_total = max(0, total - pendentes)
     presentes = sum(1 for x in processados if status_eh_presenca(x["Status"]))
     faltas = sum(1 for x in processados if x["Status"] == "Falta")
     atestados = sum(1 for x in processados if x["Status"] == "Atestado")
@@ -10070,12 +10208,12 @@ def render_dashboard_consulta(key_prefix="dash", engenheiro_fixo=None):
         float(x.get("Adicional noturno (R$)") or 0.0)
         for x in processados
     )
-    taxa_presenca = (presentes / total * 100) if total else 0.0
+    taxa_presenca = (presentes / apontados_total * 100) if apontados_total else 0.0
 
     st.markdown(
         f"""
         <div class="aproar-dash-metrics">
-            <div class="aproar-dash-card"><div class="aproar-dash-label">Convocados / registros</div><div class="aproar-dash-value">{total}</div><div class="aproar-dash-note">no período</div></div>
+            <div class="aproar-dash-card"><div class="aproar-dash-label">Convocados / registros</div><div class="aproar-dash-value">{total}</div><div class="aproar-dash-note">{pendentes} pendente(s) de apontamento</div></div>
             <div class="aproar-dash-card"><div class="aproar-dash-label">Presentes</div><div class="aproar-dash-value">{presentes}</div><div class="aproar-dash-note">{taxa_presenca:.1f}% de presença</div></div>
             <div class="aproar-dash-card"><div class="aproar-dash-label">Faltas</div><div class="aproar-dash-value">{faltas}</div><div class="aproar-dash-note">registro(s)</div></div>
             <div class="aproar-dash-card"><div class="aproar-dash-label">Atestados</div><div class="aproar-dash-value">{atestados}</div><div class="aproar-dash-note">registro(s)</div></div>
@@ -10087,7 +10225,7 @@ def render_dashboard_consulta(key_prefix="dash", engenheiro_fixo=None):
 
     st.caption(
         f"Período: {inicio.strftime('%d/%m/%Y')} a {fim.strftime('%d/%m/%Y')} • "
-        f"Presença: {taxa_presenca:.1f}% • Adicional noturno e acordos já incluídos no custo"
+        f"Presença: {taxa_presenca:.1f}% sobre registros apontados • Pendentes: {pendentes} • Adicional noturno e acordos já incluídos no custo"
     )
 
     if not processados:
@@ -10794,6 +10932,11 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
         return
 
     registros_brutos = _buscar_convocacoes_intervalo(inicio, fim, engenheiro_fixo)
+    apontamentos_estruturados = buscar_apontamentos_estruturados_periodo(
+        inicio,
+        fim,
+        engenheiro_fixo,
+    )
     registros = []
     eventos_prazo = []
 
@@ -10802,8 +10945,16 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
         if unidade_filtro != "TODAS" and obra.get("unidade") != unidade_filtro:
             continue
         colab = dict_colaboradores.get(r.get("colaborador_id"), {"nome": "Desconhecido", "valor_diaria": VALOR_DIARIA_PROFISSIONAL})
-        status = normalizar_status_operacional(r.get("status"))
         meta = obter_metadata_operacional(r.get("observacao") or "")
+        ap_real = dados_apontamento_real(
+            r,
+            apontamentos_estruturados=apontamentos_estruturados,
+        )
+        status = (
+            normalizar_status_operacional(r.get("status"))
+            if ap_real.get("apontado")
+            else "Pendente de apontamento"
+        )
         executor = executor_da_convocacao(r, meta)
         try:
             data_dt = pd.to_datetime(r.get("data"), errors="coerce")
@@ -10831,14 +10982,17 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
                 "Registrado em": str(meta.get("convocado_em") or "").replace("T", " ")[:19],
                 "Atrasado": "SIM" if convocacao_registro_esta_atrasada(pd.to_datetime(r.get("data"), errors="coerce").date() if not pd.isna(pd.to_datetime(r.get("data"), errors="coerce")) else r.get("data"), meta) else "NÃO",
             })
-        if meta.get("apontado_em") and executor_do_apontamento(r, meta) != PAULO_OPERADOR:
+        apontado_por_real = str(
+            ap_real.get("apontado_por") or r.get("engenheiro") or ""
+        ).strip().upper()
+        if ap_real.get("apontado") and apontado_por_real != PAULO_OPERADOR:
             eventos_prazo.append({
                 "Engenheiro": eng,
                 "Data do serviço": str(r.get("data") or ""),
                 "Colaborador": nome_colab,
                 "Tipo": "Apontamento",
-                "Registrado em": str(meta.get("apontado_em") or "").replace("T", " ")[:19],
-                "Atrasado": "SIM" if apontamento_registro_esta_atrasado(pd.to_datetime(r.get("data"), errors="coerce").date() if not pd.isna(pd.to_datetime(r.get("data"), errors="coerce")) else r.get("data"), meta) else "NÃO",
+                "Registrado em": str(ap_real.get("apontado_em") or "").replace("T", " ")[:19],
+                "Atrasado": "SIM" if ap_real.get("atrasado") else "NÃO",
             })
 
     if not registros:
@@ -10865,8 +11019,7 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
         meta = item["meta"]
 
         if (
-            meta.get("convocado_em")
-            and executor_da_convocacao(item["raw"], meta) != PAULO_OPERADOR
+            executor_da_convocacao(item["raw"], meta) != PAULO_OPERADOR
             and eng in {
                 str(nome).strip().upper()
                 for nome in SUPERVISORES_INDICADORES
@@ -10879,9 +11032,16 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
             if convocacao_registro_esta_atrasada(data_chave, meta):
                 info["atrasada"] = True
 
+        ap_real = dados_apontamento_real(
+            item["raw"],
+            apontamentos_estruturados=apontamentos_estruturados,
+        )
+        apontado_por_real = str(
+            ap_real.get("apontado_por") or item["raw"].get("engenheiro") or ""
+        ).strip().upper()
         if (
-            meta.get("apontado_em")
-            and executor_do_apontamento(item["raw"], meta) != PAULO_OPERADOR
+            ap_real.get("apontado")
+            and apontado_por_real != PAULO_OPERADOR
             and eng in {
                 str(nome).strip().upper()
                 for nome in SUPERVISORES_INDICADORES
@@ -10891,7 +11051,7 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
                 chave,
                 {"atrasado": False},
             )
-            if apontamento_registro_esta_atrasado(data_chave, meta):
+            if ap_real.get("atrasado"):
                 info["atrasado"] = True
 
     por_eng = {
@@ -11076,14 +11236,12 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
         if str(nome).strip()
     ]
 
-    # Reduz os registros para uma única data por supervisor.
-    # Vários funcionários convocados no mesmo dia continuam valendo 1.
-    # Mantemos dois conjuntos de convocação:
-    # - própria: para medir se o supervisor registrou sua convocação;
-    # - existente: para saber se havia obrigação de fazer apontamento.
+    # Reduz os registros por supervisor + dia, mas mantém as linhas individuais
+    # para saber se TODOS os convocados daquele dia já foram apontados.
+    # Uma linha na tabela `convocacoes` já prova que houve convocação, mesmo em
+    # registros antigos que não possuem metadata `convocado_em`.
     dias_com_convocacao = {}
-    dias_com_convocacao_existente = {}
-    dias_com_apontamento = {}
+    convocacoes_por_supervisor_dia = {}
 
     for item in registros:
         supervisor = str(
@@ -11103,23 +11261,17 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
             continue
         data_registro = data_registro.date()
 
-        # Qualquer convocação existente para supervisor + dia cria a obrigação
-        # de apontamento. Não é criado apontamento esperado em dia sem convocação.
-        if meta.get("convocado_em"):
-            dias_com_convocacao_existente.setdefault(
-                supervisor,
-                set(),
-            ).add(data_registro)
+        convocacoes_por_supervisor_dia.setdefault(
+            (supervisor, data_registro),
+            [],
+        ).append(item["raw"])
 
-            executor_conv = executor_da_convocacao(item["raw"], meta)
-            if executor_conv == supervisor:
-                dias_com_convocacao.setdefault(
-                    supervisor,
-                    set(),
-                ).add(data_registro)
-
-        if meta.get("apontado_em"):
-            dias_com_apontamento.setdefault(
+        # Para medir a convocação do supervisor, usa quem efetivamente lançou.
+        # Em registros legados sem metadata, executor_da_convocacao cai para
+        # criado_por/engenheiro e preserva o histórico.
+        executor_conv = executor_da_convocacao(item["raw"], meta)
+        if executor_conv == supervisor:
+            dias_com_convocacao.setdefault(
                 supervisor,
                 set(),
             ).add(data_registro)
@@ -11153,15 +11305,6 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
             supervisor,
             set(),
         )
-        dias_convocados = dias_com_convocacao_existente.get(
-            supervisor,
-            set(),
-        )
-        dias_apontados = dias_com_apontamento.get(
-            supervisor,
-            set(),
-        )
-
         datas_faltantes = [
             data
             for data in datas_monitoradas_por_supervisor.get(supervisor, [])
@@ -11171,12 +11314,32 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
         # Só existe apontamento esperado quando existe convocação. Além disso,
         # não chama de "não feito" antes do vencimento do prazo (09:30 do
         # próximo dia útil; fim de semana pode ser finalizado na segunda).
+        datas_apontamento_faltante = []
+        for (eng_dia, data_dia), convs_dia in convocacoes_por_supervisor_dia.items():
+            if eng_dia != supervisor:
+                continue
+            if not (inicio <= data_dia <= data_limite):
+                continue
+            if not prazo_apontamento_ja_venceu(
+                data_dia,
+                agora=agora_indicador,
+            ):
+                continue
+
+            # O dia só é considerado apontado quando todas as convocações
+            # daquele supervisor/data possuem apontamento real. Assim, um
+            # lançamento parcial não esconde colaboradores ainda pendentes.
+            if any(
+                not registro_tem_apontamento_real(
+                    conv,
+                    apontamentos_estruturados=apontamentos_estruturados,
+                )
+                for conv in convs_dia
+            ):
+                datas_apontamento_faltante.append(data_dia)
+
         datas_apontamento_faltante = sorted(
-            data
-            for data in dias_convocados
-            if data not in dias_apontados
-            and inicio <= data <= data_limite
-            and prazo_apontamento_ja_venceu(data, agora=agora_indicador)
+            set(datas_apontamento_faltante)
         )
 
         linhas_ausencias.append({
