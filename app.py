@@ -10310,6 +10310,46 @@ def executor_da_convocacao(registro, meta=None):
     return str(executor).strip().upper()
 
 
+def executor_do_apontamento(registro, meta=None):
+    """Identifica quem efetivamente registrou o apontamento."""
+    meta = meta or obter_metadata_operacional(
+        registro.get("observacao") or ""
+    )
+    executor = (
+        meta.get("apontado_por")
+        or registro.get("apontado_por")
+        or registro.get("engenheiro")
+        or ""
+    )
+    return str(executor).strip().upper()
+
+
+def prazo_apontamento_ja_venceu(data_servico, agora=None):
+    """
+    Indica se já passou o momento em que um apontamento deveria estar concluído.
+
+    O prazo é 09:30 do próximo dia útil. Para serviços de sábado/domingo,
+    o próximo dia útil é a segunda-feira. O fim de semana pode aparecer no
+    acompanhamento, mas não gera atraso artificial durante sábado/domingo.
+    """
+    agora = agora or agora_aproar()
+    try:
+        if not isinstance(data_servico, datetime.date):
+            data_servico = pd.to_datetime(data_servico, errors="coerce").date()
+    except Exception:
+        return False
+
+    if data_servico > agora.date():
+        return False
+
+    dia_limite = proximo_dia_util(data_servico)
+    if agora.date() > dia_limite:
+        return True
+    if agora.date() == dia_limite:
+        return agora.time() >= datetime.time(9, 30)
+    return False
+
+
 def gerar_pdf_relatorio_resultados(
     data_inicio,
     data_fim,
@@ -10323,10 +10363,10 @@ def gerar_pdf_relatorio_resultados(
 
     class _RelatorioResultadosPDF(FPDF):
         def footer(self):
-            self.set_y(-10)
-            self.set_font("Arial", "", 7)
-            self.set_text_color(120, 130, 145)
-            self.cell(
+            _streamlit_silencio = self.set_y(-10)
+            _streamlit_silencio = self.set_font("Arial", "", 7)
+            _streamlit_silencio = self.set_text_color(120, 130, 145)
+            _streamlit_silencio = self.cell(
                 0,
                 4,
                 to_latin(
@@ -10340,10 +10380,10 @@ def gerar_pdf_relatorio_resultados(
         unit="mm",
         format="A4",
     )
-    pdf.set_margins(12, 12, 12)
-    pdf.set_auto_page_break(auto=True, margin=15)
-    pdf.alias_nb_pages()
-    pdf.add_page()
+    _streamlit_silencio = pdf.set_margins(12, 12, 12)
+    _streamlit_silencio = pdf.set_auto_page_break(auto=True, margin=15)
+    _streamlit_silencio = pdf.alias_nb_pages()
+    _streamlit_silencio = pdf.add_page()
 
     largura_util = 273  # A4 paisagem: 297 - 12 - 12
 
@@ -10351,23 +10391,23 @@ def gerar_pdf_relatorio_resultados(
         return to_latin(str(valor if valor is not None else ""))
 
     def titulo_secao(titulo, subtitulo=None, numero=None):
-        pdf.set_font("Arial", "B", 14)
-        pdf.set_text_color(25, 39, 61)
+        _streamlit_silencio = pdf.set_font("Arial", "B", 14)
+        _streamlit_silencio = pdf.set_text_color(25, 39, 61)
         prefixo = f"{numero}. " if numero is not None else ""
-        pdf.cell(0, 8, texto(prefixo + titulo), ln=1)
+        _streamlit_silencio = pdf.cell(0, 8, texto(prefixo + titulo), ln=1)
         if subtitulo:
-            pdf.set_font("Arial", "", 8)
-            pdf.set_text_color(105, 120, 140)
-            pdf.multi_cell(0, 4.5, texto(subtitulo))
-        pdf.ln(2)
+            _streamlit_silencio = pdf.set_font("Arial", "", 8)
+            _streamlit_silencio = pdf.set_text_color(105, 120, 140)
+            _streamlit_silencio = pdf.multi_cell(0, 4.5, texto(subtitulo))
+        _streamlit_silencio = pdf.ln(2)
 
     def desenhar_cabecalho_tabela(colunas, larguras, alinhamentos):
-        pdf.set_font("Arial", "B", 7.5)
-        pdf.set_text_color(255, 255, 255)
-        pdf.set_fill_color(37, 99, 235)
-        pdf.set_draw_color(210, 218, 230)
+        _streamlit_silencio = pdf.set_font("Arial", "B", 7.5)
+        _streamlit_silencio = pdf.set_text_color(255, 255, 255)
+        _streamlit_silencio = pdf.set_fill_color(37, 99, 235)
+        _streamlit_silencio = pdf.set_draw_color(210, 218, 230)
         for col, largura, align in zip(colunas, larguras, alinhamentos):
-            pdf.cell(
+            _streamlit_silencio = pdf.cell(
                 largura,
                 7,
                 texto(col),
@@ -10375,13 +10415,13 @@ def gerar_pdf_relatorio_resultados(
                 fill=True,
                 align=align,
             )
-        pdf.ln()
+        _streamlit_silencio = pdf.ln()
 
     def tabela(colunas, linhas, larguras, alinhamentos=None):
         if not linhas:
-            pdf.set_font("Arial", "", 8.5)
-            pdf.set_text_color(105, 120, 140)
-            pdf.cell(
+            _streamlit_silencio = pdf.set_font("Arial", "", 8.5)
+            _streamlit_silencio = pdf.set_text_color(105, 120, 140)
+            _streamlit_silencio = pdf.cell(
                 0,
                 6,
                 texto("Nenhum registro encontrado para o filtro selecionado."),
@@ -10390,17 +10430,17 @@ def gerar_pdf_relatorio_resultados(
             return
 
         alinhamentos = alinhamentos or ["L"] * len(colunas)
-        desenhar_cabecalho_tabela(colunas, larguras, alinhamentos)
+        _streamlit_silencio = desenhar_cabecalho_tabela(colunas, larguras, alinhamentos)
 
-        pdf.set_font("Arial", "", 7.3)
+        _streamlit_silencio = pdf.set_font("Arial", "", 7.3)
         for i, linha in enumerate(linhas):
             if pdf.get_y() > 185:
-                pdf.add_page()
-                desenhar_cabecalho_tabela(colunas, larguras, alinhamentos)
-                pdf.set_font("Arial", "", 7.3)
+                _streamlit_silencio = pdf.add_page()
+                _streamlit_silencio = desenhar_cabecalho_tabela(colunas, larguras, alinhamentos)
+                _streamlit_silencio = pdf.set_font("Arial", "", 7.3)
 
-            pdf.set_text_color(35, 48, 68)
-            pdf.set_fill_color(
+            _streamlit_silencio = pdf.set_text_color(35, 48, 68)
+            _streamlit_silencio = pdf.set_fill_color(
                 248, 250, 252
             ) if i % 2 == 0 else pdf.set_fill_color(255, 255, 255)
 
@@ -10408,7 +10448,7 @@ def gerar_pdf_relatorio_resultados(
                 valor_txt = texto(valor)
                 if len(valor_txt) > 90:
                     valor_txt = valor_txt[:87] + "..."
-                pdf.cell(
+                _streamlit_silencio = pdf.cell(
                     largura,
                     6.2,
                     valor_txt,
@@ -10416,7 +10456,7 @@ def gerar_pdf_relatorio_resultados(
                     fill=True,
                     align=align,
                 )
-            pdf.ln()
+            _streamlit_silencio = pdf.ln()
 
     total_feitas = sum(
         int(x.get("Convocações feitas", 0) or 0)
@@ -10437,9 +10477,9 @@ def gerar_pdf_relatorio_resultados(
     )
 
     # ---------------- CABEÇALHO ----------------
-    pdf.set_font("Arial", "B", 21)
-    pdf.set_text_color(25, 39, 61)
-    pdf.cell(
+    _streamlit_silencio = pdf.set_font("Arial", "B", 21)
+    _streamlit_silencio = pdf.set_text_color(25, 39, 61)
+    _streamlit_silencio = pdf.cell(
         0,
         10,
         texto("APROAR | RELATÓRIO DE RESULTADOS"),
@@ -10452,9 +10492,9 @@ def gerar_pdf_relatorio_resultados(
         else str(unidade_filtro)
     )
 
-    pdf.set_font("Arial", "", 9)
-    pdf.set_text_color(100, 116, 139)
-    pdf.cell(
+    _streamlit_silencio = pdf.set_font("Arial", "", 9)
+    _streamlit_silencio = pdf.set_text_color(100, 116, 139)
+    _streamlit_silencio = pdf.cell(
         0,
         5,
         texto(
@@ -10463,13 +10503,13 @@ def gerar_pdf_relatorio_resultados(
         ),
         ln=1,
     )
-    pdf.cell(
+    _streamlit_silencio = pdf.cell(
         0,
         5,
         texto(f"Unidade: {unidade_texto}"),
         ln=1,
     )
-    pdf.ln(5)
+    _streamlit_silencio = pdf.ln(5)
 
     # ---------------- KPIs ----------------
     kpis = [
@@ -10489,25 +10529,25 @@ def gerar_pdf_relatorio_resultados(
     for i, (label, valor) in enumerate(kpis):
         x = 12 + i * (card_w + gap)
 
-        pdf.set_xy(x, y_cards)
-        pdf.set_fill_color(247, 249, 252)
-        pdf.set_draw_color(221, 228, 237)
-        pdf.rect(x, y_cards, card_w, card_h, style="DF")
+        _streamlit_silencio = pdf.set_xy(x, y_cards)
+        _streamlit_silencio = pdf.set_fill_color(247, 249, 252)
+        _streamlit_silencio = pdf.set_draw_color(221, 228, 237)
+        _streamlit_silencio = pdf.rect(x, y_cards, card_w, card_h, style="DF")
 
-        pdf.set_xy(x + 4, y_cards + 4)
-        pdf.set_font("Arial", "B", 7.2)
-        pdf.set_text_color(100, 116, 139)
-        pdf.cell(card_w - 8, 4, texto(label), ln=1)
+        _streamlit_silencio = pdf.set_xy(x + 4, y_cards + 4)
+        _streamlit_silencio = pdf.set_font("Arial", "B", 7.2)
+        _streamlit_silencio = pdf.set_text_color(100, 116, 139)
+        _streamlit_silencio = pdf.cell(card_w - 8, 4, texto(label), ln=1)
 
-        pdf.set_xy(x + 4, y_cards + 11)
-        pdf.set_font("Arial", "B", 17)
-        pdf.set_text_color(25, 39, 61)
-        pdf.cell(card_w - 8, 8, texto(valor), ln=0)
+        _streamlit_silencio = pdf.set_xy(x + 4, y_cards + 11)
+        _streamlit_silencio = pdf.set_font("Arial", "B", 17)
+        _streamlit_silencio = pdf.set_text_color(25, 39, 61)
+        _streamlit_silencio = pdf.cell(card_w - 8, 8, texto(valor), ln=0)
 
-    pdf.set_xy(12, y_cards + card_h + 9)
+    _streamlit_silencio = pdf.set_xy(12, y_cards + card_h + 9)
 
     # ---------------- DESEMPENHO ----------------
-    titulo_secao(
+    _streamlit_silencio = titulo_secao(
         "Desempenho dos supervisores",
         "Uma convocação corresponde a um supervisor + um dia, independentemente da quantidade de funcionários.",
         numero=1,
@@ -10519,7 +10559,7 @@ def gerar_pdf_relatorio_resultados(
         key=lambda r: str(r.get("Engenheiro", "")),
     ):
         pct = item.get("No prazo (%)")
-        linhas.append([
+        _streamlit_silencio = linhas.append([
             item.get("Engenheiro", ""),
             item.get("Convocações feitas", 0),
             item.get("Convocações atrasadas", 0),
@@ -10528,7 +10568,7 @@ def gerar_pdf_relatorio_resultados(
             item.get("Apontamentos atrasados", 0),
         ])
 
-    tabela(
+    _streamlit_silencio = tabela(
         [
             "Supervisor",
             "Convocações",
@@ -10543,10 +10583,10 @@ def gerar_pdf_relatorio_resultados(
     )
 
     # ---------------- NÃO REALIZADAS ----------------
-    pdf.ln(8)
-    titulo_secao(
-        "Convocações não realizadas",
-        "Dias em que não foi identificada uma convocação efetivamente registrada pelo próprio supervisor.",
+    _streamlit_silencio = pdf.ln(8)
+    _streamlit_silencio = titulo_secao(
+        "Convocações e apontamentos pendentes",
+        "Convocação não feita é verificada por dia. Apontamento não feito só é cobrado quando existiu convocação para aquele supervisor e o prazo do apontamento já venceu.",
         numero=2,
     )
 
@@ -10558,23 +10598,24 @@ def gerar_pdf_relatorio_resultados(
             str(r.get("Supervisor", "")),
         ),
     ):
-        linhas.append([
+        _streamlit_silencio = linhas.append([
             item.get("Supervisor", ""),
             item.get("Convocações não feitas", 0),
+            item.get("Apontamentos não feitos", 0),
             item.get("Dias sem convocação", "Nenhum"),
         ])
 
-    tabela(
-        ["Supervisor", "Não feitas", "Dias sem convocação"],
+    _streamlit_silencio = tabela(
+        ["Supervisor", "Não feitas", "Apt. não feitos", "Dias sem convocação"],
         linhas,
-        [70, 35, 168],
-        ["L", "C", "L"],
+        [52, 30, 42, 149],
+        ["L", "C", "C", "L"],
     )
 
     # ---------------- APONTAMENTOS ----------------
     # Mantém a seção inteira na página seguinte para evitar título órfão.
-    pdf.add_page()
-    titulo_secao(
+    _streamlit_silencio = pdf.add_page()
+    _streamlit_silencio = titulo_secao(
         "Apontamentos",
         "Resumo dos apontamentos associados aos supervisores no período selecionado.",
         numero=3,
@@ -10588,47 +10629,47 @@ def gerar_pdf_relatorio_resultados(
         (12, "TOTAL DE APONTAMENTOS", total_apontamentos),
         (155, "APONTAMENTOS ATRASADOS", total_apontamentos_atrasados),
     ]:
-        pdf.set_fill_color(247, 249, 252)
-        pdf.set_draw_color(221, 228, 237)
-        pdf.rect(x, y_box, box_w, resumo_h, style="DF")
+        _streamlit_silencio = pdf.set_fill_color(247, 249, 252)
+        _streamlit_silencio = pdf.set_draw_color(221, 228, 237)
+        _streamlit_silencio = pdf.rect(x, y_box, box_w, resumo_h, style="DF")
 
-        pdf.set_xy(x + 5, y_box + 4)
-        pdf.set_font("Arial", "B", 7.2)
-        pdf.set_text_color(100, 116, 139)
-        pdf.cell(box_w - 10, 4, texto(label), ln=1)
+        _streamlit_silencio = pdf.set_xy(x + 5, y_box + 4)
+        _streamlit_silencio = pdf.set_font("Arial", "B", 7.2)
+        _streamlit_silencio = pdf.set_text_color(100, 116, 139)
+        _streamlit_silencio = pdf.cell(box_w - 10, 4, texto(label), ln=1)
 
-        pdf.set_xy(x + 5, y_box + 11)
-        pdf.set_font("Arial", "B", 16)
-        pdf.set_text_color(25, 39, 61)
-        pdf.cell(box_w - 10, 7, texto(valor), ln=0)
+        _streamlit_silencio = pdf.set_xy(x + 5, y_box + 11)
+        _streamlit_silencio = pdf.set_font("Arial", "B", 16)
+        _streamlit_silencio = pdf.set_text_color(25, 39, 61)
+        _streamlit_silencio = pdf.cell(box_w - 10, 7, texto(valor), ln=0)
 
-    pdf.set_xy(12, y_box + resumo_h + 10)
+    _streamlit_silencio = pdf.set_xy(12, y_box + resumo_h + 10)
     linhas_apontamentos = []
     for item in sorted(
         resumo_supervisores,
         key=lambda r: str(r.get("Engenheiro", "")),
     ):
-        linhas_apontamentos.append([
+        _streamlit_silencio = linhas_apontamentos.append([
             item.get("Engenheiro", ""),
             item.get("Apontamentos feitos", 0),
             item.get("Apontamentos atrasados", 0),
         ])
 
-    titulo_secao(
+    _streamlit_silencio = titulo_secao(
         "Apontamentos por supervisor",
         "Quantidade de apontamentos registrados e respectivos atrasos.",
     )
-    tabela(
+    _streamlit_silencio = tabela(
         ["Supervisor", "Apontamentos", "Atrasados"],
         linhas_apontamentos,
         [150, 61, 62],
         ["L", "C", "C"],
     )
 
-    pdf.ln(6)
-    pdf.set_font("Arial", "I", 7.5)
-    pdf.set_text_color(125, 138, 157)
-    pdf.multi_cell(
+    _streamlit_silencio = pdf.ln(6)
+    _streamlit_silencio = pdf.set_font("Arial", "I", 7.5)
+    _streamlit_silencio = pdf.set_text_color(125, 138, 157)
+    _streamlit_silencio = pdf.multi_cell(
         0,
         4,
         texto(
@@ -10701,7 +10742,7 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
                 "Registrado em": str(meta.get("convocado_em") or "").replace("T", " ")[:19],
                 "Atrasado": "SIM" if convocacao_registro_esta_atrasada(pd.to_datetime(r.get("data"), errors="coerce").date() if not pd.isna(pd.to_datetime(r.get("data"), errors="coerce")) else r.get("data"), meta) else "NÃO",
             })
-        if meta.get("apontado_em") and executor != PAULO_OPERADOR:
+        if meta.get("apontado_em") and executor_do_apontamento(r, meta) != PAULO_OPERADOR:
             eventos_prazo.append({
                 "Engenheiro": eng,
                 "Data do serviço": str(r.get("data") or ""),
@@ -10751,7 +10792,7 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
 
         if (
             meta.get("apontado_em")
-            and executor_da_convocacao(item["raw"], meta) != PAULO_OPERADOR
+            and executor_do_apontamento(item["raw"], meta) != PAULO_OPERADOR
             and eng in {
                 str(nome).strip().upper()
                 for nome in SUPERVISORES_INDICADORES
@@ -10948,7 +10989,12 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
 
     # Reduz os registros para uma única data por supervisor.
     # Vários funcionários convocados no mesmo dia continuam valendo 1.
+    # Mantemos dois conjuntos de convocação:
+    # - própria: para medir se o supervisor registrou sua convocação;
+    # - existente: para saber se havia obrigação de fazer apontamento.
     dias_com_convocacao = {}
+    dias_com_convocacao_existente = {}
+    dias_com_apontamento = {}
 
     for item in registros:
         supervisor = str(
@@ -10957,26 +11003,42 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
         data_raw = item["raw"].get("data")
         meta = item["meta"]
 
-        executor = executor_da_convocacao(item["raw"], meta)
-        if (
-            supervisor in engenheiros_alvo
-            and executor == supervisor
-            and data_raw
-            and meta.get("convocado_em")
-        ):
-            data_conv = pd.to_datetime(
-                data_raw,
-                errors="coerce",
-            )
+        if supervisor not in engenheiros_alvo or not data_raw:
+            continue
 
-            if not pd.isna(data_conv):
+        data_registro = pd.to_datetime(
+            data_raw,
+            errors="coerce",
+        )
+        if pd.isna(data_registro):
+            continue
+        data_registro = data_registro.date()
+
+        # Qualquer convocação existente para supervisor + dia cria a obrigação
+        # de apontamento. Não é criado apontamento esperado em dia sem convocação.
+        if meta.get("convocado_em"):
+            dias_com_convocacao_existente.setdefault(
+                supervisor,
+                set(),
+            ).add(data_registro)
+
+            executor_conv = executor_da_convocacao(item["raw"], meta)
+            if executor_conv == supervisor:
                 dias_com_convocacao.setdefault(
                     supervisor,
                     set(),
-                ).add(data_conv.date())
+                ).add(data_registro)
+
+        if meta.get("apontado_em"):
+            dias_com_apontamento.setdefault(
+                supervisor,
+                set(),
+            ).add(data_registro)
 
     # A regra histórica começa em 16/09, mas respeita o filtro escolhido
-    # quando o usuário seleciona uma data posterior.
+    # quando o usuário seleciona uma data posterior. Para Felipe, começa em 28/09.
+    # Sábados e domingos voltam a aparecer na conferência de convocação. Eles
+    # continuam sem gerar atraso automático de convocação/apontamento.
     data_base_monitoramento = datetime.date(2026, 9, 16)
     data_limite = min(fim, agora_aproar().date())
 
@@ -10989,16 +11051,24 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
         datas_monitoradas = []
         data_loop = inicio_supervisor
         while data_loop <= data_limite:
-            # Sábado e domingo não são dias cobrados como convocação ausente.
-            if eh_dia_util_operacional(data_loop):
-                datas_monitoradas.append(data_loop)
+            # Inclui segunda a domingo. O fim de semana só não entra como atraso.
+            datas_monitoradas.append(data_loop)
             data_loop += datetime.timedelta(days=1)
         datas_monitoradas_por_supervisor[supervisor] = datas_monitoradas
 
     linhas_ausencias = []
+    agora_indicador = agora_aproar()
 
     for supervisor in engenheiros_alvo:
         dias_feitos = dias_com_convocacao.get(
+            supervisor,
+            set(),
+        )
+        dias_convocados = dias_com_convocacao_existente.get(
+            supervisor,
+            set(),
+        )
+        dias_apontados = dias_com_apontamento.get(
             supervisor,
             set(),
         )
@@ -11009,24 +11079,36 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
             if data not in dias_feitos
         ]
 
+        # Só existe apontamento esperado quando existe convocação. Além disso,
+        # não chama de "não feito" antes do vencimento do prazo (09:30 do
+        # próximo dia útil; fim de semana pode ser finalizado na segunda).
+        datas_apontamento_faltante = sorted(
+            data
+            for data in dias_convocados
+            if data not in dias_apontados
+            and inicio <= data <= data_limite
+            and prazo_apontamento_ja_venceu(data, agora=agora_indicador)
+        )
+
         linhas_ausencias.append({
             "Supervisor": supervisor,
             "Convocações não feitas": len(datas_faltantes),
+            "Apontamentos não feitos": len(datas_apontamento_faltante),
             "Dias sem convocação": (
                 ", ".join(
                     data.strftime("%d/%m/%Y")
                     for data in datas_faltantes
                 )
                 if datas_faltantes
-                else "Nenhuma",
+                else "Nenhuma"
             ),
         })
 
     df_ausencias = (
         pd.DataFrame(linhas_ausencias)
         .sort_values(
-            ["Convocações não feitas", "Supervisor"],
-            ascending=[False, True],
+            ["Convocações não feitas", "Apontamentos não feitos", "Supervisor"],
+            ascending=[False, False, True],
         )
         .reset_index(drop=True)
     )
@@ -11052,6 +11134,15 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
                 width="medium",
                 format="%d",
             ),
+            "Apontamentos não feitos": st.column_config.NumberColumn(
+                "Apontamentos não feitos",
+                width="medium",
+                format="%d",
+                help=(
+                    "Conta somente dias em que existiu convocação, não houve apontamento "
+                    "e o prazo do apontamento já venceu."
+                ),
+            ),
             "Dias sem convocação": st.column_config.TextColumn(
                 "Dias sem convocação",
                 width="large",
@@ -11064,12 +11155,14 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
     if data_inicio_verificado <= data_limite:
         st.caption(
             f"Período-base verificado: {data_inicio_verificado.strftime('%d/%m/%Y')} "
-            f"a {data_limite.strftime('%d/%m/%Y')}. Sábados e domingos não entram na cobrança. "
+            f"a {data_limite.strftime('%d/%m/%Y')}. Sábados e domingos aparecem na conferência de convocações, "
+            "mas continuam fora da regra de atraso. Apontamento só é esperado quando houve convocação; "
+            "para serviço de fim de semana, o prazo considera a segunda-feira. "
             "Para Felipe, a contagem começa em 28/09/2026."
         )
     else:
         st.caption(
-            "Não há dias úteis concluídos para verificar dentro do período selecionado."
+            "Não há datas concluídas para verificar dentro do período selecionado."
         )
 
     # O PDF é o fechamento executivo do mesmo conjunto de indicadores exibido acima.
