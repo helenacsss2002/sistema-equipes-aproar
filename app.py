@@ -11128,8 +11128,12 @@ def render_indicadores_cumprimento(key_prefix="ind", engenheiro_fixo=None, mostr
         .reset_index(drop=True)
     )
 
+    # Mantém esta tabela com largura visual fixa, independentemente do
+    # tamanho do conteúdo das colunas. Se o conteúdo exceder, o próprio
+    # dataframe exibe rolagem horizontal sem alargar a página.
     st.dataframe(
         df_ausencias,
+        width=1200,
         use_container_width=False,
         hide_index=True,
         height=max(
