@@ -10417,7 +10417,50 @@ def gerar_pdf_relatorio_resultados(
             )
         _streamlit_silencio = pdf.ln()
 
-    def tabela(colunas, linhas, larguras, alinhamentos=None):
+    def _quebrar_texto_celula(valor, largura, padding=2.2):
+        """Quebra o conteúdo para que nunca ultrapasse a largura da célula."""
+        txt = texto(valor).replace("\n", " ").strip()
+        if not txt:
+            return [""]
+
+        largura_texto = max(1.0, float(largura) - float(padding))
+        palavras = txt.split()
+        linhas_txt = []
+        atual = ""
+
+        for palavra in palavras:
+            tentativa = palavra if not atual else f"{atual} {palavra}"
+            if pdf.get_string_width(tentativa) <= largura_texto:
+                atual = tentativa
+                continue
+
+            if atual:
+                linhas_txt.append(atual)
+                atual = ""
+
+            # Segurança para qualquer token maior que a própria coluna.
+            restante = palavra
+            while restante and pdf.get_string_width(restante) > largura_texto:
+                corte = len(restante)
+                while corte > 1 and pdf.get_string_width(restante[:corte]) > largura_texto:
+                    corte -= 1
+                linhas_txt.append(restante[:corte])
+                restante = restante[corte:]
+            atual = restante
+
+        if atual or not linhas_txt:
+            linhas_txt.append(atual)
+        return linhas_txt
+
+    def tabela(
+        colunas,
+        linhas,
+        larguras,
+        alinhamentos=None,
+        fonte=7.3,
+        altura_linha=4.2,
+        altura_minima=6.2,
+    ):
         if not linhas:
             _streamlit_silencio = pdf.set_font("Arial", "", 8.5)
             _streamlit_silencio = pdf.set_text_color(105, 120, 140)
@@ -10431,32 +10474,68 @@ def gerar_pdf_relatorio_resultados(
 
         alinhamentos = alinhamentos or ["L"] * len(colunas)
         _streamlit_silencio = desenhar_cabecalho_tabela(colunas, larguras, alinhamentos)
+        _streamlit_silencio = pdf.set_font("Arial", "", fonte)
 
-        _streamlit_silencio = pdf.set_font("Arial", "", 7.3)
+        limite_inferior = pdf.h - 18
+
         for i, linha in enumerate(linhas):
-            if pdf.get_y() > 185:
+            celulas = [
+                _quebrar_texto_celula(valor, largura)
+                for valor, largura in zip(linha, larguras)
+            ]
+            max_linhas = max((len(v) for v in celulas), default=1)
+            altura_row = max(altura_minima, max_linhas * altura_linha + 1.6)
+
+            # A linha inteira vai para a página seguinte, evitando corte no meio.
+            if pdf.get_y() + altura_row > limite_inferior:
                 _streamlit_silencio = pdf.add_page()
-                _streamlit_silencio = desenhar_cabecalho_tabela(colunas, larguras, alinhamentos)
-                _streamlit_silencio = pdf.set_font("Arial", "", 7.3)
+                _streamlit_silencio = desenhar_cabecalho_tabela(
+                    colunas,
+                    larguras,
+                    alinhamentos,
+                )
+                _streamlit_silencio = pdf.set_font("Arial", "", fonte)
+
+            y_inicio = pdf.get_y()
+            x_inicio = pdf.get_x()
 
             _streamlit_silencio = pdf.set_text_color(35, 48, 68)
-            _streamlit_silencio = pdf.set_fill_color(
-                248, 250, 252
-            ) if i % 2 == 0 else pdf.set_fill_color(255, 255, 255)
+            if i % 2 == 0:
+                _streamlit_silencio = pdf.set_fill_color(248, 250, 252)
+            else:
+                _streamlit_silencio = pdf.set_fill_color(255, 255, 255)
+            _streamlit_silencio = pdf.set_draw_color(210, 218, 230)
 
-            for valor, largura, align in zip(linha, larguras, alinhamentos):
-                valor_txt = texto(valor)
-                if len(valor_txt) > 90:
-                    valor_txt = valor_txt[:87] + "..."
-                _streamlit_silencio = pdf.cell(
+            x = x_inicio
+            for linhas_celula, largura, align in zip(
+                celulas,
+                larguras,
+                alinhamentos,
+            ):
+                # Fundo e borda são desenhados uma única vez por célula.
+                _streamlit_silencio = pdf.rect(
+                    x,
+                    y_inicio,
                     largura,
-                    6.2,
-                    valor_txt,
-                    border=1,
-                    fill=True,
-                    align=align,
+                    altura_row,
+                    style="DF",
                 )
-            _streamlit_silencio = pdf.ln()
+
+                bloco_h = len(linhas_celula) * altura_linha
+                y_texto = y_inicio + max(0.8, (altura_row - bloco_h) / 2)
+                for linha_txt in linhas_celula:
+                    _streamlit_silencio = pdf.set_xy(x + 1.1, y_texto)
+                    _streamlit_silencio = pdf.cell(
+                        largura - 2.2,
+                        altura_linha,
+                        linha_txt,
+                        border=0,
+                        align=align,
+                    )
+                    y_texto += altura_linha
+                x += largura
+
+            _streamlit_silencio = pdf.set_xy(x_inicio, y_inicio + altura_row)
 
     total_feitas = sum(
         int(x.get("Convocações feitas", 0) or 0)
@@ -10617,6 +10696,9 @@ def gerar_pdf_relatorio_resultados(
         linhas,
         [38, 27, 34, 87, 87],
         ["L", "C", "C", "L", "L"],
+        fonte=6.7,
+        altura_linha=3.8,
+        altura_minima=6.2,
     )
 
     # ---------------- APONTAMENTOS ----------------
