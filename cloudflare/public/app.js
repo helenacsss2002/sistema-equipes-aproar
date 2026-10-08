@@ -969,7 +969,7 @@
     const liveResults=()=>{
       const term=clean(cardSearch.value),matches=term?remoteCards.filter(c=>clean(c.name+' '+c.unidade).includes(term)).slice(0,30):[];
       cardResults.innerHTML=term?'<div class="section">'+(matches.length?matches.map(c=>'<div class="team-list-item"><strong>'+escapeHtml(c.name)+'</strong><small>'+escapeHtml(c.unidade||'NÃO IDENTIFICADA')+'</small><button type="button" class="link-btn" data-trello-card="'+escapeHtml(c.id)+'">Importar este card</button></div>').join(''):'Nenhum card correspondente no quadro.')+'</div>':'';
-      $('[data-trello-card]').forEach(b=>b.onclick=()=>runTrelloSync({cardId:b.dataset.trelloCard}));
+      document.querySelectorAll('[data-trello-card]').forEach(b=>b.onclick=()=>runTrelloSync({cardId:b.dataset.trelloCard}));
     };
     (async()=>{
       try{
