@@ -45,3 +45,15 @@ test('Trello: classifica erro de conexão externa',async()=>{
  const response=async()=>{throw new TypeError('fetch failed');};
  await assert.rejects(()=>consultarTrello(response),/conexão entre a Cloudflare e o Trello/);
 });
+
+test('Interface: busca do Trello usa todos os cards e nao volta para cadastro local',async()=>{
+ const source=(await import('node:fs')).readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
+ const start=source.indexOf('const liveResults=()=>{');
+ const end=source.indexOf("const body=$('#settings-body');",start);
+ assert.ok(start>=0&&end>start,'Tela de configuracoes do Trello deve existir.');
+ const handler=source.slice(start,end);
+ assert.ok(handler.includes("document.querySelectorAll('[data-trello-card]').forEach"),'Cada botao de card precisa receber um evento.');
+ assert.ok(!handler.includes("      $('[data-trello-card]').forEach"),'querySelector nao retorna uma lista para forEach.');
+ assert.ok(handler.includes('cardSearch.oninput=liveResults'),'Busca deve usar cards retornados da API.');
+ assert.ok(!handler.includes("$('#trello-search').oninput="),'Busca local nao deve substituir busca do Trello.');
+});
