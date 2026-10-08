@@ -40,3 +40,26 @@ test('New or reassigned invalid supervisor remains forbidden',async()=>{
   assert.throws(()=>buildOperations(db,next,actor,now),/Supervisor inválido/);
  }finally{await pg.close();}
 });
+
+test('Partial attendance preserves a pending colleague and permits later completion',async()=>{
+ const {pg,sql}=await fixture();
+ try{
+  await pg.exec("INSERT INTO colaboradores(nome,funcao,valor_diaria) VALUES('QA two','Pedreiro',200)");
+  let db=await readDatabase(sql),next=structuredClone(db.state);
+  conv(next);
+  next.convocacoes[0].colaboradores=['1','2'];
+  attendance(next,'draft-conv');
+  db=(await save(sql,next,actor)).after;
+  assert.equal(db.raw.convocacoes.length,2);
+  assert.equal(db.raw.apontamentos.length,1);
+  const pending=db.state.convocacoes.find(c=>c.colaboradores.includes('2'));
+  assert.ok(pending);
+  assert.ok(!db.state.apontamentos.some(a=>a.convocacaoId===pending.id));
+  next=structuredClone(db.state);
+  attendance(next,pending.id);
+  next.apontamentos.at(-1).itens[0].colaboradorId='2';
+  db=(await save(sql,next,actor)).after;
+  assert.equal(db.raw.convocacoes.length,2);
+  assert.equal(db.raw.apontamentos.length,2);
+ }finally{await pg.close();}
+});
