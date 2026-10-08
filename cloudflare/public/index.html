@@ -492,6 +492,10 @@ table td .control {text-align:inherit;}
 .availability-tab.active span {background:#ffffff24;color:white;}
 .availability-tab:focus-visible {outline:3px solid #99bcff;outline-offset:2px;}
 @media(max-width:480px){.availability-tabs {gap:6px;}.availability-tab {font-size:11px;padding:11px 5px;gap:4px;}.availability-tab span {padding:2px 5px;}}
+.retro-pending-list {max-height:480px;overflow:auto;scrollbar-width:thin;scrollbar-color:#b7c4d5 transparent;}
+.retro-pending-date {margin:18px 0 8px;font-size:13px;color:#123b84;}.retro-pending-date:first-child {margin-top:0;}
+.retro-pending-item {display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;padding:13px;margin:7px 0;border:1px solid #dce6f6;border-radius:9px;background:#f5f8ff;text-align:left;color:#123b84;}
+.retro-pending-item small {display:block;margin-top:5px;color:#617796;font-size:11px;}.retro-pending-item.active,.retro-pending-item:hover {border-color:#2863ee;background:#eaf1ff;}.retro-pending-action {font-size:11px;font-weight:600;white-space:nowrap;color:#2563eb;}
 </style>
 </head>
 <body>
@@ -551,6 +555,6 @@ table td .control {text-align:inherit;}
   </div>
 
   <script src="/pdf-lib.min.js"></script>
-<script src="/app.js?v=entrada-ausencias-5"></script>
+<script src="/app.js?v=retroativo-pendencias-7"></script>
 <div id="online-saving" class="hidden" role="status" aria-live="polite" style="position:fixed;inset:0;background:rgba(11,27,51,.4);z-index:99999;display:grid;place-items:center"><div class="card card-pad"><strong>Salvando alterações no Neon…</strong><p>Aguarde a confirmação.</p></div></div></body>
 </html>
