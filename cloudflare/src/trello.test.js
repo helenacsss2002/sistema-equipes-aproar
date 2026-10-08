@@ -57,3 +57,28 @@ test('Interface: busca do Trello usa todos os cards e nao volta para cadastro lo
  assert.ok(handler.includes('cardSearch.oninput=liveResults'),'Busca deve usar cards retornados da API.');
  assert.ok(!handler.includes("$('#trello-search').oninput="),'Busca local nao deve substituir busca do Trello.');
 });
+
+test('Trello: consulta preferencial e feita na API REST oficial',async()=>{
+ const calls=[];
+ const mock=async(url)=>{calls.push(url);return {ok:true,status:200,headers:new Headers({'content-type':'application/json'}),json:async()=>({lists:[{id:'l',name:'EM EXECUÇÃO'}],cards:[{id:'a',idList:'l',name:'Obra A',desc:'LOCAL: CENTRO'}]})};};
+ const board=await consultarTrello(mock);
+ assert.equal(board.origem,'api.trello.com');
+ assert.equal(calls.length,1);
+ assert.match(calls[0],/^https:\/\/api\.trello\.com\/1\/boards\/TX8hGvmI/);
+ assert.equal(board.cards[0].name,'Obra A');
+});
+test('Trello: fallback do JSON publico quando a API envia HTML',async()=>{
+ const calls=[];
+ const mock=async(url)=>{calls.push(url);return url.includes('api.trello.com')?
+  {ok:true,status:200,headers:new Headers({'content-type':'text/html'}),json:async()=>{throw Error('Não deveria interpretar HTML');}}:
+  {ok:true,status:200,headers:new Headers({'content-type':'application/json'}),json:async()=>({lists:[{id:'l',name:'EM EXECUÇÃO'}],cards:[]})};
+ };
+ const board=await consultarTrello(mock);
+ assert.equal(board.origem,'trello.com');
+ assert.equal(calls.length,2);
+ assert.equal(board.lists[0].name,'EM EXECUÇÃO');
+});
+test('Trello: reporta duas fontes quando ambas deixam de retornar JSON',async()=>{
+ const mock=async()=>({ok:true,status:200,headers:new Headers({'content-type':'text/html'})});
+ await assert.rejects(()=>consultarTrello(mock),e=>e.status===502&&e.message.includes('api.trello.com')&&e.message.includes('trello.com')&&e.message.includes('HTML'));
+});
