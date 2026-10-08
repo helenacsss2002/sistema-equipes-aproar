@@ -920,7 +920,7 @@
       audit('Apontamento parcial da equipe',portalDate);
       saveData();toast(message);render();
     };
-    $('[data-save-person]').forEach(button=>button.onclick=()=>{
+    document.querySelectorAll('[data-save-person]').forEach(button=>button.onclick=()=>{
       const id=button.dataset.savePerson;
       if(!people.has(id))return toast('Colaborador não encontrado nesta equipe.',true);
       saveDayItems(readPersonRows([id]),'Apontamento salvo. Os demais continuam pendentes.');
