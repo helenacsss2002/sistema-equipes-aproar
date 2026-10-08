@@ -16,3 +16,27 @@ test('New temporary collaborator IDs resolve atomically with convocation and att
 test('Signed sessions reject tampering, expiry, bad passwords and cross-origin writes',async()=>{const env={CONNECTION_CHECK_TOKEN:'a'.repeat(40),ADMIN_PASSWORD:'admin-qa',FINANCE_PASSWORD:'finance-qa',VIEWER_PASSWORD:'viewer-qa',SUPERVISOR_PASSWORDS:JSON.stringify({EDUARDO:'supervisor-qa'})};const result=await login({role:'SUPERVISOR',supervisor:'EDUARDO',password:'supervisor-qa'},env);const cookie=result.cookie.split(';')[0];assert.equal((await identity(new Request('https://app.test',{headers:{cookie}}),env)).user,'EDUARDO');assert.equal(await identity(new Request('https://app.test',{headers:{cookie:cookie.replace('aproar_session=','aproar_session=x')}}),env),null);await assert.rejects(login({role:'CONTROLADORIA',password:'wrong'},env),/inválidos/);assert.equal(sameOrigin(new Request('https://app.test',{headers:{origin:'https://other.test'}})),false);});
 
 test('Corrections keep finance adjustments and attendance date consistent',async()=>{const {pg,sql}=await fixture();try{let db=await readDatabase(sql),next=structuredClone(db.state);conv(next);attendance(next,'draft-conv');db=(await save(sql,next,actor)).after;next=structuredClone(db.state);next.apontamentos[0].itens[0].financeiro=180;db=(await save(sql,next,finance)).after;next=structuredClone(db.state);next.apontamentos[0].itens[0].financeiro=1;next.apontamentos[0].itens[0].observacao='Correção supervisor';db=(await save(sql,next,actor)).after;assert.equal(Number(db.raw.apontamentos[0].custo_pago),180);next=structuredClone(db.state);next.convocacoes[0].dataServico='2026-10-06';db=(await save(sql,next,admin)).after;assert.equal(db.state.apontamentos[0].dataServico,'2026-10-06');assert.equal(new Date(db.raw.apontamentos[0].data_servico).toISOString().slice(0,10),'2026-10-06');}finally{await pg.close();}});
+
+test('Unchanged legacy supervisor does not block a new convocation from a valid supervisor',async()=>{
+ const {pg,sql}=await fixture();
+ try{
+  await pg.exec("INSERT INTO convocacoes(obra_id,colaborador_id,data,engenheiro,turno,observacao) VALUES(1,1,'2026-10-06','ENGENHEIRO ANTIGO','Integral','Turno: Integral')");
+  const db=await readDatabase(sql),next=structuredClone(db.state);
+  assert.equal(next.convocacoes[0].supervisor,'ENGENHEIRO ANTIGO');
+  next.convocacoes.push({id:'new-conv-qa',supervisor:'EDUARDO',dataServico:'2026-10-07',unidade:'FIEC',obraId:'',turno:'Integral',colaboradores:['1']});
+  const ops=buildOperations(db,next,actor,now);
+  assert.equal(ops.filter(x=>x.table==='convocacoes'&&x.action==='insert').length,1);
+  assert.equal(ops.filter(x=>x.table==='convocacoes'&&x.action==='update').length,0);
+  const after=(await save(sql,next,actor)).after;
+  assert.equal(after.raw.convocacoes.length,2);
+  assert.equal(after.raw.convocacoes.find(x=>x.engenheiro==='ENGENHEIRO ANTIGO').engenheiro,'ENGENHEIRO ANTIGO');
+ }finally{await pg.close();}
+});
+test('New or reassigned invalid supervisor remains forbidden',async()=>{
+ const {pg,sql}=await fixture();
+ try{
+  const db=await readDatabase(sql),next=structuredClone(db.state);
+  next.convocacoes.push({id:'bad-conv',supervisor:'ENGENHEIRO ANTIGO',dataServico:'2026-10-07',unidade:'FIEC',obraId:'',turno:'Integral',colaboradores:['1']});
+  assert.throws(()=>buildOperations(db,next,actor,now),/Supervisor inválido/);
+ }finally{await pg.close();}
+});
