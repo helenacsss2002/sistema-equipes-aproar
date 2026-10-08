@@ -13,7 +13,7 @@
     "run_worker_first": true
   },
   "vars": {
-    "APP_ENV": "homologacao"
+    "APP_ENV": "producao"
   },
   "keep_vars": true
 }
