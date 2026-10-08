@@ -80,7 +80,8 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
  }
 },
  async scheduled(event,env,ctx){
-  if(!writes(env))return;
+  // Somente ativar depois de validar a leitura real do Trello e as gravacoes no Neon de homologacao.
+  if(env.TRELLO_AUTO_SYNC_ENABLED!=='true'||!writes(env))return;
   ctx.waitUntil((async()=>{try{const sql=neon(env.DATABASE_URL);const r=await sql`SELECT sincronizado_obras_em,ultima_tentativa_obras_em FROM trello_snapshot WHERE snapshot_id=1`;const last=r[0]?.sincronizado_obras_em||r[0]?.ultima_tentativa_obras_em;
    if(last&&Date.now()-new Date(last).getTime()<11.5*60*60*1000)return;
    await sincronizarTrello(sql);
