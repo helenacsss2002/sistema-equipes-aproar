@@ -28,7 +28,24 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
    return json({connected:true,schemaCompatible:!missing.length,missingColumns:missing,writesEnabled:writes(env)});
   }
   if(path.startsWith('/api/')){
-   const session=await identity(request,env);if(!session)return json({error:'Faça login para acessar a plataforma.'},401);if(!env.DATABASE_URL)return json({error:'Banco não configurado.'},503);const sql=neon(env.DATABASE_URL);
+   const session=await identity(request,env);
+   if(!session)return json({error:'Faça login para acessar a plataforma.'},401);
+   if(path==='/api/homologacao/diagnostico'&&request.method==='GET'){
+    if(session.role!=='CONTROLADORIA')return json({error:'Diagnóstico restrito à Controladoria.'},403);
+    let dbHost='';
+    try{dbHost=new URL(env.DATABASE_URL).hostname.toLowerCase();}catch{}
+    return json({
+     bancoConfigurado:Boolean(env.DATABASE_URL),
+     enderecoBancoValido:Boolean(dbHost),
+     ambienteHomologacao:env.APP_ENV==='homologacao',
+     gravacaoHabilitadaNaCloudflare:env.WRITES_ENABLED==='true',
+     hostEsperadoConfigurado:Boolean(env.HOMOLOGATION_EXPECTED_HOST),
+     hostConfere:Boolean(dbHost&&env.HOMOLOGATION_EXPECTED_HOST&&dbHost===env.HOMOLOGATION_EXPECTED_HOST.toLowerCase()),
+     writesEnabled:writes(env)
+    });
+   }
+   if(!env.DATABASE_URL)return json({error:'Banco não configurado.'},503);
+   const sql=neon(env.DATABASE_URL);
    if(path==='/api/trello/lists'&&request.method==='GET'){
     if(session.role!=='CONTROLADORIA')return json({error:'Somente a Controladoria pode consultar as listas do Trello.'},403);
     const board=await consultarTrello();
