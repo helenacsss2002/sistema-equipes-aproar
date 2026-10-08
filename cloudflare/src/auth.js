@@ -8,7 +8,22 @@ export async function login(body,env){if(!secretKey(env))throw Object.assign(Err
  else if(role==='FINANCEIRO')pass=env.FINANCE_PASSWORD;
  else if(role==='VISUALIZAR')pass=env.VIEWER_PASSWORD;
  else if(role==='SUPERVISOR'){user=String(body.supervisor||'').trim().toUpperCase();if(!['EDUARDO','FELIPE','GABRIEL','JOEL','NETO','SOARES','VICTOR'].includes(user))throw Object.assign(Error('Selecione um supervisor válido.'),{status:401});}
- if(!['SUPERVISOR','VISUALIZAR'].includes(role)&&!await equalSecret(String(body.password||''),pass))throw Object.assign(Error('Acesso ou senha inválidos.'),{status:401});
+ 
+if(role==='CONTROLADORIA'||role==='FINANCEIRO'){
+  if(typeof pass!=='string'||!pass.length)
+    throw Object.assign(
+      Error('Senha administrativa não configurada.'),
+      {status:503}
+    );
+
+  if(!await equalSecret(String(body.password||''),pass))
+    throw Object.assign(
+      Error('Acesso ou senha inválidos.'),
+      {status:401}
+    );
+}
+
+ if(!['CONTROLADORIA','FINANCEIRO','SUPERVISOR','VISUALIZAR'].includes(role))throw Object.assign(Error('Perfil inválido.'),{status:401});
  const payload=encode({role,user,exp:Math.floor(Date.now()/1000)+8*3600}),signature=new Uint8Array(await crypto.subtle.sign('HMAC',await key(env),new TextEncoder().encode(payload)));
  return {session:{role,user},cookie:`aproar_session=${payload}.${encode([...signature])}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=28800`};
 }

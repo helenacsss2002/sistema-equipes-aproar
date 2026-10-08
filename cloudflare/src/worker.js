@@ -3,10 +3,11 @@ import {mapNeonData} from './neon-adapter.js';
 import {readDatabase,visibleState,supervisors} from './data.js';
 import {buildOperations} from './operations.js';
 import {login,identity,sameOrigin,equalSecret,logoutCookie} from './auth.js';
+import {consultarTrello,sincronizarTrello,unidadeCard} from './trello.js';
 const common={'cache-control':'no-store','x-content-type-options':'nosniff','referrer-policy':'same-origin'};
 const json=(data,status=200,extra={})=>new Response(JSON.stringify(data),{status,headers:{...common,'content-type':'application/json; charset=utf-8',...extra}});
 const sha=async v=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(v)))].map(x=>x.toString(16).padStart(2,'0')).join('');
-const writes=env=>env.WRITES_ENABLED==='true'&&env.APP_ENV==='homologacao';
+const writes=env=>{try{return env.WRITES_ENABLED==='true'&&env.APP_ENV==='homologacao'&&Boolean(env.HOMOLOGATION_EXPECTED_HOST)&&new URL(env.DATABASE_URL).hostname.toLowerCase()===env.HOMOLOGATION_EXPECTED_HOST.toLowerCase();}catch{return false;}};
 const failedLogins=new Map();
 function limit(request){const ip=request.headers.get('cf-connecting-ip')||'unknown',time=Date.now(),entry=failedLogins.get(ip);if(entry&&entry.until>time&&entry.n>=10)return false;if(!entry||entry.until<time)failedLogins.set(ip,{n:0,until:time+60000});failedLogins.get(ip).n++;if(failedLogins.size>5000)failedLogins.clear();return true;}
 async function bodyJSON(request){if(Number(request.headers.get('content-length')||0)>8e6)throw Object.assign(Error('Dados muito grandes. Divida a operação.'),{status:413});const text=await request.text();if(text.length>8e6)throw Object.assign(Error('Dados muito grandes.'),{status:413});try{return JSON.parse(text);}catch{throw Object.assign(Error('Requisição inválida.'),{status:400});}}
@@ -28,6 +29,21 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
   }
   if(path.startsWith('/api/')){
    const session=await identity(request,env);if(!session)return json({error:'Faça login para acessar a plataforma.'},401);if(!env.DATABASE_URL)return json({error:'Banco não configurado.'},503);const sql=neon(env.DATABASE_URL);
+   if(path==='/api/trello/lists'&&request.method==='GET'){
+    if(session.role!=='CONTROLADORIA')return json({error:'Somente a Controladoria pode consultar as listas do Trello.'},403);
+    const board=await consultarTrello();
+    return json({lists:board.lists,cards:board.cards.map(c=>({id:c.id,idList:c.idList,name:c.name,unidade:unidadeCard(c)}))});
+   }
+   if(path==='/api/trello/sync'&&request.method==='POST'){
+    if(session.role!=='CONTROLADORIA')return json({error:'Somente a Controladoria pode sincronizar o Trello.'},403);
+    if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);
+    if(!writes(env))return json({error:'Sincronização bloqueada: confirme o ambiente, o hostname do Neon e a autorização de gravação.'},403);
+    const payload=await bodyJSON(request);
+    if(!payload||typeof payload!=='object'||Object.keys(payload).some(x=>!['listId','cardId'].includes(x)))return json({error:'Solicitação de sincronização inválida.'},400);
+    for(const field of ['listId','cardId'])if(payload[field]!=null&&(typeof payload[field]!=='string'||payload[field].length>128))return json({error:'Identificador do Trello inválido.'},400);
+    const result=await sincronizarTrello(sql,{listId:payload.listId,cardId:payload.cardId});
+    return json({ok:true,...result});
+   }
    if(path==='/api/bootstrap'&&request.method==='GET')return json(summary(await readDatabase(sql),session,env));
    if(path==='/api/save'&&request.method==='POST'){
     if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);if(!writes(env))return json({error:'Gravação desativada. Configure APP_ENV=homologacao e WRITES_ENABLED=true para a branch de testes.'},403);
@@ -54,4 +70,12 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
   if(e.code==='42883'||e.code==='42P01')return json({error:'Execute migracao_homologacao.sql na branch de testes antes de abrir a nova plataforma.'},503);
   return json({error:'Não foi possível concluir a operação. Confira a conexão e a estrutura da branch de homologação.'},502);
  }
-}};
+},
+ async scheduled(event,env,ctx){
+  if(!writes(env))return;
+  ctx.waitUntil((async()=>{try{const sql=neon(env.DATABASE_URL);const r=await sql`SELECT sincronizado_obras_em,ultima_tentativa_obras_em FROM trello_snapshot WHERE snapshot_id=1`;const last=r[0]?.sincronizado_obras_em||r[0]?.ultima_tentativa_obras_em;
+   if(last&&Date.now()-new Date(last).getTime()<11.5*60*60*1000)return;
+   await sincronizarTrello(sql);
+  }catch(e){console.error('Falha na sincronização Trello:',String(e?.message||e));}})());
+ }
+};
