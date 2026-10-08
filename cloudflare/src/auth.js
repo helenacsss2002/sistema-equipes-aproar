@@ -23,6 +23,7 @@ if(role==='CONTROLADORIA'||role==='FINANCEIRO'){
     );
 }
 
+ if(!['CONTROLADORIA','FINANCEIRO','SUPERVISOR','VISUALIZAR'].includes(role))throw Object.assign(Error('Perfil inválido.'),{status:401});
  const payload=encode({role,user,exp:Math.floor(Date.now()/1000)+8*3600}),signature=new Uint8Array(await crypto.subtle.sign('HMAC',await key(env),new TextEncoder().encode(payload)));
  return {session:{role,user},cookie:`aproar_session=${payload}.${encode([...signature])}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=28800`};
 }
