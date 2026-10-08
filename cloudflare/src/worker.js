@@ -62,7 +62,15 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
   if(request.method!=='GET'&&request.method!=='HEAD')return json({error:'Método não permitido.'},405);
   if(env.ASSETS){const response=await env.ASSETS.fetch(request);const headers=new Headers(response.headers);for(const [k,v] of Object.entries(common))headers.set(k,v);headers.set('content-security-policy',"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");return new Response(response.body,{status:response.status,headers});}
   return json({message:'Interface ainda não publicada.'},404);
- }catch(e){if(e.status)return json({error:e.message,...(e.details?{details:e.details}:{})},e.status);
+ }catch(e){
+  if(path.startsWith('/api/trello/')){
+   console.error('APROAR Trello route failure', JSON.stringify({
+    route:path, type:String(e?.name||'Error').slice(0,80),
+    code:String(e?.code||'none').slice(0,80),
+    detail:String(e?.message||'No error message').slice(0,320)
+   }));
+  }
+  if(e.status)return json({error:e.message,...(e.details?{details:e.details}:{})},e.status);
   const message=String(e.message||'');if(message.includes('APROAR_STALE'))return json({error:'Os dados mudaram durante a gravação. Nenhuma alteração foi salva. Atualize e tente novamente.'},409);
   if(message.includes('APROAR_REQUEST_MISMATCH'))return json({error:'Requisição repetida com conteúdo diferente.'},409);
   if(e.code==='23505')return json({error:'Já existe um registro equivalente. Atualize os dados e confira antes de repetir.'},409);
