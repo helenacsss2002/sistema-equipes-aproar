@@ -894,11 +894,46 @@
   function renderEquipeDia(){
     const body=$('#apontamento-body');const convs=convocacoesSupervisor().filter(c=>c.dataServico===portalDate&&(portalUnit==='Todas'||c.unidade===portalUnit));
     const people=new Map();for(const c of convs)for(const id of c.colaboradores)if(!people.has(id))people.set(id,{conv:c,item:apForConv(c.id)?.itens.find(i=>i.colaboradorId===id)});
-    body.innerHTML=`<h3>Equipe do dia</h3><p style="font-size:12px">Preencha os apontamentos e salve tudo de uma vez.</p><details class="card card-pad"><summary>Adicionar colaborador / avulso ao apontamento</summary><div class="form-grid">${field('Colaborador',`<select class="control" id="day-add-person"><option value="">Selecione</option>${options(COLABORADORES.filter(c=>!c.inativo&&!people.has(c.id)))}</select>`)}${field('Nome do avulso','<input class="control" id="day-avulso-nome">')}${field('Função do avulso','<input class="control" id="day-avulso-funcao">')}</div><div class="form-actions"><button class="btn btn-secondary" type="button" id="day-add-button">Adicionar à equipe</button></div></details><p style="font-size:12px">Para marcar todos como presentes, defina primeiro a obra/serviço de todos os colaboradores exibidos.</p><button class="btn btn-primary" style="width:100%" id="day-all-present">Marcar todos como presentes</button><form id="day-form" class="section">${people.size?[...people].map(([id,x])=>personRow(id,x.item,x.conv.unidade,x.conv.obraId)).join(''):'<div class="empty">Não há equipe convocada para esta unidade e data. Use Convocação ou adicione um colaborador acima.</div>'}<div class="form-actions"><button class="btn btn-primary" ${!people.size?'disabled':''}>Salvar apontamentos da equipe</button></div></form>`;
+    body.innerHTML=`<h3>Equipe do dia</h3><p style="font-size:12px">Salve um colaborador por vez ou em lote. Os demais continuam pendentes.</p><details class="card card-pad"><summary>Adicionar colaborador / avulso ao apontamento</summary><div class="form-grid">${field('Colaborador',`<select class="control" id="day-add-person"><option value="">Selecione</option>${options(COLABORADORES.filter(c=>!c.inativo&&!people.has(c.id)))}</select>`)}${field('Nome do avulso','<input class="control" id="day-avulso-nome">')}${field('Função do avulso','<input class="control" id="day-avulso-funcao">')}</div><div class="form-actions"><button class="btn btn-secondary" type="button" id="day-add-button">Adicionar à equipe</button></div></details><p style="font-size:12px">Para marcar todos como presentes, defina primeiro a obra/serviço de todos os colaboradores exibidos.</p><button class="btn btn-primary" style="width:100%" id="day-all-present">Marcar todos como presentes</button><form id="day-form" class="section">${people.size?[...people].map(([id,x])=>'<div class="day-person-entry">'+personRow(id,x.item,x.conv.unidade,x.conv.obraId)+'<div class="form-actions"><button type="button" class="btn btn-secondary" data-save-person="'+escapeHtml(id)+'">Salvar somente este</button></div></div>').join(''):'<div class="empty">Não há equipe convocada para esta unidade e data. Use Convocação ou adicione um colaborador acima.</div>'}<div class="form-actions"><button class="btn btn-primary" ${!people.size?'disabled':''}>Salvar apontamentos da equipe</button></div></form>`;
     bindServiceRows();
     $('#day-all-present').onclick=()=>{if(!people.size)return toast('Adicione pessoas à equipe.',true);const items=readPersonRows([...people.keys()]);if(items.some(i=>i.servicos.some(s=>!s.obraId)))return toast('Selecione primeiro os serviços de todos os colaboradores.',true);$$('.row-status').forEach(x=>{x.value='Presente (Integral)';x.onchange?.();});};
     $('#day-add-button').onclick=()=>{const unit=portalUnit==='Todas'?OBRAS[0].unidade:portalUnit;const name=$('#day-avulso-nome').value.trim();let id=$('#day-add-person').value;if(!id&&!name)return toast('Escolha um colaborador ou informe o nome do avulso.',true);if(!id){id=uid('c');COLABORADORES.push({id,nome:name,funcao:$('#day-avulso-funcao').value.trim()||'Avulso',avulso:'Sim',custo:180});}if(blocked(id,portalDate)||state.convocacoes.some(c=>c.dataServico===portalDate&&c.colaboradores.includes(id)&&overlaps(c.turno,'Integral')))return toast('Colaborador indisponível ou convocado em outra equipe.',true);let conv=convs.find(c=>c.unidade===unit);if(!conv){conv={id:uid('cv'),supervisor:supervisorAtual,dataServico:portalDate,unidade:unit,obraId:'',turno:'Integral',colaboradores:[],criadoEm:now().toISOString(),origem:'inclusao_apontamento'};state.convocacoes.push(conv);}conv.colaboradores.push(id);saveData();render();};
-    $('#day-form').onsubmit=e=>{e.preventDefault();if(portalDate>isoToday())return toast('Não é possível apontar uma data futura.',true);const items=readPersonRows([...people.keys()]);for(const i of items)if(!validServices([i],people.get(i.colaboradorId).conv.unidade))return;for(const c of convs){const selected=items.filter(i=>c.colaboradores.includes(i.colaboradorId));if(!selected.length)continue;let ap=apForConv(c.id);if(ap){ap.itens=[...ap.itens.filter(i=>!selected.some(x=>x.colaboradorId===i.colaboradorId)),...selected];ap.atualizadoEm=now().toISOString();}else state.apontamentos.push({executor:supervisorAtual||perfilLabel(perfilAtual),id:uid('ap'),convocacaoId:c.id,supervisor:c.supervisor,dataServico:c.dataServico,apontadoEm:now().toISOString(),retroativo:false,itens:selected});}audit('Apontamento da equipe',portalDate);saveData();toast('Apontamentos da equipe salvos.');render();};
+    const saveDayItems=(items,message)=>{
+      if(portalDate>isoToday())return toast('Não é possível apontar uma data futura.',true);
+      if(!items.length)return toast('Nenhum apontamento selecionado.',true);
+      for(const i of items)if(!validServices([i],people.get(i.colaboradorId).conv.unidade))return;
+      const timestamp=now().toISOString();
+      for(const c of convs){
+        const selected=items.filter(i=>c.colaboradores.includes(i.colaboradorId));
+        if(!selected.length)continue;
+        const selectedIds=new Set(selected.map(i=>i.colaboradorId));
+        const ap=apForConv(c.id);
+        if(ap){
+          ap.itens=[...ap.itens.filter(i=>!selectedIds.has(i.colaboradorId)),...selected];
+          ap.atualizadoEm=timestamp;
+        }else state.apontamentos.push({
+          executor:supervisorAtual||perfilLabel(perfilAtual),id:uid('ap'),convocacaoId:c.id,
+          supervisor:c.supervisor,dataServico:c.dataServico,apontadoEm:timestamp,
+          retroativo:false,itens:selected
+        });
+      }
+      audit('Apontamento parcial da equipe',portalDate);
+      saveData();toast(message);render();
+    };
+    $('[data-save-person]').forEach(button=>button.onclick=()=>{
+      const id=button.dataset.savePerson;
+      if(!people.has(id))return toast('Colaborador não encontrado nesta equipe.',true);
+      saveDayItems(readPersonRows([id]),'Apontamento salvo. Os demais continuam pendentes.');
+    });
+    $('#day-form').onsubmit=e=>{
+      e.preventDefault();
+      const entries=readPersonRows([...people.keys()]);
+      // Sem obra preenchida, o colaborador continua pendente; faltas e atestados nao exigem obra.
+      const ready=entries.filter(i=>!presence(i.status)||(i.servicos.length>0&&i.servicos.every(s=>s.obraId)));
+      if(!ready.length)return toast('Defina o serviço de pelo menos um colaborador ou registre falta/atestado.',true);
+      const pending=entries.length-ready.length;
+      saveDayItems(ready,pending?`${ready.length} apontamento(s) salvo(s). ${pending} continua(m) pendente(s).`:'Apontamentos da equipe salvos.');
+    };
   }
   let unitConvDate='';let avulsoDraft=[];
   function renderUnitConvocacao(){
