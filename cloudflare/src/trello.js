@@ -21,10 +21,23 @@ export const unidadeCard=card=>detect(card.name)||detect(card.desc)||'NÃO IDENT
 export async function consultarTrello(fetcher=fetch){
  const ctrl=new AbortController();const id=setTimeout(()=>ctrl.abort(),20000);
  try{
-  const res=await fetcher(URL_TRELLO,{signal:ctrl.signal,headers:{accept:'application/json'}});
-  if(!res.ok)throw Object.assign(Error('Trello não respondeu normalmente.'),{status:502});
-  if(Number(res.headers.get('content-length')||0)>14_000_000)throw Error('Quadro Trello muito grande.');
-  const data=await res.json();if(!Array.isArray(data.lists)||!Array.isArray(data.cards)||data.cards.length>10000)throw Error('Resposta do Trello inválida.');
+  let res;
+  try {res=await fetcher(URL_TRELLO,{signal:ctrl.signal,headers:{accept:'application/json'}});}
+  catch(error){
+   const reason=error?.name==='AbortError'?'O Trello demorou mais de 20 segundos para responder.':'Não foi possível estabelecer a conexão entre a Cloudflare e o Trello.';
+   console.error('APROAR Trello fetch:',error?.name||'Error',String(error?.message||'').slice(0,180));
+   throw Object.assign(Error(reason),{status:502});
+  }
+  if(!res.ok)throw Object.assign(Error('O Trello retornou HTTP '+res.status+'.'),{status:502});
+  if(Number(res.headers.get('content-length')||0)>14_000_000)throw Object.assign(Error('Quadro Trello muito grande.'),{status:502});
+  let data;
+  try{data=await res.json();}
+  catch(error){
+   console.error('APROAR Trello JSON:',error?.name||'Error');
+   throw Object.assign(Error('O Trello respondeu, mas não enviou um JSON válido.'),{status:502});
+  }
+  if(!Array.isArray(data.lists)||!Array.isArray(data.cards)||data.cards.length>10000)
+   throw Object.assign(Error('O Trello respondeu com listas/cards inválidos ou excessivos.'),{status:502});
   return {lists:data.lists.filter(x=>!x.closed).map(x=>({id:String(x.id),name:String(x.name||'')})),cards:data.cards.filter(x=>!x.closed).map(x=>({id:String(x.id),idList:String(x.idList),name:String(x.name||'').slice(0,480),desc:String(x.desc||'').slice(0,6000)}))};
  }finally{clearTimeout(id);}
 }
