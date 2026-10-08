@@ -32,3 +32,16 @@ test('Trello: consulta somente os cards abertos',async()=>{
  const fn=async()=>({ok:true,headers:new Headers(),json:async()=>source});
  const out=await consultarTrello(fn);assert.equal(out.cards.length,1);assert.equal(out.cards[0].id,'a');
 });
+
+test('Trello: informa erro HTTP de forma clara',async()=>{
+ const response=async()=>({ok:false,status:403,headers:new Headers()});
+ await assert.rejects(()=>consultarTrello(response),/HTTP 403/);
+});
+test('Trello: classifica resposta HTML em vez de JSON',async()=>{
+ const response=async()=>({ok:true,status:200,headers:new Headers(),json:async()=>{throw new SyntaxError('Unexpected token');}});
+ await assert.rejects(()=>consultarTrello(response),/JSON válido/);
+});
+test('Trello: classifica erro de conexão externa',async()=>{
+ const response=async()=>{throw new TypeError('fetch failed');};
+ await assert.rejects(()=>consultarTrello(response),/conexão entre a Cloudflare e o Trello/);
+});
