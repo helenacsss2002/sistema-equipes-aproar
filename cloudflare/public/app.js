@@ -677,7 +677,7 @@
   }
 
   let loginRole='CONTROLADORIA';
-  function syncLoginProfileUI(){ const role=loginRole;$('#login-supervisor-wrap').classList.toggle('hidden',role!=='SUPERVISOR');$('#login-password').required=false;$('#login-password').closest('.password-wrap').classList.toggle('hidden',['SUPERVISOR','VISUALIZAR'].includes(role));document.querySelector('label[for="login-password"]').classList.toggle('hidden',['SUPERVISOR','VISUALIZAR'].includes(role));$('#login-error').textContent='';$('#login-password').value=''; }
+  function syncLoginProfileUI(){ const role=loginRole;$('#login-supervisor-wrap').classList.toggle('hidden',role!=='SUPERVISOR');$('#login-password').required=true;$('#login-password').closest('.password-wrap').classList.remove('hidden');document.querySelector('label[for="login-password"]').classList.remove('hidden');$('#login-error').textContent='';$('#login-password').value=''; }
   function enterProfile(profile){
     perfilAtual=profile;sessionStorage.setItem(PROFILE_KEY,profile);
     if(profile==='SUPERVISOR'){supervisorAtual=SUPERVISORES.includes(supervisorAtual)?supervisorAtual:SUPERVISORES[0];sessionStorage.setItem(SESSION_KEY,supervisorAtual);viewAtual='apontamento';portalUnit=state.convocacoes.find(c=>c.supervisor===supervisorAtual&&c.dataServico===portalDate)?.unidade||OBRAS[0]?.unidade||'Todas';}
