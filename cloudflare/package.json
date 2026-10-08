@@ -1,18 +1,14 @@
 {
   "name": "aproar-web",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
     "deploy": "wrangler deploy",
     "dev": "wrangler dev",
-    "check": "node --check src/worker.js",
-    "test": "node --test src/neon-adapter.test.js"
+    "check": "node --check src/worker.js && node --check src/write-validation.js",
+    "test": "node --test src/neon-adapter.test.js src/write-validation.test.js"
   },
-  "dependencies": {
-    "@neondatabase/serverless": "^1.0.2"
-  },
-  "devDependencies": {
-    "wrangler": "^4.0.0"
-  }
+  "dependencies": { "@neondatabase/serverless": "^1.0.2" },
+  "devDependencies": { "wrangler": "^4.0.0" }
 }
