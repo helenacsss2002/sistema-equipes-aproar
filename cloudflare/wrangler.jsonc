@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "aproar-web",
+  "name": "aproar-html-validacao",
   "main": "src/worker.js",
   "compatibility_date": "2026-10-08",
   "workers_dev": true,
@@ -13,8 +13,9 @@
     "run_worker_first": true
   },
   "vars": {
-    "APP_ENV": "homologacao"
+    "APP_ENV": "homologacao",
+    "WRITES_ENABLED": "false",
+    "TRELLO_AUTO_SYNC_ENABLED": "false"
   },
-  "keep_vars": true,
-  "triggers": {"crons": ["0 */12 * * *"]}
+  "keep_vars": true
 }
