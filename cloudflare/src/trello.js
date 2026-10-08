@@ -18,29 +18,46 @@ function detect(text){
  const all=unique(tokens(t).map(x=>x.unit)),physical=all.filter(x=>x!=='FIEC');if(physical.length===1)return physical[0];if(all.length===1&&all[0]==='FIEC')return 'FIEC';return null;
 }
 export const unidadeCard=card=>detect(card.name)||detect(card.desc)||'NÃO IDENTIFICADA';
-export async function consultarTrello(fetcher=fetch){
- const ctrl=new AbortController();const id=setTimeout(()=>ctrl.abort(),20000);
- try{
+const URL_TRELLO_API='https://api.trello.com/1/boards/TX8hGvmI?fields=id,name&lists=all&cards=all&card_fields=id,idList,name,desc,closed&list_fields=id,name,closed';
+async function lerJSONTrello(url,fetcher){
+ const ctrl=new AbortController();
+ const timer=setTimeout(()=>ctrl.abort(),16000);
+ try {
   let res;
-  try {res=await fetcher(URL_TRELLO,{signal:ctrl.signal,headers:{accept:'application/json'}});}
-  catch(error){
-   const reason=error?.name==='AbortError'?'O Trello demorou mais de 20 segundos para responder.':'Não foi possível estabelecer a conexão entre a Cloudflare e o Trello.';
-   console.error('APROAR Trello fetch:',error?.name||'Error',String(error?.message||'').slice(0,180));
-   throw Object.assign(Error(reason),{status:502});
-  }
-  if(!res.ok)throw Object.assign(Error('O Trello retornou HTTP '+res.status+'.'),{status:502});
-  if(Number(res.headers.get('content-length')||0)>14_000_000)throw Object.assign(Error('Quadro Trello muito grande.'),{status:502});
-  let data;
-  try{data=await res.json();}
-  catch(error){
-   console.error('APROAR Trello JSON:',error?.name||'Error');
-   throw Object.assign(Error('O Trello respondeu, mas não enviou um JSON válido.'),{status:502});
-  }
-  if(!Array.isArray(data.lists)||!Array.isArray(data.cards)||data.cards.length>10000)
-   throw Object.assign(Error('O Trello respondeu com listas/cards inválidos ou excessivos.'),{status:502});
-  return {lists:data.lists.filter(x=>!x.closed).map(x=>({id:String(x.id),name:String(x.name||'')})),cards:data.cards.filter(x=>!x.closed).map(x=>({id:String(x.id),idList:String(x.idList),name:String(x.name||'').slice(0,480),desc:String(x.desc||'').slice(0,6000)}))};
- }finally{clearTimeout(id);}
+  try{res=await fetcher(url,{signal:ctrl.signal,headers:{accept:'application/json'}});}
+  catch(e){throw Error(e?.name==='AbortError'?'O Trello demorou mais de 16 segundos para responder.':'Não foi possível estabelecer a conexão entre a Cloudflare e o Trello.');}
+  if(!res.ok)throw Error('O Trello retornou HTTP '+res.status+'.');
+  const size=Number(res.headers.get('content-length')||0);
+  if(size>14_000_000)throw Error('Quadro Trello muito grande.');
+  const mime=res.headers.get('content-type')||'';
+  if(/text\/html/i.test(mime))throw Error('O Trello retornou HTML em vez de JSON.');
+  let body;
+  try{body=await res.json();}catch{throw Error('O Trello respondeu, mas não enviou um JSON válido.');}
+  if(!body||!Array.isArray(body.lists)||!Array.isArray(body.cards)||body.cards.length>10000)throw Error('O Trello respondeu com listas/cards inválidos ou excessivos.');
+  return body;
+ }finally{clearTimeout(timer);}
 }
+export async function consultarTrello(fetcher=fetch){
+ // API oficial primeiro: endpoint de dados, em vez da pagina do quadro.
+ // O endereco publico .json fica como contingencia quando o Trello permite seu acesso.
+ const candidates=[{url:URL_TRELLO_API,source:'api.trello.com'},{url:URL_TRELLO,source:'trello.com'}];
+ const errors=[];
+ for(const c of candidates){
+  try{
+   const data=await lerJSONTrello(c.url,fetcher);
+   return {
+    origem:c.source,
+    lists:data.lists.filter(x=>!x.closed).map(x=>({id:String(x.id),name:String(x.name||'')})),
+    cards:data.cards.filter(x=>!x.closed).map(x=>({id:String(x.id),idList:String(x.idList),name:String(x.name||'').slice(0,480),desc:String(x.desc||'').slice(0,6000)}))
+   };
+  }catch(e){
+   console.warn('APROAR Trello read fallback:',c.source,String(e?.message||'').slice(0,180));
+   errors.push(c.source+': '+String(e?.message||'falha desconhecida'));
+  }
+ }
+ throw Object.assign(Error('Falha ao consultar o Trello. '+errors.join(' | ').slice(0,480)),{status:502});
+}
+
 export function selecionar(board,filter={}){
  if(filter.cardId){const found=board.cards.filter(c=>c.id===filter.cardId);if(!found.length)throw Object.assign(Error('Card não encontrado.'),{status:404});return {cards:found,origem:'Card: '+found[0].name};}
  const list=filter.listId?board.lists.find(l=>l.id===filter.listId):board.lists.find(l=>norm(l.name)==='EM EXECUCAO')||board.lists.find(l=>norm(l.name).includes('EM EXECUCAO'));
