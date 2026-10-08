@@ -13,9 +13,7 @@
     "run_worker_first": true
   },
   "vars": {
-    "APP_ENV": "homologacao",
-    "WRITES_ENABLED": "false",
-    "TRELLO_AUTO_SYNC_ENABLED": "false"
+    "APP_ENV": "homologacao"
   },
   "keep_vars": true
 }
