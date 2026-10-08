@@ -650,10 +650,10 @@
         ${table(['Supervisor','Quantidade','Dias sem convocação'],[...new Set(previstas.map(x=>x.supervisor))].map(s=>{const days=previstas.filter(x=>x.supervisor===s).map(x=>x.dataServico);return [s,days.length,days.map(formatDate).join(', ')];}))}
       </div>
 
-      <div class="section card card-pad">
+      ${perfilAtual==='SUPERVISOR'?'':`      <div class="section card card-pad">
         <div class="section-title"><div><h3>Histórico de regularizações com atraso</h3><p>Já foram resolvidas e não são mais pendências.</p></div></div>
         ${reg.length ? `<div class="table-wrap"><table><thead><tr><th>Data do serviço</th><th>Registrado em</th><th>Origem</th><th>Status</th></tr></thead><tbody>${reg.map(a=>`<tr><td>${formatDate(a.dataServico)}</td><td>${formatDateTime(a.apontadoEm)}</td><td>${a.retroativo ? 'Retroativo' : 'Apontamento normal'}</td><td>${badgeForStatus('Regularizado com atraso')}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">Nenhuma regularização atrasada neste conjunto de teste.</div>'}
-      </div>`;
+      </div>`}`;
 
     $('#go-retro').onclick = () => { apontamentoTab = 'retroativo'; setView('apontamento'); };
     $$('.regularizar').forEach(b => b.onclick = () => {
@@ -1025,7 +1025,8 @@
   async function initOnline(){
     init();$('#reset-demo').classList.add('hidden');$('#login-access').onchange=()=>chooseLogin($('#login-access').value);$('#enter-supervisor').onclick=()=>chooseLogin('SUPERVISOR');$('#enter-viewer').onclick=()=>chooseLogin('VISUALIZAR');$('#login-back').onclick=()=>chooseLogin($('#login-access').value);
     $('#login-form').onsubmit=async e=>{e.preventDefault();const button=$('#login-button');button.disabled=true;$('#login-error').textContent='';try{await api('/api/login',{method:'POST',body:JSON.stringify({role:loginRole,supervisor:$('#login-supervisor').value,password:$('#login-password').value})});$('#login-password').value='';applyOnline(await api('/api/bootstrap'));viewAtual=perfilAtual==='SUPERVISOR'?'apontamento':perfilAtual==='VISUALIZAR'?'dashboard':'inicio';portalUnit=state.convocacoes.find(c=>c.supervisor===supervisorAtual&&c.dataServico===portalDate)?.unidade||OBRAS[0]?.unidade||'Todas';render();}catch(err){$('#login-error').textContent=err.message;}finally{button.disabled=false;}};
-    try{applyOnline(await api('/api/bootstrap'));viewAtual=perfilAtual==='SUPERVISOR'?'apontamento':perfilAtual==='VISUALIZAR'?'dashboard':'inicio';render();}catch(e){if(e.status!==401)$('#login-error').textContent=e.message;}
+    $('#login-button').disabled=true;try{await api('/api/logout',{method:'POST',body:'{}'});}catch(e){$('#login-error').textContent='Não foi possível iniciar um novo acesso. Atualize a página.';return;}finally{$('#login-password').value='';}$('#login-button').disabled=false;
+    window.addEventListener('pageshow',event=>{if(event.persisted)window.location.reload();});
   }
   initOnline();
 
