@@ -1,28 +1,46 @@
-# APROAR — preparação da Cloudflare
+# APROAR — HTML original conectado ao Neon
 
-Etapa inicial: verificar a conexão e a estrutura do Neon. Não é ainda a plataforma completa e não altera registros. O Streamlit permanece independente.
+Esta versão mantém os estilos, logo, telas, navegação e exportações do HTML original. A persistência local e os dados fictícios foram substituídos por consultas e gravações no servidor. É necessário enviar toda a pasta cloudflare, não apenas worker.js.
 
-## Configuração do projeto Worker conectado ao GitHub
+## Publicar no Worker existente
 
-- Diretório raiz: `cloudflare`
-- Comando de build: `npm run check`
-- Comando de deploy: `npm run deploy`
-- Nome do Worker: `aproar-web`
+1. No Neon, selecione aproar-homologacao → neondb. Caso ainda não tenha executado migracao_homologacao.sql, execute todo o arquivo nesta branch. O script é aditivo e não apaga o histórico. Não execute schema.sql antigo nem altere production. Desative a expiração automática da branch.
+2. Extraia o ZIP e envie a pasta cloudflare à raiz do repositório sistema-equipes-aproar, substituindo os arquivos correspondentes. Preserve app.py do Streamlit.
+3. Em Cloudflare → aproar-web → Settings → Variables and Secrets, mantenha DATABASE_URL como Secret apontando à homologação e CONNECTION_CHECK_TOKEN como Secret. Acrescente os Secrets abaixo.
+4. Após o deploy, confira os dados em Controladoria. Para liberar gravação nessa cópia de testes, defina a variável de runtime WRITES_ENABLED=true. APP_ENV deve continuar homologacao.
 
-A pasta precisa estar no repositório antes de criar o projeto. Não execute o schema.sql antigo na produção.
+| Secret | Valor |
+| --- | --- |
+| ADMIN_PASSWORD | Senha da Controladoria; pode manter aproaradmin |
+| FINANCE_PASSWORD | Senha do Financeiro; pode manter financeiro |
+| VIEWER_PASSWORD | Senha escolhida para Somente visualizar |
+| SUPERVISOR_PASSWORDS | JSON com nomes dos supervisores e senhas individuais |
 
-## Segredos (Settings → Variables and Secrets)
+Formato de SUPERVISOR_PASSWORDS (substitua as senhas):
 
-- `DATABASE_URL`: conexão do Neon; nunca inserir em código ou variável pública.
-- `CONNECTION_CHECK_TOKEN`: token aleatório exclusivo para o diagnóstico (pelo menos 32 caracteres).
+```json
+{"EDUARDO":"senha-eduardo","FELIPE":"senha-felipe","GABRIEL":"senha-gabriel","JOEL":"senha-joel","NETO":"senha-neto","SOARES":"senha-soares","VICTOR":"senha-victor"}
+```
 
-`GET /api/health` confirma apenas se a configuração existe, sem consultar o banco.
-`POST /api/check-database`, com `Authorization: Bearer <CONNECTION_CHECK_TOKEN>`, testa o acesso e a presença das colunas necessárias. Não retorna registros pessoais, credenciais ou detalhes de erros de conexão.
+Cada perfil estará disponível quando seu Secret estiver configurado. O login passa a pedir a senha do perfil, sem expor tokens administrativos na página. Não publique os Secrets no GitHub nem os envie no chat. SESSION_SECRET pode ser configurado como Secret separado; se ausente, a assinatura das sessões utiliza CONNECTION_CHECK_TOKEN.
 
-Esta etapa não adiciona tabelas, migra dados nem implementa operações de escrita. O adaptador de dados, as permissões de cada perfil, a persistência e a interface de produção ainda precisam ser concluídos antes de liberar o uso.
+Comandos com a raiz do repositório como diretório de trabalho:
 
-## Adaptador de leitura
+```text
+Build: npm --prefix cloudflare install && npm --prefix cloudflare run check
+Deploy: npm --prefix cloudflare run deploy
+```
 
-`src/neon-adapter.js` converte o esquema existente para a estrutura da interface. Testes cobrem presença padrão sem apontamento, múltiplos serviços, pagamentos, metadados legados e extras não padronizados. Ainda não está conectado ao HTML nem implementa gravação. Extras não padronizados e serviços sem correspondência são sinalizados para tratamento antes da produção.
+Mantenha Preview builds desativados nesta etapa. O nome do Worker continua aproar-web. Secrets e variáveis existentes são preservados no deploy.
 
-`POST /api/preview-data` utiliza a mesma autenticação e lê os dados em uma transação somente leitura. Retorna uma prévia convertida para a interface; nenhuma operação de escrita é oferecida. Deve apontar para a branch `aproar-homologacao`, criada a partir de `production` com dados. Uma branch de testes não substitui um backup externo.
+## Conferir
+
+Compare colaboradores, obras e apontamentos históricos. Crie uma convocação e um apontamento com vários serviços, atualize e confira a persistência. Teste conflitos de turnos, falta, atestado, retroativo, adicionais e os relatórios PDF/Excel. Supervisor grava sua própria equipe; Financeiro ajusta pagamentos; Somente visualizar não grava.
+
+Não foi feita migração ou gravação remota por este pacote. O Streamlit permanece no banco atual. Novos registros do Streamlit não aparecem automaticamente na branch de homologação, que é uma cópia de testes. A passagem à produção exige uma etapa posterior; a gravação desta versão é limitada ao ambiente homologacao.
+
+## Validação técnica
+
+npm --prefix cloudflare test verifica transações PostgreSQL, desfazer integralmente uma operação que falhe, conflitos, serviços, permissões, ajustes financeiros e prevenção de duplicação em tentativas repetidas. Os testes usam um banco isolado, sem acessar o Neon do usuário.
+
+As gravações são feitas em uma transação com auditoria e controle de versão. Alterações concorrentes exigem atualizar os dados, evitando sobrescrever silenciosamente o histórico. Não foi possível fazer conferência visual em navegador neste ambiente.

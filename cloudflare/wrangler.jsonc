@@ -4,5 +4,16 @@
   "main": "src/worker.js",
   "compatibility_date": "2026-10-08",
   "workers_dev": true,
-  "observability": { "enabled": true }
+  "observability": {
+    "enabled": true
+  },
+  "assets": {
+    "directory": "public",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "vars": {
+    "APP_ENV": "homologacao"
+  },
+  "keep_vars": true
 }
