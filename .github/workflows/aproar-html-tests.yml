@@ -1,0 +1,26 @@
+name: Validar APROAR HTML
+
+on:
+  pull_request:
+    paths:
+      - 'cloudflare/**'
+      - '.github/workflows/aproar-html-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Instalar dependencias
+        run: npm --prefix cloudflare install --no-audit
+      - name: Validar sintaxe JavaScript
+        run: npm --prefix cloudflare run check
+      - name: Executar testes de integracao em banco isolado
+        run: npm --prefix cloudflare test
