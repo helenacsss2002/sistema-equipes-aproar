@@ -9,7 +9,7 @@ test('Normal attendance can save a single worker without completing the team',()
  assert.ok(start>=0&&end>start);
  const ui=code.slice(start,end);
  assert.ok(ui.includes('Salvar somente este'));
- assert.ok(ui.includes("$$('[data-save-person]').forEach"));
+ assert.ok(ui.includes("document.querySelectorAll('[data-save-person]').forEach"));
  assert.ok(ui.includes('const ready=entries.filter'));
  assert.ok(ui.includes('const selectedIds=new Set'));
  assert.ok(ui.includes('const pending=entries.length-ready.length'));
