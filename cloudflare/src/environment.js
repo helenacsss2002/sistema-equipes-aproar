@@ -24,17 +24,23 @@ export function permittedProductionDeletion(env,session,db,operations){
   if(mayDeleteProduction(env))return true;
   const deletions=operations.filter(op=>op.action==='delete');
   if(!deletions.length)return true;
-  if(env.APP_ENV!=='producao'||session.role!=='CONTROLADORIA'||deletions.length!==1)return false;
-  const op=deletions[0];
-  if(!/^[0-9]+$/.test(op.id))return false;
-  if(op.table==='obras'){
-    if(!db.raw.obras.some(o=>String(o.id)===op.id))return false;
-    if(db.raw.convocacoes.some(c=>String(c.obra_id)===op.id))return false;
-    if(db.raw.servicos_apontamento.some(s=>String(s.obra_id)===op.id))return false;
-    if(db.state.apontamentos.some(a=>a.itens.some(i=>i.servicos?.some(s=>String(s.obraId)===op.id))))return false;
+  if(env.APP_ENV!=='producao'||session.role!=='CONTROLADORIA')return false;
+  // A group of unlinked works can be deleted in one atomic Controladoria save.
+  // Never extend this bulk permission to convocations or other record types.
+  const safeWork=id=>{
+    if(!/^[0-9]+$/.test(id)||!db.raw.obras.some(o=>String(o.id)===id))return false;
+    if(db.raw.convocacoes.some(c=>String(c.obra_id)===id))return false;
+    if(db.raw.servicos_apontamento.some(s=>String(s.obra_id)===id))return false;
+    if(db.state.apontamentos.some(a=>a.itens.some(i=>i.servicos?.some(s=>String(s.obraId)===id))))return false;
     return true;
+  };
+  if(deletions.every(op=>op.table==='obras')){
+    const unique=new Set(deletions.map(op=>op.id));
+    return deletions.length<=50&&unique.size===deletions.length&&deletions.every(op=>safeWork(op.id));
   }
-  if(op.table!=='convocacoes')return false;
+  if(deletions.length!==1)return false;
+  const op=deletions[0];
+  if(op.table!=='convocacoes'||!/^[0-9]+$/.test(op.id))return false;
   const existing=db.raw.convocacoes.find(c=>String(c.id)===op.id);
   if(!existing)return false;
   if(db.raw.apontamentos.some(a=>String(a.convocacao_id)===op.id))return false;
