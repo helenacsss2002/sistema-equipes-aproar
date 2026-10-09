@@ -16,5 +16,9 @@
     "APP_ENV": "producao"
   },
   "keep_vars": true,
-  "previews": {}
+  "previews": {
+    "vars": {
+      "APP_ENV": "homologacao"
+    }
+  }
 }
