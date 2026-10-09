@@ -524,9 +524,10 @@
   }
 
 
+  let serviceListSeq=0;
   function allocationRow(unit,service={},index=0){
-    const works=OBRAS.filter(o=>o.unidade===unit);
-    return `<div class="allocation-row"><div>${field(index?'Obra / Serviço adicional '+index:'Obra / Serviço',`<input class="control service-work-search" type="search" autocomplete="off" placeholder="Buscar número ou nome da obra..." aria-label="Buscar obra ou serviço"><select class="control service-work"><option value="">— Selecione o serviço —</option>${works.map(o=>`<option value="${o.id}" ${o.id===service.obraId?'selected':''}>${escapeHtml(o.nome)}</option>`).join('')}</select>`)}</div><div>${field('Período',`<select class="control service-period">${['Integral','Manhã','Tarde','Noite'].map(x=>`<option ${x===(service.periodo||'Integral')?'selected':''}>${x}</option>`).join('')}</select>`)}</div></div>`;
+    const works=OBRAS.filter(o=>o.unidade===unit),listId='service-works-'+(++serviceListSeq);
+    return `<div class="allocation-row"><div>${field(index?'Obra / Serviço adicional '+index:'Obra / Serviço',`<input class="control service-work" list="${listId}" value="${escapeHtml(works.find(o=>o.id===service.obraId)?.nome||'')}" placeholder="Selecione ou digite para buscar a obra..." autocomplete="off"><datalist id="${listId}">${works.map(o=>`<option value="${escapeHtml(o.nome)}"></option>`).join('')}</datalist>`)}</div><div>${field('Período',`<select class="control service-period">${['Integral','Manhã','Tarde','Noite'].map(x=>`<option ${x===(service.periodo||'Integral')?'selected':''}>${x}</option>`).join('')}</select>`)}</div></div>`;
   }
   function itemServices(item,defaultObra){
     if(item?.servicos?.length)return item.servicos;
@@ -553,20 +554,6 @@
   }
   function bindServiceRows(){
     $$('.person-card').forEach(card=>{
-      // A pesquisa de cada obra filtra o menu correspondente sem alterar
-      // a obra já selecionada nem os demais campos do colaborador.
-      card.addEventListener('input',event=>{
-        if(!event.target.matches('.service-work-search'))return;
-        const input=event.target,select=input.closest('.allocation-row').querySelector('.service-work');
-        const chosen=select.value,term=clean(input.value);
-        const works=OBRAS.filter(o=>o.unidade===card.dataset.unit);
-        const matches=term?works.filter(o=>clean(o.nome+' '+o.unidade).includes(term)):works;
-        const active=works.find(o=>String(o.id)===chosen);
-        const visible=active&&!matches.some(o=>String(o.id)===chosen)?[active,...matches]:matches;
-        select.innerHTML='<option value="">— Selecione o serviço —</option>'+options(visible)+(term&&!matches.length?'<option disabled>Nenhuma obra encontrada</option>':'');
-        select.value=chosen;
-      });
-      card.addEventListener('keydown',event=>{if(event.target.matches('.service-work-search')&&event.key==='Enter')event.preventDefault();});
       const update=()=>card.querySelector('.service-count').textContent=card.querySelectorAll('.additional-services .allocation-row').length+' serviço(s) adicional(is)';
       card.querySelector('.add-service').onclick=()=>{card.querySelector('.additional-services').insertAdjacentHTML('beforeend',allocationRow(card.dataset.unit,{},card.querySelectorAll('.allocation-row').length));update();};
       card.querySelector('.row-status').onchange=()=>{const n=card.querySelector('.row-noturno');n.value=card.dataset.unit==='SEBRAE'&&presence(card.querySelector('.row-status').value)?(card.dataset.financeAdjusted==='true'?n.value:Math.max(90,Number(n.value)||0)):0;};
@@ -574,7 +561,7 @@
     });
   }
   function readPersonRows(ids,scope=document){
-    return ids.map(cid=>{const row=scope.querySelector(`[data-person="${cid}"]`);const servicos=[...row.querySelectorAll('.allocation-row')].map(r=>({obraId:r.querySelector('.service-work').value,periodo:r.querySelector('.service-period').value}));return {colaboradorId:cid,status:row.querySelector('.row-status').value,extra:row.querySelector('.row-extra').value,valorExtraOriginal:Number(row.dataset.extraOriginal)||0,observacao:row.querySelector('.row-obs').value.trim(),servicos,obraId:servicos[0]?.obraId||'',financeAdjusted:row.dataset.financeAdjusted==='true',financeiro:Number(row.querySelector('.row-financeiro').value||0),noturno:Number(row.querySelector('.row-noturno').value),acordo:Number(row.querySelector('.row-acordo').value)};});
+    return ids.map(cid=>{const row=scope.querySelector(`[data-person="${cid}"]`);const servicos=[...row.querySelectorAll('.allocation-row')].map(r=>({obraId:(OBRAS.find(o=>o.unidade===row.dataset.unit&&clean(o.nome)===clean(r.querySelector('.service-work').value))?.id||''),periodo:r.querySelector('.service-period').value}));return {colaboradorId:cid,status:row.querySelector('.row-status').value,extra:row.querySelector('.row-extra').value,valorExtraOriginal:Number(row.dataset.extraOriginal)||0,observacao:row.querySelector('.row-obs').value.trim(),servicos,obraId:servicos[0]?.obraId||'',financeAdjusted:row.dataset.financeAdjusted==='true',financeiro:Number(row.querySelector('.row-financeiro').value||0),noturno:Number(row.querySelector('.row-noturno').value),acordo:Number(row.querySelector('.row-acordo').value)};});
   }
   function validServices(items,unit){
     for(const i of items){if(!presence(i.status))continue;const ss=i.servicos;
