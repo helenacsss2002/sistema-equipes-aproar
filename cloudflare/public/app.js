@@ -1006,7 +1006,7 @@
         state.units=currentUnits();
         $('#unit-list').innerHTML=table(['Unidade','Ação'],state.units.map(u=>[escapeHtml(u),`<button type="button" class="link-btn danger-link" data-excluir-unidade="${escapeHtml(u)}">Excluir</button>`]));
         unit.innerHTML=options(state.units);
-        $('[data-excluir-unidade]').forEach(b=>b.onclick=()=>{
+        $$('[data-excluir-unidade]').forEach(b=>b.onclick=()=>{
           const selected=b.dataset.excluirUnidade;
           const linked=OBRAS.some(o=>o.unidade===selected)||state.convocacoes.some(c=>c.unidade===selected)||state.conflitosTentados.some(c=>c.unidade===selected||c.unidadeExistente===selected);
           if(linked)return showToast('Não é possível excluir: esta unidade possui obras ou histórico vinculado.',true);
@@ -1023,7 +1023,7 @@
       $$('[data-edit-obra]').forEach(b=>{const previous=b.onclick;b.onclick=()=>{previous();if(!currentUnits().includes(unit.value)){unit.innerHTML+=options([unit.value]);}};});
       refreshUnits();
       $('#obra-list').insertAdjacentHTML('afterbegin','<div class="form-actions" style="justify-content:flex-start;align-items:center;flex-wrap:wrap;margin-bottom:12px"><button id="obra-selecionar-disponiveis" type="button" class="btn btn-secondary">Selecionar disponíveis</button><button id="obra-limpar-selecao" type="button" class="btn btn-secondary">Limpar seleção</button><button id="obra-excluir-selecionadas" type="button" class="btn btn-secondary" disabled>Excluir selecionadas (0)</button></div>');
-      const boxes=$('#obra-list .obra-bulk-checkbox');
+      const boxes=$$('#obra-list .obra-bulk-checkbox');
       const selectedWorks=()=>new Set(boxes.filter(b=>b.checked).map(b=>b.value));
       const updateSelected=()=>{const count=selectedWorks().size,button=$('#obra-excluir-selecionadas');button.textContent='Excluir selecionadas ('+count+')';button.disabled=count===0;};
       boxes.forEach(b=>b.onchange=updateSelected);
@@ -1040,7 +1040,7 @@
         audit('Exclusão administrativa de obras em lote',String(works.length));
         saveData();
       };
-      const cells=$('#obra-list table tbody tr');
+      const cells=$$('#obra-list table tbody tr');
       cells.forEach((tr,index)=>{const obra=OBRAS[index];if(!obra)return;const last=tr.querySelector('td:last-child');if(!last)return;const btn=document.createElement('button');btn.type='button';btn.className='link-btn danger-link';btn.textContent='Excluir';btn.style.marginLeft='12px';btn.onclick=()=>{const used=obraTemVinculos(obra);if(used)return showToast('Esta obra possui registros vinculados e não pode ser excluída.',true);if(!window.confirm('Excluir somente a obra "'+obra.nome+'"? Esta ação não exclui a unidade.'))return;const index=OBRAS.findIndex(o=>o.id===obra.id);if(index<0)return;OBRAS.splice(index,1);audit('Exclusão de obra sem vínculos',obra.id);saveData();};last.appendChild(btn);});
     }
     const body=$('#settings-body');
