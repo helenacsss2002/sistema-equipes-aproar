@@ -112,6 +112,22 @@ test('Relatorios permitem buscar a obra sem perder a selecao e sem alterar outro
  assert.match(html,/#r-obra-search\s*\{\s*margin-bottom:\s*8px;/);
 });
 
+test('Dashboard aceita pesquisar obra por numero, nome ou unidade sem afetar os indicadores',()=>{
+ const ui=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
+ const dashboard=ui.slice(ui.indexOf('function renderDashboard(){'),ui.indexOf('function renderIndicatorsBase(){'));
+ assert.match(dashboard,/\+filterControls\(true\)\+'<div class="section" id="dash-body">/);
+ assert.match(dashboard,/bindFilters\(refresh\);refresh\(\)/);
+ assert.match(dashboard,/metric\('PRESENÇAS'/);
+ assert.match(dashboard,/metric\('FALTAS'/);
+ assert.match(dashboard,/metric\('ATESTADOS'/);
+ assert.match(dashboard,/metric\('CUSTO TOTAL'/);
+ assert.match(ui,/function bindFilters\(refresh\)/);
+ assert.match(ui,/const matches=query\?OBRAS\.filter\(o=>clean\(o\.nome\+' '\+o\.unidade\)\.includes\(query\)\):OBRAS/);
+ assert.match(ui,/select\.value=reportFilters\.obra/);
+ const reports=ui.slice(ui.indexOf('function renderReports(){'),ui.indexOf('function renderDashboard(){'));
+ assert.match(reports,/\+filterControls\(true\)\+'<div class="section report-toolbar">/);
+});
+
 test('Background claro utiliza imagem original em alta definicao, sem repetir',()=>{
  const html=fs.readFileSync(new URL('../public/index.html',import.meta.url),'utf8');
  const background=fs.readFileSync(new URL('../public/construction-background-hq.webp',import.meta.url));
