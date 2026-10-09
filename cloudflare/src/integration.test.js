@@ -117,3 +117,23 @@ test('Production deletion rejects convocations with attendance or conflicts',asy
   assert.equal(permittedProductionDeletion(env,admin,noAttendance,[{table:'convocacoes',action:'delete',id:target}]),false);
  }finally{await pg.close();}
 });
+
+test('Paulo can convoke, point and correct within Controladoria without a supervisor login',async()=>{
+ const {pg,sql}=await fixture();
+ try{
+  let db=await readDatabase(sql),next=structuredClone(db.state);
+  conv(next);next.convocacoes[0].supervisor='PAULO';
+  attendance(next,'draft-conv');next.apontamentos[0].supervisor='PAULO';
+  assert.throws(()=>buildOperations(db,next,actor,now),/Supervisor inválido/);
+  db=(await save(sql,next,admin)).after;
+  const c=db.state.convocacoes[0],ap=db.state.apontamentos[0];
+  assert.equal(c.supervisor,'PAULO');assert.equal(ap.supervisor,'PAULO');
+  assert.equal(db.raw.convocacoes[0].engenheiro,'PAULO');
+  assert.equal(db.raw.apontamentos[0].engenheiro,'PAULO');
+  next=structuredClone(db.state);
+  next.apontamentos[0].itens[0].observacao='Correção do Paulo';
+  db=(await save(sql,next,admin)).after;
+  assert.equal(db.state.apontamentos[0].itens[0].observacao,'Correção do Paulo');
+  assert.equal(db.state.convocacoes[0].supervisor,'PAULO');
+ }finally{await pg.close();}
+});
