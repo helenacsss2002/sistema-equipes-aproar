@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sistema-equipes-aproar",
+  "main": "cloudflare/src/worker.js",
+  "compatibility_date": "2026-10-08",
+  "workers_dev": true,
+  "observability": {
+    "enabled": true
+  },
+  "assets": {
+    "directory": "cloudflare/public",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "vars": {
+    "APP_ENV": "producao"
+  },
+  "keep_vars": true,
+  "previews": {
+    "vars": {
+      "APP_ENV": "homologacao"
+    }
+  }
+}
