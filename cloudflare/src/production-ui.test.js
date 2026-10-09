@@ -101,14 +101,33 @@ test('Exclusao de unidade informa vinculos sem apagar historico automaticamente'
 test('Background claro utiliza imagem original em alta definicao, sem repetir',()=>{
  const html=fs.readFileSync(new URL('../public/index.html',import.meta.url),'utf8');
  const background=fs.readFileSync(new URL('../public/construction-background-hq.webp',import.meta.url));
- assert.match(html,/#app-view \.main-shell\s*\{[^}]*background-image:\s*linear-gradient\(rgba\(255,255,255,\.38\), rgba\(255,255,255,\.38\)\), url\("\/construction-background-hq\.webp\?v=2"\)/s);
+ assert.match(html,/#app-view \.main-shell\s*\{[^}]*background-image:\s*linear-gradient\(rgba\(255,255,255,\.56\), rgba\(255,255,255,\.56\)\), url\("\/construction-background-hq\.webp\?v=2"\)/s);
  assert.match(html,/background-repeat:\s*no-repeat/);
- assert.match(html,/background-size:\s*100% auto/);
+ assert.match(html,/background-size:\s*cover/);
+ assert.match(html,/background-attachment:\s*fixed/);
  assert.equal(background.subarray(0,4).toString(),'RIFF');
  assert.equal(background.subarray(8,12).toString(),'WEBP');
  assert(background.length>40000,'Imagem deve ter qualidade maior que versao comprimida antiga');
  assert.match(html,/#live-status\s*\{\s*display:\s*none/);
 });
+test('Busca de colaboradores filtra somente a visualizacao e preserva selecoes e formulários',()=>{
+ const ui=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
+ const html=fs.readFileSync(new URL('../public/index.html',import.meta.url),'utf8');
+ assert.match(html,/\.person-search-wrap\s*\{\s*max-width:\s*340px/);
+ assert.match(ui,/function bindPersonSearch\(input, cards\)/);
+ assert.match(ui,/cards\(\)\.forEach\(card=>\{card\.style\.display=/);
+ assert.match(ui,/clean\(card\.textContent\)\.includes\(query\)/);
+ assert.match(ui,/id="retro-person-search"/);
+ assert.ok(ui.includes("bindPersonSearch($('#retro-person-search'),()=>$('.retro-person-list .check-card'))"));
+ assert.match(ui,/id="day-person-search"/);
+ assert.ok(ui.includes("bindPersonSearch($('#day-person-search'),()=>$('#day-form .person-card'))"));
+ assert.match(ui,/class="control admin-person-search"/);
+ assert.ok(ui.includes("bindPersonSearch(form.querySelector('.admin-person-search'),"));
+ // Saving still reads all employees, regardless of the search filter.
+ assert.match(ui,/readPersonRows\(\[\.\.\.people\.keys\(\)\]\)/);
+ assert.match(ui,/\$\$\('input\[name="retro-colab"\]:checked'\)/);
+});
+
 test('Só o avatar do Financeiro mostra desenho de dinheiro',()=>{
  const ui=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
  assert.match(ui,/perfilAtual==='FINANCEIRO'\)\$\('#sidebar-avatar'\)\.innerHTML=/);
