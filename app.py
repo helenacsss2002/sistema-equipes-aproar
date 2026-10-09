@@ -6469,18 +6469,21 @@ def turno_da_convocacao(registro):
 
 def turnos_se_sobrepoem(turno_a, turno_b):
     """
-    Regra operacional:
-    - Integral ocupa o dia inteiro e conflita com qualquer turno.
-    - Manhã conflita com Manhã/Integral.
-    - Tarde conflita com Tarde/Integral.
-    - Noite conflita com Noite/Integral.
-    - Turnos específicos diferentes podem coexistir no mesmo dia.
+    Integral é jornada diurna: ocupa manhã e tarde, mas NÃO a noite.
+    - Integral + Manhã ou Tarde: conflito.
+    - Integral + Noite: permitido, inclusive entre supervisores diferentes.
+    - Mesmo turno + mesmo turno: conflito.
+    - Turnos específicos distintos: permitidos.
     """
     a = normalizar_turno_convocacao(turno_a)
     b = normalizar_turno_convocacao(turno_b)
-    if "Integral" in (a, b):
+    if a == b:
         return True
-    return a == b
+    if a == "Integral":
+        return b in ("Manhã", "Tarde")
+    if b == "Integral":
+        return a in ("Manhã", "Tarde")
+    return False
 
 
 def _garantir_multiturno_neon():
@@ -6655,6 +6658,7 @@ def inserir_convocacao_segura(obra_id, colaborador_id, data_convocacao, engenhei
     - Neto / Manhã + Gustavo / Manhã -> conflito.
     - Neto / Manhã + Gustavo / Integral -> conflito.
     - Neto / Integral + Gustavo / Tarde -> conflito.
+    - Neto / Integral + Gustavo / Noite -> permitido.
     """
     indisp = (
         obter_indisponibilidade_colaborador(colaborador_id, data_convocacao)
