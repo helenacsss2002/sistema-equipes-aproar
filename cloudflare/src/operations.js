@@ -99,7 +99,12 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
     if(!Array.isArray(units)||units.length>500||units.some(u=>typeof u!=='string'||!u.trim()||(u.length>200&&!originalUnits.has(u)))||new Set(units.map(clean)).size!==units.length||next.obras.some(o=>!units.includes(o.unidade)))fail('Cadastro de unidades inválido.');
    for(const removed of base.units.filter(u=>!units.includes(u))){
      if(base.obras.some(o=>o.unidade===removed)||db.state.convocacoes.some(c=>c.unidade===removed)||db.raw.servicos_apontamento.some(s=>s.unidade_snapshot===removed)||db.state.conflitosTentados.some(c=>c.unidade===removed||c.unidadeExistente===removed))fail('Unidade possui obras ou histórico vinculado. Remova os vínculos antes de excluir.');
-   }const history=(next.teamsHistory||[]).filter(x=>!numericId(x.id));const config={units,unitOwners:next.unitOwners||{},teamsAutomation:!!next.teamsAutomation,teamsMessage:next.teamsMessage||'',teamsHistory:history};if(!same(config,db.raw.settings[0]?.data||{}))add('aproar_web_settings','update',1,{data:config});
+   }const history=(next.teamsHistory||[]).filter(x=>!numericId(x.id));
+    // Derived units from legacy works are visible in the UI but should not
+    // become permanent unit registrations just because another edit was saved.
+    const previousConfig=db.raw.settings[0]?.data||{};
+    const persistedUnits=units.filter(u=>u.length<=200||(Array.isArray(previousConfig.units)&&previousConfig.units.includes(u)));
+    const config={units:persistedUnits,unitOwners:next.unitOwners||{},teamsAutomation:!!next.teamsAutomation,teamsMessage:next.teamsMessage||'',teamsHistory:history};if(!same(config,previousConfig))add('aproar_web_settings','update',1,{data:config});
  }
  // Always generate a server audit record for actual changes, rather than trusting browser audit text.
  if(ops.length)add('auditoria','insert','audit:'+crypto.randomUUID(),{entidade:'aproar-web',entidade_id:null,acao:'SALVAR',usuario:session.user,ocorrido_em:timestamp,contexto:{perfil:session.role,operacoes:ops.map(o=>({tabela:o.table,acao:o.action,id:o.id}))}});
