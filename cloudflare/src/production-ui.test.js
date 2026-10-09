@@ -128,6 +128,52 @@ test('Dashboard aceita pesquisar obra por numero, nome ou unidade sem afetar os 
  assert.match(reports,/\+filterControls\(true\)\+'<div class="section report-toolbar">/);
 });
 
+test('Portal Supervisor remove a data duplicada apenas da aba de convocacao',()=>{
+ const js=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
+ const html=fs.readFileSync(new URL('../public/index.html',import.meta.url),'utf8');
+ assert.ok(js.includes("viewAtual==='convocacao'?'portal-filters-convocacao':''"));
+ assert.ok(js.includes("viewAtual==='convocacao'?'':field('Data'"));
+ assert.ok(js.includes("const portalDateInput=$('#portal-date');if(portalDateInput)portalDateInput.onchange="));
+ assert.match(html,/\.portal-filters\.portal-filters-convocacao\s*\{\s*grid-template-columns:\s*repeat\(2,minmax\(0,1fr\)\)/);
+});
+
+test('Convocacao inicia no proximo dia corrido inclusive sabado e domingo e permite alteracao',()=>{
+ const js=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
+ const conv=js.slice(js.indexOf('function renderUnitConvocacao(){'),js.indexOf('function operationalRows('));
+ assert.ok(conv.includes('if(!unitConvDate){const d=dateLocal(isoToday());d.setDate(d.getDate()+1);unitConvDate=calendarISO(d);}'));
+ assert.doesNotMatch(conv,/nextBusinessDay\(/);
+ assert.ok(conv.includes('id="unit-conv-date" type="date" value="${unitConvDate}" required'));
+ assert.ok(conv.includes("$('#unit-conv-date').onchange=()=>{unitConvDate=$('#unit-conv-date').value;render();}"));
+ // Verifica a virada real de sexta-feira para sábado e domingo para segunda.
+ const following=iso=>{const [y,m,d]=iso.split('-').map(Number);const t=new Date(y,m-1,d,12);t.setDate(t.getDate()+1);return [t.getFullYear(),String(t.getMonth()+1).padStart(2,'0'),String(t.getDate()).padStart(2,'0')].join('-');};
+ assert.equal(following('2026-10-09'),'2026-10-10');
+ assert.equal(following('2026-10-10'),'2026-10-11');
+ assert.equal(following('2026-10-11'),'2026-10-12');
+});
+
+test('Pesquisa de obra por texto funciona nos apontamentos normais retroativos e adicionais',()=>{
+ const js=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
+ const html=fs.readFileSync(new URL('../public/index.html',import.meta.url),'utf8');
+ const start=js.indexOf('function allocationRow(');
+ const end=js.indexOf('function itemServices(',start);
+ const allocation=js.slice(start,end);
+ assert.ok(allocation.includes('class="control service-work-search"'));
+ assert.ok(allocation.includes('class="control service-work"'));
+ const bind=js.slice(js.indexOf('function bindServiceRows(){'),js.indexOf('function readPersonRows(',start));
+ assert.ok(bind.includes("card.addEventListener('input',event=>"));
+ assert.ok(bind.includes("event.target.matches('.service-work-search')"));
+ assert.ok(bind.includes("o.unidade===card.dataset.unit"));
+ assert.ok(bind.includes("clean(o.nome+' '+o.unidade).includes(term)"));
+ assert.ok(bind.includes('select.value=chosen'));
+ assert.ok(bind.includes("card.addEventListener('keydown',event=>"));
+ assert.ok(bind.includes("insertAdjacentHTML('beforeend',allocationRow("));
+ assert.match(html,/\.service-work-search\s*\{\s*margin-bottom:\s*7px;/);
+ assert.ok(js.includes('function renderApontamentoRetroativo()'));
+ assert.ok(js.includes('function renderEquipeDia()'));
+ assert.ok(js.includes('function renderApontamentoNormal()'));
+ assert.ok(js.includes("r.querySelector('.service-work').value"));
+});
+
 test('Background claro utiliza imagem original em alta definicao, sem repetir',()=>{
  const html=fs.readFileSync(new URL('../public/index.html',import.meta.url),'utf8');
  const background=fs.readFileSync(new URL('../public/construction-background-hq.webp',import.meta.url));
