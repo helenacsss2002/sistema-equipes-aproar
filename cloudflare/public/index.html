@@ -529,28 +529,64 @@ table td .control {text-align:inherit;}
 #r-obra-search { margin-bottom: 8px; }
 
 
-/* Relatórios: todas as colunas permanecem acessíveis, sem estourar a página. */
-#report-body { min-width: 0; max-width: 100%; }
-#report-body .report-table-wrap { width: 100%; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
-#report-body .report-table-wrap table { width: max-content; min-width: 100%; }
-#report-body .report-table-wrap th,
-#report-body .report-table-wrap td { white-space: nowrap; }
-#report-body .report-table-wrap th:nth-child(3),
-#report-body .report-table-wrap td:nth-child(3) { min-width: 110px; max-width: 185px; white-space: normal; overflow-wrap: anywhere; }
-#report-body .report-table-wrap th:nth-child(4),
-#report-body .report-table-wrap td:nth-child(4) { min-width: 210px; max-width: 290px; white-space: normal; overflow-wrap: anywhere; }
-#report-body .report-table-wrap th:nth-child(5),
-#report-body .report-table-wrap td:nth-child(5) { min-width: 145px; max-width: 210px; white-space: normal; overflow-wrap: anywhere; }
-.report-scroll-controls { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; font-size: 12px; color: #435875; margin: 10px 0 5px; }
-.report-scroll-buttons { display: flex; gap: 6px; }
-.report-scroll-buttons .btn { font-size: 12px; padding: 6px 10px; }
-.report-scroll-top { width: 100%; max-width: 100%; height: 20px; overflow-x: auto; overflow-y: hidden; scrollbar-color: #82a0d0 #e7edf6; scrollbar-width: auto; margin-bottom: 6px; }
-.report-scroll-spacer { height: 1px; }
-.report-scroll-controls[hidden], .report-scroll-top[hidden] { display: none !important; }
+/* Relatórios: tabela compacta, todas as colunas visíveis e somente rolagem vertical. */
+#report-body { width: 100%; max-width: 100%; min-width: 0; }
+#report-body .report-vertical-wrap {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  max-height: min(64vh, 560px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior-y: contain;
+  scrollbar-width: thin;
+  scrollbar-color: #a5b8d4 #edf2f8;
+}
+#report-body .report-vertical-wrap table {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+}
+#report-body .report-vertical-wrap th,
+#report-body .report-vertical-wrap td {
+  box-sizing: border-box;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: normal;
+  min-width: 0;
+  padding: 9px 5px;
+  line-height: 1.35;
+}
+#report-body .report-vertical-wrap th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #f0f4f8;
+  font-size: 9.5px;
+  vertical-align: middle;
+}
+#report-body .report-vertical-wrap td { font-size: 10.5px; }
+#report-body .report-vertical-wrap .align-money { font-variant-numeric: tabular-nums; }
+@media (min-width: 821px) {
+  .app-shell:not(.supervisor-layout) .main-content:has(#report-body) {
+    max-width: none;
+    padding-left: 22px;
+    padding-right: 22px;
+  }
+}
+@media (max-width: 1100px) {
+  #report-body .report-vertical-wrap th,
+  #report-body .report-vertical-wrap td { padding: 7px 3px; }
+  #report-body .report-vertical-wrap td { font-size: 9.5px; }
+  #report-body .report-vertical-wrap th { font-size: 9px; }
+}
 @media print {
-  .report-scroll-controls, .report-scroll-top { display: none !important; }
-  #report-body .report-table-wrap { overflow: visible; }
-  #report-body .report-table-wrap table { min-width: 0; width: 100%; }
+  #report-body .report-vertical-wrap {
+    max-height: none;
+    overflow: visible;
+  }
+  #report-body .report-vertical-wrap th { position: static; }
 }
 
 </style>
