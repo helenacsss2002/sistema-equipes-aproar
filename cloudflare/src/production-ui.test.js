@@ -149,3 +149,26 @@ test('Só o avatar do Financeiro mostra desenho de dinheiro',()=>{
  assert.match(ui,/perfilAtual==='CONTROLADORIA'\)\$\('#sidebar-avatar'\)\.innerHTML=/);
  assert.match(ui,/else \$\('#sidebar-avatar'\)\.textContent = avatar/);
 });
+
+
+test('Relatorios mostram todas as colunas com rolagem horizontal acessivel no topo',()=>{
+ const ui=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
+ const html=fs.readFileSync(new URL('../public/index.html',import.meta.url),'utf8');
+ assert.match(ui,/function enableReportHorizontalScroll\(\)/);
+ assert.match(ui,/wrap\.classList\.add\('report-table-wrap'\)/);
+ assert.match(ui,/id="report-scroll-top"/);
+ assert.match(ui,/id="report-scroll-prev"/);
+ assert.match(ui,/id="report-scroll-next"/);
+ assert.match(ui,/wrap\.scrollWidth>wrap\.clientWidth\+2/);
+ assert.match(ui,/bar\.onscroll=\(\)=>/);
+ assert.match(ui,/wrap\.onscroll=\(\)=>/);
+ assert.match(ui,/enableReportHorizontalScroll\(\);\$\('#report-day-select'\)\.onchange/);
+ assert.match(html,/#report-body \.report-table-wrap\s*\{[^}]*overflow-x:\s*auto/);
+ assert.match(html,/#report-body \.report-table-wrap table\s*\{[^}]*width:\s*max-content/);
+ assert.match(html, /\.report-scroll-top\s*\{[^}]*overflow-x:\s*auto/);
+ // The report still contains the rightmost Total column and original export actions.
+ assert.match(ui,/\['Data','Supervisor','Unidade','Obra','Colaborador','Período','Status'/);
+ assert.match(ui,/'Periculosidade 30%'/);
+ assert.match(ui,/,'Total'\],selected\.map/);
+ assert.match(ui,/refresh\(\);bindExports\(\)/);
+});
