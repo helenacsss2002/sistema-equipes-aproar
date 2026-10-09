@@ -151,22 +151,31 @@ test('Só o avatar do Financeiro mostra desenho de dinheiro',()=>{
 });
 
 
-test('Relatorios mostram todas as colunas com rolagem horizontal acessivel no topo',()=>{
+test('Relatorios mostram todas as 13 ou 12 colunas sem barra lateral e rolam verticalmente',()=>{
  const ui=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
  const html=fs.readFileSync(new URL('../public/index.html',import.meta.url),'utf8');
- assert.match(ui,/function enableReportHorizontalScroll\(\)/);
- assert.match(ui,/wrap\.classList\.add\('report-table-wrap'\)/);
- assert.match(ui,/id="report-scroll-top"/);
- assert.match(ui,/id="report-scroll-prev"/);
- assert.match(ui,/id="report-scroll-next"/);
- assert.match(ui,/wrap\.scrollWidth>wrap\.clientWidth\+2/);
- assert.match(ui,/bar\.onscroll=\(\)=>/);
- assert.match(ui,/wrap\.onscroll=\(\)=>/);
- assert.match(ui,/enableReportHorizontalScroll\(\);\$\('#report-day-select'\)\.onchange/);
- assert.match(html,/#report-body \.report-table-wrap\s*\{[^}]*overflow-x:\s*auto/);
- assert.match(html,/#report-body \.report-table-wrap table\s*\{[^}]*width:\s*max-content/);
- assert.match(html, /\.report-scroll-top\s*\{[^}]*overflow-x:\s*auto/);
- // The report still contains the rightmost Total column and original export actions.
+ assert.match(ui,/function configureReportTable\(financial\)/);
+ assert.match(ui,/wrap\.classList\.add\('report-vertical-wrap'\)/);
+ assert.match(ui,/table\.prepend\(group\)/);
+ assert.match(ui,/configureReportTable\(fin\);\$\('#report-day-select'\)\.onchange/);
+ assert.doesNotMatch(ui,/enableReportHorizontalScroll/);
+ assert.doesNotMatch(ui,/id="report-scroll-next"/);
+ assert.doesNotMatch(ui,/id="report-scroll-prev"/);
+ const widths=ui.match(/const widths=financial\s*\?\s*\[([\d.,]+)\]\s*:\s*\[([\d.,]+)\]/);
+ assert(widths,'Larguras das tabelas financeira e da Controladoria devem existir');
+ const financeiro=widths[1].split(',').map(Number);
+ const controladoria=widths[2].split(',').map(Number);
+ assert.equal(financeiro.length,12);
+ assert.equal(controladoria.length,13);
+ assert.equal(financeiro.reduce((a,b)=>a+b,0),100);
+ assert.equal(controladoria.reduce((a,b)=>a+b,0),100);
+ assert.match(html,/#report-body \.report-vertical-wrap\s*\{[^}]*overflow-y:\s*auto;[^}]*overflow-x:\s*hidden;/s);
+ assert.match(html,/#report-body \.report-vertical-wrap table\s*\{[^}]*width:\s*100%;[^}]*min-width:\s*0;[^}]*table-layout:\s*fixed;/s);
+ assert.match(html,/#report-body \.report-vertical-wrap th,[\s\S]*?white-space:\s*normal;/);
+ assert.match(html,/#report-body \.report-vertical-wrap th\s*\{[^}]*position:\s*sticky;/s);
+ assert.match(html,/#report-body \.report-vertical-wrap td\s*\{\s*font-size:\s*10\.5px;/);
+ assert.doesNotMatch(html,/\.report-scroll-top\s*\{/);
+ // Mantém o último valor (Total) e as exportações originais.
  assert.match(ui,/\['Data','Supervisor','Unidade','Obra','Colaborador','Período','Status'/);
  assert.match(ui,/'Periculosidade 30%'/);
  assert.match(ui,/,'Total'\],selected\.map/);
