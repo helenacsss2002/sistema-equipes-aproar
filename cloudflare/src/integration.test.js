@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import {PGlite} from '@electric-sql/pglite';
-import {readDatabase,visibleState} from './data.js';import {buildOperations} from './operations.js';import {login,identity,sameOrigin} from './auth.js';
+import {readDatabase,visibleState} from './data.js';import {buildOperations} from './operations.js';import {permittedProductionDeletion} from './environment.js';import {login,identity,sameOrigin} from './auth.js';
 const actor={role:'SUPERVISOR',user:'EDUARDO'},admin={role:'CONTROLADORIA',user:'CONTROLADORIA'},finance={role:'FINANCEIRO',user:'FINANCEIRO'},now='2026-10-08T12:00:00Z';
 function driver(pg){const sql=(strings,...values)=>{const text=strings.reduce((t,s,i)=>t+(i?'$'+i:'')+s,'');return {text,values,then(a,b){return pg.query(text,values).then(r=>r.rows).then(a,b);}};};sql.transaction=queries=>pg.transaction(async tx=>{const result=[];for(const q of queries)result.push((await tx.query(q.text,q.values)).rows);return result;});return sql;}
 async function fixture(){const pg=new PGlite();await pg.exec(fs.readFileSync(new URL('./fixture-schema.sql',import.meta.url),'utf8'));await pg.exec(fs.readFileSync(new URL('../migracao_homologacao.sql',import.meta.url),'utf8'));await pg.exec("INSERT INTO colaboradores(nome,funcao,valor_diaria) VALUES('Pessoa QA','Eletricista',241.74); INSERT INTO obras(unidade,nome) VALUES('FIEC','Serviço 1'),('FIEC','Serviço 2'),('SEBRAE','Serviço noturno');");return {pg,sql:driver(pg)};}
@@ -62,5 +62,58 @@ test('New or reassigned invalid supervisor remains forbidden',async()=>{
   const db=await readDatabase(sql),next=structuredClone(db.state);
   next.convocacoes.push({id:'bad-conv',supervisor:'ENGENHEIRO ANTIGO',dataServico:'2026-10-07',unidade:'FIEC',obraId:'',turno:'Integral',colaboradores:['1']});
   assert.throws(()=>buildOperations(db,next,actor,now),/Supervisor inválido/);
+ }finally{await pg.close();}
+});
+
+test('Legacy Teams supervisor records do not block unrelated Controladoria deletions',async()=>{
+ const {pg,sql}=await fixture();
+ try{
+  let db=await readDatabase(sql),next=structuredClone(db.state);
+  next.teamsConfig={'PAULO (HISTORICO)':{email:'',ativo:false}};
+  db.state.teamsConfig=structuredClone(next.teamsConfig);
+  conv(next);
+  assert.doesNotThrow(()=>buildOperations(db,next,admin,now));
+  next.teamsConfig['PAULO (HISTORICO)'].email='changed@example.com';
+  assert.throws(()=>buildOperations(db,next,admin,now),/Supervisor inválido/);
+ }finally{await pg.close();}
+});
+
+test('Controladoria may delete one unpointed convocation in production while preserving historical records',async()=>{
+ const {pg,sql}=await fixture();
+ try{
+  let db=await readDatabase(sql),next=structuredClone(db.state);
+  conv(next);
+  db=(await save(sql,next,actor)).after;
+  next=structuredClone(db.state);
+  const id=next.convocacoes[0].id;
+  next.convocacoes=[];
+  const ops=buildOperations(db,next,admin,now);
+  const env={APP_ENV:'producao',PRODUCTION_ALLOW_DELETE:'false'};
+  assert.deepEqual(ops.filter(op=>op.action==='delete').map(op=>op.table),['convocacoes']);
+  assert.equal(permittedProductionDeletion(env,admin,db,ops),true);
+  assert.equal(permittedProductionDeletion(env,actor,db,ops),false);
+  assert.equal(permittedProductionDeletion(env,admin,db,[...ops,{table:'convocacoes',action:'delete',id:'999'}]),false);
+  assert.equal(permittedProductionDeletion(env,admin,db,[...ops,{table:'obras',action:'delete',id:'1'}]),false);
+  db=(await save(sql,next,admin)).after;
+  assert.equal(db.raw.convocacoes.some(c=>String(c.id)===id),false);
+  assert.equal(db.raw.colaboradores.length,1);
+  assert.equal(db.raw.obras.length,3);
+ }finally{await pg.close();}
+});
+
+test('Production deletion rejects convocations with attendance or conflicts',async()=>{
+ const {pg,sql}=await fixture();
+ try{
+  let db=await readDatabase(sql),next=structuredClone(db.state);
+  conv(next);attendance(next,'draft-conv');
+  db=(await save(sql,next,actor)).after;
+  const target=String(db.raw.convocacoes[0].id),env={APP_ENV:'producao'};
+  assert.equal(permittedProductionDeletion(env,admin,db,[{table:'convocacoes',action:'delete',id:target}]),false);
+  const noAttendance=structuredClone(db);
+  noAttendance.raw.apontamentos=[];
+  noAttendance.raw.servicos_apontamento=[];
+  noAttendance.state.apontamentos=[];
+  noAttendance.raw.conflitos_convocacao=[{convocacao_existente_id:target,resolvido:false}];
+  assert.equal(permittedProductionDeletion(env,admin,noAttendance,[{table:'convocacoes',action:'delete',id:target}]),false);
  }finally{await pg.close();}
 });
