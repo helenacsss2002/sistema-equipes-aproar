@@ -114,6 +114,13 @@ textarea.control { min-height: 88px; resize: vertical; }
 .check-card input { accent-color: var(--blue); }
 .form-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
 
+/* Cadastro de unidades: lista interna compacta, com rolagem própria. */
+#unit-list { max-height: 300px; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; border: 1px solid var(--line); border-radius: 4px; }
+#unit-list .table-wrap { overflow: visible; border: 0; border-radius: 0; }
+#unit-list table { min-width: 0; }
+#unit-list th, #unit-list td { padding: 7px 12px; }
+#unit-list th { position: sticky; top: 0; z-index: 1; }
+
 .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 4px; background: white; }
 table { border-collapse: collapse; width: 100%; min-width: 760px; }
 th { text-align: left; background: #f6f8fb; color: #63748b; font-size: 11px; text-transform: uppercase; letter-spacing: .03em; padding: 11px 12px; border-bottom: 1px solid var(--line); }
