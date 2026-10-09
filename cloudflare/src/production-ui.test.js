@@ -46,3 +46,23 @@ test('Paulo is available only to Controladoria, never supervisor portal',()=>{
  assert.match(js,/const SUPERVISORES = \['EDUARDO', 'FELIPE', 'GABRIEL', 'JOEL', 'NETO', 'SOARES', 'VICTOR'\]/);
  assert.doesNotMatch(js,/const SUPERVISORES = \[[^\]]*'PAULO'/);
 });
+
+test('Unit list scrolls independently and work deletion buttons stay on works',()=>{
+ const html=fs.readFileSync(new URL('../public/index.html',import.meta.url),'utf8');
+ const ui=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
+ assert.match(html,/#unit-list\s*\{\s*max-height:\s*300px;\s*overflow:\s*auto;/);
+ assert.match(html,/#unit-list\s+th\s*\{\s*position:\s*sticky;/);
+ assert.match(ui,/id="obra-list"/);
+ assert.match(ui,/const cells=\$\$\('#obra-list table tbody tr'\)/);
+ assert.doesNotMatch(ui,/\$\$\('#settings-body table tbody tr'\)/);
+});
+
+test('Reload restores a valid server session without logging out',()=>{
+ const ui=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
+ const init=ui.slice(ui.indexOf('async function initOnline(){'));
+ assert.match(init,/enterConnectedSession\(await api\('\/api\/bootstrap'\)\)/);
+ assert.doesNotMatch(init,/api\('\/api\/logout'/);
+ assert.match(ui,/async function logout\(\).*?api\('\/api\/logout'/s);
+ const auth=fs.readFileSync(new URL('./auth.js',import.meta.url),'utf8');
+ assert.match(auth,/HttpOnly; Secure; SameSite=Strict; Path=\/; Max-Age=28800/);
+});
