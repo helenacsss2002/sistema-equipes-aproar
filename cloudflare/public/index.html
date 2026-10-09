@@ -510,15 +510,19 @@ table td .control {text-align:inherit;}
 .page-head h2, .topbar-title { font-family: "Arial Black", Impact, Inter, ui-sans-serif, sans-serif; font-weight: 900; }
 .card h3, .section-title h3 { font-weight: 800; }
 #live-status { display: none !important; }
-/* Fundo arquitetônico translúcido em todas as áreas autenticadas, sem alterar cartões. */
+/* Fundo arquitetônico contínuo e mais suave, inclusive em páginas longas. */
 #app-view .main-shell {
   background-color: var(--bg);
-  background-image: linear-gradient(rgba(255,255,255,.38), rgba(255,255,255,.38)), url("/construction-background-hq.webp?v=2");
-  background-position: center top;
-  background-size: 100% auto;
+  background-image: linear-gradient(rgba(255,255,255,.56), rgba(255,255,255,.56)), url("/construction-background-hq.webp?v=2");
+  background-position: center center;
+  background-size: cover;
   background-repeat: no-repeat;
+  background-attachment: fixed;
 }
-@media print { #app-view .main-shell { background-image: none; } }
+/* Pesquisa compacta: não interfere nas fichas ou seleções do apontamento. */
+.person-search-wrap { max-width: 340px; margin: 10px 0 14px; }
+.person-search-wrap .control { width: 100%; }
+@media print { #app-view .main-shell { background-image: none; background-attachment: scroll; } }
 
 </style>
 </head>
