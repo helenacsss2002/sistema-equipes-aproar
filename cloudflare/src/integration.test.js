@@ -137,3 +137,33 @@ test('Paulo can convoke, point and correct within Controladoria without a superv
   assert.equal(db.state.convocacoes[0].supervisor,'PAULO');
  }finally{await pg.close();}
 });
+
+test('Controladoria registers units independently and protects works with historical references',async()=>{
+ const {pg,sql}=await fixture();
+ try {
+  let db=await readDatabase(sql),next=structuredClone(db.state);
+  next.units=[...next.units,'UNIDADE NOVA'];
+  db=(await save(sql,next,admin)).after;
+  assert(next.units.includes('UNIDADE NOVA'));
+  assert(db.state.units.includes('UNIDADE NOVA'));
+  next=structuredClone(db.state);next.obras.push({id:'new-work',nome:'Obra inicial',unidade:'UNIDADE NOVA'});
+  db=(await save(sql,next,admin)).after;
+  const newWork=db.state.obras.find(o=>o.nome==='Obra inicial');
+  assert(newWork);
+  next=structuredClone(db.state);next.obras=next.obras.filter(o=>o.id!==newWork.id);
+  const ops=buildOperations(db,next,admin,now),env={APP_ENV:'producao',PRODUCTION_ALLOW_DELETE:'false'};
+  assert.equal(permittedProductionDeletion(env,admin,db,ops),true);
+  assert.equal(permittedProductionDeletion(env,actor,db,ops),false);
+  db=(await save(sql,next,admin)).after;
+  assert(!db.state.obras.some(o=>o.id===newWork.id));
+  assert(db.state.units.includes('UNIDADE NOVA'));
+  assert.equal(db.state.obras.length,3);
+  next=structuredClone(db.state);next.obras=next.obras.filter(o=>o.id!=='1');
+  const protectOps=buildOperations(db,next,admin,now);
+  const protectedDb=structuredClone(db);
+  protectedDb.raw.convocacoes=[{obra_id:'1'}];
+  assert.equal(permittedProductionDeletion(env,admin,protectedDb,protectOps),false);
+  protectedDb.raw.convocacoes=[];protectedDb.raw.servicos_apontamento=[{obra_id:'1'}];
+  assert.equal(permittedProductionDeletion(env,admin,protectedDb,protectOps),false);
+ } finally {await pg.close();}
+});
