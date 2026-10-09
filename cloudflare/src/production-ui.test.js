@@ -70,7 +70,7 @@ test('Reload restores a valid server session without logging out',()=>{
 test('Cadastro permite excluir unidades e selecionar multiplas obras',()=>{
  const ui=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
  assert.match(ui,/data-excluir-unidade=/);
- assert.match(ui,/data-excluir-unidade'\]\)\.forEach/);
+ assert.match(ui,/data-excluir-unidade\]'\)\.forEach/);
  assert.match(ui,/id="obra-excluir-selecionadas"/);
  assert.match(ui,/class="obra-bulk-checkbox"/);
  assert.match(ui,/obra-selecionar-disponiveis/);
