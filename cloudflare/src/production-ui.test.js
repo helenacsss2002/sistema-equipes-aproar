@@ -98,6 +98,20 @@ test('Exclusao de unidade informa vinculos sem apagar historico automaticamente'
  assert.match(ui,/Se houver histórico, a exclusão deve permanecer bloqueada/);
 });
 
+test('Relatorios permitem buscar a obra sem perder a selecao e sem alterar outros filtros',()=>{
+ const ui=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
+ const html=fs.readFileSync(new URL('../public/index.html',import.meta.url),'utf8');
+ assert.match(ui,/function filterControls\(searchableWork=false\)/);
+ assert.match(ui,/id="r-obra-search" type="search"/);
+ assert.match(ui,/id="r-obra"><option value="Todas">Todas<\/option>/);
+ assert.match(ui,/\+filterControls\(true\)\+'<div class="section report-toolbar">/);
+ assert.match(ui,/const matches=query\?OBRAS\.filter\(o=>clean\(o\.nome\+' '\+o\.unidade\)\.includes\(query\)\):OBRAS/);
+ assert.match(ui,/select\.value=reportFilters\.obra/);
+ assert.match(ui,/workSearch\.oninput=/);
+ assert.match(ui,/\['r-sup','r-obra','r-ini','r-fim'\]\.forEach/);
+ assert.match(html,/#r-obra-search\s*\{\s*margin-bottom:\s*8px;/);
+});
+
 test('Background claro utiliza imagem original em alta definicao, sem repetir',()=>{
  const html=fs.readFileSync(new URL('../public/index.html',import.meta.url),'utf8');
  const background=fs.readFileSync(new URL('../public/construction-background-hq.webp',import.meta.url));
