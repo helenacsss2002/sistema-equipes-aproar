@@ -731,7 +731,7 @@
   function options(list){return list.map(x=>`<option value="${escapeHtml(x.id??x)}">${escapeHtml(x.nome??x)}</option>`).join('');}
   function field(label,input){return `<div><label class="field-label">${label}</label>${input}</div>`;}
   function blocked(id,date){return state.indisponibilidades.some(x=>x.colaboradorId===id&&x.inicio<=date&&x.fim>=date);}
-  function overlaps(a,b){return a===b||a==='Integral'||b==='Integral'||a==='Outro'||b==='Outro';}
+  function overlaps(a,b){return a===b||a==='Outro'||b==='Outro'||(a==='Integral'&&['Manhã','Tarde'].includes(b))||(b==='Integral'&&['Manhã','Tarde'].includes(a));}
   function localDownload(name,content,mime='text/plain'){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([content],{type:mime}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
   function exportTable(){const t=$('#main-content table');if(!t)return toast('Sem dados para exportar.',true);const csv=[...t.rows].map(r=>[...r.cells].map(c=>'"'+c.innerText.replaceAll('"','""')+'"').join(';')).join('\r\n');localDownload('aproar_relatorio.csv','\uFEFF'+csv,'text/csv;charset=utf-8');}
   function exportButtons(){return `<div class="inline-actions section"><button class="btn btn-secondary" id="export-csv">Exportar CSV</button><button class="btn btn-secondary" id="export-excel">Gerar Excel</button><button class="btn btn-primary" id="export-pdf">Gerar PDF</button></div>`;}

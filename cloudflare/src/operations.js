@@ -15,7 +15,7 @@ const mult=e=>({'Não':0,'Meia diária':.5,'Diária':1,'Uma e meia diária':1.5,
 const editableAp=['status','extra','observacao','servicos','financeiro','noturno','acordo'];
 const normServices=i=>(i?.servicos||[]).map(s=>({obraId:String(s.obraId||''),periodo:s.periodo||'Integral'}));
 const apView=i=>({...field(i,editableAp),servicos:normServices(i)});
-const overlap=(a,b)=>a==='Integral'||b==='Integral'||a===b;
+const overlap=(a,b)=>a===b||(a==='Integral'&&['Manhã','Tarde'].includes(b))||(b==='Integral'&&['Manhã','Tarde'].includes(a));
 const isoToday=t=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/Fortaleza',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(t));
 const own=(s,c)=>s.role==='CONTROLADORIA'||s.role==='SUPERVISOR'&&c.supervisor===s.user;
 export function buildOperations(db,next,session,timestamp=new Date().toISOString()){
