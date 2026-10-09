@@ -79,6 +79,25 @@ test('Cadastro permite excluir unidades e selecionar multiplas obras',()=>{
  assert.match(ui,/OBRAS\.splice\(0,OBRAS\.length,\.\.\.rest\)/);
 });
 
+test('Portal do supervisor usa unidades cadastradas no Neon em todos os seletores',()=>{
+ const ui=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
+ assert.match(ui,/function adminUnits\(\)\{return \[\.\.\.new Set\(\[\.\.\.\(state\.units\|\|\[\]\),\.\.\.OBRAS\.map/);
+ assert.ok(ui.includes('id="portal-unit" class="control">${options([\'Todas\',...adminUnits()])}'));
+ assert.ok(ui.includes('id="unit-conv-unit">${options(adminUnits())}'));
+ assert.equal((ui.match(/const unidades = adminUnits\(\);/g)||[]).length,2);
+ assert.match(ui,/Esta unidade já está cadastrada, mas ainda não possui obra/);
+ assert.match(ui,/if\(portalUnit!==\'Todas\'&&!adminUnits\(\)\.includes\(portalUnit\)\)portalUnit=\'Todas\'/);
+});
+
+test('Exclusao de unidade informa vinculos sem apagar historico automaticamente',()=>{
+ const ui=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
+ assert.match(ui,/const linkedWorks=OBRAS\.filter\(o=>o\.unidade===selected\)\.length/);
+ assert.match(ui,/const linkedHistory=state\.convocacoes\.some/);
+ assert.match(ui,/if\(linkedWorks\|\|linkedHistory\)return showToast/);
+ assert.match(ui,/state\.units=state\.units\.filter\(u=>u!==selected\)/);
+ assert.match(ui,/Se houver histórico, a exclusão deve permanecer bloqueada/);
+});
+
 test('Background claro utiliza imagem original em alta definicao, sem repetir',()=>{
  const html=fs.readFileSync(new URL('../public/index.html',import.meta.url),'utf8');
  const background=fs.readFileSync(new URL('../public/construction-background-hq.webp',import.meta.url));
