@@ -78,3 +78,19 @@ test('Cadastro permite excluir unidades e selecionar multiplas obras',()=>{
  assert.match(ui,/works\.some\(obraTemVinculos\)/);
  assert.match(ui,/OBRAS\.splice\(0,OBRAS\.length,\.\.\.rest\)/);
 });
+
+test('Background de construções é apenas decorativo e vale para todos os perfis',()=>{
+ const html=fs.readFileSync(new URL('../public/index.html',import.meta.url),'utf8');
+ const svg=fs.readFileSync(new URL('../public/construction-watermark.svg',import.meta.url),'utf8');
+ assert.match(html,/#app-view \.main-shell\s*\{[^}]*background-image:\s*url\("\/construction-watermark\.svg"\)/s);
+ assert.match(svg,/viewBox="0 0 1600 980"/);
+ assert.match(svg,/opacity="\.29"/);
+ assert.match(html,/#live-status\s*\{\s*display:\s*none/);
+});
+test('Só o avatar do Financeiro mostra desenho de dinheiro',()=>{
+ const ui=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
+ assert.match(ui,/perfilAtual==='FINANCEIRO'\)\$\('#sidebar-avatar'\)\.innerHTML=/);
+ assert.match(ui,/aria-label="Cédulas e moedas do Financeiro"/);
+ assert.match(ui,/perfilAtual==='CONTROLADORIA'\)\$\('#sidebar-avatar'\)\.innerHTML=/);
+ assert.match(ui,/else \$\('#sidebar-avatar'\)\.textContent = avatar/);
+});
