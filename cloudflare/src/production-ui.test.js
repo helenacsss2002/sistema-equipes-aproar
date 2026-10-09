@@ -82,9 +82,13 @@ test('Cadastro permite excluir unidades e selecionar multiplas obras',()=>{
 test('Background de construções é apenas decorativo e vale para todos os perfis',()=>{
  const html=fs.readFileSync(new URL('../public/index.html',import.meta.url),'utf8');
  const svg=fs.readFileSync(new URL('../public/construction-watermark.svg',import.meta.url),'utf8');
- assert.match(html,/#app-view \.main-shell\s*\{[^}]*background-image:\s*url\("\/construction-watermark\.svg"\)/s);
+ assert.match(html,/#app-view \.main-shell\s*\{[^}]*background-image:\s*url\("\/construction-watermark\.svg\?v=2"\)/s);
+ assert.match(html,/background-repeat:\s*no-repeat/);
+ assert.match(html,/background-size:\s*100% auto/);
+ assert.doesNotMatch(html,/background-repeat:\s*repeat-y/);
  assert.match(svg,/viewBox="0 0 1600 980"/);
- assert.match(svg,/opacity="\.29"/);
+ assert.match(svg,/Guindaste no canto superior direito/);
+ assert.match(svg,/opacity="\.23"/);
  assert.match(html,/#live-status\s*\{\s*display:\s*none/);
 });
 test('Só o avatar do Financeiro mostra desenho de dinheiro',()=>{
