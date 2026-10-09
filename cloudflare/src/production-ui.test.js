@@ -118,11 +118,11 @@ test('Busca de colaboradores filtra somente a visualizacao e preserva selecoes e
  assert.match(ui,/cards\(\)\.forEach\(card=>\{card\.style\.display=/);
  assert.match(ui,/clean\(card\.textContent\)\.includes\(query\)/);
  assert.match(ui,/id="retro-person-search"/);
- assert.match(ui,/bindPersonSearch\(\$\('#retro-person-search'\),()=>\$\$\('\.retro-person-list \.check-card'\)\)/);
+ assert.ok(ui.includes("bindPersonSearch($('#retro-person-search'),()=>$('.retro-person-list .check-card'))"));
  assert.match(ui,/id="day-person-search"/);
- assert.match(ui,/bindPersonSearch\(\$\('#day-person-search'\),()=>\$\$\('#day-form \.person-card'\)\)/);
+ assert.ok(ui.includes("bindPersonSearch($('#day-person-search'),()=>$('#day-form .person-card'))"));
  assert.match(ui,/class="control admin-person-search"/);
- assert.match(ui,/bindPersonSearch\(form\.querySelector\('\.admin-person-search'\)/);
+ assert.ok(ui.includes("bindPersonSearch(form.querySelector('.admin-person-search'),"));
  // Saving still reads all employees, regardless of the search filter.
  assert.match(ui,/readPersonRows\(\[\.\.\.people\.keys\(\)\]\)/);
  assert.match(ui,/\$\$\('input\[name="retro-colab"\]:checked'\)/);
