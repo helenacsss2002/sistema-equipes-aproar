@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'cloudflare/**'
+      - 'app.py'
+      - 'tests/test_turnos_conflito.py'
       - '.github/workflows/aproar-html-tests.yml'
   workflow_dispatch:
 
@@ -24,3 +26,5 @@ jobs:
         run: npm --prefix cloudflare run check
       - name: Executar testes de integracao em banco isolado
         run: npm --prefix cloudflare test
+      - name: Validar turnos do Streamlit (sem acessar banco)
+        run: python3 -m unittest discover -s tests -p 'test_turnos_conflito.py'
