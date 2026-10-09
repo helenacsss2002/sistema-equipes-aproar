@@ -1,41 +1,88 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 980" role="img" aria-label="Ilustração decorativa discreta de edifícios e construção civil">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 980" aria-hidden="true">
+  <!-- Ilustração de fundo: skyline arquitetônico delicado, sem repetição. -->
   <defs>
-    <pattern id="windows" width="30" height="40" patternUnits="userSpaceOnUse">
-      <path d="M8 0V40M21 0V40M0 12H30M0 29H30" fill="none" stroke="#bdccdb" stroke-width=".7" opacity=".28"/>
+    <linearGradient id="towerShade" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#dce5ef" stop-opacity=".28"/>
+      <stop offset="1" stop-color="#d4e0ec" stop-opacity=".09"/>
+    </linearGradient>
+    <linearGradient id="sideShade" x1="0" y1="0" x2="1" y2="0">
+      <stop stop-color="#dae6f1" stop-opacity=".22"/>
+      <stop offset="1" stop-color="#e5ecf3" stop-opacity=".04"/>
+    </linearGradient>
+    <linearGradient id="fadeUpper" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="white"/>
+      <stop offset=".6" stop-color="white" stop-opacity=".64"/>
+      <stop offset="1" stop-color="white" stop-opacity=".02"/>
+    </linearGradient>
+    <linearGradient id="fadeLower" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="white" stop-opacity="0"/>
+      <stop offset=".38" stop-color="white" stop-opacity=".28"/>
+      <stop offset="1" stop-color="white" stop-opacity=".86"/>
+    </linearGradient>
+    <mask id="upper"><rect width="1600" height="710" fill="url(#fadeUpper)"/></mask>
+    <mask id="lower"><rect y="550" width="1600" height="430" fill="url(#fadeLower)"/></mask>
+    <pattern id="glass" width="41" height="55" patternUnits="userSpaceOnUse">
+      <path d="M0 0V55M41 0V55M0 0H41M0 55H41" stroke="#a7bdcf" stroke-width="1" opacity=".23" fill="none"/>
+      <path d="M8 9H33V47H8Z" fill="#dce6ef" opacity=".13" stroke="#afc3d5" stroke-width=".65"/>
     </pattern>
-    <pattern id="floors" width="80" height="48" patternUnits="userSpaceOnUse">
-      <path d="M0 47H80M20 0V48M60 0V48" fill="none" stroke="#b4c6d7" stroke-width="1" opacity=".42"/>
+    <pattern id="frame" width="78" height="56" patternUnits="userSpaceOnUse">
+      <path d="M0 0H78M0 0V56M78 0V56M0 56H78" fill="none" stroke="#aac0d3" stroke-width="1.15" opacity=".50"/>
     </pattern>
   </defs>
-  <g fill="none" stroke="#b8cadb" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" opacity=".29">
-    <path d="M0 265 125 198 255 265V945H0ZM125 198V945M0 370 125 302 255 370M0 480 125 416 255 480"/>
-    <path d="M27 302V915M74 277V930M178 281V930M222 300V930M0 544H255M0 642H255M0 747H255M0 843H255"/>
-    <path d="M285 394 375 343 456 394V943H285ZM375 343V943M297 468H442M297 546H442M297 623H442M297 703H442M297 784H442M297 867H442"/>
-    <path d="M492 244 642 160 790 244V935H492ZM642 160V935M492 347 642 269 790 347M492 440H790M492 528H790M492 616H790M492 703H790M492 790H790"/>
-    <path d="M535 322V915M590 284V921M691 296V926M745 324V918"/>
-    <path d="M817 298 913 241 1011 298V939H817ZM913 241V939M817 395H1011M817 487H1011M817 579H1011M817 670H1011M817 765H1011M817 856H1011"/>
-    <path d="M1047 475 1141 426 1238 475V937H1047ZM1141 426V937M1047 558H1238M1047 637H1238M1047 717H1238M1047 799H1238M1047 882H1238"/>
-    <path d="M1263 299 1376 241 1490 299V954H1263ZM1376 241V954M1263 376H1490M1263 451H1490M1263 531H1490M1263 608H1490M1263 685H1490M1263 764H1490M1263 846H1490"/>
-    <path d="M1519 365 1600 325V947H1519ZM1519 447H1600M1519 540H1600M1519 635H1600M1519 735H1600M1519 838H1600"/>
+
+  <!-- Prédios altos, vistos em perspectiva, semelhantes a uma marca-d'água. -->
+  <g mask="url(#upper)" stroke="#b7c9d9" stroke-width="1.15" stroke-linejoin="round">
+    <g opacity=".34">
+      <path d="M125 166 207 120 313 174 313 555 125 555Z" fill="url(#towerShade)"/>
+      <path d="M125 166 207 120 207 520 125 555Z" fill="url(#sideShade)"/>
+      <path d="M207 120 313 174 313 555 207 520Z" fill="url(#glass)"/>
+      <path d="M207 120V520M125 264 207 221 313 269M125 353 207 315 313 353M125 446 207 411 313 448" fill="none"/>
+    </g>
+    <g opacity=".42">
+      <path d="M340 138 436 84 545 143V564H340Z" fill="url(#towerShade)"/>
+      <path d="M340 138 436 84 436 516 340 564Z" fill="url(#sideShade)"/>
+      <path d="M436 84 545 143V564L436 516Z" fill="url(#glass)"/>
+      <path d="M436 84V516M340 247 436 191 545 253M340 352 436 298 545 363M340 459 436 404 545 469" fill="none"/>
+    </g>
+    <g opacity=".40">
+      <path d="M570 114 681 49 790 113V607H570Z" fill="url(#towerShade)"/>
+      <path d="M570 114 681 49 681 560 570 607Z" fill="url(#sideShade)"/>
+      <path d="M681 49 790 113V607L681 560Z" fill="url(#glass)"/>
+      <path d="M681 49V560M570 214 681 147 790 214M570 308 681 240 790 308M570 411 681 345 790 411M570 516 681 446 790 516" fill="none"/>
+    </g>
+    <g opacity=".32">
+      <path d="M809 178 881 137 970 177V628H809Z" fill="url(#towerShade)"/>
+      <path d="M809 178 881 137 881 590 809 628Z" fill="url(#sideShade)"/>
+      <path d="M881 137 970 177V628L881 590Z" fill="url(#glass)"/>
+      <path d="M881 137V590M809 268 881 228 970 271M809 366 881 322 970 371M809 471 881 428 970 475" fill="none"/>
+    </g>
+    <!-- Estrutura em concreto do edifício em construção à direita -->
+    <g opacity=".37" stroke-width="1.65">
+      <path d="M1035 175 1142 122 1258 171V633H1035Z" fill="#dfE8f1" fill-opacity=".12"/>
+      <path d="M1142 122V584M1035 175 1142 122 1258 171M1035 252 1142 200 1258 254M1035 333 1142 281 1258 334M1035 414 1142 362 1258 415M1035 495 1142 443 1258 497M1035 575 1142 525 1258 577M1061 167V620M1112 141V603M1188 141V610M1234 164V621" fill="none"/>
+      <path d="M1035 252H1258M1035 333H1258M1035 414H1258M1035 495H1258M1035 575H1258" fill="none" opacity=".4"/>
+    </g>
+    <g opacity=".23">
+      <path d="M1365 196 1440 160 1534 200V617H1365Z" fill="url(#towerShade)"/>
+      <path d="M1440 160V605M1365 283H1534M1365 376H1534M1365 469H1534M1365 558H1534M1401 185V617M1491 182V617" fill="none"/>
+    </g>
   </g>
-  <g fill="url(#windows)" stroke="none" opacity=".46">
-    <rect x="8" y="375" width="238" height="570"/>
-    <rect x="501" y="341" width="280" height="594"/>
-    <rect x="827" y="380" width="177" height="555"/>
+
+  <!-- Guindaste no canto superior direito: fino e suave. -->
+  <g stroke="#b9c9d8" stroke-width="1.35" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity=".23">
+    <path d="M1315 12V401M1292 40H1576M1292 40 1315 12 1576 40M1315 12 1364 40 1411 16 1458 40 1504 24 1550 40"/>
+    <path d="M1315 40 1295 77 1315 112 1295 147 1315 182 1295 217 1315 252 1295 287 1315 322 1295 359 1315 397"/>
+    <path d="M1315 40 1245 40 1315 12M1245 40 1290 57 1315 40M1315 40 1374 76 1430 40 1487 76 1540 40"/>
+    <path d="M1519 40V200M1513 200H1525L1519 212Z"/>
+    <path d="M1265 401H1366M1301 409H1329"/>
   </g>
-  <g fill="url(#floors)" stroke="#aabed0" stroke-width="1.3" opacity=".23">
-    <rect x="1290" y="321" width="176" height="614"/>
-    <rect x="1071" y="488" width="144" height="448"/>
-  </g>
-  <g fill="none" stroke="#b8c9d9" stroke-linecap="round" stroke-linejoin="round" opacity=".38">
-    <path stroke-width="2" d="M1310 67V485M1248 121H1590M1310 69 1345 120M1310 69 1248 121M1310 69 1590 121M1310 121 1290 171M1590 121 1551 151M1310 121 1590 121"/>
-    <path stroke-width="1.3" d="M1248 121 1310 166 1360 121 1410 166 1460 121 1510 166 1560 121M1290 172 1310 203 1290 235 1310 267 1290 300 1310 332 1290 365 1310 397 1290 430 1310 466M1270 135V194"/>
-    <path stroke-width="1.5" d="M1522 133V295M1515 296H1530L1522 308Z"/>
-    <path stroke-width="1.3" d="M1225 129H1248M1283 475H1338M1325 485H1300"/>
-    <path stroke-width="1" d="M318 178H786M318 178 353 130M318 178 365 215M354 130 786 178M405 140 435 178 465 146 495 178 525 153 555 178 585 159 615 178 645 165 675 178 705 171 735 178M354 130V392M345 392H364"/>
-  </g>
-  <g fill="none" stroke="#cbd7e2" stroke-width="1.2" opacity=".22">
-    <path d="M0 957H1600M180 980 270 928 352 980M466 980 558 922 649 980M784 980 899 906 1015 980M1120 980 1245 905 1380 980M1384 980 1490 914 1600 980"/>
-    <path d="M40 945 132 890 224 945M528 925 641 859 748 925M1200 938 1382 840 1570 938"/>
+
+  <!-- Detalhes bem discretos próximos da base da tela, sem criar faixas. -->
+  <g mask="url(#lower)" opacity=".25" stroke="#b8cada" stroke-width="1.3" fill="none" stroke-linejoin="round">
+    <path d="M0 851 120 788 237 853V980H0ZM120 788V980M0 916 120 848 237 916M44 831V980M191 831V980"/>
+    <path d="M345 875 432 829 535 884V980H345ZM432 829V980M345 937 432 890 535 941M380 858V980M493 868V980"/>
+    <path d="M984 834 1091 775 1205 834V980H984ZM1091 775V980M984 904 1091 845 1205 904M1018 816V980M1164 819V980"/>
+    <path d="M1267 781 1403 707 1542 781V980H1267ZM1403 707V980M1267 866 1403 793 1542 866M1267 934 1403 861 1542 934M1310 758V980M1492 756V980"/>
+    <path d="M1559 872 1600 846V980H1559ZM1559 921H1600"/>
   </g>
 </svg>
