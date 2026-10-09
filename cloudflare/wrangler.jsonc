@@ -15,5 +15,6 @@
   "vars": {
     "APP_ENV": "producao"
   },
-  "keep_vars": true
+  "keep_vars": true,
+  "previews": {}
 }
