@@ -510,6 +510,16 @@ table td .control {text-align:inherit;}
 .page-head h2, .topbar-title { font-family: "Arial Black", Impact, Inter, ui-sans-serif, sans-serif; font-weight: 900; }
 .card h3, .section-title h3 { font-weight: 800; }
 #live-status { display: none !important; }
+/* Fundo arquitetônico translúcido em todas as áreas autenticadas, sem alterar cartões. */
+#app-view .main-shell {
+  background-color: var(--bg);
+  background-image: url("/construction-watermark.svg");
+  background-position: center top;
+  background-size: max(1200px, 100%) auto;
+  background-repeat: repeat-y;
+}
+@media print { #app-view .main-shell { background-image: none; } }
+
 </style>
 </head>
 <body>
