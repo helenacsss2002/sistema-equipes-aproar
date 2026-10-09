@@ -445,7 +445,7 @@
   }
 
   function renderConvocacao() {
-    const unidades = [...new Set(OBRAS.map(o=>o.unidade))];
+    const unidades = adminUnits();
     $('#main-content').innerHTML = `
       <div class="page-head"><div><div class="eyebrow">PLANEJAMENTO</div><h2>Nova convocação</h2><p>Cadastre a equipe para a data real do serviço.</p></div></div>
       <div class="grid grid-2">
@@ -563,7 +563,7 @@
   function renderApontamentoRetroativo() {
     if(perfilAtual==='SUPERVISOR'&&retroDateSelected)portalDate=retroDateSelected;
     const body = $('#apontamento-body');
-    const unidades = [...new Set(OBRAS.map(o=>o.unidade))];
+    const unidades = adminUnits();
     body.innerHTML = `
       <div class="grid grid-2">
         <div class="card card-pad">
@@ -1011,7 +1011,7 @@
           const selected=b.dataset.excluirUnidade;
           const linkedWorks=OBRAS.filter(o=>o.unidade===selected).length;
           const linkedHistory=state.convocacoes.some(c=>c.unidade===selected)||state.conflitosTentados.some(c=>c.unidade===selected||c.unidadeExistente===selected)||state.apontamentos.some(a=>a.itens.some(i=>i.servicos?.some(s=>obraById(s.obraId)?.unidade===selected)));
-          if(linkedWorks||linkedHistory)return showToast('Não é possível excluir a unidade "'+selected+'": '+(linkedWorks?linkedWorks+' obra(s) cadastrada(s)':'')+(linkedWorks&&linkedHistory?' e ':'')+(linkedHistory?'histórico de registros vinculado':'')+'. Para excluir, remova somente as obras sem histórico primeiro.',true);
+          if(linkedWorks||linkedHistory)return showToast('Não é possível excluir a unidade "'+selected+'": '+(linkedWorks?linkedWorks+' obra(s) cadastrada(s)':'')+(linkedWorks&&linkedHistory?' e ':'')+(linkedHistory?'histórico de registros vinculado':'')+'. Exclua primeiro as obras sem vínculo. Se houver histórico, a exclusão deve permanecer bloqueada para preservá-lo.',true);
           if(!window.confirm('Excluir a unidade "'+selected+'"? As demais unidades e obras permanecerão intactas.'))return;
           state.units=state.units.filter(u=>u!==selected);
           if(state.unitOwners)delete state.unitOwners[selected];
