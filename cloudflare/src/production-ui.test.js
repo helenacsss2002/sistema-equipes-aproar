@@ -104,12 +104,31 @@ test('Relatorios permitem buscar a obra sem perder a selecao e sem alterar outro
  assert.match(ui,/function filterControls\(searchableWork=false\)/);
  assert.match(ui,/id="r-obra-search" type="search"/);
  assert.match(ui,/id="r-obra"><option value="Todas">Todas<\/option>/);
- assert.match(ui,/\+filterControls\(true\)\+'<div class="section report-toolbar">/);
+ assert.match(ui,/\+filterControls\(financial\?true:'combined'\)\+'<div class="section report-toolbar">/);
  assert.match(ui,/const matches=query\?OBRAS\.filter\(o=>clean\(o\.nome\+' '\+o\.unidade\)\.includes\(query\)\):OBRAS/);
  assert.match(ui,/select\.value=reportFilters\.obra/);
  assert.match(ui,/workSearch\.oninput=/);
  assert.match(ui,/\['r-sup','r-obra','r-ini','r-fim'\]\.forEach/);
  assert.match(html,/#r-obra-search\s*\{\s*margin-bottom:\s*8px;/);
+});
+
+test('Relatorios Controladoria exibem um unico campo pesquisavel que usa IDs nos filtros',()=>{
+ const js=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
+ const report=js.slice(js.indexOf('function renderReports(){'),js.indexOf('function renderDashboard(){'));
+ const controls=js.slice(js.indexOf('function filterControls(searchableWork=false)'),js.indexOf('function filteredConvs(){'));
+ assert.ok(report.includes("filterControls(financial?true:'combined')"),'Apenas Controladoria usa o campo unificado');
+ assert.ok(controls.includes("searchableWork==='combined'"),'Modo combo selecionado');
+ assert.ok(controls.includes('id="r-obra" type="hidden"'),'Filtro interno mantém ID da obra');
+ assert.ok(controls.includes('id="r-obra-combo" class="control" list="r-obra-choices"'),'Campo visível é único e digitável');
+ assert.ok(controls.includes('<datalist id="r-obra-choices">'),'Dropdown nativo com opções');
+ assert.ok(controls.includes("o.nome+' | '+o.unidade"),'Busca inclui nome, número e unidade');
+ assert.ok(controls.includes("const matched=OBRAS.find(o=>clean(label(o))===raw)"),'Somente obras válidas são aceitas');
+ assert.ok(controls.includes("source.dispatchEvent(new Event('change',{bubbles:true}))"),'Seleção atualiza filtros existentes');
+ assert.ok(controls.includes("workCombo.oninput=choose"),'Digitação pode selecionar a obra');
+ assert.ok(controls.includes("workCombo.onblur=()=>"),'Texto inválido é revertido');
+ assert.ok(controls.includes("workCombo.onkeydown=e=>"),'Enter não submete indevidamente');
+ assert.ok(report.includes('configureReportTable(fin)'),'Tabela e cálculos preservados');
+ assert.ok(report.includes('refresh();bindExports()'),'Exportações preservadas');
 });
 
 test('Dashboard aceita pesquisar obra por numero, nome ou unidade sem afetar os indicadores',()=>{
@@ -125,7 +144,7 @@ test('Dashboard aceita pesquisar obra por numero, nome ou unidade sem afetar os 
  assert.match(ui,/const matches=query\?OBRAS\.filter\(o=>clean\(o\.nome\+' '\+o\.unidade\)\.includes\(query\)\):OBRAS/);
  assert.match(ui,/select\.value=reportFilters\.obra/);
  const reports=ui.slice(ui.indexOf('function renderReports(){'),ui.indexOf('function renderDashboard(){'));
- assert.match(reports,/\+filterControls\(true\)\+'<div class="section report-toolbar">/);
+ assert.match(reports,/\+filterControls\(financial\?true:'combined'\)\+'<div class="section report-toolbar">/);
 });
 
 test('Portal Supervisor remove a data duplicada apenas da aba de convocacao',()=>{

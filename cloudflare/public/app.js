@@ -807,8 +807,35 @@
     const update=()=>{const convs=state.convocacoes.filter(c=>c.dataServico===$('#wp-data').value);$('#wp-text').value='APROAR — Equipes de '+formatDate($('#wp-data').value)+'\n\n'+convs.map(c=>c.unidade+' · '+c.supervisor+' · '+c.turno+'\n'+c.colaboradores.map(id=>{const p=colaboradorById(id);return '• '+p?.nome+($('#wp-func').checked?' ('+p?.funcao+')':'');}).join('\n')).join('\n\n')+($('#wp-pend').checked?'\n\nOutras demandas serão enviadas posteriormente.':'');$('#wp-missing').innerHTML='<div class="notice info">Unidades sem convocação nesta data: '+escapeHtml([...new Set(OBRAS.map(o=>o.unidade))].filter(u=>!convs.some(c=>c.unidade===u)).join(', ')||'nenhuma')+'</div>';};['wp-data','wp-func','wp-pend'].forEach(id=>$('#'+id).onchange=update);$('#wp-copy').onclick=async()=>{try{await navigator.clipboard.writeText($('#wp-text').value);toast('Mensagem copiada.');}catch{$('#wp-text').select();toast('Selecione e copie com Ctrl+C.');}};update();
   }
   let reportFilters={inicio:'2026-09-01',fim:isoToday(),supervisor:'Todos',obra:'Todas'};
-  function filterControls(searchableWork=false){return `<div class="card card-pad form-grid">${field('Periodicidade',`<select class="control" id="r-period">${options(['Personalizado','Diário','Semanal','Mensal'])}</select>`)}${field('Supervisor',`<select class="control" id="r-sup">${options(['Todos',...SUPERVISORES])}</select>`)}${field('Início',`<input class="control" id="r-ini" type="date" value="${reportFilters.inicio}">`)}${field('Fim',`<input class="control" id="r-fim" type="date" value="${reportFilters.fim}">`)}${field('Obra / serviço',`${searchableWork?'<input class="control" id="r-obra-search" type="search" autocomplete="off" placeholder="Buscar número, nome ou unidade..." aria-label="Pesquisar obras e serviços">':''}<select class="control" id="r-obra"><option value="Todas">Todas</option>${options(OBRAS)}</select>`)}</div>`;}
+  function filterControls(searchableWork=false){return `<div class="card card-pad form-grid">${field('Periodicidade',`<select class="control" id="r-period">${options(['Personalizado','Diário','Semanal','Mensal'])}</select>`)}${field('Supervisor',`<select class="control" id="r-sup">${options(['Todos',...SUPERVISORES])}</select>`)}${field('Início',`<input class="control" id="r-ini" type="date" value="${reportFilters.inicio}">`)}${field('Fim',`<input class="control" id="r-fim" type="date" value="${reportFilters.fim}">`)}${field('Obra / serviço',searchableWork==='combined'?`<input id="r-obra" type="hidden" value="${escapeHtml(reportFilters.obra)}"><input id="r-obra-combo" class="control" list="r-obra-choices" autocomplete="off" placeholder="Digite ou selecione uma obra..."><datalist id="r-obra-choices"><option value="Todas"></option>${OBRAS.map(o=>`<option value="${escapeHtml(o.nome+' | '+o.unidade)}"></option>`).join('')}</datalist>`:`${searchableWork?'<input class="control" id="r-obra-search" type="search" autocomplete="off" placeholder="Buscar número, nome ou unidade..." aria-label="Pesquisar obras e serviços">':''}<select class="control" id="r-obra"><option value="Todas">Todas</option>${options(OBRAS)}</select>`)}</div>`;}
   function bindFilters(refresh){$('#r-sup').value=reportFilters.supervisor;$('#r-obra').value=reportFilters.obra;
+    // Combobox da Controladoria: um único campo visual (texto + lista).
+    // O filtro só muda quando a pessoa escolhe uma obra válida ou 'Todas'.
+    const workCombo=$('#r-obra-combo');
+    if(workCombo){
+      const selectedWork=OBRAS.find(o=>String(o.id)===String(reportFilters.obra));
+      const label=o=>o.nome+' | '+o.unidade;
+      workCombo.value=selectedWork?label(selectedWork):'Todas';
+      const choose=()=>{
+        const raw=clean(workCombo.value);
+        const matched=OBRAS.find(o=>clean(label(o))===raw);
+        const id=raw==='TODAS'?'Todas':matched?.id;
+        if(id===undefined)return;
+        const source=$('#r-obra');
+        if(source.value===String(id))return;
+        source.value=String(id);
+        source.dispatchEvent(new Event('change',{bubbles:true}));
+      };
+      workCombo.oninput=choose;
+      workCombo.onchange=choose;
+      workCombo.onblur=()=>{
+        const raw=clean(workCombo.value);
+        if(raw==='TODAS'||OBRAS.some(o=>clean(label(o))===raw))return;
+        const current=OBRAS.find(o=>String(o.id)===String($('#r-obra').value));
+        workCombo.value=current?label(current):'Todas';
+      };
+      workCombo.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();choose();}};
+    }
     const workSearch=$('#r-obra-search');
     if(workSearch){
       const select=$('#r-obra');
@@ -889,7 +916,7 @@
   }
   function renderReports(){
     const financial=perfilAtual==='FINANCEIRO';if(financial&&selectedCycle!=='custom'){const cycle=financialCycle(isoToday(),Number(selectedCycle));reportFilters.inicio=cycle.inicio;reportFilters.fim=cycle.fim;}
-    $('#main-content').innerHTML=head('Relatórios','Dados por período, com consolidado e detalhamento por dia.')+(financial?cycleControl():'')+filterControls(true)+'<div class="section report-toolbar"><div class="report-view" id="report-tabs"></div>'+exportButtons()+'</div><div class="section" id="report-body"></div>';let day='Todos';
+    $('#main-content').innerHTML=head('Relatórios','Dados por período, com consolidado e detalhamento por dia.')+(financial?cycleControl():'')+filterControls(financial?true:'combined')+'<div class="section report-toolbar"><div class="report-view" id="report-tabs"></div>'+exportButtons()+'</div><div class="section" id="report-body"></div>';let day='Todos';
     const refresh=()=>{const rows=entries().filter(x=>!financial||(presence(x.i.status)&&x.finance+x.night+x.bonus>0.005)),dates=[...new Set(filteredConvs().map(c=>c.dataServico))].sort();if(!dates.includes(day))day='Todos';$('#report-tabs').innerHTML=field('Visualização',`<select id="report-day-select" class="control"><option value="Todos">Consolidado do período</option>${dates.map(d=>`<option value="${d}">${formatDate(d)}</option>`).join('')}</select>`);$('#report-day-select').value=day;const selected=rows.filter(x=>day==='Todos'||x.c.dataServico===day);const fin=perfilAtual==='FINANCEIRO';$('#report-body').innerHTML=table(['Data','Supervisor','Unidade','Obra','Colaborador','Período','Status',fin?'Financeiro':'Custo normal','Extra','Adic. noturno','Acordos / Bonificações',...(fin?[]:['Periculosidade 30%']),'Total'],selected.map(x=>[formatDate(x.c.dataServico),x.c.supervisor,escapeHtml(x.c.unidade),escapeHtml(fin?financialWorkNumber(x.c.obraId):obraById(x.c.obraId)?.nome),escapeHtml(x.p?.nome),escapeHtml(x.service.periodo),escapeHtml(x.displayStatus||x.i.status),money(fin?x.finance:x.daily),escapeHtml(x.displayExtra||x.i.extra),money(x.night),money(x.bonus),...(fin?[]:[money(x.danger)]),money(fin?x.finance+x.night+x.bonus:x.daily+x.extra+x.danger+x.night+x.bonus)]))+`<div class="notice info section">Valores de demonstração. ${fin?'Financeiro sem adicional de periculosidade.':'Periculosidade de 30% para eletricista e auxiliar de eletricista, somente na Controladoria.'} Convocações sem apontamento ficam fora dos custos.</div>`;configureReportTable(fin);$('#report-day-select').onchange=()=>{day=$('#report-day-select').value;refresh();};};bindFilters(()=>{if(financial){selectedCycle='custom';$('#financial-cycle').value='custom';}refresh();});if(financial){$('#financial-cycle').onchange=()=>{selectedCycle=$('#financial-cycle').value;renderReports();};if(selectedCycle!=='custom')$('#cycle-caption').textContent='Pagamento em '+formatDate(financialCycle(isoToday(),Number(selectedCycle)).pagamento);}refresh();bindExports();
   }
   function renderDashboard(){
