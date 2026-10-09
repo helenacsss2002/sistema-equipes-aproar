@@ -56,3 +56,13 @@ test('Unit list scrolls independently and work deletion buttons stay on works',(
  assert.match(ui,/const cells=\$\$\('#obra-list table tbody tr'\)/);
  assert.doesNotMatch(ui,/\$\$\('#settings-body table tbody tr'\)/);
 });
+
+test('Reload restores a valid server session without logging out',()=>{
+ const ui=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
+ const init=ui.slice(ui.indexOf('async function initOnline(){'));
+ assert.match(init,/enterConnectedSession\(await api\('\/api\/bootstrap'\)\)/);
+ assert.doesNotMatch(init,/api\('\/api\/logout'/);
+ assert.match(ui,/async function logout\(\).*?api\('\/api\/logout'/s);
+ const auth=fs.readFileSync(new URL('./auth.js',import.meta.url),'utf8');
+ assert.match(auth,/HttpOnly; Secure; SameSite=Strict; Path=\/; Max-Age=28800/);
+});
