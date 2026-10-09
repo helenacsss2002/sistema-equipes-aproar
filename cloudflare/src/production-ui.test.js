@@ -16,6 +16,7 @@ test('Server cannot enable production writes based on old homologation controls 
  assert.equal(conf.vars.APP_ENV,'producao');
  assert.equal(conf.vars.WRITES_ENABLED,undefined);
  assert.equal(conf.triggers,undefined);
+ assert.deepEqual(conf.previews,{},'Cloudflare PR preview builds require a previews block.');
  assert.match(worker,/mayDeleteProduction\(env\)/);
  assert.match(worker,/writes\(env\)/);
 });
