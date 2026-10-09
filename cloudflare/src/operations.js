@@ -31,7 +31,7 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
  for(const o of base.obras)if(!works.has(o.id)){if(session.role!=='CONTROLADORIA')fail('Sem permissão para excluir obra.',403);if(next.convocacoes.some(c=>String(c.obraId)===o.id)||next.apontamentos.some(a=>a.itens.some(i=>normServices(i).some(s=>s.obraId===o.id))))fail('Esta obra possui registros e deve ser preservada.');add('obras','delete',o.id);}
  const oldConvs=new Map(base.convocacoes.map(c=>[c.id,c])),rawConvs=new Map(db.raw.convocacoes.map(c=>[String(c.id),c]));
  const records=new Map(),byGroup=new Map(),rawAps=new Map(db.raw.apontamentos.map(a=>[String(a.convocacao_id),a]));
- for(const c of next.convocacoes){const old=oldConvs.get(String(c.id));date(c.dataServico);period(c.turno);if(!supervisors.includes(c.supervisor)&&(!old||c.supervisor!==old.supervisor))fail('Supervisor inválido.');if(!Array.isArray(c.colaboradores)||!c.colaboradores.length||new Set(c.colaboradores).size!==c.colaboradores.length)fail('Equipe vazia ou duplicada.');if(!old&&numericId(c.id))fail('Convocação nova com identificador inválido.');
+ for(const c of next.convocacoes){const old=oldConvs.get(String(c.id));date(c.dataServico);period(c.turno);if(!supervisors.includes(c.supervisor)&&!(session.role==='CONTROLADORIA'&&c.supervisor==='PAULO')&&(!old||c.supervisor!==old.supervisor))fail('Supervisor inválido.');if(!Array.isArray(c.colaboradores)||!c.colaboradores.length||new Set(c.colaboradores).size!==c.colaboradores.length)fail('Equipe vazia ou duplicada.');if(!old&&numericId(c.id))fail('Convocação nova com identificador inválido.');
   for(const pidValue of c.colaboradores){const pid=String(pidValue),person=staff.get(pid);if(!person)fail('Colaborador não encontrado.');const key=old?.colaboradores.includes(pid)?old.id:`cv:${c.id}:${pid}`,scheduling=field(c,['supervisor','dataServico','unidade','turno']),changed=!old||!old.colaboradores.includes(pid)||!same(scheduling,field(old,['supervisor','dataServico','unidade','turno']));
    if(changed&&!own(session,c))fail('Você só pode convocar sua própria equipe.',403);if(changed&&old&&!own(session,old))fail('Você não pode alterar a equipe de outro supervisor.',403);if(changed&&session.role==='SUPERVISOR'&&person.inativo)fail('Colaborador inativo.');
    if(records.has(key))fail('Convocação repetida.');records.set(key,{key,c,pid,old:old?.colaboradores.includes(pid)?old:null,changed});byGroup.set(String(c.id)+'|'+pid,key);
@@ -80,7 +80,16 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
  if(session.role!=='CONTROLADORIA'){
   for(const k of ['teamsConfig','unitOwners','teamsAutomation','teamsMessage','teamsHistory'])if(!same(next[k]??base[k],base[k]))fail('Sem permissão para alterar configurações.',403);
  }else{
-  for(const [s,x] of Object.entries(next.teamsConfig||{})){if(!supervisors.includes(s))fail('Supervisor inválido.');if(x.email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x.email))fail('E-mail inválido.');if(!same(x,base.teamsConfig?.[s]))add('engenheiros_teams','update',s,{email_teams:x.email||'',ativo:x.ativo!==false});}
+  for(const [s,x] of Object.entries(next.teamsConfig||{})){
+   const previous=base.teamsConfig?.[s];
+   // Old Teams recipients can still include supervisors no longer active in APROAR.
+   // Preserve untouched legacy rows; only reject new or edited unsupported supervisors.
+   if(!supervisors.includes(s)){if(!previous||!same(x,previous))fail('Supervisor inválido.');continue;}
+   if(!same(x,previous)){
+     if(x.email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x.email))fail('E-mail inválido.');
+     add('engenheiros_teams','update',s,{email_teams:x.email||'',ativo:x.ativo!==false});
+   }
+  }
   const history=(next.teamsHistory||[]).filter(x=>!numericId(x.id));const config={unitOwners:next.unitOwners||{},teamsAutomation:!!next.teamsAutomation,teamsMessage:next.teamsMessage||'',teamsHistory:history};if(!same(config,db.raw.settings[0]?.data||{}))add('aproar_web_settings','update',1,{data:config});
  }
  // Always generate a server audit record for actual changes, rather than trusting browser audit text.

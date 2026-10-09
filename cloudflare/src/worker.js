@@ -3,7 +3,7 @@ import {mapNeonData} from './neon-adapter.js';
 import {readDatabase,visibleState,supervisors} from './data.js';
 import {buildOperations} from './operations.js';
 import {login,identity,sameOrigin,equalSecret,logoutCookie} from './auth.js';
-import {writes,writeControls,stage,mayDeleteProduction} from './environment.js';
+import {writes,writeControls,stage,permittedProductionDeletion} from './environment.js';
 import {consultarTrello,sincronizarTrello,unidadeCard} from './trello.js';
 const common={'cache-control':'no-store','x-content-type-options':'nosniff','referrer-policy':'same-origin'};
 const json=(data,status=200,extra={})=>new Response(JSON.stringify(data),{status,headers:{...common,'content-type':'application/json; charset=utf-8',...extra}});
@@ -70,7 +70,7 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
     if(previous.length){if(previous[0].actor!==session.user||previous[0].payload_hash!==digest)return json({error:'Identificador de requisição reutilizado.'},409);return json({...summary(await readDatabase(sql),session,env),ok:true,replayed:true});}
     const db=await readDatabase(sql);if(body.version!==db.version)return json({error:'Outro usuário atualizou os dados. Suas alterações não foram gravadas; recarregue e confira os registros.'},409);
     const operations=buildOperations(db,body.state,session);
-    if(!mayDeleteProduction(env)&&operations.some(op=>op.action==='delete'))return json({error:'Exclusões em produção estão bloqueadas por segurança.'},403);
+    if(!permittedProductionDeletion(env,session,db,operations))return json({error:'Por segurança, a Controladoria só pode excluir uma convocação por vez, sem apontamento, serviço ou conflito vinculado. Registros vinculados devem ser preservados.'},403);
     // Work deletions run after dependent records, never before them.
     operations.sort((a,b)=>(a.table==='obras'&&a.action==='delete'?1:0)-(b.table==='obras'&&b.action==='delete'?1:0));
     if(operations.length)await sql`SELECT aproar_web_apply(${body.version},${body.requestId},${session.user},${digest},${JSON.stringify(operations)}::jsonb)`;
