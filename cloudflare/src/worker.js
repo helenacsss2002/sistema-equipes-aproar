@@ -3,18 +3,18 @@ import {mapNeonData} from './neon-adapter.js';
 import {readDatabase,visibleState,supervisors} from './data.js';
 import {buildOperations} from './operations.js';
 import {login,identity,sameOrigin,equalSecret,logoutCookie} from './auth.js';
+import {writes,writeControls,stage,mayDeleteProduction} from './environment.js';
 import {consultarTrello,sincronizarTrello,unidadeCard} from './trello.js';
 const common={'cache-control':'no-store','x-content-type-options':'nosniff','referrer-policy':'same-origin'};
 const json=(data,status=200,extra={})=>new Response(JSON.stringify(data),{status,headers:{...common,'content-type':'application/json; charset=utf-8',...extra}});
 const sha=async v=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(v)))].map(x=>x.toString(16).padStart(2,'0')).join('');
-const writes=env=>{try{return env.WRITES_ENABLED==='true'&&env.APP_ENV==='homologacao'&&Boolean(env.HOMOLOGATION_EXPECTED_HOST)&&new URL(env.DATABASE_URL).hostname.toLowerCase()===env.HOMOLOGATION_EXPECTED_HOST.toLowerCase();}catch{return false;}};
 const failedLogins=new Map();
 function limit(request){const ip=request.headers.get('cf-connecting-ip')||'unknown',time=Date.now(),entry=failedLogins.get(ip);if(entry&&entry.until>time&&entry.n>=10)return false;if(!entry||entry.until<time)failedLogins.set(ip,{n:0,until:time+60000});failedLogins.get(ip).n++;if(failedLogins.size>5000)failedLogins.clear();return true;}
 async function bodyJSON(request){if(Number(request.headers.get('content-length')||0)>8e6)throw Object.assign(Error('Dados muito grandes. Divida a operação.'),{status:413});const text=await request.text();if(text.length>8e6)throw Object.assign(Error('Dados muito grandes.'),{status:413});try{return JSON.parse(text);}catch{throw Object.assign(Error('Requisição inválida.'),{status:400});}}
-function summary(db,session,env){return {state:visibleState(db,session),version:db.version,session:{role:session.role,user:session.user},supervisors,writesEnabled:writes(env)};}
+function summary(db,session,env){return {state:visibleState(db,session),version:db.version,session:{role:session.role,user:session.user},supervisors,writesEnabled:writes(env),stage:stage(env)};}
 export default {async fetch(request,env){const url=new URL(request.url),path=url.pathname;
  try{
-  if(path==='/api/health'&&request.method==='GET')return json({application:'APROAR',stage:'homologacao',databaseConfigured:Boolean(env.DATABASE_URL),writesEnabled:writes(env)});
+  if(path==='/api/health'&&request.method==='GET')return json({application:'APROAR',stage:stage(env),databaseConfigured:Boolean(env.DATABASE_URL),writesEnabled:writes(env)});
   if(path==='/api/login'&&request.method==='POST'){if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);if(!limit(request))return json({error:'Muitas tentativas. Aguarde um minuto.'},429);const result=await login(await bodyJSON(request),env);return json({session:result.session},200,{'set-cookie':result.cookie});}
   if(path==='/api/logout'&&request.method==='POST'){if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);return json({ok:true},200,{'set-cookie':logoutCookie});}
   if(path==='/api/check-database'||path==='/api/preview-data'){
@@ -32,16 +32,17 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
    if(!session)return json({error:'Faça login para acessar a plataforma.'},401);
    if(path==='/api/homologacao/diagnostico'&&request.method==='GET'){
     if(session.role!=='CONTROLADORIA')return json({error:'Diagnóstico restrito à Controladoria.'},403);
-    let dbHost='';
-    try{dbHost=new URL(env.DATABASE_URL).hostname.toLowerCase();}catch{}
+    const controls=writeControls(env);
     return json({
      bancoConfigurado:Boolean(env.DATABASE_URL),
-     enderecoBancoValido:Boolean(dbHost),
-     ambienteHomologacao:env.APP_ENV==='homologacao',
-     gravacaoHabilitadaNaCloudflare:env.WRITES_ENABLED==='true',
-     hostEsperadoConfigurado:Boolean(env.HOMOLOGATION_EXPECTED_HOST),
-     hostConfere:Boolean(dbHost&&env.HOMOLOGATION_EXPECTED_HOST&&dbHost===env.HOMOLOGATION_EXPECTED_HOST.toLowerCase()),
-     writesEnabled:writes(env)
+     enderecoBancoValido:controls.hostMatches||Boolean(env.DATABASE_URL),
+     ambienteHomologacao:controls.homologation,
+     ambienteProducao:controls.production,
+     gravacaoHabilitadaNaCloudflare:controls.enabled,
+     aprovacaoProducao:controls.approved,
+     hostEsperadoConfigurado:controls.hostConfigured,
+     hostConfere:controls.hostMatches,
+     writesEnabled:controls.writesEnabled
     });
    }
    if(!env.DATABASE_URL)return json({error:'Banco não configurado.'},503);
@@ -63,12 +64,13 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
    }
    if(path==='/api/bootstrap'&&request.method==='GET')return json(summary(await readDatabase(sql),session,env));
    if(path==='/api/save'&&request.method==='POST'){
-    if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);if(!writes(env))return json({error:'Gravação desativada. Configure APP_ENV=homologacao e WRITES_ENABLED=true para a branch de testes.'},403);
+    if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);if(!writes(env))return json({error:'Gravação desativada ou sem autorização específica para este ambiente.'},403);
     const body=await bodyJSON(request);if(!/^[a-f0-9-]{36}$/i.test(body.requestId||'')||typeof body.version!=='string')return json({error:'Identificador de requisição inválido.'},400);
     const digest=await sha(JSON.stringify(body)),previous=await sql`SELECT actor,payload_hash FROM aproar_web_requests WHERE id=${body.requestId}`;
     if(previous.length){if(previous[0].actor!==session.user||previous[0].payload_hash!==digest)return json({error:'Identificador de requisição reutilizado.'},409);return json({...summary(await readDatabase(sql),session,env),ok:true,replayed:true});}
     const db=await readDatabase(sql);if(body.version!==db.version)return json({error:'Outro usuário atualizou os dados. Suas alterações não foram gravadas; recarregue e confira os registros.'},409);
     const operations=buildOperations(db,body.state,session);
+    if(!mayDeleteProduction(env)&&operations.some(op=>op.action==='delete'))return json({error:'Exclusões em produção estão bloqueadas por segurança.'},403);
     // Work deletions run after dependent records, never before them.
     operations.sort((a,b)=>(a.table==='obras'&&a.action==='delete'?1:0)-(b.table==='obras'&&b.action==='delete'?1:0));
     if(operations.length)await sql`SELECT aproar_web_apply(${body.version},${body.requestId},${session.user},${digest},${JSON.stringify(operations)}::jsonb)`;
@@ -92,12 +94,12 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
   if(message.includes('APROAR_REQUEST_MISMATCH'))return json({error:'Requisição repetida com conteúdo diferente.'},409);
   if(e.code==='23505')return json({error:'Já existe um registro equivalente. Atualize os dados e confira antes de repetir.'},409);
   if(e.code==='23503')return json({error:'Este registro está vinculado ao histórico e não pode ser excluído.'},409);
-  if(e.code==='42883'||e.code==='42P01')return json({error:'Execute migracao_homologacao.sql na branch de testes antes de abrir a nova plataforma.'},503);
-  return json({error:'Não foi possível concluir a operação. Confira a conexão e a estrutura da branch de homologação.'},502);
+  if(e.code==='42883'||e.code==='42P01')return json({error:'Estrutura do banco incompleta: confira a migração de banco correspondente ao ambiente.'},503);
+  return json({error:'Não foi possível concluir a operação. Confira a conexão e a estrutura do banco.'},502);
  }
 },
  async scheduled(event,env,ctx){
-  // Somente ativar depois de validar a leitura real do Trello e as gravacoes no Neon de homologacao.
+  // A rotina depende de autorização explícita e de Cron Trigger configurado no ambiente.
   if(env.TRELLO_AUTO_SYNC_ENABLED!=='true'||!writes(env))return;
   ctx.waitUntil((async()=>{try{const sql=neon(env.DATABASE_URL);const r=await sql`SELECT sincronizado_obras_em,ultima_tentativa_obras_em FROM trello_snapshot WHERE snapshot_id=1`;const last=r[0]?.sincronizado_obras_em||r[0]?.ultima_tentativa_obras_em;
    if(last&&Date.now()-new Date(last).getTime()<11.5*60*60*1000)return;

@@ -1,14 +1,14 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "sistema-equipes-aproar",
-  "main": "src/worker.js",
+  "main": "cloudflare/src/worker.js",
   "compatibility_date": "2026-10-08",
   "workers_dev": true,
   "observability": {
     "enabled": true
   },
   "assets": {
-    "directory": "public",
+    "directory": "cloudflare/public",
     "binding": "ASSETS",
     "run_worker_first": true
   },
