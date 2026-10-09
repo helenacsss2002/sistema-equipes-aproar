@@ -79,16 +79,15 @@ test('Cadastro permite excluir unidades e selecionar multiplas obras',()=>{
  assert.match(ui,/OBRAS\.splice\(0,OBRAS\.length,\.\.\.rest\)/);
 });
 
-test('Background de construções é apenas decorativo e vale para todos os perfis',()=>{
+test('Background claro utiliza imagem original em alta definicao, sem repetir',()=>{
  const html=fs.readFileSync(new URL('../public/index.html',import.meta.url),'utf8');
- const background=fs.readFileSync(new URL('../public/construction-background.webp',import.meta.url));
- assert.match(html,/#app-view \.main-shell\s*\{[^}]*background-image:\s*url\("\/construction-background\.webp\?v=1"\)/s);
+ const background=fs.readFileSync(new URL('../public/construction-background-hq.webp',import.meta.url));
+ assert.match(html,/#app-view \.main-shell\s*\{[^}]*background-image:\s*linear-gradient\(rgba\(255,255,255,\.38\), rgba\(255,255,255,\.38\)\), url\("\/construction-background-hq\.webp\?v=2"\)/s);
  assert.match(html,/background-repeat:\s*no-repeat/);
  assert.match(html,/background-size:\s*100% auto/);
- assert.doesNotMatch(html,/background-repeat:\s*repeat-y/);
  assert.equal(background.subarray(0,4).toString(),'RIFF');
  assert.equal(background.subarray(8,12).toString(),'WEBP');
- assert(background.length>2000);
+ assert(background.length>40000,'Imagem deve ter qualidade maior que versao comprimida antiga');
  assert.match(html,/#live-status\s*\{\s*display:\s*none/);
 });
 test('Só o avatar do Financeiro mostra desenho de dinheiro',()=>{
