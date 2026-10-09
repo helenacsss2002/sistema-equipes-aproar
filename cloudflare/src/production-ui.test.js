@@ -16,7 +16,14 @@ test('Server cannot enable production writes based on old homologation controls 
  assert.equal(conf.vars.APP_ENV,'producao');
  assert.equal(conf.vars.WRITES_ENABLED,undefined);
  assert.equal(conf.triggers,undefined);
- assert.deepEqual(conf.previews,{},'Cloudflare PR preview builds require a previews block.');
+ assert.deepEqual(conf.previews?.vars,{APP_ENV:'homologacao'},'PR preview environment must stay isolated.');
+ const root=JSON.parse(fs.readFileSync(new URL('../../wrangler.jsonc',import.meta.url),'utf8'));
+ assert.equal(root.name,conf.name,'Root fallback config must target the same validation worker.');
+ assert.equal(root.main,'cloudflare/src/worker.js');
+ assert.equal(root.assets.directory,'cloudflare/public');
+ assert.deepEqual(root.previews,conf.previews);
+ assert.deepEqual(root.vars,conf.vars);
+ assert.equal(root.triggers,undefined);
  assert.match(worker,/mayDeleteProduction\(env\)/);
  assert.match(worker,/writes\(env\)/);
 });
