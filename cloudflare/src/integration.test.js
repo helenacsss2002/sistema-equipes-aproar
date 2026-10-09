@@ -167,3 +167,49 @@ test('Controladoria registers units independently and protects works with histor
   assert.equal(permittedProductionDeletion(env,admin,protectedDb,protectOps),false);
  } finally {await pg.close();}
 });
+
+test('Controladoria exclui unidade sem obras e bloqueia unidade em uso',async()=>{
+ const {pg,sql}=await fixture();
+ try{
+  let db=await readDatabase(sql),next=structuredClone(db.state);
+  next.units=[...next.units,'UNIDADE TEMPORARIA'];
+  db=(await save(sql,next,admin)).after;
+  assert(db.state.units.includes('UNIDADE TEMPORARIA'));
+  next=structuredClone(db.state);next.units=next.units.filter(u=>u!=='UNIDADE TEMPORARIA');
+  const ops=buildOperations(db,next,admin,now);
+  assert(ops.some(op=>op.table==='aproar_web_settings'&&op.action==='update'));
+  assert.equal(permittedProductionDeletion({APP_ENV:'producao'},admin,db,ops),true);
+  db=(await save(sql,next,admin)).after;
+  assert(!db.state.units.includes('UNIDADE TEMPORARIA'));
+  assert(db.state.units.includes('FIEC'));
+  next=structuredClone(db.state);next.units=next.units.filter(u=>u!=='FIEC');
+  assert.throws(()=>buildOperations(db,next,admin,now),/Cadastro de unidades inválido/);
+  assert.throws(()=>buildOperations(db,next,actor,now),/Sem permissão para alterar configurações/);
+ }finally{await pg.close();}
+});
+
+test('Controladoria exclui varias obras sem vinculos de forma atomica e preserva historico',async()=>{
+ const {pg,sql}=await fixture();
+ try{
+  let db=await readDatabase(sql),next=structuredClone(db.state);
+  next.obras.push({id:'nova-a',nome:'Obra sem uso A',unidade:'FIEC'});
+  next.obras.push({id:'nova-b',nome:'Obra sem uso B',unidade:'SEBRAE'});
+  db=(await save(sql,next,admin)).after;
+  const ids=db.state.obras.filter(o=>o.nome.startsWith('Obra sem uso')).map(o=>o.id);
+  assert.equal(ids.length,2);
+  next=structuredClone(db.state);next.obras=next.obras.filter(o=>!ids.includes(o.id));
+  const ops=buildOperations(db,next,admin,now),env={APP_ENV:'producao'};
+  assert.deepEqual(ops.filter(o=>o.action==='delete').map(o=>o.table),['obras','obras']);
+  assert.equal(permittedProductionDeletion(env,admin,db,ops),true);
+  assert.equal(permittedProductionDeletion(env,actor,db,ops),false);
+  assert.equal(permittedProductionDeletion(env,admin,db,[...ops,{table:'convocacoes',action:'delete',id:'1'}]),false);
+  assert.equal(permittedProductionDeletion(env,admin,db,[...ops,{table:'obras',action:'delete',id:ids[0]}]),false);
+  const linked=structuredClone(db);linked.raw.servicos_apontamento.push({obra_id:ids[0]});
+  assert.equal(permittedProductionDeletion(env,admin,linked,ops),false);
+  db=(await save(sql,next,admin)).after;
+  assert.equal(db.state.obras.length,3);
+  assert(!db.state.obras.some(o=>ids.includes(o.id)));
+  assert.equal(db.state.apontamentos.length,0);
+  assert.equal(db.raw.colaboradores.length,1);
+ }finally{await pg.close();}
+});
