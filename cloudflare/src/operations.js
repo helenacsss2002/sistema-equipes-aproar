@@ -80,7 +80,16 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
  if(session.role!=='CONTROLADORIA'){
   for(const k of ['teamsConfig','unitOwners','teamsAutomation','teamsMessage','teamsHistory'])if(!same(next[k]??base[k],base[k]))fail('Sem permissão para alterar configurações.',403);
  }else{
-  for(const [s,x] of Object.entries(next.teamsConfig||{})){if(!supervisors.includes(s))fail('Supervisor inválido.');if(x.email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x.email))fail('E-mail inválido.');if(!same(x,base.teamsConfig?.[s]))add('engenheiros_teams','update',s,{email_teams:x.email||'',ativo:x.ativo!==false});}
+  for(const [s,x] of Object.entries(next.teamsConfig||{})){
+   const previous=base.teamsConfig?.[s];
+   // Old Teams recipients can still include supervisors no longer active in APROAR.
+   // Preserve untouched legacy rows; only reject new or edited unsupported supervisors.
+   if(!supervisors.includes(s)){if(!previous||!same(x,previous))fail('Supervisor inválido.');continue;}
+   if(!same(x,previous)){
+     if(x.email&&!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(x.email))fail('E-mail inválido.');
+     add('engenheiros_teams','update',s,{email_teams:x.email||'',ativo:x.ativo!==false});
+   }
+  }
   const history=(next.teamsHistory||[]).filter(x=>!numericId(x.id));const config={unitOwners:next.unitOwners||{},teamsAutomation:!!next.teamsAutomation,teamsMessage:next.teamsMessage||'',teamsHistory:history};if(!same(config,db.raw.settings[0]?.data||{}))add('aproar_web_settings','update',1,{data:config});
  }
  // Always generate a server audit record for actual changes, rather than trusting browser audit text.
