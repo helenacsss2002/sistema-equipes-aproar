@@ -12,6 +12,30 @@ test('Invalid statement after a valid insert rolls back the entire transaction',
 test('Retries of the same request cannot create duplicate convocations',async()=>{const {pg,sql}=await fixture();try{const db=await readDatabase(sql),next=structuredClone(db.state);conv(next);const ops=buildOperations(db,next,actor,now),id=crypto.randomUUID();await sql`SELECT aproar_web_apply(${db.version},${id},${actor.user},${'hash'},${JSON.stringify(ops)}::jsonb)`;await sql`SELECT aproar_web_apply(${db.version},${id},${actor.user},${'hash'},${JSON.stringify(ops)}::jsonb)`;assert.equal((await pg.query('SELECT count(*)::int n FROM convocacoes')).rows[0].n,1);}finally{await pg.close();}});
 test('Supervisor cannot change another supervisor or financial protected values',async()=>{const {pg,sql}=await fixture();try{let db=await readDatabase(sql),next=structuredClone(db.state);conv(next);next.convocacoes[0].supervisor='FELIPE';assert.throws(()=>buildOperations(db,next,actor,now),/própria equipe/);next=structuredClone(db.state);conv(next);attendance(next,'draft-conv');db=(await save(sql,next,actor)).after;next=structuredClone(db.state);next.apontamentos[0].itens[0].status='Falta';assert.throws(()=>buildOperations(db,next,finance,now),/só altera pagamentos/);next=structuredClone(db.state);next.apontamentos[0].itens[0].financeiro=180;db=(await save(sql,next,finance)).after;assert.equal(Number(db.raw.apontamentos[0].custo_pago),180);assert.equal(db.raw.apontamentos[0].apontado_por,'EDUARDO');assert.equal(db.raw.apontamentos[0].custo_pago_definido_financeiro,true);assert.throws(()=>buildOperations(db,db.state,{role:'VISUALIZAR',user:'VISUALIZAR'},now),/somente visualização/);}finally{await pg.close();}});
 test('Cross-unit overlapping turns are rejected while morning/evening coexist',async()=>{const {pg,sql}=await fixture();try{const db=await readDatabase(sql),next=structuredClone(db.state);conv(next);next.convocacoes[0].turno='Manhã';next.convocacoes.push({...next.convocacoes[0],id:'second',unidade:'SEBRAE',turno:'Tarde'});assert.doesNotThrow(()=>buildOperations(db,next,actor,now));next.convocacoes[1].turno='Integral';assert.throws(()=>buildOperations(db,next,actor,now),/Conflito/);}finally{await pg.close();}});
+test('Integral means daytime only: allow Soares at night and retain morning conflict',async()=>{
+ const {pg,sql}=await fixture();
+ try{
+  const db=await readDatabase(sql);
+  const initial=structuredClone(db.state);
+  conv(initial);
+  initial.convocacoes[0].supervisor='VICTOR';
+  initial.convocacoes[0].turno='Integral';
+  const night={...initial.convocacoes[0],id:'soares-night',supervisor:'SOARES',unidade:'SEBRAE',turno:'Noite'};
+  const next=structuredClone(initial);
+  next.convocacoes.push(night);
+  assert.doesNotThrow(()=>buildOperations(db,next,admin,now),'Integral+Noite must coexist');
+  for(const turno of ['Manhã','Tarde','Integral']){
+   next.convocacoes[1].turno=turno;
+   assert.throws(()=>buildOperations(db,next,admin,now),/Conflito/, 'Integral+'+turno+' must remain blocked');
+  }
+  next.convocacoes[1].turno='Noite';
+  next.convocacoes[0].turno='Noite';
+  assert.throws(()=>buildOperations(db,next,admin,now),/Conflito/,'Noite+Noite must remain blocked');
+  next.convocacoes[0].turno='Noite';
+  next.convocacoes[1].turno='Integral';
+  assert.doesNotThrow(()=>buildOperations(db,next,admin,now),'Noite+Integral must coexist in reverse order');
+ }finally{await pg.close();}
+});
 test('New temporary collaborator IDs resolve atomically with convocation and attendance',async()=>{const {pg,sql}=await fixture();try{const db=await readDatabase(sql),next=structuredClone(db.state);next.colaboradores.push({id:'temp-worker',nome:'Avulso QA',funcao:'Pedreiro',custo:241.74,moradia:'',inativo:false,categoria:'Profissional',avulso:'Sim'});conv(next);next.convocacoes[0].colaboradores=['temp-worker'];attendance(next,'draft-conv');next.apontamentos[0].itens[0].colaboradorId='temp-worker';const after=(await save(sql,next,actor)).after;assert.equal(after.state.colaboradores.length,2);assert.equal(after.state.convocacoes[0].colaboradores[0],'2');assert.equal(after.raw.apontamentos[0].colaborador_id,'2');}finally{await pg.close();}});
 test('Signed sessions reject tampering, expiry, bad passwords and cross-origin writes',async()=>{const env={CONNECTION_CHECK_TOKEN:'a'.repeat(40),ADMIN_PASSWORD:'admin-qa',FINANCE_PASSWORD:'finance-qa',VIEWER_PASSWORD:'viewer-qa',SUPERVISOR_PASSWORDS:JSON.stringify({EDUARDO:'supervisor-qa'})};const result=await login({role:'SUPERVISOR',supervisor:'EDUARDO',password:'supervisor-qa'},env);const cookie=result.cookie.split(';')[0];assert.equal((await identity(new Request('https://app.test',{headers:{cookie}}),env)).user,'EDUARDO');assert.equal(await identity(new Request('https://app.test',{headers:{cookie:cookie.replace('aproar_session=','aproar_session=x')}}),env),null);await assert.rejects(login({role:'CONTROLADORIA',password:'wrong'},env),/inválidos/);assert.equal(sameOrigin(new Request('https://app.test',{headers:{origin:'https://other.test'}})),false);});
 
