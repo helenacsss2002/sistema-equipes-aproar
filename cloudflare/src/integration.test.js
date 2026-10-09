@@ -213,3 +213,46 @@ test('Controladoria exclui varias obras sem vinculos de forma atomica e preserva
   assert.equal(db.raw.colaboradores.length,1);
  }finally{await pg.close();}
 });
+
+
+test('Obra com unidade legada longa nao bloqueia cadastro ou exclusao seguros de obras e unidades',async()=>{
+ const {pg,sql}=await fixture();
+ try{
+  const legacyUnit='LINK PARA ACESSO AO DRIVE: '+('LINK ANTIGO '.repeat(19));
+  assert(legacyUnit.length>200);
+  await pg.query('INSERT INTO obras(unidade,nome) VALUES($1,$2)',[legacyUnit,'Obra legada importada']);
+  let db=await readDatabase(sql);
+  assert(db.state.units.includes(legacyUnit),'O nome de unidade legado permanece visivel');
+  let next=structuredClone(db.state);
+  next.units.push('SÃO GONÇALO');
+  db=(await save(sql,next,admin)).after;
+  assert(db.state.units.includes('SÃO GONÇALO'));
+  assert(!db.raw.settings[0].data.units.includes(legacyUnit),'A unidade longa nao deve ser persistida como cadastro novo');
+
+  next=structuredClone(db.state);
+  next.obras.push({id:'nova-sao-goncalo',nome:'Serviço novo',unidade:'SÃO GONÇALO'});
+  db=(await save(sql,next,admin)).after;
+  const work=db.state.obras.find(o=>o.nome==='Serviço novo');
+  assert(work,'Obra nova deve ser cadastrada normalmente');
+  next=structuredClone(db.state);
+  next.obras=next.obras.filter(o=>o.id!==work.id);
+  const ops=buildOperations(db,next,admin,now);
+  assert.equal(permittedProductionDeletion({APP_ENV:'producao'},admin,db,ops),true);
+  db=(await save(sql,next,admin)).after;
+  assert(!db.state.obras.some(o=>o.id===work.id),'A obra sem historico deve ser excluida');
+
+  next=structuredClone(db.state);
+  next.units=next.units.filter(u=>u!=='SÃO GONÇALO');
+  db=(await save(sql,next,admin)).after;
+  assert(!db.state.units.includes('SÃO GONÇALO'),'A unidade sem vinculos deve ser excluida');
+  assert(db.state.obras.some(o=>o.unidade===legacyUnit),'A obra legada nao foi modificada');
+  assert(!db.raw.settings[0].data.units.includes(legacyUnit),'Nome derivado invalido nao contamina configuracao');
+
+  next=structuredClone(db.state);
+  next.units.push('X'.repeat(201));
+  assert.throws(()=>buildOperations(db,next,admin,now),/Cadastro de unidades inválido/);
+  next=structuredClone(db.state);
+  next.units=next.units.map(u=>u===legacyUnit?'Y'.repeat(230):u);
+  assert.throws(()=>buildOperations(db,next,admin,now),/Cadastro de unidades inválido/);
+ }finally{await pg.close();}
+});
