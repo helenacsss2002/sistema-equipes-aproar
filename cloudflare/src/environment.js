@@ -26,7 +26,15 @@ export function permittedProductionDeletion(env,session,db,operations){
   if(!deletions.length)return true;
   if(env.APP_ENV!=='producao'||session.role!=='CONTROLADORIA'||deletions.length!==1)return false;
   const op=deletions[0];
-  if(op.table!=='convocacoes'||!/^[0-9]+$/.test(op.id))return false;
+  if(!/^[0-9]+$/.test(op.id))return false;
+  if(op.table==='obras'){
+    if(!db.raw.obras.some(o=>String(o.id)===op.id))return false;
+    if(db.raw.convocacoes.some(c=>String(c.obra_id)===op.id))return false;
+    if(db.raw.servicos_apontamento.some(s=>String(s.obra_id)===op.id))return false;
+    if(db.state.apontamentos.some(a=>a.itens.some(i=>i.servicos?.some(s=>String(s.obraId)===op.id))))return false;
+    return true;
+  }
+  if(op.table!=='convocacoes')return false;
   const existing=db.raw.convocacoes.find(c=>String(c.id)===op.id);
   if(!existing)return false;
   if(db.raw.apontamentos.some(a=>String(a.convocacao_id)===op.id))return false;
