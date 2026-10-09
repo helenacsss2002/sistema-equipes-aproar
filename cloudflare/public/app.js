@@ -1004,7 +1004,7 @@
       workForm.onsubmit=e=>{const selected=unit.value;if(!selected){e.preventDefault();return showToast('Cadastre e selecione uma unidade.',true);}formSubmit(e);};
       $$('[data-edit-obra]').forEach(b=>{const previous=b.onclick;b.onclick=()=>{previous();if(!currentUnits().includes(unit.value)){unit.innerHTML+=options([unit.value]);}};});
       refreshUnits();
-      const cells=$('#obra-list table tbody tr');
+      const cells=$$('#obra-list table tbody tr');
       cells.forEach((tr,index)=>{const obra=OBRAS[index];if(!obra)return;const last=tr.querySelector('td:last-child');if(!last)return;const btn=document.createElement('button');btn.type='button';btn.className='link-btn danger-link';btn.textContent='Excluir';btn.style.marginLeft='12px';btn.onclick=()=>{const used=state.convocacoes.some(c=>String(c.obraId)===String(obra.id))||state.apontamentos.some(a=>a.itens.some(i=>i.servicos?.some(x=>String(x.obraId)===String(obra.id))));if(used)return showToast('Esta obra possui registros vinculados e não pode ser excluída.',true);if(!window.confirm('Excluir somente a obra "'+obra.nome+'"? Esta ação não exclui a unidade.'))return;const index=OBRAS.findIndex(o=>o.id===obra.id);if(index<0)return;OBRAS.splice(index,1);audit('Exclusão de obra sem vínculos',obra.id);saveData();};last.appendChild(btn);});
     }
     const body=$('#settings-body');
