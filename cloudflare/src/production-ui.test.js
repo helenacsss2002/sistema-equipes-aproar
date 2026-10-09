@@ -27,3 +27,12 @@ test('Server cannot enable production writes based on old homologation controls 
  assert.match(worker,/mayDeleteProduction\(env\)/);
  assert.match(worker,/writes\(env\)/);
 });
+
+test('Connected diagnostics use Neon records rather than legacy local-demo text',()=>{
+ const js=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
+ assert.match(js,/if\(diagnostic&&onlineSession\)/);
+ assert.match(js,/p\.textContent='Banco Neon/);
+ assert.match(js,/badge\.textContent='Conectado ao banco de '/);
+ assert.doesNotMatch(js,/Sem conexão com o banco de produção/);
+ assert.doesNotMatch(js,/Demonstração HTML • dados locais/);
+});
