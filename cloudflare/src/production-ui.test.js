@@ -167,7 +167,7 @@ test('Pesquisa de obra por texto funciona nos apontamentos normais retroativos e
  assert.ok(js.includes('?.id||'));
  assert.ok(allocation.includes('placeholder="Selecione ou digite'));
  assert.ok(bind.includes("insertAdjacentHTML('beforeend',allocationRow("));
- assert.match(html,/\.service-work-search\s*\{\s*margin-bottom:\s*7px;/);
+ assert.ok(html.includes('.service-work { width: 100%; }'));
  assert.ok(js.includes('function renderApontamentoRetroativo()'));
  assert.ok(js.includes('function renderEquipeDia()'));
  assert.ok(js.includes('function renderApontamentoNormal()'));
