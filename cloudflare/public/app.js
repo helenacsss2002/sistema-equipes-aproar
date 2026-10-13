@@ -940,7 +940,23 @@
   function renderPayments(){
     if(selectedCycle!=='custom'){const cycle=financialCycle(isoToday(),Number(selectedCycle));reportFilters.inicio=cycle.inicio;reportFilters.fim=cycle.fim;}
     $('#main-content').innerHTML=head('Pagamentos','Ciclo de terça a segunda, com pagamento na terça seguinte.')+cycleControl()+filterControls()+'<div class="section" id="pay-body"></div>'+exportButtons();
-    const refresh=()=>{const e=financialEntries().filter(x=>x.finance>0.005||x.night>0.005||x.bonus>0.005);$('#pay-body').innerHTML=metric('TOTAL A PAGAR',money(e.reduce((v,x)=>v+x.finance+x.night+x.bonus,0)),'sem periculosidade')+`<div class="section">${table(['Colaborador','Total a pagar'],[...new Set(e.map(x=>x.p?.id))].map(id=>[escapeHtml(colaboradorById(id)?.nome),money(e.filter(x=>x.p?.id===id).reduce((v,x)=>v+x.finance+x.night+x.bonus,0))]))}</div><h3>Detalhamento por dia</h3>`+table(['Data','Colaborador','Status','Financeiro (R$)','Noturno (R$)','Acordos (R$)'],e.map((x,index)=>[formatDate(x.c.dataServico),escapeHtml(x.p?.nome),escapeHtml(x.i.status),...['financeiro','noturno','acordo'].map(k=>`<input aria-label="${k}" class="control pay-input" type="number" min="0" step="0.01" data-index="${index}" data-field="${k}" value="${k==='financeiro'?x.finance:k==='noturno'?x.night:x.bonus}" ${k==='noturno'&&!x.units.has('SEBRAE')?'disabled':''}>`)]));$$('.pay-input').forEach(inp=>inp.onchange=()=>{adjustPayment(e[Number(inp.dataset.index)],inp.dataset.field,inp.value);refresh();});};bindFilters(()=>{selectedCycle='custom';$('#financial-cycle').value='custom';refresh();});$('#financial-cycle').onchange=()=>{selectedCycle=$('#financial-cycle').value;renderPayments();};if(selectedCycle!=='custom')$('#cycle-caption').textContent='Pagamento em '+formatDate(financialCycle(isoToday(),Number(selectedCycle)).pagamento);refresh();bindExports();
+    const refresh=()=>{
+      const e=financialEntries().filter(x=>x.finance>0.005||x.night>0.005||x.bonus>0.005||x.ajudaCusto>0.005);
+      const total=x=>x.finance+x.night+x.bonus+x.ajudaCusto;
+      const predefinidos='<datalist id="passagens-ajuda-valores"><option value="11" label="Fortaleza - R$ 11,00"></option><option value="10" label="Caucaia - R$ 10,00"></option><option value="12" label="Maracanaú - R$ 12,00"></option><option value="25" label="Horizonte - R$ 25,00"></option></datalist>';
+      const fields=['financeiro','noturno','acordo','ajudaCusto'];
+      $('#pay-body').innerHTML=metric('TOTAL A PAGAR',money(e.reduce((v,x)=>v+total(x),0)),'sem periculosidade')
+        +'<div class="section">'+table(['Colaborador','Total a pagar'],[...new Set(e.map(x=>x.p?.id))].map(id=>[escapeHtml(colaboradorById(id)?.nome),money(e.filter(x=>x.p?.id===id).reduce((v,x)=>v+total(x),0))]))+'</div>'
+        +'<h3>Detalhamento por dia</h3>'
+        +'<p class="help-text">Passagens/Ajuda de custo: Fortaleza R$ 11, Caucaia R$ 10, Maracanaú R$ 12 e Horizonte R$ 25. Selecione um valor sugerido ou digite outro. Sem lançamento, o valor é R$ 0.</p>'
+        +table(['Data','Colaborador','Status','Financeiro (R$)','Noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)'],e.map((x,index)=>[formatDate(x.c.dataServico),escapeHtml(x.p?.nome),escapeHtml(x.i.status),...fields.map(k=>`<input aria-label="${k==='ajudaCusto'?'Passagens/Ajuda de custo':k}" class="control pay-input" type="number" min="0" step="0.01" ${k==='ajudaCusto'?'list="passagens-ajuda-valores"':''} data-index="${index}" data-field="${k}" value="${k==='financeiro'?x.finance:k==='noturno'?x.night:k==='acordo'?x.bonus:x.ajudaCusto}" ${k==='noturno'&&!x.units.has('SEBRAE')?'disabled':''}>`)]))
+        +predefinidos;
+      $$('.pay-input').forEach(inp=>inp.onchange=()=>{adjustPayment(e[Number(inp.dataset.index)],inp.dataset.field,inp.value);refresh();});
+    };
+    bindFilters(()=>{selectedCycle='custom';$('#financial-cycle').value='custom';refresh();});
+    $('#financial-cycle').onchange=()=>{selectedCycle=$('#financial-cycle').value;renderPayments();};
+    if(selectedCycle!=='custom')$('#cycle-caption').textContent='Pagamento em '+formatDate(financialCycle(isoToday(),Number(selectedCycle)).pagamento);
+    refresh();bindExports();
   }
   function absenceRecords(){const groups=new Map();for(const x of operationalRows(filteredConvs()).filter(x=>['Falta','Atestado'].includes(x.i?.status))){const key=[x.c.dataServico,x.i.colaboradorId,x.c.supervisor,x.i.status].join('|');if(!groups.has(key))groups.set(key,{...x,units:new Set(),notes:new Set()});const r=groups.get(key);r.units.add(x.c.unidade);if(x.i.observacao)r.notes.add(x.i.observacao);}return [...groups.values()].sort((a,b)=>a.c.dataServico.localeCompare(b.c.dataServico)||(a.p?.nome||'').localeCompare(b.p?.nome||'','pt-BR'));}
   function absenceReportRows(){return absenceRecords().map(x=>[formatDate(x.c.dataServico),x.c.supervisor,x.p?.nome||'',x.p?.funcao||'',[...x.units].join(', '),x.i.status,[...x.notes].join(' · ')]);}
