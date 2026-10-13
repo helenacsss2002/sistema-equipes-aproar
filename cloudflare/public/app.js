@@ -1271,7 +1271,7 @@
   // Financial changes are sent as a small, explicit batch: never re-upload the entire system.
   async function saveFinancialUpdates(items){
     if(!onlineSession||onlineSession.role!=='FINANCEIRO'||!onlineWritable){
-      if(onlineConfirmed)applyOnline({state:copy(onlineConfirmed),version:onlineVersion,session:onlineSession,writesEnabled:onlineWritable,stage:onlineStage});
+      if(onlineConfirmed){state=copy(onlineConfirmed);OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);}
       render();return showToast('Gravação financeira não autorizada.',true);
     }
     const ids=new Map();
