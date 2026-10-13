@@ -256,3 +256,55 @@ test('Obra com unidade legada longa nao bloqueia cadastro ou exclusao seguros de
   assert.throws(()=>buildOperations(db,next,admin,now),/Cadastro de unidades inválido/);
  }finally{await pg.close();}
 });
+
+
+test('Financeiro grava passagem/ajuda de custo no Neon, sem alterar estrutura ou apontamento operacional',async()=>{
+ const {pg,sql}=await fixture();
+ try{
+  let db=await readDatabase(sql),next=structuredClone(db.state);
+  conv(next);attendance(next,'draft-conv');
+  db=(await save(sql,next,actor)).after;
+  assert.equal(db.state.apontamentos[0].itens[0].ajudaCusto,0,'Histórico começa sem ajuda de custo');
+  next=structuredClone(db.state);
+  next.apontamentos[0].itens[0].ajudaCusto=11;
+  db=(await save(sql,next,finance)).after;
+  assert.equal(db.state.apontamentos[0].itens[0].ajudaCusto,11);
+  assert.equal(db.raw.apontamentos.length,1);
+  assert.equal(Number(db.raw.apontamentos[0].valor_acordo),20);
+  assert.equal(Number(db.raw.apontamentos[0].custo_pago),120);
+  assert.match(db.raw.convocacoes[0].observacao,/"valor_ajuda_custo":11/);
+  const cols=(await pg.query("SELECT column_name FROM information_schema.columns WHERE table_name='apontamentos' ORDER BY column_name")).rows.map(x=>x.column_name);
+  assert(!cols.includes('valor_ajuda_custo'),'O lançamento usa metadados existentes, sem migração destrutiva');
+
+  next=structuredClone(db.state);
+  next.apontamentos[0].itens[0].ajudaCusto=25;
+  assert.throws(()=>buildOperations(db,next,actor,now),/Somente o Financeiro/);
+  assert.throws(()=>buildOperations(db,next,admin,now),/Somente o Financeiro/);
+  assert.equal((await readDatabase(sql)).state.apontamentos[0].itens[0].ajudaCusto,11,'Edição indevida não é persistida');
+
+  next=structuredClone(db.state);
+  next.apontamentos[0].itens[0].observacao='Revisão operacional permitida';
+  db=(await save(sql,next,actor)).after;
+  assert.equal(db.state.apontamentos[0].itens[0].ajudaCusto,11,'Correção do supervisor preserva a ajuda');
+  assert.equal(db.state.apontamentos[0].itens[0].observacao,'Revisão operacional permitida');
+
+  next=structuredClone(db.state);
+  next.apontamentos[0].itens[0].ajudaCusto=10;
+  db=(await save(sql,next,finance)).after;
+  assert.equal(db.state.apontamentos[0].itens[0].ajudaCusto,10,'Pode editar o valor livremente');
+  next=structuredClone(db.state);
+  next.apontamentos[0].itens[0].ajudaCusto=12;
+  db=(await save(sql,next,finance)).after;
+  assert.equal(db.state.apontamentos[0].itens[0].ajudaCusto,12);
+  next=structuredClone(db.state);
+  next.apontamentos[0].itens[0].ajudaCusto=17.5;
+  db=(await save(sql,next,finance)).after;
+  assert.equal(db.state.apontamentos[0].itens[0].ajudaCusto,17.5,'Aceita valor personalizado');
+  next=structuredClone(db.state);
+  next.apontamentos[0].itens[0].ajudaCusto=-5;
+  assert.throws(()=>buildOperations(db,next,finance,now),/Valor financeiro inválido/);
+  next.apontamentos[0].itens[0].ajudaCusto=0;
+  db=(await save(sql,next,finance)).after;
+  assert.equal(db.state.apontamentos[0].itens[0].ajudaCusto,0,'Pode remover uma passagem lançada');
+ }finally{await pg.close();}
+});
