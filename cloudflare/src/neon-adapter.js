@@ -8,7 +8,7 @@ const extraLabel=(value,base)=>{const ratio=base>0?amount(value)/base:0;return r
 export function mapNeonData(db){
   const colaboradores=(db.colaboradores||[]).map(p=>({id:id(p.id),nome:p.nome,funcao:p.funcao,custo:amount(p.valor_diaria),moradia:p.local_moradia||'',inativo:p.ativo===false,categoria:p.categoria_diaria||'',avulso:p.avulso||'Não'}));
   const obras=(db.obras||[]).map(o=>({id:id(o.id),nome:o.nome,unidade:o.unidade}));
-  const people=new Map(colaboradores.map(p=>[p.id,p])),works=new Map(obras.map(o=>[o.id,o]));
+  const people=new Map(colaboradores.map(p=>[p.id,p])),works=new Map(obras.map(o=>[o.id,o])),worksByName=new Map(obras.map(o=>[o.nome,o]));
   const pointed=new Map((db.apontamentos||[]).map(a=>[id(a.convocacao_id),a]));
   const services=new Map();for(const s of db.servicos_apontamento||[]){const key=id(s.convocacao_id);if(!services.has(key))services.set(key,[]);services.get(key).push(s);}
   const convocacoes=[],apontamentos=[],warnings=[];
@@ -18,7 +18,7 @@ export function mapNeonData(db){
     // The initial presence status of a convocation is NOT an attendance entry.
     const a=pointed.get(key);if(!a&&!meta.apontado_em&&c.custos_separados!==true)continue;
     const source=a||c,raw=services.get(key)||[],additional=meta.servicos_adicionais||[];
-    const mapped=raw.length?raw.map(s=>({obraId:id(s.obra_id)||obras.find(o=>o.nome===s.obra_nome_snapshot)?.id||'',periodo:s.periodo||turno})): [{obraId:work,periodo:meta.periodo_principal||turno},...additional.map(s=>({obraId:id(s.obra_id)||obras.find(o=>o.nome===s.servico)?.id||'',periodo:s.periodo||turno}))];
+    const mapped=raw.length?raw.map(s=>({obraId:id(s.obra_id)||worksByName.get(s.obra_nome_snapshot)?.id||'',periodo:s.periodo||turno})): [{obraId:work,periodo:meta.periodo_principal||turno},...additional.map(s=>({obraId:id(s.obra_id)||worksByName.get(s.servico)?.id||'',periodo:s.periodo||turno}))];
     if(mapped.some(s=>!s.obraId))warnings.push({code:'UNMAPPED_SERVICE',convocacaoId:key});
     const cost=people.get(person)?.custo||0,extra=amount(source.valor_extra),savedType=['Não','Meia diária','Diária','Uma e meia diária','Duas diárias'].includes(source.tipo_diaria)?source.tipo_diaria:null;if(extra&&extraLabel(extra,cost)==='Valor específico')warnings.push({code:'NONSTANDARD_EXTRA',convocacaoId:key,value:extra});
     apontamentos.push({id:a?id(a.id):'legacy-'+key,convocacaoId:key,supervisor:c.engenheiro,dataServico:isoDate(c.data),apontadoEm:a?.apontado_em||meta.apontado_em||null,executor:a?.apontado_por||meta.apontado_por||c.engenheiro,retroativo:a?.retroativo||meta.apontamento_atrasado||false,itens:[{colaboradorId:person,status:source.status==='Extra'?'Presente (Integral)':source.status,extra:savedType||extraLabel(extra,cost),valorExtraOriginal:extra,observacao:a?.observacao||text.replace(/^Turno:[^|]+\|?\s*/,''),financeiro:amount(source.custo_pago??meta.custo_pago),financeAdjusted:source.custo_pago_definido_financeiro===true,noturno:amount(source.valor_adicional_noturno??meta.valor_adicional_noturno),acordo:amount(source.valor_acordo??meta.valor_acordo),ajudaCusto:amount(meta.valor_ajuda_custo),tipoDiariaOriginal:source.tipo_diaria,servicos:mapped,custoEncargosOriginal:source.custo_encargos_base}]});
