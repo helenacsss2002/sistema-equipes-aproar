@@ -1231,7 +1231,31 @@
   
   let onlineVersion='',onlineSession=null,onlineWritable=false,onlineStage='homologacao',onlineConfirmed=null,onlineQueued=false,onlineSaving=false,onlineMessage='';
   const copy=v=>JSON.parse(JSON.stringify(v));
-  async function api(path,options={}){const response=await fetch(path,{credentials:'same-origin',...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});const data=await response.json();if(!response.ok)throw Object.assign(new Error(data.error||'Falha na comunicação.'),{status:response.status});return data;}
+  async function api(path,options={}){
+    const response=await fetch(path,{credentials:'same-origin',...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});
+    const contentType=response.headers.get('content-type')||'';
+    let data;
+    if(contentType.toLowerCase().includes('application/json')){
+      try{data=await response.json();}catch{/* Incomplete or interrupted API response. */}
+    }
+    if(!data||typeof data!=='object'){
+      const saving=path==='/api/save';
+      throw Object.assign(new Error(saving
+        ?'O servidor interrompeu a resposta do salvamento. Confira se o valor foi registrado antes de lançar novamente.'
+        :'O servidor da APROAR respondeu com uma página inválida ou ficou temporariamente indisponível. Aguarde e tente novamente.'),{status:response.ok?502:response.status||502,nonJson:true});
+    }
+    if(!response.ok)throw Object.assign(new Error(data.error||'Falha na comunicação.'),{status:response.status});
+    return data;
+  }
+  async function restoreOnlineSession(){
+    try{return await api('/api/bootstrap');}
+    catch(error){
+      if(error.status===401||error.status===403)return Promise.reject(error);
+      // Only retry a read: never repeat a write merely because a response was interrupted.
+      await new Promise(resolve=>setTimeout(resolve,1500));
+      return api('/api/bootstrap');
+    }
+  }
   function applyOnline(result){state=result.state;OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);onlineVersion=result.version;onlineSession=result.session;onlineWritable=result.writesEnabled;onlineStage=result.stage||'homologacao';onlineConfirmed=copy(state);perfilAtual=result.session.role;supervisorAtual=result.session.role==='SUPERVISOR'?result.session.user:'';}
   function lockOnline(locked){$('#app-view').inert=locked;$('#online-saving').classList.toggle('hidden',!locked);}
   function toast(message,error=false){if((onlineQueued||onlineSaving)&&!error){onlineMessage=message;return;}showToast(message,error);}
@@ -1241,7 +1265,7 @@
     queueMicrotask(async()=>{onlineQueued=false;onlineSaving=true;const payload=JSON.stringify({requestId:crypto.randomUUID(),version:onlineVersion,state:copy(state)});try{
       let result;for(let attempt=0;attempt<2;attempt++){try{result=await api('/api/save',{method:'POST',body:payload});break;}catch(e){if(e.status||attempt===1)throw e;}}
       applyOnline(result);onlineSaving=false;render();showToast(onlineMessage||'Alterações salvas no Neon.');
-    }catch(e){try{applyOnline(await api('/api/bootstrap'));}catch{if(onlineConfirmed){state=copy(onlineConfirmed);OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);}}onlineSaving=false;render();showToast(e.message,true);
+    }catch(e){try{applyOnline(await restoreOnlineSession());}catch{if(onlineConfirmed){state=copy(onlineConfirmed);OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);}}onlineSaving=false;render();showToast(e.message,true);
     }finally{onlineQueued=false;onlineSaving=false;onlineMessage='';lockOnline(false);}});
   }
   function resetData(){toast('Restauração automática desativada na versão conectada.',true);}
@@ -1254,7 +1278,7 @@
     init();$('#reset-demo').classList.add('hidden');$('#login-access').onchange=()=>chooseLogin($('#login-access').value);$('#enter-supervisor').onclick=()=>chooseLogin('SUPERVISOR');$('#enter-viewer').onclick=()=>chooseLogin('VISUALIZAR');$('#login-back').onclick=()=>chooseLogin($('#login-access').value);
     $('#login-form').onsubmit=async e=>{e.preventDefault();const button=$('#login-button');button.disabled=true;$('#login-error').textContent='';try{await api('/api/login',{method:'POST',body:JSON.stringify({role:loginRole,supervisor:$('#login-supervisor').value,password:$('#login-password').value})});$('#login-password').value='';enterConnectedSession(await api('/api/bootstrap'));}catch(err){$('#login-error').textContent=err.message;}finally{button.disabled=false;}};
     // Preserve a valid signed HttpOnly session across F5; only Sair clears it.
-    $('#login-button').disabled=true;try{enterConnectedSession(await api('/api/bootstrap'));}catch(e){if(e.status!==401)$('#login-error').textContent='Não foi possível restaurar a sessão. Atualize a página ou entre novamente.';}finally{$('#login-password').value='';$('#login-button').disabled=false;}
+    $('#login-button').disabled=true;try{enterConnectedSession(await restoreOnlineSession());}catch(e){if(e.status!==401)$('#login-error').textContent=e.message+' Sua sessão não foi encerrada automaticamente.';}finally{$('#login-password').value='';$('#login-button').disabled=false;}
     window.addEventListener('pageshow',event=>{if(event.persisted)window.location.reload();});
   }
   initOnline();
