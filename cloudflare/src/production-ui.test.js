@@ -193,6 +193,39 @@ test('Pesquisa de obra por texto funciona nos apontamentos normais retroativos e
  assert.ok(js.includes("r.querySelector('.service-work').value"));
 });
 
+
+test('Passagens/Ajuda de custo: quatro precos sugeridos e campo editavel com persistencia',()=>{
+ const ui=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
+ const adapter=fs.readFileSync(new URL('./neon-adapter.js',import.meta.url),'utf8');
+ const ops=fs.readFileSync(new URL('./operations.js',import.meta.url),'utf8');
+ const payments=ui.slice(ui.indexOf('function renderPayments(){'),ui.indexOf('function absenceRecords(){'));
+ const reports=ui.slice(ui.indexOf('function renderReports(){'),ui.indexOf('function renderDashboard(){'));
+ const workbook=ui.slice(ui.indexOf('function financialWorkbook(){'),ui.indexOf('function exportReportsExcel(){'));
+ const pdf=ui.slice(ui.indexOf("}else if(kind==='financial'){"),ui.indexOf("}else{grid(['Data','Unidade / Obra'"));
+ assert.match(payments,/Passagens\/Ajuda de custo \(R\$\)/);
+ for(const [valor,cidade] of [['11','Fortaleza'],['10','Caucaia'],['12','Maracanaú'],['25','Horizonte']]){
+   assert.ok(payments.includes('<option value="'+valor+'" label="'+cidade),'Preset de '+cidade);
+ }
+ assert.ok(payments.includes('type="number" min="0" step="0.01"'),'Valor monetário editável');
+ assert.ok(payments.includes('list="passagens-ajuda-valores"'),'Predefinições selecionáveis');
+ assert.ok(payments.includes("data-field="),'Mudança salva por campo');
+ assert.ok(payments.includes("adjustPayment(e[Number(inp.dataset.index)],inp.dataset.field,inp.value)"));
+ assert.ok(payments.includes('x.finance+x.night+x.bonus+x.ajudaCusto'),'Total de pagamentos inclui passagem');
+ assert.ok(ui.includes('i.ajudaCusto=index===0?roundMoney(data.ajudaCusto):0'));
+ assert.ok(ui.includes('row.ajudaCusto+=(isPresent?Math.max(0,Number(i.ajudaCusto)||0):0)/ss.length'),'Rateio único por serviço');
+ assert.ok(ui.includes("['daily','extra','danger','night','bonus','finance','ajudaCusto']"),'Consolidado por colaborador soma passagem');
+ assert.ok(reports.includes("fin?['Passagens/Ajuda de custo']:['Periculosidade 30%']"),'Campo aparece só Financeiro');
+ assert.ok(reports.includes('x.finance+x.night+x.bonus+x.ajudaCusto'),'Total do relatório');
+ assert.ok(workbook.includes("'Passagens/Ajuda de custo (R$)'"));
+ assert.ok(workbook.includes('H${row}+I${row}+J${row}+K${row}'),'Fórmula inclui passagem');
+ assert.ok(workbook.includes('SUM(L${first}:L${rows.length})'),'Subtotal calcula coluna deslocada');
+ assert.ok(pdf.includes("'Passagens/Ajuda de custo'"));
+ assert.ok(pdf.includes('g.ajudaCusto+=x.ajudaCusto'));
+ assert.ok(pdf.includes('x.finance+x.night+x.bonus+x.ajudaCusto'));
+ assert.ok(adapter.includes('ajudaCusto:amount(meta.valor_ajuda_custo)'),'Persistência de leitura');
+ assert.ok(ops.includes('valor_ajuda_custo:money(ajudaCusto)'),'Persistência de escrita');
+ assert.ok(ops.includes('Somente o Financeiro pode alterar passagens/ajuda de custo'),'Proteção de perfil');
+});
 test('Background claro utiliza imagem original em alta definicao, sem repetir',()=>{
  const html=fs.readFileSync(new URL('../public/index.html',import.meta.url),'utf8');
  const background=fs.readFileSync(new URL('../public/construction-background-hq.webp',import.meta.url));
@@ -232,7 +265,7 @@ test('Só o avatar do Financeiro mostra desenho de dinheiro',()=>{
 });
 
 
-test('Relatorios mostram todas as 13 ou 12 colunas sem barra lateral e rolam verticalmente',()=>{
+test('Relatorios da Controladoria e Financeiro mostram 13 colunas sem barra lateral',()=>{
  const ui=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
  const html=fs.readFileSync(new URL('../public/index.html',import.meta.url),'utf8');
  assert.match(ui,/function configureReportTable\(financial\)/);
@@ -246,7 +279,7 @@ test('Relatorios mostram todas as 13 ou 12 colunas sem barra lateral e rolam ver
  assert(widths,'Larguras das tabelas financeira e da Controladoria devem existir');
  const financeiro=widths[1].split(',').map(Number);
  const controladoria=widths[2].split(',').map(Number);
- assert.equal(financeiro.length,12);
+ assert.equal(financeiro.length,13);
  assert.equal(controladoria.length,13);
  assert.equal(financeiro.reduce((a,b)=>a+b,0),100);
  assert.equal(controladoria.reduce((a,b)=>a+b,0),100);
