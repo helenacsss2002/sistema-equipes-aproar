@@ -2,6 +2,7 @@ import { neon } from '@neondatabase/serverless';
 import {mapNeonData} from './neon-adapter.js';
 import {readDatabase,visibleState,supervisors} from './data.js';
 import {buildOperations} from './operations.js';
+import {validateFinancialPayload,buildFinancialOperations} from './financial-adjust.js';
 import {login,identity,sameOrigin,equalSecret,logoutCookie} from './auth.js';
 import {writes,writeControls,stage,permittedProductionDeletion} from './environment.js';
 import {consultarTrello,sincronizarTrello,unidadeCard} from './trello.js';
@@ -62,19 +63,42 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
     const result=await sincronizarTrello(sql,{listId:payload.listId,cardId:payload.cardId});
     return json({ok:true,...result});
    }
-   if(path==='/api/bootstrap'&&request.method==='GET')return json(summary(await readDatabase(sql),session,env));
+   // Avoid retrieving multi-year audit logs for users who do not view them.
+   const readOptions=session.role==='FINANCEIRO'?{includeAudit:false}:session.role==='SUPERVISOR'?{auditUser:session.user}:{};
+   if(path==='/api/bootstrap'&&request.method==='GET')return json(summary(await readDatabase(sql,readOptions),session,env));
+   if(path==='/api/financial-adjust'&&request.method==='POST'){
+    if(session.role!=='FINANCEIRO')return json({error:'Somente o Financeiro pode lançar pagamentos e passagens.'},403);
+    if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);
+    if(!writes(env))return json({error:'Gravação não autorizada neste ambiente.'},403);
+    const body=validateFinancialPayload(await bodyJSON(request));
+    const ids=body.changes.map(change=>change.convocacaoId).join(',');
+    // Read only the attendance rows being adjusted. No full-state parse or serialization.
+    const rows=await sql`SELECT c.id::text AS convocacao_id,c.observacao,a.id::text AS apontamento_id,a.status,
+      a.valor_adicional_noturno AS noturno_atual,
+      (coalesce(upper(o.unidade),'')='SEBRAE' OR EXISTS(
+        SELECT 1 FROM servicos_apontamento s JOIN obras so ON so.id::text=s.obra_id
+        WHERE s.convocacao_id=a.convocacao_id AND upper(so.unidade)='SEBRAE'
+      )) AS has_sebrae
+      FROM convocacoes c JOIN apontamentos a ON a.convocacao_id=c.id::text
+      LEFT JOIN obras o ON o.id=c.obra_id
+      WHERE a.convocacao_id=ANY(string_to_array(${ids},','))`;
+    const operations=buildFinancialOperations(body.changes,rows,session.user);
+    const digest=await sha(JSON.stringify(body));
+    const applied=await sql`SELECT aproar_web_apply(${body.version},${body.requestId},${session.user},${digest},${JSON.stringify(operations)}::jsonb) AS result`;
+    return json({ok:true,version:applied[0].result.version});
+   }
    if(path==='/api/save'&&request.method==='POST'){
     if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);if(!writes(env))return json({error:'Gravação desativada ou sem autorização específica para este ambiente.'},403);
     const body=await bodyJSON(request);if(!/^[a-f0-9-]{36}$/i.test(body.requestId||'')||typeof body.version!=='string')return json({error:'Identificador de requisição inválido.'},400);
     const digest=await sha(JSON.stringify(body)),previous=await sql`SELECT actor,payload_hash FROM aproar_web_requests WHERE id=${body.requestId}`;
-    if(previous.length){if(previous[0].actor!==session.user||previous[0].payload_hash!==digest)return json({error:'Identificador de requisição reutilizado.'},409);return json({...summary(await readDatabase(sql),session,env),ok:true,replayed:true});}
-    const db=await readDatabase(sql);if(body.version!==db.version)return json({error:'Outro usuário atualizou os dados. Suas alterações não foram gravadas; recarregue e confira os registros.'},409);
+    if(previous.length){if(previous[0].actor!==session.user||previous[0].payload_hash!==digest)return json({error:'Identificador de requisição reutilizado.'},409);return json({...summary(await readDatabase(sql,readOptions),session,env),ok:true,replayed:true});}
+    const db=await readDatabase(sql,readOptions);if(body.version!==db.version)return json({error:'Outro usuário atualizou os dados. Suas alterações não foram gravadas; recarregue e confira os registros.'},409);
     const operations=buildOperations(db,body.state,session);
     if(!permittedProductionDeletion(env,session,db,operations))return json({error:'A Controladoria pode excluir uma convocação sem apontamento por vez ou até 50 obras sem vínculos. Registros com histórico devem ser preservados.'},403);
     // Work deletions run after dependent records, never before them.
     operations.sort((a,b)=>(a.table==='obras'&&a.action==='delete'?1:0)-(b.table==='obras'&&b.action==='delete'?1:0));
     if(operations.length)await sql`SELECT aproar_web_apply(${body.version},${body.requestId},${session.user},${digest},${JSON.stringify(operations)}::jsonb)`;
-    return json({...summary(await readDatabase(sql),session,env),ok:true});
+    return json({...summary(await readDatabase(sql,readOptions),session,env),ok:true});
    }
    return json({error:'Rota não encontrada.'},404);
   }

@@ -889,7 +889,7 @@
     }return out;
   }
   function financialEntries(){const map=new Map();for(const x of entries()){const key=x.c.dataServico+'|'+x.i.colaboradorId+'|'+x.c.supervisor;if(!map.has(key))map.set(key,{...x,refs:[...x.refs],units:new Set([x.c.unidade]),works:new Set([x.c.obraId])});else{const prev=map.get(key);for(const k of ['daily','extra','danger','night','bonus','finance','ajudaCusto'])prev[k]+=x[k];prev.units.add(x.c.unidade);prev.works.add(x.c.obraId);prev.refs=[...new Set([...prev.refs,...x.refs])];}}return [...map.values()];}
-  function adjustPayment(row,field,value){const data={financeiro:row.finance,noturno:row.night,acordo:row.bonus,ajudaCusto:row.ajudaCusto};data[field]=Math.max(0,Number(value)||0);for(const [index,i] of row.refs.entries()){i.financeiro=index===0?roundMoney(data.financeiro):0;i.noturno=index===0&&row.units.has('SEBRAE')?roundMoney(data.noturno):0;i.acordo=index===0?roundMoney(data.acordo):0;i.ajudaCusto=index===0?roundMoney(data.ajudaCusto):0;i.financeAdjusted=true;}audit('Ajuste financeiro',row.c.dataServico+' · '+row.p?.nome);saveData();}
+  function adjustPayment(row,field,value){if(onlineSaving||onlineQueued)return showToast('Aguarde a gravação em andamento.',true);const data={financeiro:row.finance,noturno:row.night,acordo:row.bonus,ajudaCusto:row.ajudaCusto};data[field]=Math.max(0,Number(value)||0);for(const [index,i] of row.refs.entries()){i.financeiro=index===0?roundMoney(data.financeiro):0;i.noturno=index===0&&row.units.has('SEBRAE')?roundMoney(data.noturno):0;i.acordo=index===0?roundMoney(data.acordo):0;i.ajudaCusto=index===0?roundMoney(data.ajudaCusto):0;i.financeAdjusted=true;}saveFinancialUpdates(row.refs);}
   function financialCycle(ref=isoToday(),offset=0){const d=dateLocal(ref),n=(d.getDay()-2+7)%7;d.setDate(d.getDate()-n+offset*7);const end=new Date(d);end.setDate(end.getDate()+6);const pay=new Date(end);pay.setDate(pay.getDate()+1);return {inicio:calendarISO(d),fim:calendarISO(end),pagamento:calendarISO(pay)};}
   function reminder(c){const today=isoToday(),p=brazilParts(now()),hh=Number(p.hour)+Number(p.minute)/60;if(c.dataServico>today)return 'Ainda não iniciou';if(clean(c.unidade)==='SEBRAE')return c.dataServico===today?(hh<21?'Hoje · 21:00':'Lembrete de 21:00 já passou'):'Somente manual';if(c.dataServico===today)return hh<16?'Hoje · 16:00':'Próximo dia · 09:30';const d=dateLocal(c.dataServico);d.setDate(d.getDate()+1);return calendarISO(d)===today?(hh<9.5?'Hoje · 09:30':'Lembrete de 09:30 já passou'):'Somente manual';}
 
@@ -1231,7 +1231,31 @@
   
   let onlineVersion='',onlineSession=null,onlineWritable=false,onlineStage='homologacao',onlineConfirmed=null,onlineQueued=false,onlineSaving=false,onlineMessage='';
   const copy=v=>JSON.parse(JSON.stringify(v));
-  async function api(path,options={}){const response=await fetch(path,{credentials:'same-origin',...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});const data=await response.json();if(!response.ok)throw Object.assign(new Error(data.error||'Falha na comunicação.'),{status:response.status});return data;}
+  async function api(path,options={}){
+    const response=await fetch(path,{credentials:'same-origin',...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});
+    const contentType=response.headers.get('content-type')||'';
+    let data;
+    if(contentType.toLowerCase().includes('application/json')){
+      try{data=await response.json();}catch{/* Incomplete or interrupted API response. */}
+    }
+    if(!data||typeof data!=='object'){
+      const saving=path==='/api/save';
+      throw Object.assign(new Error(saving
+        ?'O servidor interrompeu a resposta do salvamento. Confira se o valor foi registrado antes de lançar novamente.'
+        :'O servidor da APROAR respondeu com uma página inválida ou ficou temporariamente indisponível. Aguarde e tente novamente.'),{status:response.ok?502:response.status||502,nonJson:true});
+    }
+    if(!response.ok)throw Object.assign(new Error(data.error||'Falha na comunicação.'),{status:response.status});
+    return data;
+  }
+  async function restoreOnlineSession(){
+    try{return await api('/api/bootstrap');}
+    catch(error){
+      if(error.status===401||error.status===403)return Promise.reject(error);
+      // Only retry a read: never repeat a write merely because a response was interrupted.
+      await new Promise(resolve=>setTimeout(resolve,1500));
+      return api('/api/bootstrap');
+    }
+  }
   function applyOnline(result){state=result.state;OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);onlineVersion=result.version;onlineSession=result.session;onlineWritable=result.writesEnabled;onlineStage=result.stage||'homologacao';onlineConfirmed=copy(state);perfilAtual=result.session.role;supervisorAtual=result.session.role==='SUPERVISOR'?result.session.user:'';}
   function lockOnline(locked){$('#app-view').inert=locked;$('#online-saving').classList.toggle('hidden',!locked);}
   function toast(message,error=false){if((onlineQueued||onlineSaving)&&!error){onlineMessage=message;return;}showToast(message,error);}
@@ -1241,8 +1265,44 @@
     queueMicrotask(async()=>{onlineQueued=false;onlineSaving=true;const payload=JSON.stringify({requestId:crypto.randomUUID(),version:onlineVersion,state:copy(state)});try{
       let result;for(let attempt=0;attempt<2;attempt++){try{result=await api('/api/save',{method:'POST',body:payload});break;}catch(e){if(e.status||attempt===1)throw e;}}
       applyOnline(result);onlineSaving=false;render();showToast(onlineMessage||'Alterações salvas no Neon.');
-    }catch(e){try{applyOnline(await api('/api/bootstrap'));}catch{if(onlineConfirmed){state=copy(onlineConfirmed);OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);}}onlineSaving=false;render();showToast(e.message,true);
+    }catch(e){try{applyOnline(await restoreOnlineSession());}catch{if(onlineConfirmed){state=copy(onlineConfirmed);OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);}}onlineSaving=false;render();showToast(e.message,true);
     }finally{onlineQueued=false;onlineSaving=false;onlineMessage='';lockOnline(false);}});
+  }
+  // Financial changes are sent as a small, explicit batch: never re-upload the entire system.
+  async function saveFinancialUpdates(items){
+    if(!onlineSession||onlineSession.role!=='FINANCEIRO'||!onlineWritable){
+      if(onlineConfirmed){state=copy(onlineConfirmed);OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);}
+      render();return showToast('Gravação financeira não autorizada.',true);
+    }
+    const ids=new Map();
+    for(const a of state.apontamentos)for(const i of a.itens)ids.set(i,String(a.convocacaoId));
+    const fields=['financeiro','noturno','acordo','ajudaCusto'];
+    const changes=items.map(i=>({convocacaoId:ids.get(i),...Object.fromEntries(fields.map(k=>[k,roundMoney(Number(i[k])||0)]))}));
+    if(changes.some(c=>!c.convocacaoId))return showToast('Não foi possível identificar o apontamento. Atualize os dados.',true);
+    const payload={requestId:crypto.randomUUID(),version:onlineVersion,changes};
+    onlineSaving=true;lockOnline(true);
+    try{
+      const response=await api('/api/financial-adjust',{method:'POST',body:JSON.stringify(payload)});
+      if(!response.ok||typeof response.version!=='string')throw new Error('Resposta incompleta após o salvamento.');
+      onlineVersion=response.version;
+      onlineConfirmed=copy(state);
+      onlineSaving=false;render();
+      showToast('Valores financeiros salvos no Neon.');
+    }catch(error){
+      let confirmed=false,loaded=false;
+      try{
+        const current=await restoreOnlineSession();
+        confirmed=changes.every(change=>{
+          const a=current.state.apontamentos.find(record=>String(record.convocacaoId)===change.convocacaoId);
+          const i=a?.itens.find(item=>fields.every(k=>Math.abs(Number(item[k]||0)-change[k])<0.005));
+          return !!i;
+        });
+        applyOnline(current);loaded=true;
+      }catch{if(onlineConfirmed){state=copy(onlineConfirmed);OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);}}
+      onlineSaving=false;render();
+      if(confirmed)showToast('Valores confirmados no Neon após restabelecer a conexão.');
+      else showToast(loaded?'Não foi possível confirmar a alteração. Dados atualizados; confira os valores antes de lançar novamente.':'Servidor indisponível. Não repita o lançamento antes de conferir no Neon ou após reconectar.',true);
+    }finally{onlineSaving=false;lockOnline(false);}
   }
   function resetData(){toast('Restauração automática desativada na versão conectada.',true);}
   async function logout(){chooseLogin('CONTROLADORIA');if(onlineSaving||onlineQueued)return;try{await api('/api/logout',{method:'POST',body:'{}'});}catch(e){return showToast(e.message,true);}perfilAtual='';supervisorAtual='';onlineSession=null;onlineConfirmed=null;state=seedData();OBRAS.length=0;COLABORADORES.length=0;render();}
@@ -1254,7 +1314,7 @@
     init();$('#reset-demo').classList.add('hidden');$('#login-access').onchange=()=>chooseLogin($('#login-access').value);$('#enter-supervisor').onclick=()=>chooseLogin('SUPERVISOR');$('#enter-viewer').onclick=()=>chooseLogin('VISUALIZAR');$('#login-back').onclick=()=>chooseLogin($('#login-access').value);
     $('#login-form').onsubmit=async e=>{e.preventDefault();const button=$('#login-button');button.disabled=true;$('#login-error').textContent='';try{await api('/api/login',{method:'POST',body:JSON.stringify({role:loginRole,supervisor:$('#login-supervisor').value,password:$('#login-password').value})});$('#login-password').value='';enterConnectedSession(await api('/api/bootstrap'));}catch(err){$('#login-error').textContent=err.message;}finally{button.disabled=false;}};
     // Preserve a valid signed HttpOnly session across F5; only Sair clears it.
-    $('#login-button').disabled=true;try{enterConnectedSession(await api('/api/bootstrap'));}catch(e){if(e.status!==401)$('#login-error').textContent='Não foi possível restaurar a sessão. Atualize a página ou entre novamente.';}finally{$('#login-password').value='';$('#login-button').disabled=false;}
+    $('#login-button').disabled=true;try{enterConnectedSession(await restoreOnlineSession());}catch(e){if(e.status!==401)$('#login-error').textContent=e.message+' Sua sessão não foi encerrada automaticamente.';}finally{$('#login-password').value='';$('#login-button').disabled=false;}
     window.addEventListener('pageshow',event=>{if(event.persisted)window.location.reload();});
   }
   initOnline();
