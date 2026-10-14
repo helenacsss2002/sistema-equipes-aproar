@@ -37,7 +37,6 @@ function setup(){
   section('  function localDownload(', '  function bindExports()'),
   section('  const xmlSafe=', '  function controlValues('),
   section('  function financialWorkNumber(', '  function financialWorkbook('),
-  section('  function exportFinancialSummaryExcel()', '  function financialWorkNumber('),
   section('  function financialWorkbook()', '  async function xlsxRows(')
  ].join('\n');
  vm.runInContext(fragment,ctx,{timeout:8000});
