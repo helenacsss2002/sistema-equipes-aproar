@@ -20,7 +20,7 @@ test('Consolidado financeiro agrupa por colaborador e ordena alfabeticamente com
    row('1','Álvaro','2026-10-13','FELIPE',{finance:0,night:7,ajudaCusto:0})
  ];
  const rowsOut=summarize(rows);
- assert.deepEqual(rowsOut.map(x=>x.nome),['Álvaro','Zélia']);
+ assert.deepEqual(Array.from(rowsOut,x=>x.nome),['Álvaro','Zélia']);
  const a=rowsOut[0];
  assert.equal(a.dias,2);assert.equal(a.supervisores,'EDUARDO, FELIPE');
  assert.equal(a.finance,240);assert.equal(a.night,22);assert.equal(a.bonus,15);assert.equal(a.ajudaCusto,36);
@@ -38,8 +38,8 @@ test('Não soma falta, atestado nem linhas sem pagamento, e não mistura IDs igu
  ];
  const out=summarize(rows);
  assert.equal(out.length,2);
- assert.deepEqual(out.map(x=>x.id),['11','12']);
- assert.deepEqual(out.map(x=>x.total),[31.2,2]);
+ assert.deepEqual(Array.from(out,x=>x.id),['11','12']);
+ assert.deepEqual(Array.from(out,x=>x.total),[31.2,2]);
 });
 
 test('Soma passagens separadamente do financeiro e preserva casas decimais',()=>{
