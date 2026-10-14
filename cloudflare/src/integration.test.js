@@ -346,10 +346,3 @@ test('Supervisors can allocate an extra to a different unit without duplicating 
   assert.equal(otherOps.filter(x=>x.table==='convocacoes'&&x.action==='insert').length,1,'Supervisor can assign the extra to another registered unit');
  }finally{await pg.close();}
 });
-  const ops=buildOperations(db,owned,actor,now);
-  assert.equal(ops.filter(x=>x.table==='convocacoes'&&x.action==='insert').length,1);
-  const deniedSession={role:'SUPERVISOR',user:'VICTOR'},denied=structuredClone(visibleState(db,deniedSession));
-  denied.extras.push({id:'extra-owner-denied',supervisor:'VICTOR',dataServico:'2026-10-07',unidade:'SEBRAE',obraId:'3',colaboradorId:'1',extra:'Meia diária',valorExtraOriginal:0,observacao:'',criadoEm:now});
-  assert.throws(()=>buildOperations(db,denied,deniedSession,now),/unidade sob sua responsabilidade/);
- }finally{await pg.close();}
-});
