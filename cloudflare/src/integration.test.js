@@ -308,3 +308,40 @@ test('Financeiro grava passagem/ajuda de custo no Neon, sem alterar estrutura ou
   assert.equal(db.state.apontamentos[0].itens[0].ajudaCusto,0,'Pode remover uma passagem lançada');
  }finally{await pg.close();}
 });
+
+test('Independent extra at another unit does not duplicate the normal attendance',async()=>{
+ const {pg,sql}=await fixture();
+ try{
+  let db=await readDatabase(sql),next=structuredClone(db.state);
+  conv(next);next.convocacoes[0].obraId='1';attendance(next,'draft-conv');
+  db=(await save(sql,next,actor)).after;
+  next=structuredClone(db.state);
+  next.extras.push({id:'extra-independent-1',supervisor:'VICTOR',dataServico:'2026-10-07',unidade:'SEBRAE',obraId:'3',colaboradorId:'1',extra:'Diária',valorExtraOriginal:0,observacao:'Extra após jornada',criadoEm:now});
+  const saved=await save(sql,next,admin),after=saved.after;
+  assert.equal(after.state.convocacoes.length,1,'only the ordinary daytime convocation is visible');
+  assert.equal(after.state.apontamentos.length,1,'the ordinary presence remains a single attendance record');
+  assert.equal(after.state.apontamentos[0].itens[0].status,'Presente (Integral)');
+  assert.equal(after.state.extras.length,1);
+  assert.equal(after.state.extras[0].unidade,'SEBRAE');
+  assert.equal(after.state.extras[0].servicoDiaId,'1','the original daytime service reference is retained separately');
+  assert.equal(after.state.extras[0].extra,'Diária');
+  assert.equal(Number(after.raw.apontamentos.find(x=>x.status==='Extra').valor_extra),241.74);
+  assert.equal(after.raw.servicos_apontamento.length,3);
+ }finally{await pg.close();}
+});
+test('Only the supervisor responsible for the extra unit may register the independent extra',async()=>{
+ const {pg,sql}=await fixture();
+ try{
+  let db=await readDatabase(sql),next=structuredClone(db.state);
+  conv(next);next.convocacoes[0].obraId='1';attendance(next,'draft-conv');
+  db=(await save(sql,next,actor)).after;
+  db.state.unitOwners.SEBRAE='EDUARDO';
+  const owned=structuredClone(db.state);
+  owned.extras.push({id:'extra-owner-ok',supervisor:'EDUARDO',dataServico:'2026-10-07',unidade:'SEBRAE',obraId:'3',colaboradorId:'1',extra:'Meia diária',valorExtraOriginal:0,observacao:'',criadoEm:now});
+  const ops=buildOperations(db,owned,actor,now);
+  assert.equal(ops.filter(x=>x.table==='convocacoes'&&x.action==='insert').length,1);
+  const deniedSession={role:'SUPERVISOR',user:'VICTOR'},denied=structuredClone(visibleState(db,deniedSession));
+  denied.extras.push({id:'extra-owner-denied',supervisor:'VICTOR',dataServico:'2026-10-07',unidade:'SEBRAE',obraId:'3',colaboradorId:'1',extra:'Meia diária',valorExtraOriginal:0,observacao:'',criadoEm:now});
+  assert.throws(()=>buildOperations(db,denied,deniedSession,now),/unidade sob sua responsabilidade/);
+ }finally{await pg.close();}
+});
