@@ -246,9 +246,9 @@ test('Busca de colaboradores filtra somente a visualizacao e preserva selecoes e
  assert.match(ui,/cards\(\)\.forEach\(card=>\{card\.style\.display=/);
  assert.match(ui,/clean\(card\.textContent\)\.includes\(query\)/);
  assert.match(ui,/id="retro-person-search"/);
- assert.ok(ui.includes("bindPersonSearch($('#retro-person-search'),()=>$('.retro-person-list .check-card'))"));
+ assert.ok(ui.includes("bindPersonSearch($('#retro-person-search'),()=>$$('.retro-person-list .check-card'))"));
  assert.match(ui,/id="day-person-search"/);
- assert.ok(ui.includes("bindPersonSearch($('#day-person-search'),()=>$('#day-form .person-card'))"));
+ assert.ok(ui.includes("bindPersonSearch($('#day-person-search'),()=>$$('#day-form .person-card'))"));
  assert.match(ui,/class="control admin-person-search"/);
  assert.ok(ui.includes("bindPersonSearch(form.querySelector('.admin-person-search'),"));
  // Saving still reads all employees, regardless of the search filter.
@@ -311,5 +311,5 @@ test('Extras are launched from daily attendance and remain available to reports 
  assert.match(ui,/Extras \(R\$\)/);
  assert.match(ui,/Extra independente/);
  assert.doesNotMatch(ui,/item\('extras','Extras'/);
- assert.match(html,/aproar-extra-dropdown-20261014-1/);
+ assert.match(html,/aproar-extra-categoria-total-20261014-2/);
 });
