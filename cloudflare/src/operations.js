@@ -114,12 +114,13 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
    const dayConv=(db.state.convocacoes||[]).find(c=>c.dataServico===serviceDate&&c.colaboradores?.includes(personId));
    const dayWorkId=String(dayConv?.obraId||old?.servicoDiaId||'');
    const amount=money(Number(x.valorExtraOriginal));
+   const unchanged=old&&old.supervisor===supervisor&&old.dataServico===serviceDate&&String(old.colaboradorId)===personId&&String(old.obraId)===String(work.id)&&old.extra===kind&&String(old.observacao||'')===obs&&money(Number(old.valorExtraOriginal)||0)===amount;
+   // Legacy records, including zero-valued extras, must remain readable and must not block unrelated saves.
+   if(unchanged)continue;
    if(!finite(x.valorExtraOriginal)||amount<=0)fail('Informe o Valor da Extra em reais; o valor não é pré-definido.');
    const created=old?.criadoEm||oldMeta.extra_lancado_em||timestamp,creator=old?.executor||oldMeta.extra_lancado_por||session.user;
    const meta={...oldMeta,extra_avulsa:true,extra_obra_id:String(work.id),extra_unidade:work.unidade,extra_dia_obra_id:dayWorkId,extra_observacao:obs,extra_lancado_em:created,extra_lancado_por:creator,apontado_em:created,apontado_por:creator,custos_separados:true,servico_a_definir:false};
    const convData={obra_id:String(work.id),colaborador_id:personId,data:serviceDate,engenheiro:supervisor,turno:'Integral',status:'Extra',valor_extra:amount,custo_pago:0,valor_acordo:0,valor_adicional_noturno:0,custo_encargos_base:amount,custos_separados:true,observacao:'Extra independente ||APROAR_META|| '+JSON.stringify(meta)};
-   const unchanged=old&&old.supervisor===supervisor&&old.dataServico===serviceDate&&String(old.colaboradorId)===personId&&String(old.obraId)===String(work.id)&&old.extra===kind&&String(old.observacao||'')===obs&&money(Number(old.valorExtraOriginal)||0)===amount;
-   if(unchanged)continue;
    const convKey=old?id:'extra:'+id;
    if(old)add('convocacoes','update',id,convData);
    else add('convocacoes','insert',convKey,{...convData,criado_em:timestamp,criado_por:session.user});
