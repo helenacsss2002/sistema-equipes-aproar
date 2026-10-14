@@ -9,4 +9,4 @@ export async function readDatabase(sql,{auditUser=null,includeAudit=true}={}){
  state.teamsConfig=Object.fromEntries(raw.engenheiros_teams.map(x=>[x.engenheiro,{email:x.email_teams||'',ativo:x.ativo}]));
  return {raw,state,version:raw.version[0].version};
 }
-export function visibleState(db,session){const state=session.role==='SUPERVISOR'?structuredClone(db.state):db.state;if(session.role==='SUPERVISOR'){state.apontamentos=state.apontamentos.filter(a=>a.supervisor===session.user);state.auditoria=state.auditoria.filter(a=>a.usuario===session.user);state.teamsConfig={};state.teamsHistory=[];state.teamsMessage='';}return state;}
+export function visibleState(db,session){const state=session.role==='SUPERVISOR'?structuredClone(db.state):db.state;if(session.role==='SUPERVISOR'){state.apontamentos=state.apontamentos.filter(a=>a.supervisor===session.user);state.extras=(state.extras||[]).filter(x=>x.supervisor===session.user);state.auditoria=state.auditoria.filter(a=>a.usuario===session.user);state.teamsConfig={};state.teamsHistory=[];state.teamsMessage='';}return state;}
