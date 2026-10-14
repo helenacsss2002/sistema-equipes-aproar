@@ -72,7 +72,17 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
   add('apontamentos',oldRow?'update':'insert',oldRow?.id||'ap:'+key,{...values,convocacao_id:key,data_servico:c.dataServico,colaborador_id:pid,engenheiro:c.supervisor,apontado_em:pointTime,apontado_por:executor,retroativo:Boolean(oldRow?.retroativo||ap.a.retroativo),atualizado_em:timestamp});
   const oldMeta=metadata(raw?.observacao).meta,first=ss[0],meta={...oldMeta,apontado_em:pointTime,apontado_por:executor,custos_separados:true,custo_pago:money(finance),valor_acordo:money(bonus),valor_adicional_noturno:money(night),valor_ajuda_custo:money(ajudaCusto),servico_a_definir:!first,periodo_principal:first?.periodo||c.turno,servicos_adicionais:ss.slice(1).map(s=>({servico:works.get(s.obraId)?.nome,obra_id:s.obraId,periodo:s.periodo}))};
   add('convocacoes','update',key,{...values,obra_id:first?.obraId||work,observacao:'Turno: '+c.turno+(i.observacao?' | Obs: '+i.observacao:'')+' ||APROAR_META|| '+JSON.stringify(meta)});
-  if(!same(normServices(oldPoint),ss)){for(const s of db.raw.servicos_apontamento.filter(x=>String(x.convocacao_id)===key))add('servicos_apontamento','delete',s.id);ss.forEach((s,index)=>add('servicos_apontamento','insert',`service:${key}:${index}`,{convocacao_id:key,obra_id:s.obraId,obra_nome_snapshot:works.get(s.obraId).nome,unidade_snapshot:works.get(s.obraId).unidade,periodo:s.periodo,principal:index===0,criado_em:timestamp,atualizado_em:timestamp}));}
+  if(!same(normServices(oldPoint),ss)){
+    const previousServices=(rawServicesByConv.get(key)||[]).slice().sort((a,b)=>Number(b.principal)-Number(a.principal)||Number(a.id)-Number(b.id));
+    ss.forEach((service,index)=>{
+      const work=works.get(service.obraId),previous=previousServices[index];
+      const values={convocacao_id:key,obra_id:service.obraId,obra_nome_snapshot:work.nome,unidade_snapshot:work.unidade,periodo:service.periodo,principal:index===0,atualizado_em:timestamp};
+      if(previous)add('servicos_apontamento','update',String(previous.id),values);
+      else add('servicos_apontamento','insert',`service:${key}:${index}`,{...values,criado_em:timestamp});
+    });
+    // Any actual removal of historical services continues to be blocked by production permissions.
+    for(const previous of previousServices.slice(ss.length))add('servicos_apontamento','delete',String(previous.id));
+   }
  }
  // Extra-only records are stored separately in the existing tables, without a second ordinary attendance.
  if(Array.isArray(next.extras)){
@@ -103,11 +113,12 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
    const oldMeta=metadata(raw?.observacao).meta,obs=String(x.observacao||'').trim().slice(0,2000);
    const dayConv=(db.state.convocacoes||[]).find(c=>c.dataServico===serviceDate&&c.colaboradores?.includes(personId));
    const dayWorkId=String(dayConv?.obraId||old?.servicoDiaId||'');
-   const amount=old&&old.extra===kind?money(Number(old.valorExtraOriginal)||0):money(Number(p.custo)*factor);
+   const amount=money(Number(x.valorExtraOriginal));
+   if(!finite(x.valorExtraOriginal)||amount<=0)fail('Informe o Valor da Extra em reais; o valor não é pré-definido.');
    const created=old?.criadoEm||oldMeta.extra_lancado_em||timestamp,creator=old?.executor||oldMeta.extra_lancado_por||session.user;
    const meta={...oldMeta,extra_avulsa:true,extra_obra_id:String(work.id),extra_unidade:work.unidade,extra_dia_obra_id:dayWorkId,extra_observacao:obs,extra_lancado_em:created,extra_lancado_por:creator,apontado_em:created,apontado_por:creator,custos_separados:true,servico_a_definir:false};
    const convData={obra_id:String(work.id),colaborador_id:personId,data:serviceDate,engenheiro:supervisor,turno:'Integral',status:'Extra',valor_extra:amount,custo_pago:0,valor_acordo:0,valor_adicional_noturno:0,custo_encargos_base:amount,custos_separados:true,observacao:'Extra independente ||APROAR_META|| '+JSON.stringify(meta)};
-   const unchanged=old&&old.supervisor===supervisor&&old.dataServico===serviceDate&&String(old.colaboradorId)===personId&&String(old.obraId)===String(work.id)&&old.extra===kind&&String(old.observacao||'')===obs;
+   const unchanged=old&&old.supervisor===supervisor&&old.dataServico===serviceDate&&String(old.colaboradorId)===personId&&String(old.obraId)===String(work.id)&&old.extra===kind&&String(old.observacao||'')===obs&&money(Number(old.valorExtraOriginal)||0)===amount;
    if(unchanged)continue;
    const convKey=old?id:'extra:'+id;
    if(old)add('convocacoes','update',id,convData);
