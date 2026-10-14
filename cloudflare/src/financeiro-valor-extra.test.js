@@ -55,5 +55,5 @@ test('Todos os relatórios financeiros usam Valor da Extra e explicitam valores 
   assert.match(area,/Valores (complementares já registrados|anteriores)/,start);
   assert.doesNotMatch(area,/'Financeiro \(R\$\)'/,start);
  }
- assert.match(html,/app\.js\?v=aproar-valor-extra-total-20261014-3/);
+ assert.match(html,/app\.js\?v=aproar-extra-unificada-20261014-4/);
 });
