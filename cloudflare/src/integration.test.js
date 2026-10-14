@@ -346,3 +346,26 @@ test('Supervisors can allocate an extra to a different unit without duplicating 
   assert.equal(otherOps.filter(x=>x.table==='convocacoes'&&x.action==='insert').length,1,'Supervisor can assign the extra to another registered unit');
  }finally{await pg.close();}
 });
+
+
+test('SEBRAE accepts R$ 50 and R$ 90 night additions from a supervisor, preserving amounts in Neon',async()=>{
+ const {pg,sql}=await fixture();
+ try{
+  let db=await readDatabase(sql),next=structuredClone(db.state);
+  next.convocacoes.push({id:'sebrae-conv',supervisor:'EDUARDO',dataServico:'2026-10-07',unidade:'SEBRAE',obraId:'3',turno:'Noite',colaboradores:['1']});
+  next.apontamentos.push({id:'sebrae-ap',convocacaoId:'sebrae-conv',supervisor:'EDUARDO',dataServico:'2026-10-07',itens:[{
+   colaboradorId:'1',status:'Presente (Integral)',extra:'Não',financeiro:120,noturno:50,acordo:0,ajudaCusto:0,
+   observacao:'Noite de teste',servicos:[{obraId:'3',periodo:'Noite'}]
+  }]});
+  db=(await save(sql,next,actor)).after;
+  assert.equal(Number(db.raw.apontamentos[0].valor_adicional_noturno),50);
+  assert.equal(db.state.apontamentos[0].itens[0].noturno,50);
+  next=structuredClone(db.state);next.apontamentos[0].itens[0].noturno=90;
+  db=(await save(sql,next,actor)).after;
+  assert.equal(Number(db.raw.apontamentos[0].valor_adicional_noturno),90);
+  assert.equal(db.state.apontamentos[0].itens[0].noturno,90);
+  next=structuredClone(db.state);next.apontamentos[0].itens[0].noturno=50;
+  db=(await save(sql,next,actor)).after;
+  assert.equal(Number(db.raw.apontamentos[0].valor_adicional_noturno),50);
+ }finally{await pg.close();}
+});
