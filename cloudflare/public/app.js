@@ -506,6 +506,7 @@
         <div class="tabs"><button class="tab-btn ${apontamentoTab==='normal'?'active':''}" data-tab="normal">Normal</button><button class="tab-btn ${apontamentoTab==='retroativo'?'active':''}" data-tab="retroativo">Retroativo</button></div>
       </div>
       <div id="apontamento-body"></div>
+      ${perfilAtual==='SUPERVISOR'?'<datalist id="passagens-ajuda-valores"><option value="11" label="Fortaleza - R$ 11,00"></option><option value="10" label="Caucaia - R$ 10,00"></option><option value="12" label="Maracanaú - R$ 12,00"></option><option value="25" label="Horizonte - R$ 25,00"></option></datalist>':''}
     `;
     $$('.tab-btn').forEach(b => b.onclick = () => { apontamentoTab = b.dataset.tab; render(); });
     if (apontamentoTab === 'normal') renderApontamentoNormal(); else renderApontamentoRetroativo();
@@ -540,7 +541,7 @@
     return `<div class="person-row person-card" data-person="${cid}" data-unit="${escapeHtml(unit)}" data-extra-original="${item?.valorExtraOriginal||0}" data-finance-adjusted="${item?.financeAdjusted?'true':'false'}" data-ajuda-custo="${Number(item?.ajudaCusto)||0}"><div class="person-name">${escapeHtml(c?.nome||cid)}<br><small>${escapeHtml(c?.funcao||'')} · ${escapeHtml(unit)}</small></div>
       <div class="person-top">${field('Status',`<select class="control row-status">${STATUS_OPTIONS.map(x=>`<option ${x===(item?.status||'Presente (Integral)')?'selected':''}>${x}</option>`).join('')}</select>`)}</div>
       <div class="person-services"><div class="allocations principal-service">${allocationRow(unit,services[0],0)}</div>
-      <div class="form-grid">${field('Extra',`<select class="control row-extra">${[...EXTRA_OPTIONS,...(item?.extra==='Valor específico'?['Valor específico']:[])].map(x=>`<option ${x===(item?.extra||'Não')?'selected':''}>${x}</option>`).join('')}</select>`)}${field('Financeiro (R$)',`<input class="control row-financeiro" type="number" min="0" step="0.01" value="${item?.financeiro??0}">`)}${field('Acordos / Bonificações (R$)',`<input class="control row-acordo" type="number" min="0" step="0.01" value="${item?.acordo||0}">`)}</div>
+      <div class="form-grid">${field('Extra',`<select class="control row-extra">${[...EXTRA_OPTIONS,...(item?.extra==='Valor específico'?['Valor específico']:[])].map(x=>`<option ${x===(item?.extra||'Não')?'selected':''}>${x}</option>`).join('')}</select>`)}${field('Financeiro (R$)',`<input class="control row-financeiro" type="number" min="0" step="0.01" value="${item?.financeiro??0}">`)}${field('Acordos / Bonificações (R$)',`<input class="control row-acordo" type="number" min="0" step="0.01" value="${item?.acordo||0}">`)}${perfilAtual==='SUPERVISOR'?field('Passagens/Ajuda de custo (R$)',`<input class="control row-ajuda-custo" type="number" min="0" step="0.01" list="passagens-ajuda-valores" value="${Number(item?.ajudaCusto)||0}" ${item?.financeAdjusted?'readonly title="Valor confirmado pelo Financeiro"':''}>`):''}</div>
       <details class="more-services"><summary>Mais opções</summary>${field('Observação / justificativa',`<input class="control row-obs" value="${escapeHtml(item?.observacao||'')}">`)}${field('Adic. noturno (SEBRAE)',`<input class="control row-noturno" type="number" min="0" step="0.01" value="${unit==='SEBRAE'&&presence(item?.status||'Presente (Integral)')?(item?.financeAdjusted?(item?.noturno||0):Math.max(90,item?.noturno||0)):0}" readonly>`)}<div class="additional-services">${services.slice(1).map((x,i)=>allocationRow(unit,x,i+1)).join('')}</div><div class="inline-actions section"><button type="button" class="btn btn-primary add-service">+ Adicionar serviço</button><button type="button" class="btn btn-secondary remove-last-service">− Remover último</button><span class="service-count">${Math.max(0,services.length-1)} serviço(s) adicional(is)</span></div></details></div></div>`;
   }
   // Filtra apenas os cartões exibidos: seleção e alterações não são apagadas.
@@ -561,7 +562,7 @@
     });
   }
   function readPersonRows(ids,scope=document){
-    return ids.map(cid=>{const row=scope.querySelector(`[data-person="${cid}"]`);const servicos=[...row.querySelectorAll('.allocation-row')].map(r=>({obraId:(OBRAS.find(o=>o.unidade===row.dataset.unit&&clean(o.nome)===clean(r.querySelector('.service-work').value))?.id||''),periodo:r.querySelector('.service-period').value}));return {colaboradorId:cid,status:row.querySelector('.row-status').value,extra:row.querySelector('.row-extra').value,valorExtraOriginal:Number(row.dataset.extraOriginal)||0,observacao:row.querySelector('.row-obs').value.trim(),servicos,obraId:servicos[0]?.obraId||'',financeAdjusted:row.dataset.financeAdjusted==='true',financeiro:Number(row.querySelector('.row-financeiro').value||0),noturno:Number(row.querySelector('.row-noturno').value),acordo:Number(row.querySelector('.row-acordo').value),ajudaCusto:Number(row.dataset.ajudaCusto)||0};});
+    return ids.map(cid=>{const row=scope.querySelector(`[data-person="${cid}"]`);const servicos=[...row.querySelectorAll('.allocation-row')].map(r=>({obraId:(OBRAS.find(o=>o.unidade===row.dataset.unit&&clean(o.nome)===clean(r.querySelector('.service-work').value))?.id||''),periodo:r.querySelector('.service-period').value}));return {colaboradorId:cid,status:row.querySelector('.row-status').value,extra:row.querySelector('.row-extra').value,valorExtraOriginal:Number(row.dataset.extraOriginal)||0,observacao:row.querySelector('.row-obs').value.trim(),servicos,obraId:servicos[0]?.obraId||'',financeAdjusted:row.dataset.financeAdjusted==='true',financeiro:Number(row.querySelector('.row-financeiro').value||0),noturno:Number(row.querySelector('.row-noturno').value),acordo:Number(row.querySelector('.row-acordo').value),ajudaCusto:Number(row.querySelector('.row-ajuda-custo')?.value??row.dataset.ajudaCusto)||0};});
   }
   function validServices(items,unit){
     for(const i of items){if(!presence(i.status))continue;const ss=i.servicos;
@@ -615,7 +616,12 @@
     function refreshRows(reset=false) {
       const current=$$('#retro-rows [data-person]').map(x=>x.dataset.person);if(!reset)readPersonRows(current).forEach(i=>retroDrafts.set(i.colaboradorId,i));
       const ids = $$('input[name="retro-colab"]:checked').map(x=>x.value);
-      rows.innerHTML = ids.length ? `<div class="section-title" style="margin-top:12px"><div><h3>Apontamento da equipe</h3><p>Defina status e extra. Extra inicia em “Não”.</p></div></div>${ids.map(id=>personRow(id,retroDrafts.get(id),unidade.value)).join('')}` : '';
+      const retroDate=$('#retro-data').value,retroTurn=$('#retro-turno').value,retroSupervisor=$('#retro-sup')?.value||supervisorAtual;
+      const previousItem=id=>{
+        const conv=state.convocacoes.find(c=>c.dataServico===retroDate&&c.unidade===unidade.value&&c.turno===retroTurn&&c.supervisor===retroSupervisor&&c.colaboradores.includes(id));
+        return conv?apForConv(conv.id)?.itens.find(i=>i.colaboradorId===id):null;
+      };
+      rows.innerHTML = ids.length ? `<div class="section-title" style="margin-top:12px"><div><h3>Apontamento da equipe</h3><p>Defina status e extra. Extra inicia em “Não”.</p></div></div>${ids.map(id=>personRow(id,retroDrafts.get(id)||previousItem(id),unidade.value)).join('')}` : '';
       bindServiceRows();
     }
     $$('input[name="retro-colab"]').forEach(x=>x.onchange = ()=>refreshRows());
@@ -948,18 +954,19 @@
     if(selectedCycle!=='custom'){const cycle=financialCycle(isoToday(),Number(selectedCycle));reportFilters.inicio=cycle.inicio;reportFilters.fim=cycle.fim;}
     $('#main-content').innerHTML=head('Pagamentos','Ciclo de terça a segunda, com pagamento na terça seguinte.')+cycleControl()+filterControls()+'<div class="section" id="pay-body"></div>'+exportButtons()+financialSummaryButtons();
     const refresh=()=>{
-      const e=financialEntries().filter(x=>x.finance>0.005||x.night>0.005||x.bonus>0.005||x.ajudaCusto>0.005);
+      const e=financialEntries().filter(x=>x.finance>0.005||x.night>0.005||x.bonus>0.005||x.ajudaCusto>0.005)
+        .sort((a,b)=>a.c.dataServico.localeCompare(b.c.dataServico)||(a.p?.nome||'').localeCompare(b.p?.nome||'','pt-BR',{sensitivity:'base'})||(a.p?.id||'').localeCompare(b.p?.id||''));
       const total=x=>x.finance+x.night+x.bonus+x.ajudaCusto;
       const predefinidos='<datalist id="passagens-ajuda-valores"><option value="11" label="Fortaleza - R$ 11,00"></option><option value="10" label="Caucaia - R$ 10,00"></option><option value="12" label="Maracanaú - R$ 12,00"></option><option value="25" label="Horizonte - R$ 25,00"></option></datalist>';
       const fields=['financeiro','noturno','acordo','ajudaCusto'];
       const consolidated=financialSummaryRows(e);
       $('#pay-body').innerHTML=metric('TOTAL A PAGAR',money(e.reduce((v,x)=>v+total(x),0)),'sem periculosidade')
         +'<div class="section"><h3>Consolidado por colaborador · ordem alfabética</h3>'+table(['Colaborador','Total a pagar'],consolidated.map(x=>[escapeHtml(x.nome),money(x.total)]))+'</div>'
-        +'<h3>Detalhamento por dia</h3>'
+        +'<section class="pay-detail-section" aria-labelledby="pay-detail-heading"><h3 id="pay-detail-heading">Detalhamento por dia</h3>'
         +'<p class="help-text">Passagens/Ajuda de custo: Fortaleza R$ 11, Caucaia R$ 10, Maracanaú R$ 12 e Horizonte R$ 25. Selecione um valor sugerido ou digite outro. Sem lançamento, o valor é R$ 0.</p>'
         +table(['Data','Colaborador','Status','Financeiro (R$)','Noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)'],e.map((x,index)=>[formatDate(x.c.dataServico),escapeHtml(x.p?.nome),escapeHtml(x.i.status),...fields.map(k=>`<input aria-label="${k==='ajudaCusto'?'Passagens/Ajuda de custo':k}" class="control pay-input" type="number" min="0" step="0.01" ${k==='ajudaCusto'?'list="passagens-ajuda-valores"':''} data-index="${index}" data-field="${k}" value="${k==='financeiro'?x.finance:k==='noturno'?x.night:k==='acordo'?x.bonus:x.ajudaCusto}" ${k==='noturno'&&!x.units.has('SEBRAE')?'disabled':''}>`)]))
-        +predefinidos;
-      $$('.pay-input').forEach(inp=>inp.onchange=()=>{adjustPayment(e[Number(inp.dataset.index)],inp.dataset.field,inp.value);refresh();});
+        +predefinidos+'</section>';
+      $('.pay-input').forEach(inp=>inp.onchange=()=>{adjustPayment(e[Number(inp.dataset.index)],inp.dataset.field,inp.value);refresh();});
     };
     bindFilters(()=>{selectedCycle='custom';$('#financial-cycle').value='custom';refresh();});
     $('#financial-cycle').onchange=()=>{selectedCycle=$('#financial-cycle').value;renderPayments();};
