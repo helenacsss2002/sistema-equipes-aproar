@@ -311,5 +311,5 @@ test('Extras are launched from daily attendance and remain available to reports 
  assert.match(ui,/Valor da Extra \(R\$\)/);
  assert.match(ui,/Extra independente/);
  assert.doesNotMatch(ui,/item\('extras','Extras'/);
- assert.match(html,/aproar-extra-unificada-20261014-4/);
+ assert.match(html,/aproar-extra-manual-realocacao-20261014-5/);
 });
