@@ -18,7 +18,9 @@
       });
       const item=byPerson.get(id);
       if(row.c?.supervisor)item.supervisors.add(String(row.c.supervisor));
-      if(row.c?.unidade)item.units.add(String(row.c.unidade));
+      if(row.units&&typeof row.units[Symbol.iterator]==='function'){
+        for(const unit of row.units)if(unit)item.units.add(String(unit));
+      }else if(row.c?.unidade)item.units.add(String(row.c.unidade));
       if(row.c?.dataServico)item.days.add(String(row.c.dataServico));
       fields.forEach((key,index)=>{item[key]+=values[index];});
     }
