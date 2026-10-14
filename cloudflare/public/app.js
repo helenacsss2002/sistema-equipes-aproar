@@ -674,7 +674,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       </div>`;
 
     const unidade = $('#retro-unidade'), rows = $('#retro-rows');
-    bindPersonSearch($('#retro-person-search'),()=>$('.retro-person-list .check-card'));
+    bindPersonSearch($('#retro-person-search'),()=>$$('.retro-person-list .check-card'));
     let retroDrafts=new Map();
     if(perfilAtual==='SUPERVISOR'){
       const pending=new Map();for(const c of state.convocacoes.filter(c=>c.supervisor===supervisorAtual&&c.dataServico<=isoToday()&&!completeConv(c))){const done=new Set(apForConv(c.id)?.itens.map(i=>i.colaboradorId)||[]),ids=c.colaboradores.filter(id=>!done.has(id));if(!ids.length)continue;const key=c.dataServico+'|'+c.unidade+'|'+c.turno;if(!pending.has(key))pending.set(key,{date:c.dataServico,unit:c.unidade,turn:c.turno,ids:new Set()});ids.forEach(id=>pending.get(key).ids.add(id));}
@@ -703,7 +703,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       e.preventDefault();
       const dataServico = $('#retro-data').value;
       if (!dataServico) return toast('Escolha a data do serviço.', true);if(dataServico>isoToday())return toast('O apontamento retroativo não aceita data futura.',true);
-      const ids = $('input[name="retro-colab"]:checked').map(x=>x.value);
+      const ids = $$('input[name="retro-colab"]:checked').map(x=>x.value);
       if (!ids.length) return toast('Selecione pelo menos um colaborador.', true);
       const responsavel=$('#retro-sup')?.value||supervisorAtual;
       const itens=readPersonRows(ids);if(!validServices(itens,unidade.value))return;
@@ -773,7 +773,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       const action=onlineWritable&&onlineStage!=='producao'?'<button class="link-btn" data-extra-delete="'+escapeHtml(x.id)+'">Excluir</button>':'—';
       return [formatDate(x.dataServico),escapeHtml(x.supervisor),escapeHtml(person?.nome||x.colaboradorId),escapeHtml(work?.unidade||x.unidade),escapeHtml(work?.nome||'Serviço removido'),escapeHtml(x.extra),money(value),escapeHtml(x.observacao||''),action];
     }));
-    $('[data-extra-delete]').forEach(button=>button.onclick=()=>{
+    $$('[data-extra-delete]').forEach(button=>button.onclick=()=>{
       const id=button.dataset.extraDelete,entry=(state.extras||[]).find(x=>String(x.id)===String(id));
       if(!entry)return;
       if(supervisorOnly&&entry.supervisor!==supervisorAtual)return toast('Você só pode excluir as extras que lançou.',true);
@@ -1208,7 +1208,7 @@ function renderEquipeDia(){
  <div id="day-extra-fields" class="form-grid hidden">${field('Obra / Serviço e unidade da extra',`<select class="control" id="day-extra-work">${extraWorkOptions('')}</select>`)}${field('Observação da extra','<input class="control" id="day-extra-obs" maxlength="2000" placeholder="Opcional">')}</div>
  <div id="day-extra-origin" class="notice info section">Escolha o funcionário. O serviço registrado para ele neste dia será sugerido automaticamente, mas pode ser trocado.</div></details>
  <div class="form-actions"><button class="btn btn-primary">Salvar apontamento do dia</button></div></form>`;
- bindServiceRows();bindPersonSearch($('#day-person-search'),()=>$('#day-form .person-card'));
+ bindServiceRows();bindPersonSearch($('#day-person-search'),()=>$$('#day-form .person-card'));
  const extraToggle=$('#day-extra-kind'),extraFields=$('#day-extra-fields');
  const refreshExternalFields=()=>extraFields.classList.toggle('hidden',extraToggle.value==='Não');
  const suggestExternalWork=()=>{
