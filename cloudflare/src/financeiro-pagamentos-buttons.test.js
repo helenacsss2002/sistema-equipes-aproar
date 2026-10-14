@@ -16,7 +16,7 @@ const code=[
 ].join('\n');
 
 test('Pagamentos vincula todos os cinco botões de exportação após montar o detalhamento',async()=>{
-  const calls=[],inputs=[{dataset:{index:'0',field:'ajudaCusto'},value:'11'}],buttons={};
+  const calls=[],tables=[],inputs=[{dataset:{index:'0',field:'ajudaCusto'},value:'11'}],buttons={};
   for(const id of ['export-csv','export-excel','export-pdf','export-fin-summary-excel','export-fin-summary-pdf']){
     buttons['#'+id]={textContent:id,disabled:false,onclick:null};
   }
@@ -30,7 +30,7 @@ test('Pagamentos vincula todos os cinco botões de exportação após montar o d
     c:{dataServico:'2026-10-13'},
     p:{nome:'Álvaro QA',id:'1'},
     i:{status:'Presente (Integral)'},
-    finance:100,night:0,bonus:0,ajudaCusto:11,
+    extra:50,finance:100,night:90,bonus:10,ajudaCusto:11,
     units:new Set(['FIEC'])
   };
   const ctx={
@@ -44,8 +44,8 @@ test('Pagamentos vincula todos os cinco botões de exportação após montar o d
     filterControls:()=>'<div>Filtros</div>',
     exportButtons:()=>'<div>Exportações</div>',
     financialEntries:()=>[row],
-    financialSummaryRows:()=>[{nome:'Álvaro QA',total:111}],
-    table:()=>'<table></table>',metric:()=>'<div>Total</div>',
+    financialSummaryRows:()=>[{nome:'Álvaro QA',extra:50,finance:100,total:261}],
+    table:(head,rows)=>{tables.push({head,rows});return '<table></table>';},metric:()=>'<div>Total</div>',
     money:x=>'R$ '+x,formatDate:s=>s,escapeHtml:s=>String(s||''),
     bindFilters:()=>{},financialCycle:()=>({pagamento:'2026-10-14'}),isoToday:()=> '2026-10-14',
     exportTable:()=>calls.push('csv'),
@@ -61,7 +61,15 @@ test('Pagamentos vincula todos os cinco botões de exportação após montar o d
   vm.createContext(ctx);
   vm.runInContext(code,ctx,{timeout:1000});
   assert.doesNotThrow(()=>ctx.openPayments(),'A tela deve abrir sem TypeError antes de vincular os botões');
-  assert.equal(typeof inputs[0].onchange,'function','Campos financeiros devem permanecer editáveis');
+  assert.equal(typeof inputs[0].onchange,'function','Campos de adicionais e passagens continuam editáveis');
+  assert.equal(tables.length,2);
+  assert.ok(tables[1].head.includes('Valor da Extra (R$)'));
+  assert.ok(tables[1].head.includes('Valores complementares já registrados (R$)'));
+  assert.ok(!tables[1].head.includes('Financeiro (R$)'));
+  assert.equal(tables[1].rows[0][3],'R$ 50');
+  assert.equal(tables[1].rows[0][4],'R$ 100');
+  assert.match(tables[1].rows[0].at(-1),/R\$ 261/);
+  assert.equal(tables[1].rows[0].filter(cell=>String(cell).includes('class="control pay-input"')).length,3,'Total e extra não têm campo editável');
   for(const btn of Object.values(buttons))assert.equal(typeof btn.onclick,'function',btn.textContent+' sem evento de clique');
   for(const id of ['export-csv','export-excel','export-pdf','export-fin-summary-excel','export-fin-summary-pdf']){
     await buttons['#'+id].onclick();

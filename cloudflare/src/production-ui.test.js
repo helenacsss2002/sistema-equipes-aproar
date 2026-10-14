@@ -308,8 +308,8 @@ test('Extras are launched from daily attendance and remain available to reports 
  assert.match(ui,/state\.extras=extras/);
  assert.match(ui,/x\.extra>0\.005\|\|x\.finance>0\.005/);
  assert.match(ui,/money\(fin\?x\.extra\+x\.finance/);
- assert.match(ui,/Extras \(R\$\)/);
+ assert.match(ui,/Valor da Extra \(R\$\)/);
  assert.match(ui,/Extra independente/);
  assert.doesNotMatch(ui,/item\('extras','Extras'/);
- assert.match(html,/aproar-extra-categoria-total-20261014-2/);
+ assert.match(html,/aproar-valor-extra-total-20261014-3/);
 });
