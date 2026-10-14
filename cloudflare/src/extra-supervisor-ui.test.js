@@ -20,7 +20,6 @@ function setup(){
  });
  const inputs={
   '.row-extra':control('Não'),
-  '.row-extra-category':control('Meia diária'),
   '.row-extra-value':control('0'),
   '.row-noturno':control('50'),
   '.row-status':control('Presente (Integral)'),
@@ -64,29 +63,31 @@ function setup(){
  vm.runInContext(block('  function bindServiceRows(){','  function readPersonRows(')+block('  function readPersonRows(','  function applyInlineExtras(')+'\nglobalThis.bind=bindServiceRows;globalThis.read=readPersonRows;',ctx);
  return {ctx,inputs,card,toggled};
 }
-test('Extra volta a permitir Sim/Não, categoria e total automático sem alterar valor pago',()=>{
+test('Menu único de Extra altera categoria e total automaticamente sem modificar pagamento histórico',()=>{
  const {ctx,inputs,toggled}=setup();
  ctx.bind();
  assert.match(inputs['.row-total'].textContent,/186,00/);
- inputs['.row-extra'].value='Sim';inputs['.row-extra'].onchange();
+ inputs['.row-extra'].value='Meia diária';inputs['.row-extra'].onchange();
  assert.equal(Number(inputs['.row-extra-value'].value),120.87);
  assert.match(inputs['.row-total'].textContent,/306,87/);
  assert.deepEqual(toggled.at(-1),['hidden',false]);
- inputs['.row-extra-category'].value='Diária';inputs['.row-extra-category'].onchange();
+ inputs['.row-extra'].value='Diária';inputs['.row-extra'].onchange();
  assert.equal(Number(inputs['.row-extra-value'].value),241.74);
  assert.match(inputs['.row-total'].textContent,/427,74/);
  inputs['.row-noturno'].value='90';inputs['.row-noturno'].fire('change');
  assert.match(inputs['.row-total'].textContent,/467,74/);
+ inputs['.row-extra'].value='Duas diárias';inputs['.row-extra'].onchange();
+ assert.equal(Number(inputs['.row-extra-value'].value),483.48);
+ assert.match(inputs['.row-total'].textContent,/709,48/);
  assert.equal(inputs['.row-financeiro-historico'].value,'120','O valor base não é alterado ao escolher extra');
 });
 test('Apontamento normal e retroativo recebem extraLancamento para gravar categoria, obra e observação',()=>{
  const {ctx,inputs}=setup();
- inputs['.row-extra'].value='Sim';
- inputs['.row-extra-category'].value='Uma e meia diária';
+ inputs['.row-extra'].value='Duas diárias';
  const [item]=ctx.read(['1']);
  assert.equal(item.extra,'Não','Extra independente não pode ser duplicada na presença');
  assert.equal(item.extraLancamento.enabled,true);
- assert.equal(item.extraLancamento.extra,'Uma e meia diária');
+ assert.equal(item.extraLancamento.extra,'Duas diárias');
  assert.equal(item.extraLancamento.obraId,'3');
  assert.equal(item.extraLancamento.observacao,'serviço de extra');
  assert.equal(item.noturno,50);
@@ -99,19 +100,21 @@ test('Apontamento normal e retroativo recebem extraLancamento para gravar catego
 test('Não há funções duplicadas que sobrescrevam Extra e apontamento da equipe',()=>{
  assert.equal((ui.match(/function bindServiceRows\(\)/g)||[]).length,1);
  assert.equal((ui.match(/function readPersonRows\(/g)||[]).length,1);
- assert.match(ui,/field\('Extra\?'/);
- assert.match(ui,/Categoria da Extra/);
+ assert.match(ui,/field\('Houve extra\?'/);
+ assert.match(ui,/APONTAMENTO_EXTRA_OPTIONS = \[\['Não','Não'\],\['Meia diária','Meia Diária'\],\['Diária','Diária'\],\['Duas diárias','Duas diárias'\]\]/);
+ assert.doesNotMatch(ui,/class="control row-extra-category"/);
+ assert.doesNotMatch(ui,/\['extras','Lançar extra'\]/);
  assert.match(ui,/Valor da Extra \(R\$\)/);
  assert.match(ui,/row-total-summary/);
  assert.match(ui,/data-financeiro-original/);
  assert.doesNotMatch(ui,/class="control row-financeiro"/);
  assert.match(ui,/TOTAL A PAGAR AO COLABORADOR/);
  assert.match(ui,/valorExtraOriginal:0/);
- assert.match(ui,/\.row-extra-category/);
+ assert.match(ui,/category=row.querySelector\('\.row-extra'\)/);
  assert.match(ui,/option value="50"/);
  assert.match(ui,/option value="90"/);
  assert.match(html,/row-total-summary/);
- assert.match(html,/app\.js\?v=aproar-valor-extra-total-20261014-3/);
+ assert.match(html,/app\.js\?v=aproar-extra-unificada-20261014-4/);
  assert.match(ui,/bindPersonSearch\(\$\('#retro-person-search'\),\(\)=>\$\$\('\.retro-person-list/);
  assert.match(ui,/const ids = \$\$\('input\[name="retro-colab"\]:checked'\)\.map/);
 });
