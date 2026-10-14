@@ -46,7 +46,8 @@ test('Houve extra? tem apenas quatro opções e Não selecionado em novo apontam
   ]);
   assert.match(menu[1],/<option value="Não" selected>/);
   assert.doesNotMatch(html,/row-extra-category/);
-  assert.match(html,/row-extra-value[^>]*readonly value="0\.00"/);
+  assert.match(html,/row-extra-value[^>]*value=""/);
+  assert.doesNotMatch(html,/row-extra-value[^>]*readonly/);
   assert.doesNotMatch(app.slice(app.indexOf('function renderSupervisorHeader()'),app.indexOf('function audit(action')),/\['extras','Lançar extra'\]/);
 });
 
@@ -60,6 +61,6 @@ test('Registro histórico de Uma e meia diária não desaparece ao reabrir apont
   const menu=html.match(/<select class="control row-extra"[^>]*>([\s\S]*?)<\/select>/)?.[1];
   assert.ok(menu);
   assert.match(menu,/value="Uma e meia diária" selected>Uma e meia diária \(registro anterior\)<\/option>/);
-  assert.match(html,/row-extra-value[^>]*readonly value="300\.00"/);
+  assert.match(html,/row-extra-value[^>]*value="300\.00"/);
   assert.match(html,/Registro anterior/);
 });
