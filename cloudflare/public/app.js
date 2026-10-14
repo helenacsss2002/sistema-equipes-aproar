@@ -1186,7 +1186,7 @@
     const last=rows.length,summary=Array(10).fill('');summary[0]='TOTAL GERAL';
     for(const [index,key] of [[5,'finance'],[6,'night'],[7,'bonus'],[8,'ajudaCusto'],[9,'total']]){
       const column=excelCol(index);
-      summary[index]={formula:people.length?'SUM('+column+'5:'+column+last+')':'0',value:roundMoney(people.reduce((sum,p)=>sum+p[key],0))};
+      summary[index]={formula:people.length?'SUM('+column+'5:'+column+last+')':'0',value:roundMoney(people.reduce((sum,p)=>sum+p[key],0)),style:6};
     }
     rows.push(summary);
     exportWorkbook([{name:'CONSOLIDADO POR PESSOA',rows,headers:[3],titles:[0,1],sections:[rows.length-1],blue:true,freeze:4,merges:['A1:J1','A2:J2'],center:[4],money:[5,6,7,8,9],widths:[38,24,30,28,11,23,23,20,31,22]}],'financeiro_consolidado_colaboradores_'+reportFilters.inicio+'_a_'+reportFilters.fim);
