@@ -19,7 +19,7 @@
 
   const EXTRA_OPTIONS = ['Não', 'Meia diária', 'Diária', 'Uma e meia diária', 'Duas diárias'];
 
-  const seedData=()=>({version:2,colaboradores:[],obras:[],convocacoes:[],apontamentos:[],indisponibilidades:[],conflitosTentados:[],auditoria:[]});
+  const seedData=()=>({version:2,colaboradores:[],obras:[],convocacoes:[],apontamentos:[],extras:[],indisponibilidades:[],conflitosTentados:[],auditoria:[]});
 
   let state = loadData();
   if(state.obras) OBRAS.splice(0,OBRAS.length,...state.obras);
@@ -110,7 +110,8 @@
   function obraById(id) { return OBRAS.find(o => o.id === id); }
   function obraTemVinculos(obra){
     return state.convocacoes.some(c=>String(c.obraId)===String(obra.id))||
-      state.apontamentos.some(a=>a.itens.some(i=>i.servicos?.some(servico=>String(servico.obraId)===String(obra.id))));
+      state.apontamentos.some(a=>a.itens.some(i=>i.servicos?.some(servico=>String(servico.obraId)===String(obra.id))))||
+      (state.extras||[]).some(x=>String(x.obraId)===String(obra.id));
   }
   function colaboradorById(id) { return COLABORADORES.find(c => c.id === id); }
 
@@ -157,10 +158,10 @@
 
   function navConfig() {
     const item=(view,label,icon,group='')=>({view,label,icon,group});
-    if(perfilAtual==='CONTROLADORIA') return [item('inicio','Início','⌂'),item('convocacao','Convocação','▤','OPERAÇÃO'),item('conflitos','Conflitos','!'),item('apontamento','Apontamento','✓'),item('whatsapp','WhatsApp','◌'),item('disponibilidade','Disponibilidade','♙'),item('indisponibilidade','Indisponibilidade','⊘'),item('dashboard','Dashboard','▦','ANÁLISE E FECHAMENTO'),item('relatorios','Relatórios','▥'),item('indicadores','Indicadores','↗'),item('configuracoes','Configurações','⚙','SISTEMA')];
+    if(perfilAtual==='CONTROLADORIA') return [item('inicio','Início','⌂'),item('convocacao','Convocação','▤','OPERAÇÃO'),item('conflitos','Conflitos','!'),item('apontamento','Apontamento','✓'),item('extras','Extras','＋','OPERAÇÃO'),item('whatsapp','WhatsApp','◌'),item('disponibilidade','Disponibilidade','♙'),item('indisponibilidade','Indisponibilidade','⊘'),item('dashboard','Dashboard','▦','ANÁLISE E FECHAMENTO'),item('relatorios','Relatórios','▥'),item('indicadores','Indicadores','↗'),item('configuracoes','Configurações','⚙','SISTEMA')];
     if(perfilAtual==='VISUALIZAR') return [item('dashboard','Dashboard','▦'),item('relatorios','Relatórios','▥'),item('indicadores','Indicadores','↗')];
     if(perfilAtual==='FINANCEIRO') return [item('inicio','Início','⌂'),item('financeiro','Pagamentos','$'),item('ausencias','Faltas / Atestados','⊘'),item('relatorios','Relatório','▥')];
-    return [item('inicio','Início','⌂'),item('convocacao','Convocação','▤'),item('apontamento','Apontamento','✓'),item('disponibilidade','Disponibilidade','♙'),item('pendencias','Pendências','!')];
+    return [item('inicio','Início','⌂'),item('convocacao','Convocação','▤'),item('apontamento','Apontamento','✓'),item('extras','Extras','＋'),item('disponibilidade','Disponibilidade','♙'),item('pendencias','Pendências','!')];
   }
 
   function sidebarIcon(view){
@@ -170,6 +171,7 @@
       conflitos:'<path d="m12 3 10 18H2L12 3Z"/><path d="M12 9v5"/><path d="M12 17h.01"/>',
       apontamento:'<rect x="4" y="4" width="16" height="16" rx="2"/><path d="m8 12 3 3 5-6"/>',
       whatsapp:'<path d="M4 4h16v13H9l-5 4V4Z"/><path d="M8 8h8M8 12h5"/>',
+      extras:'<path d="M12 4v16M4 12h16"/>',
       disponibilidade:'<circle cx="9" cy="7" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M16 4a3 3 0 0 1 0 6M18 14a5 5 0 0 1 3 4v3"/>',
       indisponibilidade:'<circle cx="12" cy="12" r="9"/><path d="m6 6 12 12"/>',
       dashboard:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
@@ -204,6 +206,7 @@
       indicadores:'Indicadores',
       relatorios:'Relatórios',
       financeiro:'Fechamento financeiro',
+      extras:'Lançamento de extras',
     };
     $('#topbar-title').textContent = navConfig().find(x=>x.view===viewAtual)?.label || map[viewAtual] || 'APROAR';
     $('.sidebar').classList.remove('open');
@@ -334,7 +337,7 @@
     const itens = state.apontamentos.flatMap(a => a.itens || []);
     const presentes = itens.filter(i => String(i.status || '').startsWith('Presente')).length;
     const faltas = itens.filter(i => i.status === 'Falta').length;
-    const extras = itens.filter(i => i.extra && i.extra !== 'Não').length;
+    const extras = itens.filter(i => i.extra && i.extra !== 'Não').length + (state.extras||[]).length;
 
     $('#main-content').innerHTML = `
       <div class="page-head">
@@ -359,17 +362,13 @@
   }
 
   function renderFinanceiroFechamento() {
-    const linhas = state.apontamentos
-      .slice()
-      .sort((a,b) => b.dataServico.localeCompare(a.dataServico))
-      .flatMap(a => (a.itens || []).map(i => ({
-        data: a.dataServico,
-        supervisor: a.supervisor,
-        colaborador: colaboradorById(i.colaboradorId)?.nome || i.colaboradorId,
-        status: i.status,
-        extra: i.extra || 'Não',
-        retroativo: a.retroativo,
-      })));
+    const linhas = [
+      ...state.apontamentos.slice().sort((a,b) => b.dataServico.localeCompare(a.dataServico)).flatMap(a => (a.itens || []).map(i => ({
+        data: a.dataServico, supervisor: a.supervisor, colaborador: colaboradorById(i.colaboradorId)?.nome || i.colaboradorId,
+        status: i.status, extra: i.extra || 'Não', retroativo: a.retroativo,
+      }))),
+      ...(state.extras||[]).map(x=>({data:x.dataServico,supervisor:x.supervisor,colaborador:colaboradorById(x.colaboradorId)?.nome||x.colaboradorId,status:'Extra independente · '+(obraById(x.obraId)?.unidade||x.unidade)+' · '+(obraById(x.obraId)?.nome||''),extra:x.extra,retroativo:x.dataServico<isoToday()})),
+    ].sort((a,b)=>b.data.localeCompare(a.data));
 
     $('#main-content').innerHTML = `
       <div class="page-head"><div><div class="eyebrow">FINANCEIRO</div><h2>Fechamento</h2><p>Somente apontamentos realmente salvos entram nesta base de apontamentos.</p></div></div>
@@ -645,6 +644,67 @@
     };
   }
 
+
+  function renderExtras(){
+    const supervisorOnly=perfilAtual==='SUPERVISOR';
+    const eligibleUnits=adminUnits().filter(unit=>{
+      if(!supervisorOnly)return true;
+      const owner=state.unitOwners?.[unit];
+      return owner?owner===supervisorAtual:state.convocacoes.some(c=>c.supervisor===supervisorAtual&&c.unidade===unit);
+    });
+    const eligibleWorks=OBRAS.filter(o=>eligibleUnits.includes(o.unidade));
+    const startDate=portalDate>isoToday()?isoToday():(portalDate||isoToday());
+    const supField=supervisorOnly?'':field('Supervisor responsável pelo lançamento','<select class="control" id="extra-supervisor">'+options(SUPERVISORES)+'</select>');
+    const workOptions=eligibleWorks.map(o=>'<option value="'+escapeHtml(o.id)+'">'+escapeHtml(o.unidade+' · '+o.nome)+'</option>').join('');
+    $('#main-content').innerHTML=head('Lançamento de extras','Registre uma extra independente do apontamento normal, inclusive quando o colaborador já trabalhou integralmente em outra unidade')+
+      '<div class="card card-pad"><form id="extra-form"><div class="form-grid">'+
+      field('Data da extra','<input class="control" id="extra-date" type="date" value="'+escapeHtml(startDate)+'" max="'+isoToday()+'" required>')+
+      field('Colaborador','<select class="control" id="extra-person" required><option value="">Selecione o colaborador</option>'+options(COLABORADORES.filter(p=>!p.inativo).slice().sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR')))+'</select>')+
+      field('Serviço da extra','<select class="control" id="extra-work" required>'+workOptions+'</select>')+
+      field('Tipo de extra','<select class="control" id="extra-kind" required>'+['Meia diária','Diária','Uma e meia diária','Duas diárias'].map(x=>'<option '+(x==='Diária'?'selected':'')+'>'+x+'</option>').join('')+'</select>')+
+      supField+field('Observação (opcional)','<input class="control" id="extra-obs" maxlength="2000" placeholder="Descreva o serviço extra, se necessário">')+
+      '</div><div id="extra-day-service" class="notice info section">O serviço principal do dia será sugerido quando estiver dentro da unidade sob sua responsabilidade. Você pode escolher outro serviço da sua unidade para atribuir a extra.</div>'+
+      (eligibleWorks.length?'':'<div class="notice warning section">Nenhum serviço está vinculado à sua responsabilidade. A Controladoria precisa configurar o responsável da unidade antes do lançamento.</div>')+
+      '<div class="form-actions"><button class="btn btn-primary" type="submit" '+(eligibleWorks.length?'':'disabled')+'>Salvar extra</button></div></form></div>'+
+      '<div class="section card card-pad"><div class="section-title"><div><h3>Extras independentes registrados</h3><p>Cada lançamento pertence a um serviço e aparece separado da presença diária do colaborador.</p></div></div><div id="extra-records"></div></div>';
+    const updateSuggestion=()=>{
+      const date=$('#extra-date')?.value,personId=$('#extra-person')?.value;
+      const dayConv=state.convocacoes.find(c=>c.dataServico===date&&c.colaboradores.includes(personId)&&c.supervisor===supervisorAtual)||state.convocacoes.find(c=>c.dataServico===date&&c.colaboradores.includes(personId));
+      const dayWork=dayConv?.obraId?obraById(dayConv.obraId):null;
+      const current=$('#extra-work')?.value;
+      if(dayWork&&eligibleWorks.some(o=>String(o.id)===String(dayWork.id)))$('#extra-work').value=dayWork.id;
+      else if(!eligibleWorks.some(o=>String(o.id)===String(current)))$('#extra-work').value=eligibleWorks[0]?.id||'';
+      $('#extra-day-service').textContent=dayWork
+        ?'Serviço principal registrado no dia: '+dayWork.unidade+' · '+dayWork.nome+'. A extra será atribuída ao serviço selecionado abaixo.'
+        :'Não foi encontrado um serviço principal para este colaborador nesta data. Selecione o serviço em que a extra foi realizada.';
+    };
+    $('#extra-date').onchange=updateSuggestion;$('#extra-person').onchange=updateSuggestion;updateSuggestion();
+    $('#extra-form').onsubmit=e=>{
+      e.preventDefault();
+      const date=$('#extra-date').value,personId=$('#extra-person').value,work=obraById($('#extra-work').value),kind=$('#extra-kind').value;
+      const supervisor=supervisorOnly?supervisorAtual:$('#extra-supervisor').value;
+      if(!personId||!work)return toast('Selecione o colaborador e o serviço da extra.',true);
+      if(date>isoToday())return toast('Extra não aceita data futura.',true);
+      if((state.extras||[]).some(x=>x.dataServico===date&&String(x.colaboradorId)===String(personId)&&String(x.obraId)===String(work.id)))return toast('Já existe uma extra para este colaborador, data e serviço.',true);
+      state.extras ||= [];
+      state.extras.push({id:uid('extra'),supervisor,dataServico:date,unidade:work.unidade,obraId:work.id,colaboradorId:personId,extra:kind,valorExtraOriginal:0,observacao:$('#extra-obs').value.trim(),criadoEm:now().toISOString()});
+      audit('Lançamento de extra independente',colaboradorById(personId)?.nome+' · '+date+' · '+work.unidade+' · '+work.nome);
+      saveData();
+    };
+    const rows=(state.extras||[]).slice().sort((a,b)=>b.dataServico.localeCompare(a.dataServico)||String(a.id).localeCompare(String(b.id)));
+    $('#extra-records').innerHTML=table(['Data','Supervisor','Colaborador','Unidade','Serviço','Tipo','Valor calculado','Observação','Ação'],rows.map(x=>{
+      const person=colaboradorById(x.colaboradorId),work=obraById(x.obraId),value=Number(x.valorExtraOriginal)||roundMoney(dayCost(person)*extraMultiplier(x.extra));
+      return [formatDate(x.dataServico),escapeHtml(x.supervisor),escapeHtml(person?.nome||x.colaboradorId),escapeHtml(work?.unidade||x.unidade),escapeHtml(work?.nome||'Serviço removido'),escapeHtml(x.extra),money(value),escapeHtml(x.observacao||''),'<button class="link-btn" data-extra-delete="'+escapeHtml(x.id)+'">Excluir</button>'];
+    }));
+    $('[data-extra-delete]').forEach(button=>button.onclick=()=>{
+      const id=button.dataset.extraDelete,entry=(state.extras||[]).find(x=>String(x.id)===String(id));
+      if(!entry)return;
+      if(supervisorOnly&&entry.supervisor!==supervisorAtual)return toast('Você só pode excluir as extras que lançou.',true);
+      state.extras=state.extras.filter(x=>String(x.id)!==String(id));
+      audit('Exclusão de extra independente',id);saveData();
+    });
+  }
+
   function renderPendencias() {
     const pend = pendenciasApontamento();
     const example=pend.find(c=>c.exemploRegularizacao);
@@ -728,7 +788,7 @@
     const total=convs.reduce((v,c)=>v+c.colaboradores.length,0);const pointed=convs.reduce((v,c)=>v+c.colaboradores.filter(id=>apForConv(c.id)?.itens.some(i=>i.colaboradorId===id)).length,0);
     const logo=$('.brand-lockup img').src;
     $('#main-content').insertAdjacentHTML('afterbegin',`<div class="portal-hero"><img src="${logo}" alt="Logo da APROAR"><div class="portal-heading"><span>Portal do Supervisor</span><h1>Minha equipe</h1></div><div class="portal-hero-end"><div class="portal-date">Data<strong id="portal-date-label">${formatDate(portalDate)}</strong></div><div class="inline-actions"><button class="btn btn-outline" id="portal-logout">Sair</button></div></div></div>
-      <div class="portal-tabs">${[['apontamento','Apontamentos'],['convocacao','Convocação'],['disponibilidade','Disponibilidade']].map(([v,l])=>`<button class="tab-btn ${viewAtual===v?'active':''}" data-portal-view="${v}">${l}</button>`).join('')}</div>
+      <div class="portal-tabs">${[['apontamento','Apontamentos'],['convocacao','Convocação'],['extras','Lançar extra'],['disponibilidade','Disponibilidade']].map(([v,l])=>`<button class="tab-btn ${viewAtual===v?'active':''}" data-portal-view="${v}">${l}</button>`).join('')}</div>
       <div class="portal-filters ${viewAtual==='convocacao'?'portal-filters-convocacao':''}">${field('SUPERVISOR',`<select id="portal-sup" class="control">${options(SUPERVISORES)}</select>`)}${field('Unidade',`<select id="portal-unit" class="control">${options(['Todas',...adminUnits()])}</select>`)}${viewAtual==='convocacao'?'':field('Data',`<input id="portal-date" class="control" type="date" value="${portalDate}">`)}</div>
       <div class="grid grid-3 portal-metrics"><div class="portal-metric"><strong id="portal-total">${total}</strong><span>convocados</span></div><div class="portal-metric"><strong id="portal-pointed">${pointed}</strong><span>apontados</span></div><button class="portal-metric pending" id="portal-pending"><strong id="portal-pending-total">${Math.max(0,total-pointed)}</strong><span>pendentes do dia</span><small>Ver minhas pendências</small></button></div>`);
     if(portalUnit!=='Todas'&&!adminUnits().includes(portalUnit))portalUnit='Todas';
@@ -945,7 +1005,17 @@
       }
       for(const b of new Set([...Object.keys(blocks.daily),...Object.keys(blocks.extra),...Object.keys(blocks.finance)])){let participants=[...services.values()].filter(x=>x.blocks.has(b));if(!participants.length)participants=[...services.values()];for(const row of participants)for(const field of ['daily','extra','finance'])row[field]+=(blocks[field][b]||0)/participants.length;}
       for(const row of services.values()){row.daily=roundMoney(row.daily);row.extra=roundMoney(row.extra);row.finance=roundMoney(row.finance);row.night=roundMoney(row.night);row.bonus=roundMoney(row.bonus);row.ajudaCusto=roundMoney(row.ajudaCusto);if(dangerEligible(p))row.danger=roundMoney(row.daily*1.3)-row.daily+roundMoney(row.extra*1.3)-row.extra;row.danger=roundMoney(row.danger);row.service={obraId:row.c.obraId,periodo:[...row.periods].join(' + ')};row.c.supervisor=[...row.supervisors].join(' / ');row.displayStatus=[...row.statuses].join(' / ');row.displayExtra=[...row.extras].join(' / ');if(reportFilters.obra==='Todas'||row.c.obraId===reportFilters.obra)out.push(row);}
-    }return out;
+    }
+    for(const x of state.extras||[]){
+      if(x.dataServico<reportFilters.inicio||x.dataServico>reportFilters.fim||(reportFilters.supervisor!=='Todos'&&x.supervisor!==reportFilters.supervisor))continue;
+      const p=colaboradorById(x.colaboradorId),work=obraById(x.obraId);
+      if(!p||!work||(reportFilters.obra!=='Todas'&&String(x.obraId)!==String(reportFilters.obra)))continue;
+      const amount=Number(x.valorExtraOriginal)||roundMoney(dayCost(p)*extraMultiplier(x.extra));
+      const c={id:'extra-'+x.id,dataServico:x.dataServico,supervisor:x.supervisor,unidade:work.unidade,obraId:work.id,turno:'Integral',extraAvulsa:true};
+      const i={colaboradorId:x.colaboradorId,status:'Extra independente',extra:x.extra,valorExtraOriginal:amount,financeiro:0,noturno:0,acordo:0,ajudaCusto:0,observacao:x.observacao||'',extraAvulsa:true};
+      out.push({c,i,p,refs:[],blocks:new Set(),periods:new Set(['Integral']),supervisors:new Set([x.supervisor]),statuses:new Set(['Extra independente']),extras:new Set([x.extra]),daily:0,extra:roundMoney(amount),finance:0,night:0,bonus:0,ajudaCusto:0,danger:dangerEligible(p)?roundMoney(amount*1.3)-amount:0,share:1,service:{obraId:work.id,periodo:'Extra'},units:new Set([work.unidade]),works:new Set([work.id]),displayStatus:'Extra independente',displayExtra:x.extra});
+    }
+    return out;
   }
   function financialEntries(){const map=new Map();for(const x of entries()){const key=x.c.dataServico+'|'+x.i.colaboradorId+'|'+x.c.supervisor;if(!map.has(key))map.set(key,{...x,refs:[...x.refs],units:new Set([x.c.unidade]),works:new Set([x.c.obraId])});else{const prev=map.get(key);for(const k of ['daily','extra','danger','night','bonus','finance','ajudaCusto'])prev[k]+=x[k];prev.units.add(x.c.unidade);prev.works.add(x.c.obraId);prev.refs=[...new Set([...prev.refs,...x.refs])];}}return [...map.values()];}
   function financialSummaryRows(rows=financialEntries()){return globalThis.APROARFinanceConsolidado.summarize(rows);}
@@ -1323,7 +1393,7 @@
   function parseCSV(text){text=text.replace(/^\uFEFF/,'');const delim=(text.split(/\r?\n/)[0].match(/;/g)||[]).length>=(text.split(/\r?\n/)[0].match(/,/g)||[]).length?';':',';const rows=[];let row=[],value='',quoted=false;for(let i=0;i<text.length;i++){const c=text[i];if(c==='"'){if(quoted&&text[i+1]==='"'){value+='"';i++;}else quoted=!quoted;}else if(c===delim&&!quoted){row.push(value);value='';}else if((c==='\n'||c==='\r')&&!quoted){if(c==='\r'&&text[i+1]==='\n')i++;row.push(value);if(row.some(v=>v.trim()))rows.push(row);row=[];value='';}else value+=c;}row.push(value);if(row.some(v=>v.trim()))rows.push(row);return rows;}
   function renderImportSettings(){const body=$('#settings-body');body.innerHTML=`<h3>Importar planilha de colaboradores</h3><p>Adicione novos colaboradores ou atualize cadastros pelo nome. Nenhum colaborador ausente da planilha será excluído.</p><input class="control" id="import-file" type="file" accept=".xlsx,.csv"><p>XLSX ou CSV. A primeira aba deve conter nome, função e custo diário.</p><div id="import-mapping" class="section"></div><div id="import-preview" class="section"></div><div class="form-actions"><button class="btn btn-secondary" id="import-template">Baixar modelo Excel</button><button class="btn btn-primary" id="import-save" disabled>Importar prévia</button></div>`;let matrix=[],rows=[];$('#import-template').onclick=()=>exportWorkbook([{name:'Colaboradores',rows:[['Nome','Função','Custo diário','Moradia','Categoria','Avulso'],['Exemplo fictício','Pedreiro',241.74,'Fortaleza','Profissional','Não']]}],'modelo_colaboradores');const preview=()=>{const map=Object.fromEntries(['nome','funcao','custo','moradia','categoria','avulso'].map(k=>[k,Number($('#map-'+k).value)]));rows=matrix.slice(1).filter(r=>r.some(v=>String(v||'').trim())).map(r=>{const x=Object.fromEntries(Object.entries(map).map(([k,j])=>[k,j>=0?String(r[j]??'').trim():'']));let cost=x.custo.replace(/R\$\s*/g,'');if(cost.includes(','))cost=cost.replaceAll('.','').replace(',','.');x.custo=Number(cost);return x;});const invalid=rows.filter(x=>!x.nome||!x.funcao||!Number.isFinite(x.custo)||x.custo<=0);$('#import-preview').innerHTML=`<div class="notice ${invalid.length?'warning':'info'}">${rows.length} linha(s). ${invalid.length} linha(s) inválida(s). Preencha nome, função e um custo diário positivo para importar.</div>`+table(['Nome','Função','Custo','Moradia','Ação'],rows.map(x=>[escapeHtml(x.nome),escapeHtml(x.funcao),money(x.custo),escapeHtml(x.moradia),COLABORADORES.some(c=>clean(c.nome)===clean(x.nome))?'Atualizar':'Adicionar']));$('#import-save').disabled=!rows.length||Boolean(invalid.length)||map.nome<0||map.funcao<0||map.custo<0;};$('#import-file').onchange=async()=>{const f=$('#import-file').files[0];if(!f)return;try{matrix=f.name.toLowerCase().endsWith('.xlsx')?await xlsxRows(f):parseCSV(await f.text());if(matrix.length<2)throw Error('A planilha precisa de cabeçalho e dados.');const headers=matrix[0];const hints={nome:/NOME|COLABORADOR|FUNCIONARIO/,funcao:/FUNCAO|CARGO/,custo:/CUSTO|DIARIA|VALOR/,moradia:/MORADIA|RESIDENCIA/,categoria:/CATEGORIA/,avulso:/AVULSO/};$('#import-mapping').innerHTML='<h3>Conferir colunas</h3><div class="form-grid">'+Object.keys(hints).map(k=>field(k==='funcao'?'Função':readableName(k),`<select class="control" id="map-${k}"><option value="-1">Não usar</option>${headers.map((v,i)=>`<option value="${i}">${escapeHtml(v)}</option>`).join('')}</select>`)).join('')+'</div>';Object.keys(hints).forEach(k=>{$('#map-'+k).value=String(headers.findIndex(v=>hints[k].test(clean(v))));$('#map-'+k).onchange=preview;});preview();}catch(e){rows=[];$('#import-save').disabled=true;$('#import-preview').innerHTML='<div class="notice warning">'+escapeHtml(e.message)+'</div>';}};$('#import-save').onclick=()=>{if($('#import-save').disabled)return;let added=0,updated=0;for(const x of rows){const c=COLABORADORES.find(c=>clean(c.nome)===clean(x.nome));const data={nome:x.nome,funcao:x.funcao,custo:x.custo,...(x.moradia?{moradia:x.moradia}:{}),...(x.categoria?{categoria:x.categoria}:{}),...(x.avulso?{avulso:x.avulso}:{})};if(c){Object.assign(c,data);updated++;}else{COLABORADORES.push({id:uid('c'),...data});added++;}}audit('Importação de colaboradores',added+' novos / '+updated+' atualizados');saveData();toast(added+' adicionados e '+updated+' atualizados.');renderSettings();};}
 
-  const extendedRenderers={convocacao:renderConvCompleta,apontamento:renderApCompleto,disponibilidade:renderDisponibilidade,indisponibilidade:renderIndisponibilidade,conflitos:renderConflitos,whatsapp:renderWhatsApp,dashboard:renderDashboard,relatorios:renderReports,financeiro:renderPayments,ausencias:renderAbsences,configuracoes:renderSettings,indicadores:renderIndicators};
+  const extendedRenderers={convocacao:renderConvCompleta,apontamento:renderApCompleto,extras:renderExtras,disponibilidade:renderDisponibilidade,indisponibilidade:renderIndisponibilidade,conflitos:renderConflitos,whatsapp:renderWhatsApp,dashboard:renderDashboard,relatorios:renderReports,financeiro:renderPayments,ausencias:renderAbsences,configuracoes:renderSettings,indicadores:renderIndicators};
   
   let onlineVersion='',onlineSession=null,onlineWritable=false,onlineStage='homologacao',onlineConfirmed=null,onlineQueued=false,onlineSaving=false,onlineMessage='';
   const copy=v=>JSON.parse(JSON.stringify(v));
