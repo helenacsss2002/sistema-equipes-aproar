@@ -19,7 +19,7 @@
 
   const EXTRA_OPTIONS = ['Não', 'Meia diária', 'Diária', 'Uma e meia diária', 'Duas diárias'];
   // Opções do apontamento cotidiano; registros antigos de "Uma e meia diária" continuam preservados.
-  const APONTAMENTO_EXTRA_OPTIONS = [['Não','Não'],['Meia diária','Meia Diária'],['Diária','Diária'],['Duas diárias','Duas diárias']];
+  const APONTAMENTO_EXTRA_OPTIONS = [['Não','Não'],['Meia diária','Meia Diária'],['Diária','Diária'],['Uma e meia diária','1 e meia diária'],['Duas diárias','Duas diárias']];
 
   const seedData=()=>({version:2,colaboradores:[],obras:[],convocacoes:[],apontamentos:[],extras:[],indisponibilidades:[],conflitosTentados:[],auditoria:[]});
 
@@ -550,7 +550,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
  return `<div class="person-row person-card" data-person="${cid}" data-unit="${escapeHtml(unit)}" data-extra-original="0" data-finance-adjusted="${item?.financeAdjusted?'true':'false'}" data-financeiro-original="${Number(item?.financeiro)||0}" data-ajuda-custo="${Number(item?.ajudaCusto)||0}"><div class="person-name">${escapeHtml(c?.nome||cid)}<br><small>${escapeHtml(c?.funcao||'')} · ${escapeHtml(unit)}</small></div>
  <div class="person-top">${field('Status',`<select class="control row-status">${STATUS_OPTIONS.map(x=>`<option ${x===(item?.status||'Presente (Integral)')?'selected':''}>${x}</option>`).join('')}</select>`)}</div>
  <div class="person-services"><div class="allocations principal-service">${allocationRow(unit,services[0],0)}</div>
- <div class="form-grid">${field('Houve extra?',`<select class="control row-extra" aria-label="Houve extra?">${APONTAMENTO_EXTRA_OPTIONS.map(([value,label])=>`<option value="${value}" ${extraValue===value?'selected':''}>${label}</option>`).join('')}${extraEnabled&&!APONTAMENTO_EXTRA_OPTIONS.some(([value])=>value===extraValue)?`<option value="${escapeHtml(extraValue)}" selected>${escapeHtml(extraValue)} (registro anterior)</option>`:''}</select>`)}${field('Valor da Extra (R$)',`<input class="control row-extra-value" type="number" min="0" step="0.01" value="${extraAmount?extraAmount.toFixed(2):''}" ${extraEnabled?'required':''} placeholder="Digite o valor" title="Digite o valor da extra em reais">`)}${Number(item?.financeiro)>0?field('Valor complementar já registrado (R$)',`<input class="control row-financeiro-historico" type="number" readonly value="${Number(item.financeiro).toFixed(2)}" title="Lançamento anterior preservado, sem edição pelo supervisor">`):''}${field('Acordos / Bonificações (R$)',`<input class="control row-acordo" type="number" min="0" step="0.01" value="${item?.acordo||0}">`)}${perfilAtual==='SUPERVISOR'?field('Passagens/Ajuda de custo (R$)',`<input class="control row-ajuda-custo" type="number" min="0" step="0.01" list="passagens-ajuda-valores" value="${Number(item?.ajudaCusto)||0}" ${item?.financeAdjusted?'readonly title="Valor confirmado pelo Financeiro"':''}>`):''}</div>
+ <div class="form-grid">${field('Houve extra?',`<select class="control row-extra" aria-label="Houve extra?">${APONTAMENTO_EXTRA_OPTIONS.map(([value,label])=>`<option value="${value}" ${extraValue===value?'selected':''}>${label}</option>`).join('')}${extraEnabled&&!APONTAMENTO_EXTRA_OPTIONS.some(([value])=>value===extraValue)?`<option value="${escapeHtml(extraValue)}" selected>${escapeHtml(extraValue)} (registro anterior)</option>`:''}</select>`)}${field('Valor da Extra (R$)',`<input class="control row-extra-value" type="${extraEnabled?'number':'text'}" min="0.01" step="0.01" value="${extraEnabled?(extraAmount?extraAmount.toFixed(2):''):'R$ 0,00'}" ${extraEnabled?'required':'disabled'} placeholder="Digite o valor" title="${extraEnabled?'Digite o valor da extra em reais':'Sem extra: R$ 0,00'}">`)}${Number(item?.financeiro)>0?field('Valor complementar já registrado (R$)',`<input class="control row-financeiro-historico" type="number" readonly value="${Number(item.financeiro).toFixed(2)}" title="Lançamento anterior preservado, sem edição pelo supervisor">`):''}${field('Acordos / Bonificações (R$)',`<input class="control row-acordo" type="number" min="0" step="0.01" value="${item?.acordo||0}">`)}${perfilAtual==='SUPERVISOR'?field('Passagens/Ajuda de custo (R$)',`<input class="control row-ajuda-custo" type="number" min="0" step="0.01" list="passagens-ajuda-valores" value="${Number(item?.ajudaCusto)||0}" ${item?.financeAdjusted?'readonly title="Valor confirmado pelo Financeiro"':''}>`):''}</div>
  <div class="row-extra-panel section ${extraEnabled?'':'hidden'}"><div class="notice info">Informe o valor da extra realizado pelo colaborador. A categoria identifica o tipo de extra, mas não define o valor. O registro é separado da presença normal.</div><div class="form-grid">
  ${field('Obra / Serviço da extra',`<select class="control row-extra-work">${extraWorkOptions(workId)}</select>`)}
  ${field('Observação da extra',`<input class="control row-extra-obs" maxlength="2000" value="${escapeHtml(extraObservation)}" placeholder="Opcional">`)}
@@ -566,9 +566,18 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
             night=field('.row-noturno'),status=field('.row-status'),total=field('.row-total'),
             panel=field('.row-extra-panel');
       const moneyValue=selector=>Math.max(0,Number(field(selector)?.value)||0);
+      let lastExtraActive=(extraChoice?.value||'Não')!=='Não';
       const updateTotal=()=>{
         const active=(extraChoice?.value||'Não')!=='Não';
-        if(extraAmount){extraAmount.disabled=!active;extraAmount.required=active;}
+        if(extraAmount){
+          if(active!==lastExtraActive){
+            extraAmount.type=active?'number':'text';
+            extraAmount.value=active?'':'R$ 0,00';
+            lastExtraActive=active;
+          }
+          extraAmount.disabled=!active;
+          extraAmount.required=active;
+        }
         const extra=active?moneyValue('.row-extra-value'):0;
         const ordinary=presence(status.value)?Math.max(0,Number(card.dataset.financeiroOriginal)||0)+moneyValue('.row-acordo')+moneyValue('.row-ajuda-custo')+moneyValue('.row-noturno'):0;
         const sum=roundMoney(extra+ordinary);
