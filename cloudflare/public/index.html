@@ -613,6 +613,12 @@ table td .control {text-align:inherit;}
 .person-card .row-total-summary strong {font-size:22px;font-weight:800;letter-spacing:-.02em;color:#12396b;}
 .person-card .row-total-summary small {flex-basis:100%;font-size:12px;color:#56718f;line-height:1.5;}
 @media (max-width:620px){.person-card .row-total-summary strong{font-size:20px;}}
+
+/* Total calculado, não editável, em destaque azul no Portal do Supervisor e no Financeiro. */
+.person-card .row-total-summary {background:#155bc7;border:1px solid #0f4eaf;box-shadow:0 5px 14px rgba(21,91,199,.15);}
+.person-card .row-total-summary span,.person-card .row-total-summary strong,.person-card .row-total-summary small {color:#fff;}
+.person-card .row-extra-value[readonly],.person-card .row-financeiro-historico[readonly] {background:#f0f5fc;color:#18446f;font-weight:700;cursor:default;}
+.pay-total-display {color:#1459c4;font-size:1.05em;font-weight:800;white-space:nowrap;}
 </style>
 </head>
 <body>
@@ -673,6 +679,6 @@ table td .control {text-align:inherit;}
 
   <script src="/pdf-lib.min.js"></script>
 <script src="/financeiro-consolidado.js?v=20261014-1"></script>
-  <script src="/app.js?v=aproar-extra-categoria-total-20261014-2"></script>
+  <script src="/app.js?v=aproar-valor-extra-total-20261014-3"></script>
 <div id="online-saving" class="hidden" role="status" aria-live="polite" style="position:fixed;inset:0;background:rgba(11,27,51,.4);z-index:99999;display:grid;place-items:center"><div class="card card-pad"><strong>Salvando alterações no Neon…</strong><p>Aguarde a confirmação.</p></div></div></body>
 </html>
