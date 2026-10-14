@@ -329,15 +329,23 @@ test('Independent extra at another unit does not duplicate the normal attendance
   assert.equal(after.raw.servicos_apontamento.length,3);
  }finally{await pg.close();}
 });
-test('Only the supervisor responsible for the extra unit may register the independent extra',async()=>{
+test('Supervisors can allocate an extra to a different unit without duplicating ordinary attendance',async()=>{
  const {pg,sql}=await fixture();
  try{
   let db=await readDatabase(sql),next=structuredClone(db.state);
   conv(next);next.convocacoes[0].obraId='1';attendance(next,'draft-conv');
   db=(await save(sql,next,actor)).after;
   db.state.unitOwners.SEBRAE='EDUARDO';
-  const owned=structuredClone(db.state);
-  owned.extras.push({id:'extra-owner-ok',supervisor:'EDUARDO',dataServico:'2026-10-07',unidade:'SEBRAE',obraId:'3',colaboradorId:'1',extra:'Meia diária',valorExtraOriginal:0,observacao:'',criadoEm:now});
+  const crossUnit=structuredClone(db.state);
+  crossUnit.extras.push({id:'extra-cross-unit',supervisor:'EDUARDO',dataServico:'2026-10-07',unidade:'SEBRAE',obraId:'3',colaboradorId:'1',extra:'Meia diária',valorExtraOriginal:0,observacao:'',criadoEm:now});
+  const ops=buildOperations(db,crossUnit,actor,now);
+  assert.equal(ops.filter(x=>x.table==='convocacoes'&&x.action==='insert').length,1);
+  const otherSupervisor={role:'SUPERVISOR',user:'VICTOR'},other=structuredClone(visibleState(db,otherSupervisor));
+  other.extras.push({id:'extra-other-supervisor',supervisor:'VICTOR',dataServico:'2026-10-07',unidade:'SEBRAE',obraId:'3',colaboradorId:'1',extra:'Meia diária',valorExtraOriginal:0,observacao:'',criadoEm:now});
+  const otherOps=buildOperations(db,other,otherSupervisor,now);
+  assert.equal(otherOps.filter(x=>x.table==='convocacoes'&&x.action==='insert').length,1,'Supervisor can assign the extra to another registered unit');
+ }finally{await pg.close();}
+});
   const ops=buildOperations(db,owned,actor,now);
   assert.equal(ops.filter(x=>x.table==='convocacoes'&&x.action==='insert').length,1);
   const deniedSession={role:'SUPERVISOR',user:'VICTOR'},denied=structuredClone(visibleState(db,deniedSession));
