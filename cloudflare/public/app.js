@@ -754,15 +754,54 @@
   function field(label,input){return `<div><label class="field-label">${label}</label>${input}</div>`;}
   function blocked(id,date){return state.indisponibilidades.some(x=>x.colaboradorId===id&&x.inicio<=date&&x.fim>=date);}
   function overlaps(a,b){return a===b||a==='Outro'||b==='Outro'||(a==='Integral'&&['Manhã','Tarde'].includes(b))||(b==='Integral'&&['Manhã','Tarde'].includes(a));}
-  function localDownload(name,content,mime='text/plain'){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([content],{type:mime}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
-  function exportTable(){const t=$('#main-content table');if(!t)return toast('Sem dados para exportar.',true);const csv=[...t.rows].map(r=>[...r.cells].map(c=>'"'+c.innerText.replaceAll('"','""')+'"').join(';')).join('\r\n');localDownload('aproar_relatorio.csv','\uFEFF'+csv,'text/csv;charset=utf-8');}
+  function localDownload(name,content,mime='text/plain'){downloadBlob(name,new Blob([content],{type:mime}));}
+  function exportTable(){
+    let rows,filename='aproar_relatorio.csv';
+    if(perfilAtual==='FINANCEIRO'&&viewAtual==='pagamentos'){
+      const details=financialEntries().filter(x=>presence(x.i.status)&&x.finance+x.night+x.bonus+x.ajudaCusto>0.005);
+      if(!details.length)return showToast('Não há pagamentos neste período para exportar.',true);
+      const people=financialSummaryRows(details);
+      rows=[
+        ['APROAR | CONSOLIDADO FINANCEIRO POR COLABORADOR'],
+        ['Período',reportPeriod()],
+        ['Colaborador','Função','Supervisor(es)','Unidade(s)','Dias','Financeiro (R$)','Noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total (R$)'],
+        ...people.map(p=>[p.nome,p.funcao,p.supervisores,p.unidades,p.dias,p.finance,p.night,p.bonus,p.ajudaCusto,p.total]),
+        [],['DETALHAMENTO POR DIA'],
+        ['Data','Supervisor','Unidade','Obra','Colaborador','Status','Financeiro (R$)','Noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total (R$)'],
+        ...details.sort((a,b)=>a.c.dataServico.localeCompare(b.c.dataServico)||(a.p?.nome||'').localeCompare(b.p?.nome||'','pt-BR',{sensitivity:'base'})).map(x=>[
+          formatDate(x.c.dataServico),x.c.supervisor,[...x.units].join(', '),[...x.works].map(financialWorkNumber).join(', '),
+          x.p?.nome||'',x.i.status,x.finance,x.night,x.bonus,x.ajudaCusto,roundMoney(x.finance+x.night+x.bonus+x.ajudaCusto)
+        ])
+      ];
+      filename='financeiro_pagamentos_'+reportFilters.inicio+'_a_'+reportFilters.fim+'.csv';
+    }else{
+      const t=$('#main-content table');if(!t)return showToast('Sem dados para exportar.',true);
+      rows=[...t.rows].map(r=>[...r.cells].map(c=>c.querySelector('input,select,textarea')?.value??c.innerText));
+    }
+    const csv=rows.map(r=>r.map(value=>'"'+String(value??'').replaceAll('"','""')+'"').join(';')).join('\r\n');
+    localDownload(filename,'\uFEFF'+csv,'text/csv;charset=utf-8');
+  }
   function exportButtons(){return `<div class="inline-actions section"><button class="btn btn-secondary" id="export-csv">Exportar CSV</button><button class="btn btn-secondary" id="export-excel">Gerar Excel</button><button class="btn btn-primary" id="export-pdf">Gerar PDF</button></div>`;}
-  function bindExports(){$('#export-csv').onclick=exportTable;$('#export-excel').onclick=()=>['relatorios','pagamentos','financeiro'].includes(viewAtual)?exportReportsExcel():exportVisibleWorkbook('aproar_relatorio');$('#export-pdf').onclick=()=>reportPDF(perfilAtual==='FINANCEIRO'?'financial':'control');}
+  function bindExportAction(button,action){
+    if(!button)return;
+    button.onclick=async()=>{
+      if(button.disabled)return;
+      const original=button.textContent;
+      button.disabled=true;button.textContent='Gerando arquivo...';
+      try{await action();}
+      catch(error){console.error('Erro ao exportar relatório APROAR',error);showToast('Não foi possível gerar o relatório: '+(error?.message||'erro desconhecido'),true);}
+      finally{button.disabled=false;button.textContent=original;}
+    };
+  }
+  function bindExports(){
+    bindExportAction($('#export-csv'),exportTable);
+    bindExportAction($('#export-excel'),()=>['relatorios','pagamentos','financeiro'].includes(viewAtual)?exportReportsExcel():exportVisibleWorkbook('aproar_relatorio'));
+    bindExportAction($('#export-pdf'),()=>reportPDF(perfilAtual==='FINANCEIRO'?'financial':'control'));
+  }
   function financialSummaryButtons(){return '<div class="inline-actions section"><button type="button" class="btn btn-secondary" id="export-fin-summary-excel">Consolidado por colaborador · Excel</button><button type="button" class="btn btn-secondary" id="export-fin-summary-pdf">Consolidado por colaborador · PDF</button></div>';}
   function bindFinancialSummaryExports(){
-    const excel=$('#export-fin-summary-excel'),pdf=$('#export-fin-summary-pdf');
-    if(excel)excel.onclick=()=>exportFinancialSummaryExcel();
-    if(pdf)pdf.onclick=()=>reportPDF('financial-consolidated');
+    bindExportAction($('#export-fin-summary-excel'),exportFinancialSummaryExcel);
+    bindExportAction($('#export-fin-summary-pdf'),()=>reportPDF('financial-consolidated'));
   }
   function renderConvCompletaBase(){
     if(perfilAtual==='SUPERVISOR')return renderUnitConvocacao();
@@ -1166,7 +1205,19 @@
   function renderTeamsSettings(body){state.teamsConfig??={};const units=adminUnits();body.innerHTML=`<h3>Cobranças Teams</h3><p>Destinatários e prévia das pendências de apontamento. O envio externo depende da integração com o Teams.</p><form id="teams-config-form"><div class="form-grid">${field('Rotina automática','<label><input id="teams-automation" type="checkbox"> Ativar rotina de cobranças quando o Teams estiver conectado</label>')}${field('Texto da cobrança manual','<input id="teams-manual-message" class="control" placeholder="Regularize os apontamentos pendentes no Portal do Supervisor.">')}</div><h3 class="section">Destinatários por supervisor</h3>${table(['Supervisor','E-mail Teams','Ativo','Ação'],SUPERVISORES.map((s,index)=>[s,`<input class="control" type="email" id="teams-email-${index}" value="${escapeHtml(state.teamsConfig[s]?.email||'')}">`,`<input type="checkbox" id="teams-enabled-${index}" ${state.teamsConfig[s]?.ativo!==false?'checked':''}>`,`<button type="button" class="btn btn-primary" data-teams-now="${s}">Cobrar agora</button>`]))}<button class="btn btn-primary btn-block">Salvar destinatários e configuração</button></form><h3 class="section">Responsáveis cadastrados</h3><div id="teams-responsible"></div><div class="form-grid">${field('Unidade',`<select id="teams-owner-unit" class="control">${options(units)}</select>`)}${field('Supervisor',`<select id="teams-owner-sup" class="control">${options(SUPERVISORES)}</select>`)}</div><button class="btn btn-secondary section" id="teams-save-owner">Salvar responsável da unidade</button><h3 class="section">Pendências de apontamento e destinatários</h3><p>A pendência considera colaboradores ainda sem apontamento, inclusive em equipes parcialmente regularizadas.</p><div id="teams-pending"></div><h3 class="section">Histórico recente de cobranças</h3><div id="teams-history"></div><div class="notice info section">Demais unidades: 16:00 do dia do serviço e 09:30 do dia seguinte. SEBRAE: 21:00 do próprio dia. Prévia local; nenhuma cobrança é enviada por este HTML.</div>`;$('#teams-automation').checked=Boolean(state.teamsAutomation);$('#teams-manual-message').value=state.teamsMessage||'';const refresh=()=>{const pending=operationalRows(state.convocacoes.filter(c=>c.dataServico<=isoToday())).filter(x=>!x.i);const noDest=pending.filter(x=>!state.teamsConfig[x.c.supervisor]?.email||state.teamsConfig[x.c.supervisor]?.ativo===false);$('#teams-pending').innerHTML=`<div class="grid grid-4">${metric('Pendências',pending.length,'colaboradores')}${metric('Pendentes hoje',pending.filter(x=>x.c.dataServico===isoToday()).length,'dia atual')}${metric('Atrasados',pending.filter(x=>!isWeekend(x.c.dataServico)&&now()>=deadlineApontamento(x.c.dataServico)).length,'prazo vencido')}${metric('Sem destinatário',noDest.length,'e-mail ausente ou inativo')}</div><div class="limited-table section">`+table(['Data','Unidade','Colaborador','Turno','Situação','Automação','Responsável','Destinatário'],pending.map(x=>[formatDate(x.c.dataServico),escapeHtml(x.c.unidade),escapeHtml(x.p?.nome),x.c.turno,!isWeekend(x.c.dataServico)&&now()>=deadlineApontamento(x.c.dataServico)?'Atrasado':'Pendente',reminder(x.c),x.c.supervisor,escapeHtml(state.teamsConfig[x.c.supervisor]?.email||'Sem destinatário')]))+'</div>';$('#teams-responsible').innerHTML=table(['Supervisor','Unidades'],SUPERVISORES.map(s=>[s,escapeHtml(Object.entries(state.unitOwners||{}).filter(([u,v])=>v===s).map(([u])=>u).join(', ')||[...new Set(state.convocacoes.filter(c=>c.supervisor===s).map(c=>c.unidade))].join(', '))]));$('#teams-history').innerHTML=table(['Data','Supervisor','Pendências','Status','Detalhe'],(state.teamsHistory||[]).slice().reverse().map(x=>[formatDateTime(x.data),x.supervisor,x.quantidade,x.status,escapeHtml(x.detalhe)]));};$('#teams-config-form').onsubmit=e=>{e.preventDefault();SUPERVISORES.forEach((s,i)=>state.teamsConfig[s]={email:$('#teams-email-'+i).value.trim(),ativo:$('#teams-enabled-'+i).checked});state.teamsAutomation=$('#teams-automation').checked;state.teamsMessage=$('#teams-manual-message').value.trim();audit('Configuração de destinatários Teams');saveData();toast('Configuração salva.');refresh();};$('#teams-save-owner').onclick=()=>{state.unitOwners??={};state.unitOwners[$('#teams-owner-unit').value]=$('#teams-owner-sup').value;audit('Responsável da unidade alterado');saveData();refresh();};$$('[data-teams-now]').forEach(b=>b.onclick=()=>{const s=b.dataset.teamsNow,rows=operationalRows(state.convocacoes.filter(c=>c.supervisor===s&&c.dataServico<=isoToday())).filter(x=>!x.i);body.insertAdjacentHTML('beforeend',`<div class="card card-pad section"><h3>Prévia da cobrança · ${s}</h3><textarea class="control" id="teams-preview" readonly>${escapeHtml((state.teamsMessage||'Regularize os apontamentos pendentes no Portal do Supervisor.')+'\n'+rows.map(x=>formatDate(x.c.dataServico)+' · '+x.c.unidade+' · '+x.p?.nome).join('\n'))}</textarea><p>Prévia gerada. Envio não realizado: Teams não conectado.</p></div>`);state.teamsHistory??=[];state.teamsHistory.push({data:now().toISOString(),supervisor:s,quantidade:rows.length,status:'Não enviado',detalhe:'Prévia local; Teams não conectado'});saveData();refresh();});refresh();}
   const xmlSafe=v=>String(v??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
   function zipStore(files){const enc=new TextEncoder(),parts=[],central=[];let offset=0;const crc=data=>{let c=0xffffffff;for(const b of data){c^=b;for(let k=0;k<8;k++)c=(c>>>1)^((c&1)?0xedb88320:0);}return (c^0xffffffff)>>>0;};for(const [name,content] of Object.entries(files)){const n=enc.encode(name),d=enc.encode(content),h=new Uint8Array(30+n.length),v=new DataView(h.buffer),sum=crc(d);v.setUint32(0,0x04034b50,true);v.setUint16(4,20,true);v.setUint32(14,sum,true);v.setUint32(18,d.length,true);v.setUint32(22,d.length,true);v.setUint16(26,n.length,true);h.set(n,30);parts.push(h,d);const c=new Uint8Array(46+n.length),cv=new DataView(c.buffer);cv.setUint32(0,0x02014b50,true);cv.setUint16(4,20,true);cv.setUint16(6,20,true);cv.setUint32(16,sum,true);cv.setUint32(20,d.length,true);cv.setUint32(24,d.length,true);cv.setUint16(28,n.length,true);cv.setUint32(42,offset,true);c.set(n,46);central.push(c);offset+=h.length+d.length;}const length=central.reduce((v,x)=>v+x.length,0),end=new Uint8Array(22),ev=new DataView(end.buffer);ev.setUint32(0,0x06054b50,true);ev.setUint16(8,central.length,true);ev.setUint16(10,central.length,true);ev.setUint32(12,length,true);ev.setUint32(16,offset,true);return new Blob([...parts,...central,end],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});}
-  function downloadBlob(name,blob){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
+  function downloadBlob(name,blob){
+    if(!(blob instanceof Blob)||!blob.size)throw Error('O arquivo gerado está vazio.');
+    const url=URL.createObjectURL(blob),a=document.createElement('a');
+    a.href=url;a.download=name;a.style.display='none';document.body.appendChild(a);
+    try{
+      a.click();
+      showToast('Download iniciado: '+name);
+    }finally{
+      a.remove();
+      // Revogação imediata ou em 1 segundo pode interromper downloads em alguns navegadores.
+      setTimeout(()=>URL.revokeObjectURL(url),60000);
+    }
+  }
   function exportVisibleWorkbook(filename){const tables=$$('#main-content table');if(!tables.length)return toast('Sem dados para exportar.',true);exportWorkbook(tables.map((t,i)=>({name:'Tabela '+(i+1),center:[...t.rows[0].cells].map((c,j)=>/data|status|situação|turno|quantidade|dias|atrasado|prazo|posição|extra|percentual|%/i.test(c.innerText)?j:-1).filter(j=>j>=0),rows:[...t.rows].map(r=>[...r.cells].map(c=>c.innerText))})),filename);}
   function reportRowsForExport(rows){const fin=perfilAtual==='FINANCEIRO';return [['Data','Supervisor','Unidade','Obra','Colaborador','Período','Status',fin?'Financeiro':'Custo normal','Extra (R$)','Noturno','Acordos',...(fin?['Passagens/Ajuda de custo']:['Periculosidade']),'Total'],...rows.map(x=>[formatDate(x.c.dataServico),x.c.supervisor,x.c.unidade,fin?financialWorkNumber(x.c.obraId):obraById(x.c.obraId)?.nome||'',x.p?.nome||'',x.service.periodo,x.displayStatus||x.i.status,fin?x.finance:x.daily,fin?0:x.extra,x.night,x.bonus,fin?x.ajudaCusto:x.danger,fin?x.finance+x.night+x.bonus+x.ajudaCusto:x.daily+x.extra+x.danger+x.night+x.bonus])];}
   const excelCol=n=>{let s='';for(n++;n;n=Math.floor((n-1)/26))s=String.fromCharCode(65+(n-1)%26)+s;return s;};
