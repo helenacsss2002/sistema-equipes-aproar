@@ -19,7 +19,10 @@ function setup(){
    createObjectURL(blob){const url='blob:test/'+urls.size;urls.set(url,blob);return url;},
    revokeObjectURL(){}
   },setTimeout(){},document:{
-   createElement(name){assert.equal(name,'a');return {href:'',download:'',click(){downloads.push({filename:this.download,blob:urls.get(this.href)});}};}
+   body:{appendChild(anchor){anchor.attached=true;}},
+   createElement(name){assert.equal(name,'a');return {href:'',download:'',style:{},attached:false,
+    click(){assert.equal(this.attached,true,'Link precisa estar anexado ao DOM antes de baixar');downloads.push({filename:this.download,blob:urls.get(this.href)});},
+    remove(){this.attached=false;}};}
   },reportFilters:{inicio:'2026-10-13',fim:'2026-10-13',supervisor:'Todos',obra:'Todas'},
   perfilAtual:'FINANCEIRO',viewAtual:'pagamentos',selectedCycle:'custom',
   onlineSession:{role:'FINANCEIRO'},reportPeriod:null,
@@ -29,12 +32,12 @@ function setup(){
   reportFiltersReady:true,entries:()=>[record],financialEntries:()=>[record],
   financialSummaryRows:()=>[{id:'1',nome:'Álvaro QA',funcao:'Pedreiro',supervisores:'EDUARDO',unidades:'FIEC',dias:1,finance:100,night:0,bonus:10,ajudaCusto:11,total:121}],
   presence:status=>status.startsWith('Presente'),
-  obraById:id=>({id,nome:'OBRA 147 - TESTE',unidade:'FIEC'}),toast:msg=>{throw Error('Falha exibida ao usuário: '+msg);}
+  obraById:id=>({id,nome:'OBRA 147 - TESTE',unidade:'FIEC'}),showToast:()=>{},toast:msg=>{throw Error('Falha exibida ao usuário: '+msg);}
  };
  ctx.globalThis=ctx;ctx.self=ctx;ctx.window=ctx;
  vm.createContext(ctx);
  const fragment=[
-  section('  function localDownload(', '  function bindExports()'),
+  section('  function localDownload(', '  function bindFinancialSummaryExports()'),
   section('  const xmlSafe=', '  function controlValues('),
   section('  function financialWorkNumber(', '  function financialWorkbook('),
   section('  function financialWorkbook()', '  async function xlsxRows(')
@@ -46,11 +49,12 @@ test('Financeiro em Pagamentos baixa relatório CSV e arquivos Excel completos',
  const {ctx,downloads}=setup();
  ctx.exportFinancialSummaryExcel();
  ctx.exportReportsExcel();
- assert.equal(downloads.length,2);
+ ctx.exportTable();
+ assert.equal(downloads.length,3);
  assert.ok(downloads.every(x=>x.blob instanceof Blob));
  assert.match(downloads[0].filename,/financeiro_consolidado_colaboradores.*\.xlsx$/);
  assert.match(downloads[1].filename,/financeiro.*\.xlsx$/);
- for(const {blob} of downloads)assert.equal(Buffer.from(await blob.arrayBuffer()).subarray(0,4).toString('hex'),'504b0304');
+ for(const {blob} of downloads.slice(0,2))assert.equal(Buffer.from(await blob.arrayBuffer()).subarray(0,4).toString('hex'),'504b0304');
 });
 test('PDF financeiro e consolidado são gerados com a biblioteca distribuída pelo Worker',async()=>{
  const {ctx,downloads}=setup();
