@@ -311,5 +311,5 @@ test('Extras are launched from daily attendance and remain available to reports 
  assert.match(ui,/Valor da Extra \(R\$\)/);
  assert.match(ui,/Extra independente/);
  assert.doesNotMatch(ui,/item\('extras','Extras'/);
- assert.match(html,/aproar-extra-cinco-opcoes-zero-20261014-6/);
+ assert.match(html,/aproar-convocados-amarelo-20261014-7/);
 });
