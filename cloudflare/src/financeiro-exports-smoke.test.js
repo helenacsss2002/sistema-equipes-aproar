@@ -53,13 +53,13 @@ test('Financeiro em Pagamentos baixa relatório CSV e arquivos Excel completos',
  assert.equal(downloads.length,3);
  assert.ok(downloads.every(x=>x.blob instanceof Blob));
  assert.match(downloads[0].filename,/financeiro_consolidado_colaboradores.*\.xlsx$/);
- assert.match(downloads[1].filename,/financeiro.*\\.xlsx$/);
- assert.match(downloads[2].filename,/financeiro_pagamentos.*\\.csv$/);
+ assert.match(downloads[1].filename,/financeiro.*\.xlsx$/);
+ assert.match(downloads[2].filename,/financeiro_pagamentos.*\.csv$/);
  const csv=await downloads[2].blob.text();
  assert.match(csv,/CONSOLIDADO FINANCEIRO POR COLABORADOR/);
  assert.match(csv,/DETALHAMENTO POR DIA/);
  assert.match(csv,/Álvaro QA/);
- assert.match(csv,/Passagens\\/Ajuda de custo/);
+ assert.match(csv,/Passagens\/Ajuda de custo/);
  for(const {blob} of downloads.slice(0,2))assert.equal(Buffer.from(await blob.arrayBuffer()).subarray(0,4).toString('hex'),'504b0304');
 });
 test('PDF financeiro e consolidado são gerados com a biblioteca distribuída pelo Worker',async()=>{
