@@ -29,7 +29,8 @@ test('Portal do Supervisor tem um único campo Valor da Extra e total em azul n�
  const person=app.slice(app.indexOf('function personRow('),app.indexOf('function bindServiceRows()'));
  assert.match(person,/field\('Valor da Extra \(R\$\)'/);
  assert.equal((person.match(/field\('Valor da Extra \(R\$\)'/g)||[]).length,1);
- assert.match(person,/class="control row-extra-value"[^>]*readonly/);
+ assert.match(person,/class="control row-extra-value"[^>]*placeholder="Digite o valor"/);
+ assert.doesNotMatch(person,/class="control row-extra-value"[^>]*readonly/);
  assert.match(person,/data-financeiro-original=/);
  assert.doesNotMatch(person,/class="control row-financeiro"/);
  assert.match(person,/TOTAL A PAGAR AO COLABORADOR/);
@@ -55,5 +56,5 @@ test('Todos os relatórios financeiros usam Valor da Extra e explicitam valores 
   assert.match(area,/Valores (complementares já registrados|anteriores)/,start);
   assert.doesNotMatch(area,/'Financeiro \(R\$\)'/,start);
  }
- assert.match(html,/app\.js\?v=aproar-extra-unificada-20261014-4/);
+ assert.match(html,/app\.js\?v=aproar-extra-manual-realocacao-20261014-5/);
 });

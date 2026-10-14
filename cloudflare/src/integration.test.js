@@ -316,7 +316,7 @@ test('Independent extra at another unit does not duplicate the normal attendance
   conv(next);next.convocacoes[0].obraId='1';attendance(next,'draft-conv');
   db=(await save(sql,next,actor)).after;
   next=structuredClone(db.state);
-  next.extras.push({id:'extra-independent-1',supervisor:'VICTOR',dataServico:'2026-10-07',unidade:'SEBRAE',obraId:'3',colaboradorId:'1',extra:'Diária',valorExtraOriginal:0,observacao:'Extra após jornada',criadoEm:now});
+  next.extras.push({id:'extra-independent-1',supervisor:'VICTOR',dataServico:'2026-10-07',unidade:'SEBRAE',obraId:'3',colaboradorId:'1',extra:'Diária',valorExtraOriginal:241.74,observacao:'Extra após jornada',criadoEm:now});
   const saved=await save(sql,next,admin),after=saved.after;
   assert.equal(after.state.convocacoes.length,1,'only the ordinary daytime convocation is visible');
   assert.equal(after.state.apontamentos.length,1,'the ordinary presence remains a single attendance record');
@@ -337,11 +337,11 @@ test('Supervisors can allocate an extra to a different unit without duplicating 
   db=(await save(sql,next,actor)).after;
   db.state.unitOwners.SEBRAE='EDUARDO';
   const crossUnit=structuredClone(db.state);
-  crossUnit.extras.push({id:'extra-cross-unit',supervisor:'EDUARDO',dataServico:'2026-10-07',unidade:'SEBRAE',obraId:'3',colaboradorId:'1',extra:'Meia diária',valorExtraOriginal:0,observacao:'',criadoEm:now});
+  crossUnit.extras.push({id:'extra-cross-unit',supervisor:'EDUARDO',dataServico:'2026-10-07',unidade:'SEBRAE',obraId:'3',colaboradorId:'1',extra:'Meia diária',valorExtraOriginal:120.87,observacao:'',criadoEm:now});
   const ops=buildOperations(db,crossUnit,actor,now);
   assert.equal(ops.filter(x=>x.table==='convocacoes'&&x.action==='insert').length,1);
   const otherSupervisor={role:'SUPERVISOR',user:'VICTOR'},other=structuredClone(visibleState(db,otherSupervisor));
-  other.extras.push({id:'extra-other-supervisor',supervisor:'VICTOR',dataServico:'2026-10-07',unidade:'SEBRAE',obraId:'3',colaboradorId:'1',extra:'Meia diária',valorExtraOriginal:0,observacao:'',criadoEm:now});
+  other.extras.push({id:'extra-other-supervisor',supervisor:'VICTOR',dataServico:'2026-10-07',unidade:'SEBRAE',obraId:'3',colaboradorId:'1',extra:'Meia diária',valorExtraOriginal:120.87,observacao:'',criadoEm:now});
   const otherOps=buildOperations(db,other,otherSupervisor,now);
   assert.equal(otherOps.filter(x=>x.table==='convocacoes'&&x.action==='insert').length,1,'Supervisor can assign the extra to another registered unit');
  }finally{await pg.close();}
@@ -367,5 +367,81 @@ test('SEBRAE accepts R$ 50 and R$ 90 night additions from a supervisor, preservi
   next=structuredClone(db.state);next.apontamentos[0].itens[0].noturno=50;
   db=(await save(sql,next,actor)).after;
   assert.equal(Number(db.raw.apontamentos[0].valor_adicional_noturno),50);
+ }finally{await pg.close();}
+});
+
+
+test('Valor da Extra é digitado pelo supervisor, sem cálculo automático, e persistido no Neon',async()=>{
+ const {pg,sql}=await fixture();
+ try{
+  let db=await readDatabase(sql),next=structuredClone(db.state);
+  conv(next);
+  db=(await save(sql,next,actor)).after;
+  next=structuredClone(visibleState(db,actor));
+  next.extras.push({id:'extra-valor-livre',supervisor:'EDUARDO',dataServico:'2026-10-07',obraId:'1',unidade:'FIEC',colaboradorId:'1',extra:'Diária',valorExtraOriginal:37.45,observacao:'Extra com valor informado'});
+  const ops=buildOperations(db,next,actor,now);
+  assert.equal(ops.find(o=>o.table==='apontamentos'&&o.action==='insert')?.data.valor_extra,37.45);
+  db=(await save(sql,next,actor)).after;
+  assert.equal(db.state.extras[0].valorExtraOriginal,37.45);
+  next=structuredClone(visibleState(db,actor));
+  next.extras[0].valorExtraOriginal=53.27;
+  db=(await save(sql,next,actor)).after;
+  assert.equal(db.state.extras[0].valorExtraOriginal,53.27);
+  assert.equal(Number(db.raw.convocacoes.find(c=>c.status==='Extra').valor_extra),53.27);
+  next=structuredClone(visibleState(db,actor));
+  next.extras[0].valorExtraOriginal=0;
+  assert.throws(()=>buildOperations(db,next,actor,now),/Informe o Valor da Extra/);
+  next.extras[0].valorExtraOriginal=-10;
+  assert.throws(()=>buildOperations(db,next,actor,now),/Informe o Valor da Extra/);
+ }finally{await pg.close();}
+});
+test('Realocação sem apontamento altera o mesmo ID, sem solicitar exclusão em produção',async()=>{
+ const {pg,sql}=await fixture();
+ try{
+  let db=await readDatabase(sql),next=structuredClone(db.state);
+  conv(next);
+  db=(await save(sql,next,admin)).after;
+  const id=db.state.convocacoes[0].id;
+  next=structuredClone(db.state);
+  Object.assign(next.convocacoes[0],{unidade:'SEBRAE',obraId:'3',supervisor:'FELIPE',dataServico:'2026-10-07',turno:'Noite'});
+  const ops=buildOperations(db,next,admin,now);
+  assert.equal(ops.filter(o=>o.action==='delete').length,0);
+  assert.equal(ops.filter(o=>o.table==='convocacoes'&&o.action==='insert').length,0);
+  assert.equal(ops.filter(o=>o.table==='convocacoes'&&o.action==='update').length,1);
+  assert.equal(permittedProductionDeletion({APP_ENV:'producao',PRODUCTION_ALLOW_DELETE:'false'},admin,db,ops),true);
+  db=(await save(sql,next,admin)).after;
+  assert.equal(db.state.convocacoes[0].id,id);
+  assert.equal(db.state.convocacoes[0].supervisor,'FELIPE');
+  assert.equal(db.state.convocacoes[0].unidade,'SEBRAE');
+  assert.equal(db.state.convocacoes[0].dataServico,'2026-10-07');
+ }finally{await pg.close();}
+});
+test('Realocação com apontamento e troca de obra da mesma unidade mantém o ID e o histórico de serviços',async()=>{
+ const {pg,sql}=await fixture();
+ try{
+  let db=await readDatabase(sql),next=structuredClone(db.state);
+  conv(next);
+  next.convocacoes[0].obraId='1';
+  next.apontamentos.push({id:'ap-realloc',convocacaoId:'draft-conv',supervisor:'EDUARDO',dataServico:'2026-10-07',itens:[{colaboradorId:'1',status:'Presente (Integral)',extra:'Não',financeiro:75,noturno:0,acordo:11,ajudaCusto:10,observacao:'Histórico',servicos:[{obraId:'1',periodo:'Integral'}]}]});
+  db=(await save(sql,next,admin)).after;
+  const convId=db.state.convocacoes[0].id;
+  const pointId=db.raw.apontamentos[0].id;
+  const serviceId=db.raw.servicos_apontamento[0].id;
+  const oldPaid=db.raw.apontamentos[0].custo_pago;
+  next=structuredClone(db.state);
+  next.convocacoes[0].obraId='2';
+  next.apontamentos[0].itens[0].servicos=[{obraId:'2',periodo:'Integral'}];
+  const ops=buildOperations(db,next,admin,now);
+  assert.equal(ops.filter(o=>o.action==='delete').length,0);
+  assert(ops.some(o=>o.table==='servicos_apontamento'&&o.action==='update'&&o.id===String(serviceId)));
+  assert.equal(permittedProductionDeletion({APP_ENV:'producao',PRODUCTION_ALLOW_DELETE:'false'},admin,db,ops),true);
+  db=(await save(sql,next,admin)).after;
+  assert.equal(db.state.convocacoes[0].id,convId);
+  assert.equal(db.raw.apontamentos[0].id,pointId);
+  assert.equal(db.raw.servicos_apontamento[0].id,serviceId);
+  assert.equal(db.raw.apontamentos[0].custo_pago,oldPaid);
+  assert.equal(db.state.apontamentos[0].itens[0].ajudaCusto,10);
+  assert.equal(db.state.apontamentos[0].itens[0].acordo,11);
+  assert.equal(db.raw.servicos_apontamento[0].obra_id,'2');
  }finally{await pg.close();}
 });

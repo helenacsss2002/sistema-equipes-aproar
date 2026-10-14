@@ -619,6 +619,10 @@ table td .control {text-align:inherit;}
 .person-card .row-total-summary span,.person-card .row-total-summary strong,.person-card .row-total-summary small {color:#fff;}
 .person-card .row-extra-value[readonly],.person-card .row-financeiro-historico[readonly] {background:#f0f5fc;color:#18446f;font-weight:700;cursor:default;}
 .pay-total-display {color:#1459c4;font-size:1.05em;font-weight:800;white-space:nowrap;}
+
+/* Valor da Extra é digitado pelo supervisor; não pode parecer bloqueado. */
+.person-card .row-extra-value:not(:disabled){background:#fff;color:#15395f;cursor:text;border-color:#94b6e1;}
+.person-card .row-extra-value:disabled{background:#edf2f8;color:#72839a;}
 </style>
 </head>
 <body>
@@ -679,6 +683,6 @@ table td .control {text-align:inherit;}
 
   <script src="/pdf-lib.min.js"></script>
 <script src="/financeiro-consolidado.js?v=20261014-1"></script>
-  <script src="/app.js?v=aproar-extra-unificada-20261014-4"></script>
+  <script src="/app.js?v=aproar-extra-manual-realocacao-20261014-5"></script>
 <div id="online-saving" class="hidden" role="status" aria-live="polite" style="position:fixed;inset:0;background:rgba(11,27,51,.4);z-index:99999;display:grid;place-items:center"><div class="card card-pad"><strong>Salvando alterações no Neon…</strong><p>Aguarde a confirmação.</p></div></div></body>
 </html>
