@@ -299,8 +299,11 @@ test('Relatorios da Controladoria e Financeiro mostram 13 colunas sem barra late
 test('Extras are launched from daily attendance and remain available to reports and Financeiro',()=>{
  const ui=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
  const html=fs.readFileSync(new URL('../public/index.html',import.meta.url),'utf8');
- assert.match(ui,/row-extra-toggle/);
+ assert.match(ui,/class="control row-extra"/);
+ assert.match(ui,/EXTRA_OPTIONS\.map/);
+ assert.match(ui,/field\('Extra'/);
  assert.match(ui,/row-extra-work/);
+ assert.doesNotMatch(ui,/row-extra-toggle/);
  assert.match(ui,/function applyInlineExtras/);
  assert.match(ui,/state\.extras=extras/);
  assert.match(ui,/x\.extra>0\.005\|\|x\.finance>0\.005/);
@@ -308,5 +311,5 @@ test('Extras are launched from daily attendance and remain available to reports 
  assert.match(ui,/Extras \(R\$\)/);
  assert.match(ui,/Extra independente/);
  assert.doesNotMatch(ui,/item\('extras','Extras'/);
- assert.match(html,/aproar-inline-extras-20261014-1/);
+ assert.match(html,/aproar-extra-dropdown-20261014-1/);
 });
