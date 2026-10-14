@@ -29,7 +29,8 @@ test('Portal do Supervisor tem um Ãºnico campo Valor da Extra e total em azul nÃ
  const person=app.slice(app.indexOf('function personRow('),app.indexOf('function bindServiceRows()'));
  assert.match(person,/field\('Valor da Extra \(R\$\)'/);
  assert.equal((person.match(/field\('Valor da Extra \(R\$\)'/g)||[]).length,1);
- assert.match(person,/class="control row-extra-value"[^>]*readonly/);
+ assert.match(person,/class="control row-extra-value"[^>]*placeholder="Digite o valor"/);
+ assert.doesNotMatch(person,/class="control row-extra-value"[^>]*readonly/);
  assert.match(person,/data-financeiro-original=/);
  assert.doesNotMatch(person,/class="control row-financeiro"/);
  assert.match(person,/TOTAL A PAGAR AO COLABORADOR/);
