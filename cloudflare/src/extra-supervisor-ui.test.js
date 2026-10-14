@@ -24,7 +24,7 @@ function setup(){
   '.row-extra-value':control('0'),
   '.row-noturno':control('50'),
   '.row-status':control('Presente (Integral)'),
-  '.row-financeiro':control('120'),
+  '.row-financeiro-historico':control('120'),
   '.row-acordo':control('5'),
   '.row-ajuda-custo':control('11'),
   '.row-extra-panel':{classList:{toggle(className,enabled){toggled.push([className,enabled]);}}},
@@ -43,7 +43,7 @@ function setup(){
  inputs['.row-extra-obs']={value:'serviço de extra'};
  inputs['.row-obs']={value:'comprovado'};
  const card={
-  dataset:{person:'1',unit:'SEBRAE',financeAdjusted:'false',ajudaCusto:'11'},
+  dataset:{person:'1',unit:'SEBRAE',financeAdjusted:'false',ajudaCusto:'11',financeiroOriginal:'120'},
   querySelector:sel=>inputs[sel]||null,
   querySelectorAll:sel=>sel==='.allocation-row'?[service]:[]
  };
@@ -77,7 +77,7 @@ test('Extra volta a permitir Sim/Não, categoria e total automático sem alterar
  assert.match(inputs['.row-total'].textContent,/427,74/);
  inputs['.row-noturno'].value='90';inputs['.row-noturno'].fire('change');
  assert.match(inputs['.row-total'].textContent,/467,74/);
- assert.equal(inputs['.row-financeiro'].value,'120','O valor base não é alterado ao escolher extra');
+ assert.equal(inputs['.row-financeiro-historico'].value,'120','O valor base não é alterado ao escolher extra');
 });
 test('Apontamento normal e retroativo recebem extraLancamento para gravar categoria, obra e observação',()=>{
  const {ctx,inputs}=setup();
@@ -103,12 +103,15 @@ test('Não há funções duplicadas que sobrescrevam Extra e apontamento da equi
  assert.match(ui,/Categoria da Extra/);
  assert.match(ui,/Valor da Extra \(R\$\)/);
  assert.match(ui,/row-total-summary/);
+ assert.match(ui,/data-financeiro-original/);
+ assert.doesNotMatch(ui,/class="control row-financeiro"/);
+ assert.match(ui,/TOTAL A PAGAR AO COLABORADOR/);
  assert.match(ui,/valorExtraOriginal:0/);
  assert.match(ui,/\.row-extra-category/);
  assert.match(ui,/option value="50"/);
  assert.match(ui,/option value="90"/);
  assert.match(html,/row-total-summary/);
- assert.match(html,/app\.js\?v=aproar-extra-categoria-total-20261014-2/);
+ assert.match(html,/app\.js\?v=aproar-valor-extra-total-20261014-3/);
  assert.match(ui,/bindPersonSearch\(\$\('#retro-person-search'\),\(\)=>\$\$\('\.retro-person-list/);
  assert.match(ui,/const ids = \$\$\('input\[name="retro-colab"\]:checked'\)\.map/);
 });
