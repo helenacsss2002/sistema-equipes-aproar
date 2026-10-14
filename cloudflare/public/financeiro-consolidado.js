@@ -14,7 +14,7 @@
       if(values.reduce((sum,value)=>sum+value,0)<=0.005)continue;
       if(!byPerson.has(id))byPerson.set(id,{
         id,nome:String(row.p?.nome||'Colaborador sem nome'),funcao:String(row.p?.funcao||''),
-        supervisors:new Set(),units:new Set(),days:new Set(),finance:0,night:0,bonus:0,ajudaCusto:0,total:0
+        supervisors:new Set(),units:new Set(),days:new Set(),extra:0,finance:0,night:0,bonus:0,ajudaCusto:0,total:0
       });
       const item=byPerson.get(id);
       if(row.c?.supervisor)item.supervisors.add(String(row.c.supervisor));
