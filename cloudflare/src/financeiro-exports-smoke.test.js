@@ -13,7 +13,7 @@ function setup(){
  const downloads=[],urls=new Map();
  const record={id:'1',c:{supervisor:'EDUARDO',dataServico:'2026-10-13',unidade:'FIEC',obraId:'1'},p:{id:'1',nome:'Álvaro QA',funcao:'Pedreiro'},
    i:{status:'Presente (Integral)',observacao:'Teste financeiro'},service:{periodo:'Integral'},
-   finance:100,night:0,bonus:10,ajudaCusto:11,units:new Set(['FIEC']),works:new Set(['1'])};
+   extra:0,finance:100,night:0,bonus:10,ajudaCusto:11,units:new Set(['FIEC']),works:new Set(['1'])};
  const ctx={
   console,Uint8Array,DataView,TextEncoder,TextDecoder,Blob,Set,Map,Date,Math,URL:{
    createObjectURL(blob){const url='blob:test/'+urls.size;urls.set(url,blob);return url;},
@@ -30,7 +30,7 @@ function setup(){
   financialCycle:()=>({pagamento:'2026-10-14'}),
   money:n=>'R$ '+Number(n).toFixed(2).replace('.',','),roundMoney:n=>Math.round(n*100)/100,
   reportFiltersReady:true,entries:()=>[record],financialEntries:()=>[record],
-  financialSummaryRows:()=>[{id:'1',nome:'Álvaro QA',funcao:'Pedreiro',supervisores:'EDUARDO',unidades:'FIEC',dias:1,finance:100,night:0,bonus:10,ajudaCusto:11,total:121}],
+  financialSummaryRows:()=>[{id:'1',nome:'Álvaro QA',funcao:'Pedreiro',supervisores:'EDUARDO',unidades:'FIEC',dias:1,extra:0,finance:100,night:0,bonus:10,ajudaCusto:11,total:121}],
   presence:status=>status.startsWith('Presente'),
   obraById:id=>({id,nome:'OBRA 147 - TESTE',unidade:'FIEC'}),showToast:()=>{},toast:msg=>{throw Error('Falha exibida ao usuário: '+msg);}
  };
