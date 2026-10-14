@@ -49,3 +49,13 @@ test('Soma passagens separadamente do financeiro e preserva casas decimais',()=>
  ])[0];
  assert.equal(out.finance,150.33);assert.equal(out.ajudaCusto,22.86);assert.equal(out.total,173.19);
 });
+
+test('Extras independentes entram no consolidado e no total a pagar',()=>{
+ const out=summarize([
+  row('20','João','2026-10-13','EDUARDO',{extra:120}),
+  row('20','João','2026-10-14','EDUARDO',{extra:60,finance:100})
+  ])[0];
+ assert.equal(out.extra,180);
+ assert.equal(out.finance,100);
+ assert.equal(out.total,280);
+});
