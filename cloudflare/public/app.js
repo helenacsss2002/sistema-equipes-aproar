@@ -1084,17 +1084,17 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
     if(selectedCycle!=='custom'){const cycle=financialCycle(isoToday(),Number(selectedCycle));reportFilters.inicio=cycle.inicio;reportFilters.fim=cycle.fim;}
     $('#main-content').innerHTML=head('Pagamentos','Ciclo de terça a segunda, com pagamento na terça seguinte.')+cycleControl()+filterControls('combined')+'<div class="section" id="pay-body"></div>'+exportButtons()+financialSummaryButtons();
     const refresh=()=>{
-      const e=financialEntries().filter(x=>x.finance>0.005||x.night>0.005||x.bonus>0.005||x.ajudaCusto>0.005)
+      const e=financialEntries().filter(x=>x.extra>0.005||x.finance>0.005||x.night>0.005||x.bonus>0.005||x.ajudaCusto>0.005)
         .sort((a,b)=>a.c.dataServico.localeCompare(b.c.dataServico)||(a.p?.nome||'').localeCompare(b.p?.nome||'','pt-BR',{sensitivity:'base'})||(a.p?.id||'').localeCompare(b.p?.id||''));
-      const total=x=>x.finance+x.night+x.bonus+x.ajudaCusto;
+      const total=x=>x.extra+x.finance+x.night+x.bonus+x.ajudaCusto;
       const predefinidos='<datalist id="passagens-ajuda-valores"><option value="11" label="Fortaleza - R$ 11,00"></option><option value="10" label="Caucaia - R$ 10,00"></option><option value="12" label="Maracanaú - R$ 12,00"></option><option value="25" label="Horizonte - R$ 25,00"></option></datalist>';
       const fields=['financeiro','noturno','acordo','ajudaCusto'];
       const consolidated=financialSummaryRows(e);
       $('#pay-body').innerHTML=metric('TOTAL A PAGAR',money(e.reduce((v,x)=>v+total(x),0)),'sem periculosidade')
-        +'<div class="section"><h3>Consolidado por colaborador · ordem alfabética</h3>'+table(['Colaborador','Total a pagar'],consolidated.map(x=>[escapeHtml(x.nome),money(x.total)]))+'</div>'
+        +'<div class="section"><h3>Consolidado por colaborador · ordem alfabética</h3>'+table(['Colaborador','Extras (R$)','Total a pagar'],consolidated.map(x=>[escapeHtml(x.nome),money(x.extra),money(x.total)]))+'</div>'
         +'<section class="pay-detail-section" aria-labelledby="pay-detail-heading"><h3 id="pay-detail-heading">Detalhamento por dia</h3>'
         +'<p class="help-text">Passagens/Ajuda de custo: Fortaleza R$ 11, Caucaia R$ 10, Maracanaú R$ 12 e Horizonte R$ 25. Selecione um valor sugerido ou digite outro. Sem lançamento, o valor é R$ 0.</p>'
-        +table(['Data','Colaborador','Status','Financeiro (R$)','Noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)'],e.map((x,index)=>[formatDate(x.c.dataServico),escapeHtml(x.p?.nome),escapeHtml(x.i.status),...fields.map(k=>`<input aria-label="${k==='ajudaCusto'?'Passagens/Ajuda de custo':k}" class="control pay-input" type="number" min="0" step="0.01" ${k==='ajudaCusto'?'list="passagens-ajuda-valores"':''} data-index="${index}" data-field="${k}" value="${k==='financeiro'?x.finance:k==='noturno'?x.night:k==='acordo'?x.bonus:x.ajudaCusto}" ${k==='noturno'&&!x.units.has('SEBRAE')?'disabled':''}>`)]))
+        +table(['Data','Colaborador','Status','Extra (R$)','Financeiro (R$)','Noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)'],e.map((x,index)=>[formatDate(x.c.dataServico),escapeHtml(x.p?.nome),escapeHtml(x.i.status),money(x.extra),...fields.map(k=>`<input aria-label="${k==='ajudaCusto'?'Passagens/Ajuda de custo':k}" class="control pay-input" type="number" min="0" step="0.01" ${k==='ajudaCusto'?'list="passagens-ajuda-valores"':''} data-index="${index}" data-field="${k}" value="${k==='financeiro'?x.finance:k==='noturno'?x.night:k==='acordo'?x.bonus:x.ajudaCusto}" ${(!x.refs?.length||(k==='noturno'&&!x.units.has('SEBRAE')))?'disabled':''}>`)]))
         +predefinidos+'</section>';
       $$('.pay-input').forEach(inp=>inp.onchange=()=>{adjustPayment(e[Number(inp.dataset.index)],inp.dataset.field,inp.value);refresh();});
     };
