@@ -545,18 +545,18 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
  const extraValue=draft&&typeof draft.enabled==='boolean'?(draft.enabled?draft.extra:'Não'):(existingExtra?.extra||(legacyExtra?item.extra:'Não')),extraEnabled=extraValue!=='Não',
  extraCategory=EXTRA_OPTIONS.includes(extraValue)&&extraEnabled?extraValue:'Meia diária',
  proposedWork=draft?.obraId||existingExtra?.obraId||services.find(x=>x.obraId)?.obraId||defaultObra||'',workId=OBRAS.some(o=>String(o.id)===String(proposedWork))?proposedWork:(OBRAS[0]?.id||''),extraObservation=draft?.observacao??existingExtra?.observacao??'',
- cost=dayCost(c),suggestedExtra=extraEnabled?(existingExtra?.extra===extraCategory&&Number(existingExtra.valorExtraOriginal)>0?Number(existingExtra.valorExtraOriginal):roundMoney(cost*extraMultiplier(extraCategory))):0,
+ savedExtraAmount=draft?.valorExtraOriginal??existingExtra?.valorExtraOriginal??(legacyExtra?item?.valorExtraOriginal:null),extraAmount=extraEnabled&&Number(savedExtraAmount)>0?roundMoney(Number(savedExtraAmount)):0,
  nightValue=unit==='SEBRAE'&&presence(item?.status||'Presente (Integral)')?(item?.financeAdjusted?Number(item?.noturno||0):[50,90].includes(Number(item?.noturno))?Number(item.noturno):90):0;
  return `<div class="person-row person-card" data-person="${cid}" data-unit="${escapeHtml(unit)}" data-extra-original="0" data-finance-adjusted="${item?.financeAdjusted?'true':'false'}" data-financeiro-original="${Number(item?.financeiro)||0}" data-ajuda-custo="${Number(item?.ajudaCusto)||0}"><div class="person-name">${escapeHtml(c?.nome||cid)}<br><small>${escapeHtml(c?.funcao||'')} · ${escapeHtml(unit)}</small></div>
  <div class="person-top">${field('Status',`<select class="control row-status">${STATUS_OPTIONS.map(x=>`<option ${x===(item?.status||'Presente (Integral)')?'selected':''}>${x}</option>`).join('')}</select>`)}</div>
  <div class="person-services"><div class="allocations principal-service">${allocationRow(unit,services[0],0)}</div>
- <div class="form-grid">${field('Houve extra?',`<select class="control row-extra" aria-label="Houve extra?">${APONTAMENTO_EXTRA_OPTIONS.map(([value,label])=>`<option value="${value}" ${extraValue===value?'selected':''}>${label}</option>`).join('')}${extraEnabled&&!APONTAMENTO_EXTRA_OPTIONS.some(([value])=>value===extraValue)?`<option value="${escapeHtml(extraValue)}" selected>${escapeHtml(extraValue)} (registro anterior)</option>`:''}</select>`)}${field('Valor da Extra (R$)',`<input class="control row-extra-value" type="number" min="0" step="0.01" readonly value="${suggestedExtra.toFixed(2)}" title="Calculado pela categoria da extra e a diária cadastrada">`)}${Number(item?.financeiro)>0?field('Valor complementar já registrado (R$)',`<input class="control row-financeiro-historico" type="number" readonly value="${Number(item.financeiro).toFixed(2)}" title="Lançamento anterior preservado, sem edição pelo supervisor">`):''}${field('Acordos / Bonificações (R$)',`<input class="control row-acordo" type="number" min="0" step="0.01" value="${item?.acordo||0}">`)}${perfilAtual==='SUPERVISOR'?field('Passagens/Ajuda de custo (R$)',`<input class="control row-ajuda-custo" type="number" min="0" step="0.01" list="passagens-ajuda-valores" value="${Number(item?.ajudaCusto)||0}" ${item?.financeAdjusted?'readonly title="Valor confirmado pelo Financeiro"':''}>`):''}</div>
- <div class="row-extra-panel section ${extraEnabled?'':'hidden'}"><div class="notice info">A categoria determina o valor sugerido da extra a partir da diária cadastrada para o colaborador. A extra é registrada separadamente, sem modificar a presença normal.</div><div class="form-grid">
+ <div class="form-grid">${field('Houve extra?',`<select class="control row-extra" aria-label="Houve extra?">${APONTAMENTO_EXTRA_OPTIONS.map(([value,label])=>`<option value="${value}" ${extraValue===value?'selected':''}>${label}</option>`).join('')}${extraEnabled&&!APONTAMENTO_EXTRA_OPTIONS.some(([value])=>value===extraValue)?`<option value="${escapeHtml(extraValue)}" selected>${escapeHtml(extraValue)} (registro anterior)</option>`:''}</select>`)}${field('Valor da Extra (R$)',`<input class="control row-extra-value" type="number" min="0" step="0.01" value="${extraAmount?extraAmount.toFixed(2):''}" ${extraEnabled?'required':''} placeholder="Digite o valor" title="Digite o valor da extra em reais">`)}${Number(item?.financeiro)>0?field('Valor complementar já registrado (R$)',`<input class="control row-financeiro-historico" type="number" readonly value="${Number(item.financeiro).toFixed(2)}" title="Lançamento anterior preservado, sem edição pelo supervisor">`):''}${field('Acordos / Bonificações (R$)',`<input class="control row-acordo" type="number" min="0" step="0.01" value="${item?.acordo||0}">`)}${perfilAtual==='SUPERVISOR'?field('Passagens/Ajuda de custo (R$)',`<input class="control row-ajuda-custo" type="number" min="0" step="0.01" list="passagens-ajuda-valores" value="${Number(item?.ajudaCusto)||0}" ${item?.financeAdjusted?'readonly title="Valor confirmado pelo Financeiro"':''}>`):''}</div>
+ <div class="row-extra-panel section ${extraEnabled?'':'hidden'}"><div class="notice info">Informe o valor da extra realizado pelo colaborador. A categoria identifica o tipo de extra, mas não define o valor. O registro é separado da presença normal.</div><div class="form-grid">
  ${field('Obra / Serviço da extra',`<select class="control row-extra-work">${extraWorkOptions(workId)}</select>`)}
  ${field('Observação da extra',`<input class="control row-extra-obs" maxlength="2000" value="${escapeHtml(extraObservation)}" placeholder="Opcional">`)}
  </div></div>
  <div class="form-grid section">${field('Adicional noturno (SEBRAE)',`<select class="control row-noturno" ${unit==='SEBRAE'&&!item?.financeAdjusted?'':'disabled'}><option value="0" ${nightValue===0?'selected':''}>Sem adicional (R$ 0,00)</option><option value="50" ${nightValue===50?'selected':''}>R$ 50,00</option><option value="90" ${nightValue===90?'selected':''}>R$ 90,00</option>${![0,50,90].includes(nightValue)?`<option value="${nightValue}" selected>R$ ${nightValue.toFixed(2)} (valor já registrado)</option>`:''}</select>`)}</div>
- <div class="row-total-summary" role="status"><span>TOTAL A PAGAR AO COLABORADOR</span><strong class="row-total">${roundMoney(Number(item?.financeiro||0)+suggestedExtra+nightValue+Number(item?.acordo||0)+Number(item?.ajudaCusto||0)).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</strong><small>Valor da extra + adicional noturno + acordos + passagens/ajuda de custo${Number(item?.financeiro)>0?' + valor complementar já registrado':''}. Total calculado automaticamente, não editável.</small></div>
+ <div class="row-total-summary" role="status"><span>TOTAL A PAGAR AO COLABORADOR</span><strong class="row-total">${roundMoney(Number(item?.financeiro||0)+extraAmount+nightValue+Number(item?.acordo||0)+Number(item?.ajudaCusto||0)).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</strong><small>Valor da extra + adicional noturno + acordos + passagens/ajuda de custo${Number(item?.financeiro)>0?' + valor complementar já registrado':''}. Total calculado automaticamente, não editável.</small></div>
  <details class="more-services"><summary>Mais opções</summary>${field('Observação / justificativa',`<input class="control row-obs" value="${escapeHtml(item?.observacao||'')}">`)}<div class="additional-services">${services.slice(1).map((x,i)=>allocationRow(unit,x,i+1)).join('')}</div><div class="inline-actions section"><button type="button" class="btn btn-primary add-service">+ Adicionar serviço</button><button type="button" class="btn btn-secondary remove-last-service">− Remover último</button><span class="service-count">${Math.max(0,services.length-1)} serviço(s) adicional(is)</span></div></details></div></div>`;
 }
   function bindServiceRows(){
@@ -565,19 +565,14 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
             extraAmount=field('.row-extra-value'),
             night=field('.row-noturno'),status=field('.row-status'),total=field('.row-total'),
             panel=field('.row-extra-panel');
-      let previousChoice=extraChoice?.value||'Não';
       const moneyValue=selector=>Math.max(0,Number(field(selector)?.value)||0);
       const updateTotal=()=>{
-        const chosen=extraChoice?.value||'Não',active=chosen!=='Não';
-        if(extraAmount&&active&&chosen!==previousChoice){
-          extraAmount.value=roundMoney(dayCost(colaboradorById(card.dataset.person))*extraMultiplier(chosen)).toFixed(2);
-        }
-        if(extraAmount&& !active)extraAmount.value='0.00';
+        const active=(extraChoice?.value||'Não')!=='Não';
+        if(extraAmount){extraAmount.disabled=!active;extraAmount.required=active;}
         const extra=active?moneyValue('.row-extra-value'):0;
         const ordinary=presence(status.value)?Math.max(0,Number(card.dataset.financeiroOriginal)||0)+moneyValue('.row-acordo')+moneyValue('.row-ajuda-custo')+moneyValue('.row-noturno'):0;
         const sum=roundMoney(extra+ordinary);
         if(total)total.textContent=sum.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
-        previousChoice=chosen;
         panel?.classList.toggle('hidden',!active);
       };
       const countServices=()=>{const counter=field('.service-count');if(counter)counter.textContent=card.querySelectorAll('.additional-services .allocation-row').length+' serviço(s) adicional(is)';};
@@ -593,6 +588,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
         updateTotal();
       };
       if(extraChoice)extraChoice.onchange=updateTotal;
+      if(extraAmount){extraAmount.addEventListener('input',updateTotal);extraAmount.addEventListener('change',updateTotal);}
       for(const selector of ['.row-acordo','.row-ajuda-custo','.row-noturno']){
         const control=field(selector);if(control){control.addEventListener('input',updateTotal);control.addEventListener('change',updateTotal);}
       }
@@ -612,6 +608,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
         colaboradorId:cid,status:row.querySelector('.row-status').value,extra:'Não',
         extraLancamento:{
           enabled,extra:category,
+          valorExtraOriginal:enabled?Number(row.querySelector('.row-extra-value')?.value||0):0,
           obraId:row.querySelector('.row-extra-work')?.value||'',
           observacao:row.querySelector('.row-extra-obs')?.value.trim()||'',
           dayWorkId:servicos.find(x=>x.obraId)?.obraId||''
