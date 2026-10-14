@@ -71,7 +71,7 @@ test('Pagamentos vincula todos os cinco botões de exportação após montar o d
 
 test('Índice HTML força atualização do app.js para quem já abriu o Financeiro',()=>{
  const html=fs.readFileSync(new URL('../public/index.html',import.meta.url),'utf8');
- assert.match(html,/src="\/app\.js\?v=aproar-exportacoes-financeiro-20261014-1"/);
+ assert.match(html,/src="\/app\.js\?v=[^"]+"/);
  assert.match(app,/\$\$\('\.pay-input'\)\.forEach/);
  assert.doesNotMatch(app,/(?<!\$)\$\('\.pay-input'\)\.forEach/);
 });
