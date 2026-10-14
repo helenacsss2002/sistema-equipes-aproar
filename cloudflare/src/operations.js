@@ -92,11 +92,7 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
    if(!work)fail('Escolha um serviço válido para a extra.');
    const supervisor=session.role==='SUPERVISOR'?session.user:required(String(x.supervisor||old?.supervisor||''),'Supervisor responsável');
    if(!supervisors.includes(supervisor))fail('Supervisor inválido para a extra.');
-   if(session.role==='SUPERVISOR'){
-    const configuredOwner=db.state.unitOwners?.[work.unidade]||next.unitOwners?.[work.unidade]||'';
-    const historicOwner=(db.state.convocacoes||[]).find(c=>c.unidade===work.unidade&&c.supervisor===session.user)?.supervisor||'';
-    if((configuredOwner||historicOwner)!==session.user)fail('Você só pode lançar extra para serviços de uma unidade sob sua responsabilidade.',403);
-   }
+   // Supervisors can allocate an extra to another registered unit; the extra remains separate from ordinary attendance.
    const kind=String(x.extra||''),factor=mult(kind);
    if(!factor)fail('Selecione um tipo de extra válido.');
    const combo=serviceDate+'|'+personId+'|'+String(work.id);
