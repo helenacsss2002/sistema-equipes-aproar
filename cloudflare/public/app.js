@@ -1063,7 +1063,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
   function completeConv(c){const ap=apForConv(c.id);return !!ap&&c.colaboradores.every(id=>ap.itens.some(i=>i.colaboradorId===id));}
   function serviceList(i,c){const raw=i.servicos?.length?i.servicos:itemServices(i,c.obraId);const seen=new Set();return raw.filter(s=>{if(!s.obraId)return false;const key=s.obraId+'|'+(s.periodo||c.turno);if(seen.has(key))return false;seen.add(key);return true;}).map(s=>({...s,periodo:s.periodo||c.turno||'Integral'}));}
   function hasSebrae(i,c){return clean(c.unidade)==='SEBRAE'||serviceList(i,c).some(s=>clean(obraById(s.obraId)?.unidade)==='SEBRAE');}
-  function nocturnal(i,c){if(!presence(i.status)||!hasSebrae(i,c))return 0;const v=Math.max(0,Number(i.noturno)||0);return roundMoney(i.financeAdjusted?v:Math.max(90,v));}
+  function nocturnal(i,c){if(!presence(i.status)||!hasSebrae(i,c))return 0;const v=Math.max(0,Number(i.noturno)||0);return roundMoney(i.financeAdjusted||[50,90].includes(v)?v:Math.max(90,v));}
   function periodBlocks(p){return p==='Manhã'?{M:.5}:p==='Tarde'?{T:.5}:p==='Noite'?{N:1}:{M:.5,T:.5};}
   function presenceBlocks(i,c){if(!presence(i.status))return {};if(i.status==='Presente (Só Manhã)')return {M:.5};if(i.status==='Presente (Só Tarde)')return {T:.5};if(i.status==='Saída Antecipada')return c.turno==='Noite'?{N:.5}:c.turno==='Tarde'?{T:.5}:{M:.5};return periodBlocks(c.turno);}
   function entries(){
