@@ -623,6 +623,16 @@ table td .control {text-align:inherit;}
 /* Valor da Extra é digitado pelo supervisor; não pode parecer bloqueado. */
 .person-card .row-extra-value:not(:disabled){background:#fff;color:#15395f;cursor:text;border-color:#94b6e1;}
 .person-card .row-extra-value:disabled{background:#edf2f8;color:#72839a;}
+
+/* Convocação do supervisor: destacar somente a lista de pessoas já convocadas. */
+details.convocados-destaque {
+  background:#fff3bf;
+  border:1px solid #e6b84c;
+  box-shadow:0 3px 10px rgba(180,126,18,.1);
+}
+details.convocados-destaque > summary {color:#835307;font-weight:800;}
+details.convocados-destaque[open] {background:#fff8dd;}
+details.convocados-destaque .team-list-item {border-color:#eddaab;}
 </style>
 </head>
 <body>
@@ -683,6 +693,6 @@ table td .control {text-align:inherit;}
 
   <script src="/pdf-lib.min.js"></script>
 <script src="/financeiro-consolidado.js?v=20261014-1"></script>
-  <script src="/app.js?v=aproar-extra-cinco-opcoes-zero-20261014-6"></script>
+  <script src="/app.js?v=aproar-convocados-amarelo-20261014-7"></script>
 <div id="online-saving" class="hidden" role="status" aria-live="polite" style="position:fixed;inset:0;background:rgba(11,27,51,.4);z-index:99999;display:grid;place-items:center"><div class="card card-pad"><strong>Salvando alterações no Neon…</strong><p>Aguarde a confirmação.</p></div></div></body>
 </html>
