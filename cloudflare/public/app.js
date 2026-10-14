@@ -831,19 +831,19 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
   function exportTable(){
     let rows,filename='aproar_relatorio.csv';
     if(perfilAtual==='FINANCEIRO'&&viewAtual==='pagamentos'){
-      const details=financialEntries().filter(x=>presence(x.i.status)&&x.finance+x.night+x.bonus+x.ajudaCusto>0.005);
+      const details=financialEntries().filter(x=>presence(x.i.status)&&x.extra+x.finance+x.night+x.bonus+x.ajudaCusto>0.005);
       if(!details.length)return showToast('Não há pagamentos neste período para exportar.',true);
       const people=financialSummaryRows(details);
       rows=[
         ['APROAR | CONSOLIDADO FINANCEIRO POR COLABORADOR'],
         ['Período',reportPeriod()],
-        ['Colaborador','Função','Supervisor(es)','Unidade(s)','Dias','Financeiro (R$)','Noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total (R$)'],
-        ...people.map(p=>[p.nome,p.funcao,p.supervisores,p.unidades,p.dias,p.finance,p.night,p.bonus,p.ajudaCusto,p.total]),
+        ['Colaborador','Função','Supervisor(es)','Unidade(s)','Dias','Extras (R$)','Financeiro (R$)','Noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total (R$)'],
+        ...people.map(p=>[p.nome,p.funcao,p.supervisores,p.unidades,p.dias,p.extra,p.finance,p.night,p.bonus,p.ajudaCusto,p.total]),
         [],['DETALHAMENTO POR DIA'],
-        ['Data','Supervisor','Unidade','Obra','Colaborador','Status','Financeiro (R$)','Noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total (R$)'],
+        ['Data','Supervisor','Unidade','Obra','Colaborador','Status','Extras (R$)','Financeiro (R$)','Noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total (R$)'],
         ...details.sort((a,b)=>a.c.dataServico.localeCompare(b.c.dataServico)||(a.p?.nome||'').localeCompare(b.p?.nome||'','pt-BR',{sensitivity:'base'})).map(x=>[
           formatDate(x.c.dataServico),x.c.supervisor,[...x.units].join(', '),[...x.works].map(financialWorkNumber).join(', '),
-          x.p?.nome||'',x.i.status,x.finance,x.night,x.bonus,x.ajudaCusto,roundMoney(x.finance+x.night+x.bonus+x.ajudaCusto)
+          x.p?.nome||'',x.i.status,x.extra,x.finance,x.night,x.bonus,x.ajudaCusto,roundMoney(x.extra+x.finance+x.night+x.bonus+x.ajudaCusto)
         ])
       ];
       filename='financeiro_pagamentos_'+reportFilters.inicio+'_a_'+reportFilters.fim+'.csv';
@@ -1060,7 +1060,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
   function renderReports(){
     const financial=perfilAtual==='FINANCEIRO';if(financial&&selectedCycle!=='custom'){const cycle=financialCycle(isoToday(),Number(selectedCycle));reportFilters.inicio=cycle.inicio;reportFilters.fim=cycle.fim;}
     $('#main-content').innerHTML=head('Relatórios','Dados por período, com consolidado e detalhamento por dia.')+(financial?cycleControl():'')+filterControls(financial?true:'combined')+'<div class="section report-toolbar"><div class="report-view" id="report-tabs"></div>'+exportButtons()+(financial?financialSummaryButtons():'')+'</div><div class="section" id="report-body"></div>';let day='Todos';
-    const refresh=()=>{const rows=entries().filter(x=>!financial||(x.c.extraAvulsa||(presence(x.i.status)&&x.finance+x.night+x.bonus+x.ajudaCusto>0.005))),dates=[...new Set(filteredConvs().map(c=>c.dataServico))].sort();if(!dates.includes(day))day='Todos';$('#report-tabs').innerHTML=field('Visualização',`<select id="report-day-select" class="control"><option value="Todos">Consolidado do período</option>${dates.map(d=>`<option value="${d}">${formatDate(d)}</option>`).join('')}</select>`);$('#report-day-select').value=day;const selected=rows.filter(x=>day==='Todos'||x.c.dataServico===day);const fin=perfilAtual==='FINANCEIRO';$('#report-body').innerHTML=table(['Data','Supervisor','Unidade','Obra','Colaborador','Período','Status',fin?'Financeiro':'Custo normal','Extra','Adic. noturno','Acordos / Bonificações',...(fin?['Passagens/Ajuda de custo']:['Periculosidade 30%']),'Total'],selected.map(x=>[formatDate(x.c.dataServico),x.c.supervisor,escapeHtml(x.c.unidade),escapeHtml(fin?financialWorkNumber(x.c.obraId):obraById(x.c.obraId)?.nome),escapeHtml(x.p?.nome),escapeHtml(x.service.periodo),escapeHtml(x.displayStatus||x.i.status),money(fin?x.finance:x.daily),escapeHtml(x.displayExtra||x.i.extra),money(x.night),money(x.bonus),...(fin?[money(x.ajudaCusto)]:[money(x.danger)]),money(fin?x.finance+x.night+x.bonus+x.ajudaCusto:x.daily+x.extra+x.danger+x.night+x.bonus)]))+`<div class="notice info section">Valores de demonstração. ${fin?'Financeiro sem adicional de periculosidade.':'Periculosidade de 30% para eletricista e auxiliar de eletricista, somente na Controladoria.'} Convocações sem apontamento ficam fora dos custos.</div>`;configureReportTable(fin);$('#report-day-select').onchange=()=>{day=$('#report-day-select').value;refresh();};};bindFilters(()=>{if(financial){selectedCycle='custom';$('#financial-cycle').value='custom';}refresh();});if(financial){$('#financial-cycle').onchange=()=>{selectedCycle=$('#financial-cycle').value;renderReports();};if(selectedCycle!=='custom')$('#cycle-caption').textContent='Pagamento em '+formatDate(financialCycle(isoToday(),Number(selectedCycle)).pagamento);}refresh();bindExports();if(financial)bindFinancialSummaryExports();
+    const refresh=()=>{const rows=entries().filter(x=>!financial||(x.c.extraAvulsa||(presence(x.i.status)&&x.extra+x.finance+x.night+x.bonus+x.ajudaCusto>0.005))),dates=[...new Set(filteredConvs().map(c=>c.dataServico))].sort();if(!dates.includes(day))day='Todos';$('#report-tabs').innerHTML=field('Visualização',`<select id="report-day-select" class="control"><option value="Todos">Consolidado do período</option>${dates.map(d=>`<option value="${d}">${formatDate(d)}</option>`).join('')}</select>`);$('#report-day-select').value=day;const selected=rows.filter(x=>day==='Todos'||x.c.dataServico===day);const fin=perfilAtual==='FINANCEIRO';$('#report-body').innerHTML=table(['Data','Supervisor','Unidade','Obra','Colaborador','Período','Status',fin?'Financeiro':'Custo normal',fin?'Extra (R$)':'Extra','Adic. noturno','Acordos / Bonificações',...(fin?['Passagens/Ajuda de custo']:['Periculosidade 30%']),'Total'],selected.map(x=>[formatDate(x.c.dataServico),x.c.supervisor,escapeHtml(x.c.unidade),escapeHtml(fin?financialWorkNumber(x.c.obraId):obraById(x.c.obraId)?.nome),escapeHtml(x.p?.nome),escapeHtml(x.service.periodo),escapeHtml(x.displayStatus||x.i.status),money(fin?x.finance:x.daily),fin?money(x.extra):escapeHtml(x.displayExtra||x.i.extra),money(x.night),money(x.bonus),...(fin?[money(x.ajudaCusto)]:[money(x.danger)]),money(fin?x.extra+x.finance+x.night+x.bonus+x.ajudaCusto:x.daily+x.extra+x.danger+x.night+x.bonus)]))+`<div class="notice info section">Valores de demonstração. ${fin?'Financeiro sem adicional de periculosidade.':'Periculosidade de 30% para eletricista e auxiliar de eletricista, somente na Controladoria.'} Convocações sem apontamento ficam fora dos custos.</div>`;configureReportTable(fin);$('#report-day-select').onchange=()=>{day=$('#report-day-select').value;refresh();};};bindFilters(()=>{if(financial){selectedCycle='custom';$('#financial-cycle').value='custom';}refresh();});if(financial){$('#financial-cycle').onchange=()=>{selectedCycle=$('#financial-cycle').value;renderReports();};if(selectedCycle!=='custom')$('#cycle-caption').textContent='Pagamento em '+formatDate(financialCycle(isoToday(),Number(selectedCycle)).pagamento);}refresh();bindExports();if(financial)bindFinancialSummaryExports();
   }
   function renderDashboard(){
     $('#main-content').innerHTML=head('Dashboard','Presença, faltas e custos confirmados por unidade e responsável.')+filterControls(true)+'<div class="section" id="dash-body"></div>';
@@ -1358,42 +1358,42 @@ function renderEquipeDia(){
   function indicatorWorkbook(){const d=indicatorReportData(),make=(name,title,headers,rows,widths)=>({name,rows:[[title],['Período: '+reportPeriod()+' | Unidade: '+indicatorUnit],[],headers,...rows],headers:[3],titles:[],blue:true,merges:['A1:F1','A2:F2'],freeze:4,center:[1,2,3,4,5],widths});const sheets=[make('Resumo','INDICADOR DE CUMPRIMENTO DE PRAZOS',['Supervisor','Convocações feitas','Convocações atrasadas','Apontamentos feitos','Apontamentos atrasados','No prazo (%)'],d.summary,[18,21,24,22,25,15]),make('Ocorrências','OCORRÊNCIAS DE CONVOCAÇÃO E APONTAMENTO',['Supervisor','Data do serviço','Colaborador','Tipo','Registrado em','Atrasado'],d.events,[18,18,42,18,24,11])];sheets[1].center=[1,3,4,5];sheets.forEach(s=>s.rows[0][0]={value:s.rows[0][0],style:4});return sheets;}
   function financialWorkNumber(id){const name=obraById(id)?.nome||'';const obra=name.match(/\bOBRA\s*(?:N[º°.]*\s*)?(\d+(?:[.,/-]\d+)*)/i),code=name.match(/\b(APR[A-Z]*\s*[-.]?\s*\d+(?:[./-]\d+)*)/i),number=name.match(/^\s*(\d+(?:[.,/-]\d+)*)(?=\s|$|\s*-)/);return obra?obra[1]:code?code[1].replace(/\s+/g,'').toUpperCase():number?number[1]:'Sem número cadastrado';}
   function exportFinancialSummaryExcel(){
-    const people=financialSummaryRows(),columns=['Colaborador','Função','Supervisor(es)','Unidade(s)','Dias','Financeiro (R$)','Adicional noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total (R$)'];
+    const people=financialSummaryRows(),columns=['Colaborador','Função','Supervisor(es)','Unidade(s)','Dias','Extras (R$)','Financeiro (R$)','Adicional noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total (R$)'];
     const rows=[['APROAR | CONSOLIDADO FINANCEIRO POR COLABORADOR'],['Período: '+reportPeriod()],[],columns];
     for(const p of people){
       const line=rows.length+1;
-      rows.push([p.nome,p.funcao,p.supervisores,p.unidades,p.dias,p.finance,p.night,p.bonus,p.ajudaCusto,{formula:'F'+line+'+G'+line+'+H'+line+'+I'+line,value:p.total}]);
+      rows.push([p.nome,p.funcao,p.supervisores,p.unidades,p.dias,p.extra,p.finance,p.night,p.bonus,p.ajudaCusto,{formula:'F'+line+'+G'+line+'+H'+line+'+I'+line+'+J'+line,value:p.total}]);
     }
-    const last=rows.length,summary=Array(10).fill('');summary[0]='TOTAL GERAL';
-    for(const [index,key] of [[5,'finance'],[6,'night'],[7,'bonus'],[8,'ajudaCusto'],[9,'total']]){
+    const last=rows.length,summary=Array(11).fill('');summary[0]='TOTAL GERAL';
+    for(const [index,key] of [[5,'extra'],[6,'finance'],[7,'night'],[8,'bonus'],[9,'ajudaCusto'],[10,'total']]){
       const column=excelCol(index);
       summary[index]={formula:people.length?'SUM('+column+'5:'+column+last+')':'0',value:roundMoney(people.reduce((sum,p)=>sum+p[key],0)),style:6};
     }
     rows.push(summary);
-    exportWorkbook([{name:'CONSOLIDADO POR PESSOA',rows,headers:[3],titles:[0,1],sections:[rows.length-1],blue:true,freeze:4,merges:['A1:J1','A2:J2'],center:[4],money:[5,6,7,8,9],widths:[38,24,30,28,11,23,23,20,31,22]}],'financeiro_consolidado_colaboradores_'+reportFilters.inicio+'_a_'+reportFilters.fim);
+    exportWorkbook([{name:'CONSOLIDADO POR PESSOA',rows,headers:[3],titles:[0,1],sections:[rows.length-1],blue:true,freeze:4,merges:['A1:K1','A2:K2'],center:[4],money:[5,6,7,8,9,10],widths:[38,24,30,28,11,23,23,23,20,31,22]}],'financeiro_consolidado_colaboradores_'+reportFilters.inicio+'_a_'+reportFilters.fim);
   }
   function financialWorkbook(){
-    const data=entries().filter(x=>presence(x.i.status)&&x.finance+x.night+x.bonus+x.ajudaCusto>0.005);
+    const data=entries().filter(x=>presence(x.i.status)&&x.extra+x.finance+x.night+x.bonus+x.ajudaCusto>0.005);
     function sheet(name,xs){
-      const rows=[['RELATÓRIO FINANCEIRO - '+reportPeriod()],[]],headers=[],sections=[],merges=['A1:M1'],groups=new Map();
+      const rows=[['RELATÓRIO FINANCEIRO - '+reportPeriod()],[]],headers=[],sections=[],merges=['A1:N1'],groups=new Map();
       for(const x of xs){const k=x.c.unidade+'|'+x.c.obraId;if(!groups.has(k))groups.set(k,[]);groups.get(k).push(x);}
       for(const group of groups.values()){
         const x=group[0],n=rows.length+1;
-        sections.push(n-1);merges.push(`A${n}:M${n}`);
+        sections.push(n-1);merges.push(`A${n}:N${n}`);
         rows.push(['UNIDADE: '+x.c.unidade+' | OBRA: '+financialWorkNumber(x.c.obraId)]);
         headers.push(rows.length);
-        rows.push(['Data','Supervisor','Unidade','Colaborador','Função','Período','Status','Financeiro (R$)','Noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total (R$)','Observação']);
+        rows.push(['Data','Supervisor','Unidade','Colaborador','Função','Período','Status','Extras (R$)','Financeiro (R$)','Noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total (R$)','Observação']);
         let total=0;const first=rows.length+1;
         for(const x of group){
-          const row=rows.length+1,value=roundMoney(x.finance+x.night+x.bonus+x.ajudaCusto);total+=value;
-          rows.push([formatDate(x.c.dataServico),x.c.supervisor,x.c.unidade,x.p?.nome||'',x.p?.funcao||'',x.service.periodo,x.displayStatus||x.i.status,x.finance,x.night,x.bonus,x.ajudaCusto,{formula:`H${row}+I${row}+J${row}+K${row}`,value},x.i.observacao||x.i.obs||'']);
+          const row=rows.length+1,value=roundMoney(x.extra+x.finance+x.night+x.bonus+x.ajudaCusto);total+=value;
+          rows.push([formatDate(x.c.dataServico),x.c.supervisor,x.c.unidade,x.p?.nome||'',x.p?.funcao||'',x.service.periodo,x.displayStatus||x.i.status,x.extra,x.finance,x.night,x.bonus,x.ajudaCusto,{formula:`H${row}+I${row}+J${row}+K${row}+L${row}`,value},x.i.observacao||x.i.obs||'']);
         }
-        const summary=Array(13).fill('');
-        summary[10]='TOTAL DA OBRA';
-        summary[11]={formula:`SUM(L${first}:L${rows.length})`,value:roundMoney(total)};
+        const summary=Array(14).fill('');
+        summary[11]='TOTAL DA OBRA';
+        summary[12]={formula:`SUM(M${first}:M${rows.length})`,value:roundMoney(total)};
         rows.push(summary,[]);
       }
-      return {name,rows,headers,sections,merges,titles:[0],freeze:4,center:[0,5,6],money:[7,8,9,10,11],widths:[16,22,20,38,26,22,22,22,22,22,30,22,30]};
+      return {name,rows,headers,sections,merges,titles:[0],freeze:4,center:[0,5,6],money:[7,8,9,10,11,12],widths:[16,22,20,38,26,22,22,22,22,22,22,30,22,30]};
     }
     return [sheet('GERAL',data),...[...new Set(data.map(x=>x.c.dataServico))].sort().map(d=>sheet(d,data.filter(x=>x.c.dataServico===d)))];
   }
@@ -1413,24 +1413,24 @@ function renderEquipeDia(){
       paragraph('Consolidado do período: uma linha por colaborador, em ordem alfabética.',10,bold);
       if(viewAtual==='pagamentos'&&selectedCycle!=='custom')paragraph('Pagamento previsto: '+formatDate(financialCycle(isoToday(),Number(selectedCycle)).pagamento));
       paragraph('COLABORADORES: '+people.length+' | TOTAL A PAGAR: '+money(total),11,bold);
-      grid(['Colaborador','Dias','Supervisor(es)','Financeiro','Noturno','Acordos','Passagens/Ajuda','Total'],people.map(p=>[p.nome,p.dias,p.supervisores,money(p.finance),money(p.night),money(p.bonus),money(p.ajudaCusto),money(p.total)]),[2.9,.55,1.9,1.3,1.1,1.2,1.7,1.3],true);
+      grid(['Colaborador','Dias','Supervisor(es)','Extras','Financeiro','Noturno','Acordos','Passagens/Ajuda','Total'],people.map(p=>[p.nome,p.dias,p.supervisores,money(p.extra),money(p.finance),money(p.night),money(p.bonus),money(p.ajudaCusto),money(p.total)]),[2.9,.55,1.9,1.1,1.3,1.1,1.2,1.7,1.3],true);
     }else if(kind==='financial'){
       const rows=financialEntries(),groups=new Map();
-      for(const x of rows.filter(x=>presence(x.i.status)&&x.finance+x.night+x.bonus+x.ajudaCusto>0.005)){
+      for(const x of rows.filter(x=>presence(x.i.status)&&x.extra+x.finance+x.night+x.bonus+x.ajudaCusto>0.005)){
         const key=x.c.supervisor+'|'+x.p.id;
-        if(!groups.has(key))groups.set(key,{sup:x.c.supervisor,p:x.p,days:new Set(),units:new Set(),works:new Set(),finance:0,night:0,bonus:0,ajudaCusto:0});
+        if(!groups.has(key))groups.set(key,{sup:x.c.supervisor,p:x.p,days:new Set(),units:new Set(),works:new Set(),extra:0,finance:0,night:0,bonus:0,ajudaCusto:0});
         const g=groups.get(key);
         g.days.add(x.c.dataServico);x.units.forEach(u=>g.units.add(u));x.works.forEach(w=>g.works.add(financialWorkNumber(w)));
-        g.finance+=x.finance;g.night+=x.night;g.bonus+=x.bonus;g.ajudaCusto+=x.ajudaCusto;
+        g.extra+=x.extra;g.finance+=x.finance;g.night+=x.night;g.bonus+=x.bonus;g.ajudaCusto+=x.ajudaCusto;
       }
-      const values=[...groups.values()],amount=x=>x.finance+x.night+x.bonus+x.ajudaCusto;
+      const values=[...groups.values()],amount=x=>x.extra+x.finance+x.night+x.bonus+x.ajudaCusto;
       if(viewAtual==='pagamentos'&&selectedCycle!=='custom')paragraph('Pagamento previsto: '+formatDate(financialCycle(isoToday(),Number(selectedCycle)).pagamento));
       paragraph('TOTAL A PAGAR: '+money(values.reduce((a,x)=>a+amount(x),0)),12,bold);
       for(const sup of [...new Set(values.map(x=>x.sup))]){
         const xs=values.filter(x=>x.sup===sup);
         if(y<125)newPage();
         paragraph('SUPERVISOR: '+sup+' | SUBTOTAL: '+money(xs.reduce((a,x)=>a+amount(x),0)),10,bold);
-        grid(['Colaborador','Função','Unidade(s)','Obra','Dias','Financeiro','Adic. not.','Acordos / Bonif.','Passagens/Ajuda de custo','Total'],xs.map(x=>[x.p.nome,x.p.funcao,[...x.units].join(', '),[...x.works].join(', '),x.days.size,money(x.finance),money(x.night),money(x.bonus),money(x.ajudaCusto),money(amount(x))]),[2.2,1.6,1.3,2.1,.5,1,1,1.2,1.4,1],true);
+        grid(['Colaborador','Função','Unidade(s)','Obra','Dias','Extras','Financeiro','Adic. not.','Acordos / Bonif.','Passagens/Ajuda de custo','Total'],xs.map(x=>[x.p.nome,x.p.funcao,[...x.units].join(', '),[...x.works].join(', '),x.days.size,money(x.extra),money(x.finance),money(x.night),money(x.bonus),money(x.ajudaCusto),money(amount(x))]),[2.2,1.6,1.3,2.1,.5,1,1,1,1.2,1.4,1],true);
       }
     }else{grid(['Data','Unidade / Obra','Colaborador / Função','Supervisor','Status','Normal','Extra','Noturno','Acordos','Total'],entries().map(x=>{const v=controlValues(x);return [formatDate(x.c.dataServico),x.c.unidade+'\n'+(obraById(x.c.obraId)?.nome||''),x.p?.nome+'\n'+x.p?.funcao,x.c.supervisor,x.displayStatus,...v.map(money),money(v.reduce((a,b)=>a+b,0))];}),[1,2.5,2.5,1.2,1.2,1,1,1,1,1]);}
     doc.getPages().forEach((p,i)=>{const label='APROAR | '+(kind==='absences'?'Faltas e Atestados':kind==='executive'?'Relatório de Resultados':kind==='financial-consolidated'?'Financeiro por Colaborador':kind==='financial'?'Relatório Financeiro':'Controladoria')+' | Página '+(i+1);p.drawText(label,{x:(W-regular.widthOfTextAtSize(label,8))/2,y:22,size:8,font:regular,color:navy});});downloadBlob((kind==='absences'?'faltas_atestados':kind==='executive'?'relatorio_resultados':kind==='financial-consolidated'?'financeiro_consolidado_colaboradores':kind==='financial'?'financeiro_pagamentos':'controladoria')+'_'+reportFilters.inicio+'_a_'+reportFilters.fim+'.pdf',new Blob([await doc.save()],{type:'application/pdf'}));}catch(e){toast('Não foi possível gerar o PDF: '+e.message,true);}}
