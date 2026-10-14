@@ -833,7 +833,7 @@
         const matched=OBRAS.find(o=>clean(label(o))===raw);
         // A digitação de um número exato seleciona a obra somente se não houver ambiguidade.
         // Durante a digitação não mudamos o filtro para uma correspondência parcial.
-        const byCode=allowCode&&!matched?OBRAS.filter(o=>
+        const byCode=allowCode===true&&!matched?OBRAS.filter(o=>
           clean(financialWorkNumber(o.id))===raw||clean(o.nome)===raw
         ):[];
         const chosen=matched||(byCode.length===1?byCode[0]:null);
@@ -841,13 +841,13 @@
         if(id===undefined)return false;
         const source=$('#r-obra');
         // Mantém o rótulo completo no mesmo campo, após informar somente o número.
-        if(chosen&&allowCode)workCombo.value=label(chosen);
+        if(chosen&&allowCode===true)workCombo.value=label(chosen);
         if(source.value===String(id))return true;
         source.value=String(id);
         source.dispatchEvent(new Event('change',{bubbles:true}));
         return true;
       };
-      workCombo.oninput=()=>choose(false);
+      workCombo.oninput=choose;
       workCombo.onchange=()=>choose(true);
       workCombo.onblur=()=>{
         if(choose(true))return;
