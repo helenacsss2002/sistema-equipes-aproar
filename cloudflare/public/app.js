@@ -901,10 +901,10 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       rows=[
         ['APROAR | CONSOLIDADO FINANCEIRO POR COLABORADOR'],
         ['Período',reportPeriod()],
-        ['Colaborador','Função','Supervisor(es)','Unidade(s)','Dias','Extras (R$)','Financeiro (R$)','Noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total (R$)'],
+        ['Colaborador','Função','Supervisor(es)','Unidade(s)','Dias','Valor da Extra (R$)','Valores complementares já registrados (R$)','Noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total (R$)'],
         ...people.map(p=>[p.nome,p.funcao,p.supervisores,p.unidades,p.dias,p.extra,p.finance,p.night,p.bonus,p.ajudaCusto,p.total]),
         [],['DETALHAMENTO POR DIA'],
-        ['Data','Supervisor','Unidade','Obra','Colaborador','Status','Extras (R$)','Financeiro (R$)','Noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total (R$)'],
+        ['Data','Supervisor','Unidade','Obra','Colaborador','Status','Valor da Extra (R$)','Valores complementares já registrados (R$)','Noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total (R$)'],
         ...details.sort((a,b)=>a.c.dataServico.localeCompare(b.c.dataServico)||(a.p?.nome||'').localeCompare(b.p?.nome||'','pt-BR',{sensitivity:'base'})).map(x=>[
           formatDate(x.c.dataServico),x.c.supervisor,[...x.units].join(', '),[...x.works].map(financialWorkNumber).join(', '),
           x.p?.nome||'',x.i.status,x.extra,x.finance,x.night,x.bonus,x.ajudaCusto,roundMoney(x.extra+x.finance+x.night+x.bonus+x.ajudaCusto)
@@ -1422,7 +1422,7 @@ function renderEquipeDia(){
   function indicatorWorkbook(){const d=indicatorReportData(),make=(name,title,headers,rows,widths)=>({name,rows:[[title],['Período: '+reportPeriod()+' | Unidade: '+indicatorUnit],[],headers,...rows],headers:[3],titles:[],blue:true,merges:['A1:F1','A2:F2'],freeze:4,center:[1,2,3,4,5],widths});const sheets=[make('Resumo','INDICADOR DE CUMPRIMENTO DE PRAZOS',['Supervisor','Convocações feitas','Convocações atrasadas','Apontamentos feitos','Apontamentos atrasados','No prazo (%)'],d.summary,[18,21,24,22,25,15]),make('Ocorrências','OCORRÊNCIAS DE CONVOCAÇÃO E APONTAMENTO',['Supervisor','Data do serviço','Colaborador','Tipo','Registrado em','Atrasado'],d.events,[18,18,42,18,24,11])];sheets[1].center=[1,3,4,5];sheets.forEach(s=>s.rows[0][0]={value:s.rows[0][0],style:4});return sheets;}
   function financialWorkNumber(id){const name=obraById(id)?.nome||'';const obra=name.match(/\bOBRA\s*(?:N[º°.]*\s*)?(\d+(?:[.,/-]\d+)*)/i),code=name.match(/\b(APR[A-Z]*\s*[-.]?\s*\d+(?:[./-]\d+)*)/i),number=name.match(/^\s*(\d+(?:[.,/-]\d+)*)(?=\s|$|\s*-)/);return obra?obra[1]:code?code[1].replace(/\s+/g,'').toUpperCase():number?number[1]:'Sem número cadastrado';}
   function exportFinancialSummaryExcel(){
-    const people=financialSummaryRows(),columns=['Colaborador','Função','Supervisor(es)','Unidade(s)','Dias','Extras (R$)','Financeiro (R$)','Adicional noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total (R$)'];
+    const people=financialSummaryRows(),columns=['Colaborador','Função','Supervisor(es)','Unidade(s)','Dias','Valor da Extra (R$)','Valores complementares já registrados (R$)','Adicional noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total (R$)'];
     const rows=[['APROAR | CONSOLIDADO FINANCEIRO POR COLABORADOR'],['Período: '+reportPeriod()],[],columns];
     for(const p of people){
       const line=rows.length+1;
@@ -1446,7 +1446,7 @@ function renderEquipeDia(){
         sections.push(n-1);merges.push(`A${n}:N${n}`);
         rows.push(['UNIDADE: '+x.c.unidade+' | OBRA: '+financialWorkNumber(x.c.obraId)]);
         headers.push(rows.length);
-        rows.push(['Data','Supervisor','Unidade','Colaborador','Função','Período','Status','Extras (R$)','Financeiro (R$)','Noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total (R$)','Observação']);
+        rows.push(['Data','Supervisor','Unidade','Colaborador','Função','Período','Status','Valor da Extra (R$)','Valores complementares já registrados (R$)','Noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total (R$)','Observação']);
         let total=0;const first=rows.length+1;
         for(const x of group){
           const row=rows.length+1,value=roundMoney(x.extra+x.finance+x.night+x.bonus+x.ajudaCusto);total+=value;
@@ -1477,7 +1477,7 @@ function renderEquipeDia(){
       paragraph('Consolidado do período: uma linha por colaborador, em ordem alfabética.',10,bold);
       if(viewAtual==='pagamentos'&&selectedCycle!=='custom')paragraph('Pagamento previsto: '+formatDate(financialCycle(isoToday(),Number(selectedCycle)).pagamento));
       paragraph('COLABORADORES: '+people.length+' | TOTAL A PAGAR: '+money(total),11,bold);
-      grid(['Colaborador','Dias','Supervisor(es)','Extras','Financeiro','Noturno','Acordos','Passagens/Ajuda','Total'],people.map(p=>[p.nome,p.dias,p.supervisores,money(p.extra),money(p.finance),money(p.night),money(p.bonus),money(p.ajudaCusto),money(p.total)]),[2.9,.55,1.9,1.1,1.3,1.1,1.2,1.7,1.3],true);
+      grid(['Colaborador','Dias','Supervisor(es)','Valor da Extra','Valores anteriores','Noturno','Acordos','Passagens/Ajuda','Total'],people.map(p=>[p.nome,p.dias,p.supervisores,money(p.extra),money(p.finance),money(p.night),money(p.bonus),money(p.ajudaCusto),money(p.total)]),[2.9,.55,1.9,1.1,1.3,1.1,1.2,1.7,1.3],true);
     }else if(kind==='financial'){
       const rows=financialEntries(),groups=new Map();
       for(const x of rows.filter(x=>presence(x.i.status)&&x.extra+x.finance+x.night+x.bonus+x.ajudaCusto>0.005)){
@@ -1494,7 +1494,7 @@ function renderEquipeDia(){
         const xs=values.filter(x=>x.sup===sup);
         if(y<125)newPage();
         paragraph('SUPERVISOR: '+sup+' | SUBTOTAL: '+money(xs.reduce((a,x)=>a+amount(x),0)),10,bold);
-        grid(['Colaborador','Função','Unidade(s)','Obra','Dias','Extras','Financeiro','Adic. not.','Acordos / Bonif.','Passagens/Ajuda de custo','Total'],xs.map(x=>[x.p.nome,x.p.funcao,[...x.units].join(', '),[...x.works].join(', '),x.days.size,money(x.extra),money(x.finance),money(x.night),money(x.bonus),money(x.ajudaCusto),money(amount(x))]),[2.2,1.6,1.3,2.1,.5,1,1,1,1.2,1.4,1],true);
+        grid(['Colaborador','Função','Unidade(s)','Obra','Dias','Valor da Extra','Valores anteriores','Adic. not.','Acordos / Bonif.','Passagens/Ajuda de custo','Total'],xs.map(x=>[x.p.nome,x.p.funcao,[...x.units].join(', '),[...x.works].join(', '),x.days.size,money(x.extra),money(x.finance),money(x.night),money(x.bonus),money(x.ajudaCusto),money(amount(x))]),[2.2,1.6,1.3,2.1,.5,1,1,1,1.2,1.4,1],true);
       }
     }else{grid(['Data','Unidade / Obra','Colaborador / Função','Supervisor','Status','Normal','Extra','Noturno','Acordos','Total'],entries().map(x=>{const v=controlValues(x);return [formatDate(x.c.dataServico),x.c.unidade+'\n'+(obraById(x.c.obraId)?.nome||''),x.p?.nome+'\n'+x.p?.funcao,x.c.supervisor,x.displayStatus,...v.map(money),money(v.reduce((a,b)=>a+b,0))];}),[1,2.5,2.5,1.2,1.2,1,1,1,1,1]);}
     doc.getPages().forEach((p,i)=>{const label='APROAR | '+(kind==='absences'?'Faltas e Atestados':kind==='executive'?'Relatório de Resultados':kind==='financial-consolidated'?'Financeiro por Colaborador':kind==='financial'?'Relatório Financeiro':'Controladoria')+' | Página '+(i+1);p.drawText(label,{x:(W-regular.widthOfTextAtSize(label,8))/2,y:22,size:8,font:regular,color:navy});});downloadBlob((kind==='absences'?'faltas_atestados':kind==='executive'?'relatorio_resultados':kind==='financial-consolidated'?'financeiro_consolidado_colaboradores':kind==='financial'?'financeiro_pagamentos':'controladoria')+'_'+reportFilters.inicio+'_a_'+reportFilters.fim+'.pdf',new Blob([await doc.save()],{type:'application/pdf'}));}catch(e){toast('Não foi possível gerar o PDF: '+e.message,true);}}
