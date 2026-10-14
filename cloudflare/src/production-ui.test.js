@@ -304,5 +304,5 @@ test('Independent extras can be entered without changing the regular attendance 
  assert.match(ui,/extra-day-service/);
  assert.match(ui,/state\.extras\.push/);
  assert.match(ui,/Extra independente/);
- assert.match(html,/aproar-extras-independentes-20261014-1/);
+ assert.match(html,/aproar-extras-independentes-20261014-2/);
 });
