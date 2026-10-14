@@ -3,7 +3,7 @@
   'use strict';
   const amount=value=>Number.isFinite(Number(value))?Number(value):0;
   const round=value=>Math.round((value+Number.EPSILON)*100)/100;
-  const fields=['finance','night','bonus','ajudaCusto'];
+  const fields=['extra','finance','night','bonus','ajudaCusto'];
   function summarize(entries){
     const byPerson=new Map();
     for(const row of entries||[]){
