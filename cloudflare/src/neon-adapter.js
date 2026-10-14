@@ -11,19 +11,28 @@ export function mapNeonData(db){
   const people=new Map(colaboradores.map(p=>[p.id,p])),works=new Map(obras.map(o=>[o.id,o])),worksByName=new Map(obras.map(o=>[o.nome,o]));
   const pointed=new Map((db.apontamentos||[]).map(a=>[id(a.convocacao_id),a]));
   const services=new Map();for(const s of db.servicos_apontamento||[]){const key=id(s.convocacao_id);if(!services.has(key))services.set(key,[]);services.get(key).push(s);}
-  const convocacoes=[],apontamentos=[],warnings=[];
+  const convocacoes=[],apontamentos=[],extras=[],warnings=[];
   for(const c of db.convocacoes||[]){
     const key=id(c.id),person=id(c.colaborador_id),work=id(c.obra_id),{text,meta}=metadata(c.observacao),turno=c.turno||text.match(/Turno:\s*(Integral|Manhã|Tarde|Noite)/i)?.[1]||'Integral';
+    const a=pointed.get(key);
+    // Extra-only entries use the existing tables but stay separate from ordinary attendance.
+    if(meta.extra_avulsa===true){
+      if(!a)continue;
+      const cost=people.get(person)?.custo||0,extra=amount(a.valor_extra??c.valor_extra),targetWork=id(meta.extra_obra_id||work);
+      const savedType=['Não','Meia diária','Diária','Uma e meia diária','Duas diárias'].includes(a.tipo_diaria)?a.tipo_diaria:null;
+      extras.push({id:key,supervisor:c.engenheiro,dataServico:isoDate(c.data),unidade:works.get(targetWork)?.unidade||meta.extra_unidade||works.get(work)?.unidade||'',obraId:targetWork,colaboradorId:person,extra:savedType||extraLabel(extra,cost),valorExtraOriginal:extra,observacao:String(meta.extra_observacao||a.observacao||''),criadoEm:a.apontado_em||meta.extra_lancado_em||c.criado_em||null,executor:a.apontado_por||meta.extra_lancado_por||c.engenheiro,servicoDiaId:id(meta.extra_dia_obra_id||'')});
+      continue;
+    }
     convocacoes.push({id:key,supervisor:c.engenheiro,dataServico:isoDate(c.data),unidade:works.get(work)?.unidade||'',obraId:meta.servico_a_definir?'':work,turno,colaboradores:[person],criadoEm:c.criado_em||meta.convocado_em||null,executor:c.criado_por||meta.convocado_por||c.engenheiro,origem:'neon'});
     // The initial presence status of a convocation is NOT an attendance entry.
-    const a=pointed.get(key);if(!a&&!meta.apontado_em&&c.custos_separados!==true)continue;
+    if(!a&&!meta.apontado_em&&c.custos_separados!==true)continue;
     const source=a||c,raw=services.get(key)||[],additional=meta.servicos_adicionais||[];
     const mapped=raw.length?raw.map(s=>({obraId:id(s.obra_id)||worksByName.get(s.obra_nome_snapshot)?.id||'',periodo:s.periodo||turno})): [{obraId:work,periodo:meta.periodo_principal||turno},...additional.map(s=>({obraId:id(s.obra_id)||worksByName.get(s.servico)?.id||'',periodo:s.periodo||turno}))];
     if(mapped.some(s=>!s.obraId))warnings.push({code:'UNMAPPED_SERVICE',convocacaoId:key});
     const cost=people.get(person)?.custo||0,extra=amount(source.valor_extra),savedType=['Não','Meia diária','Diária','Uma e meia diária','Duas diárias'].includes(source.tipo_diaria)?source.tipo_diaria:null;if(extra&&extraLabel(extra,cost)==='Valor específico')warnings.push({code:'NONSTANDARD_EXTRA',convocacaoId:key,value:extra});
     apontamentos.push({id:a?id(a.id):'legacy-'+key,convocacaoId:key,supervisor:c.engenheiro,dataServico:isoDate(c.data),apontadoEm:a?.apontado_em||meta.apontado_em||null,executor:a?.apontado_por||meta.apontado_por||c.engenheiro,retroativo:a?.retroativo||meta.apontamento_atrasado||false,itens:[{colaboradorId:person,status:source.status==='Extra'?'Presente (Integral)':source.status,extra:savedType||extraLabel(extra,cost),valorExtraOriginal:extra,observacao:a?.observacao||text.replace(/^Turno:[^|]+\|?\s*/,''),financeiro:amount(source.custo_pago??meta.custo_pago),financeAdjusted:source.custo_pago_definido_financeiro===true,noturno:amount(source.valor_adicional_noturno??meta.valor_adicional_noturno),acordo:amount(source.valor_acordo??meta.valor_acordo),ajudaCusto:amount(meta.valor_ajuda_custo),tipoDiariaOriginal:source.tipo_diaria,servicos:mapped,custoEncargosOriginal:source.custo_encargos_base}]});
   }
-  return {colaboradores,obras,convocacoes,apontamentos,warnings,
+  return {colaboradores,obras,convocacoes,apontamentos,extras,warnings,
     indisponibilidades:(db.indisponibilidades||[]).filter(x=>x.ativo).map(x=>({id:id(x.id),colaboradorId:id(x.colaborador_id),motivo:x.motivo,inicio:isoDate(x.inicio),fim:isoDate(x.fim),observacao:x.observacao||'',obs:x.observacao||''})),
     conflitosTentados:(db.conflitos_convocacao||[]).map(x=>({id:id(x.id),colaboradorId:id(x.colaborador_id),colaboradorNome:x.colaborador_nome_snapshot,dataServico:isoDate(x.data),supervisor:x.engenheiro_tentativa,unidade:x.unidade_tentativa,turno:x.turno_tentativa,supervisorExistente:x.engenheiro_original,unidadeExistente:x.unidade_original,turnoExistente:x.turno_original,convocacaoExistenteId:id(x.convocacao_existente_id),data:x.criado_em,resolvido:x.resolvido,conferidoEm:x.resolvido_em})),
     auditoria:(db.auditoria||[]).map(x=>({id:id(x.id),data:x.ocorrido_em,usuario:x.usuario,action:x.acao,ref:x.entidade+' '+(x.entidade_id||'')}))};
