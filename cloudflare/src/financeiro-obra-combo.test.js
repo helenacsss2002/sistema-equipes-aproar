@@ -14,9 +14,13 @@ function setup(works){
   for(const id of ['r-sup','r-obra','r-obra-combo','r-obra-search','r-ini','r-fim','r-period']){
     controls.set(id,{value:'',onchange:null,oninput:null,onblur:null,onkeydown:null,dispatchEvent(event){this.onchange?.(event);}});
   }
+  // No navegador, os campos de data já são inicializados pelo HTML do filtro.
+  controls.get('r-ini').value='2026-10-06';
+  controls.get('r-fim').value='2026-10-12';
   let refreshed=0;
   const context={
     OBRAS:works,
+    SUPERVISORES:['EDUARDO','FELIPE'],
     reportFilters:{inicio:'2026-10-06',fim:'2026-10-12',supervisor:'Todos',obra:'Todas'},
     obraById:id=>works.find(o=>o.id===id),
     $:selector=>controls.get(selector.slice(1))||null,
