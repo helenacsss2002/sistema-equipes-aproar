@@ -74,6 +74,63 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
   add('convocacoes','update',key,{...values,obra_id:first?.obraId||work,observacao:'Turno: '+c.turno+(i.observacao?' | Obs: '+i.observacao:'')+' ||APROAR_META|| '+JSON.stringify(meta)});
   if(!same(normServices(oldPoint),ss)){for(const s of db.raw.servicos_apontamento.filter(x=>String(x.convocacao_id)===key))add('servicos_apontamento','delete',s.id);ss.forEach((s,index)=>add('servicos_apontamento','insert',`service:${key}:${index}`,{convocacao_id:key,obra_id:s.obraId,obra_nome_snapshot:works.get(s.obraId).nome,unidade_snapshot:works.get(s.obraId).unidade,periodo:s.periodo,principal:index===0,criado_em:timestamp,atualizado_em:timestamp}));}
  }
+ // Extra-only records are stored separately in the existing tables, without a second ordinary attendance.
+ if(Array.isArray(next.extras)){
+  const oldExtras=new Map((base.extras||[]).map(x=>[String(x.id),x]));
+  const allExtras=db.state.extras||[],incomingIds=new Set(),incomingCombos=new Set();
+  const rawExtraConvs=new Map(db.raw.convocacoes.filter(c=>metadata(c.observacao).meta.extra_avulsa===true).map(c=>[String(c.id),c]));
+  for(const x of next.extras){
+   const id=String(x.id||'');if(!id)fail('Identificador do extra inválido.');
+   if(incomingIds.has(id))fail('Extra duplicada.');incomingIds.add(id);
+   const old=oldExtras.get(id);if(!old&&numericId(id))fail('Identificador novo de extra inválido.');
+   if(session.role!=='SUPERVISOR'&&session.role!=='CONTROLADORIA')fail('Sem permissão para lançar extras.',403);
+   if(old&&!own(session,{supervisor:old.supervisor}))fail('Você não pode alterar a extra de outro supervisor.',403);
+   const personId=String(x.colaboradorId||''),p=staff.get(personId),work=works.get(String(x.obraId||''));
+   if(!p)fail('Colaborador não encontrado para a extra.');
+   const serviceDate=date(x.dataServico);
+   if(serviceDate>isoToday(timestamp))fail('Extra não aceita data futura.');
+   if(!work)fail('Escolha um serviço válido para a extra.');
+   const supervisor=session.role==='SUPERVISOR'?session.user:required(String(x.supervisor||old?.supervisor||''),'Supervisor responsável');
+   if(!supervisors.includes(supervisor))fail('Supervisor inválido para a extra.');
+   if(session.role==='SUPERVISOR'){
+    const configuredOwner=db.state.unitOwners?.[work.unidade]||next.unitOwners?.[work.unidade]||'';
+    const historicOwner=(db.state.convocacoes||[]).find(c=>c.unidade===work.unidade&&c.supervisor===session.user)?.supervisor||'';
+    if((configuredOwner||historicOwner)!==session.user)fail('Você só pode lançar extra para serviços de uma unidade sob sua responsabilidade.',403);
+   }
+   const kind=String(x.extra||''),factor=mult(kind);
+   if(!factor)fail('Selecione um tipo de extra válido.');
+   const combo=serviceDate+'|'+personId+'|'+String(work.id);
+   if(incomingCombos.has(combo))fail('Há duas extras para o mesmo colaborador, data e serviço.');incomingCombos.add(combo);
+   const duplicate=allExtras.find(y=>String(y.id)!==id&&y.dataServico===serviceDate&&String(y.colaboradorId)===personId&&String(y.obraId)===String(work.id));
+   if(duplicate)fail('Já existe uma extra para este colaborador, data e serviço.',409,{extraId:duplicate.id});
+   const raw=old?rawExtraConvs.get(id):null,rawPoint=old?rawAps.get(id):null;
+   const oldMeta=metadata(raw?.observacao).meta,obs=String(x.observacao||'').trim().slice(0,2000);
+   const dayConv=(db.state.convocacoes||[]).find(c=>c.dataServico===serviceDate&&c.colaboradores?.includes(personId));
+   const dayWorkId=String(dayConv?.obraId||old?.servicoDiaId||'');
+   const amount=old&&old.extra===kind?money(Number(old.valorExtraOriginal)||0):money(Number(p.custo)*factor);
+   const created=old?.criadoEm||oldMeta.extra_lancado_em||timestamp,creator=old?.executor||oldMeta.extra_lancado_por||session.user;
+   const meta={...oldMeta,extra_avulsa:true,extra_obra_id:String(work.id),extra_unidade:work.unidade,extra_dia_obra_id:dayWorkId,extra_observacao:obs,extra_lancado_em:created,extra_lancado_por:creator,apontado_em:created,apontado_por:creator,custos_separados:true,servico_a_definir:false};
+   const convData={obra_id:String(work.id),colaborador_id:personId,data:serviceDate,engenheiro:supervisor,turno:'Integral',status:'Extra',valor_extra:amount,custo_pago:0,valor_acordo:0,valor_adicional_noturno:0,custo_encargos_base:amount,custos_separados:true,observacao:'Extra independente ||APROAR_META|| '+JSON.stringify(meta)};
+   const unchanged=old&&old.supervisor===supervisor&&old.dataServico===serviceDate&&String(old.colaboradorId)===personId&&String(old.obraId)===String(work.id)&&old.extra===kind&&String(old.observacao||'')===obs;
+   if(unchanged)continue;
+   const convKey=old?id:'extra:'+id;
+   if(old)add('convocacoes','update',id,convData);
+   else add('convocacoes','insert',convKey,{...convData,criado_em:timestamp,criado_por:session.user});
+   const pointData={convocacao_id:convKey,data_servico:serviceDate,colaborador_id:personId,engenheiro:supervisor,status:'Extra',valor_extra:amount,observacao:obs,tipo_diaria:kind,custo_pago:0,custo_pago_definido_financeiro:false,valor_acordo:0,valor_adicional_noturno:0,custo_encargos_base:amount,custos_separados:true,migracao_sebrae_noturno_v2:true,apontado_em:created,apontado_por:creator,retroativo:serviceDate<isoToday(timestamp),atualizado_em:timestamp};
+   add('apontamentos',rawPoint?'update':'insert',rawPoint?.id||'extra-ap:'+id,pointData);
+   if(!old||String(old.obraId)!==String(work.id)||(rawServicesByConv.get(id)||[]).length===0){
+    if(old)for(const service of (rawServicesByConv.get(id)||[]))add('servicos_apontamento','delete',service.id);
+    add('servicos_apontamento','insert','extra-service:'+id,{convocacao_id:convKey,obra_id:String(work.id),obra_nome_snapshot:work.nome,unidade_snapshot:work.unidade,periodo:'Integral',principal:true,criado_em:timestamp,atualizado_em:timestamp});
+   }
+  }
+  for(const old of base.extras||[]){
+   if(incomingIds.has(String(old.id)))continue;
+   if(!own(session,{supervisor:old.supervisor}))fail('Sem permissão para excluir esta extra.',403);
+   for(const service of (rawServicesByConv.get(String(old.id))||[]))add('servicos_apontamento','delete',service.id);
+   const row=rawAps.get(String(old.id));if(row)add('apontamentos','delete',row.id);
+   add('convocacoes','delete',old.id);
+  }
+ }
  // Availability and recorded conflicts use existing production tables.
  const sync=(name,table,convert,allowed)=>{const old=new Map(base[name].map(x=>[String(x.id),x]));for(const x of next[name]){const previous=old.get(String(x.id));if(previous&&same(previous,x))continue;if(!allowed(x,previous))fail('Sem permissão para alterar '+name+'.',403);if(!previous&&numericId(x.id))fail('Identificador novo inválido.');add(table,previous?'update':'insert',x.id,convert(x,previous));}for(const x of base[name])if(!next[name].some(y=>String(y.id)===String(x.id))){if(session.role!=='CONTROLADORIA')fail('Sem permissão para excluir registro.',403);add(table,'delete',x.id);}};
  sync('indisponibilidades','indisponibilidades',x=>{if(!staff.has(String(x.colaboradorId)))fail('Colaborador inválido.');date(x.inicio);date(x.fim);if(x.fim<x.inicio)fail('Período inválido.');return {colaborador_id:String(x.colaboradorId),colaborador_nome_snapshot:staff.get(String(x.colaboradorId)).nome,motivo:required(x.motivo,'Motivo'),inicio:x.inicio,fim:x.fim,observacao:String(x.obs||x.observacao||''),criado_por:session.user,ativo:true};},()=>session.role==='CONTROLADORIA');
