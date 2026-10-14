@@ -540,16 +540,92 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
   function mainWorkForPersonOnDate(personId,date){const convs=state.convocacoes.filter(c=>String(c.dataServico)===String(date)&&(c.colaboradores||[]).some(id=>String(id)===String(personId)));const conv=convs.find(c=>apForConv(c.id)?.itens?.some(i=>String(i.colaboradorId)===String(personId)))||convs[0];const item=conv?apForConv(conv.id)?.itens?.find(i=>String(i.colaboradorId)===String(personId)):null;const workId=itemServices(item,conv?.obraId||'').find(x=>x.obraId)?.obraId||conv?.obraId||'';return {conv,item,workId,work:obraById(workId)};}
   function personRow(cid,item=null,unit='',defaultObra='',serviceDate=portalDate,extraSupervisor=supervisorAtual){
  const c=colaboradorById(cid),services=itemServices(item,defaultObra),existingExtra=extraRecordFor(serviceDate,cid,extraSupervisor),draft=item?.extraLancamento,legacyExtra=EXTRA_OPTIONS.includes(item?.extra)&&item.extra!=='Não';
- const extraValue=draft&&typeof draft.enabled==='boolean'?(draft.enabled?draft.extra:'Não'):(existingExtra?.extra||(legacyExtra?item.extra:'Não')),extraEnabled=extraValue!=='Não',extraOptions=[...EXTRA_OPTIONS,...(extraValue==='Valor específico'?['Valor específico']:[])].map(x=>`<option ${x===extraValue?'selected':''}>${x}</option>`).join(''),proposedWork=draft?.obraId||existingExtra?.obraId||services.find(x=>x.obraId)?.obraId||defaultObra||'',workId=OBRAS.some(o=>String(o.id)===String(proposedWork))?proposedWork:(OBRAS[0]?.id||''),extraObservation=draft?.observacao??existingExtra?.observacao??'';
+ const extraValue=draft&&typeof draft.enabled==='boolean'?(draft.enabled?draft.extra:'Não'):(existingExtra?.extra||(legacyExtra?item.extra:'Não')),extraEnabled=extraValue!=='Não',
+ extraCategory=EXTRA_OPTIONS.includes(extraValue)&&extraEnabled?extraValue:'Meia diária',
+ proposedWork=draft?.obraId||existingExtra?.obraId||services.find(x=>x.obraId)?.obraId||defaultObra||'',workId=OBRAS.some(o=>String(o.id)===String(proposedWork))?proposedWork:(OBRAS[0]?.id||''),extraObservation=draft?.observacao??existingExtra?.observacao??'',
+ cost=dayCost(c),suggestedExtra=extraEnabled?(existingExtra?.extra===extraCategory&&Number(existingExtra.valorExtraOriginal)>0?Number(existingExtra.valorExtraOriginal):roundMoney(cost*extraMultiplier(extraCategory))):0,
+ nightValue=unit==='SEBRAE'&&presence(item?.status||'Presente (Integral)')?(item?.financeAdjusted?Number(item?.noturno||0):[50,90].includes(Number(item?.noturno))?Number(item.noturno):90):0;
  return `<div class="person-row person-card" data-person="${cid}" data-unit="${escapeHtml(unit)}" data-extra-original="0" data-finance-adjusted="${item?.financeAdjusted?'true':'false'}" data-ajuda-custo="${Number(item?.ajudaCusto)||0}"><div class="person-name">${escapeHtml(c?.nome||cid)}<br><small>${escapeHtml(c?.funcao||'')} · ${escapeHtml(unit)}</small></div>
  <div class="person-top">${field('Status',`<select class="control row-status">${STATUS_OPTIONS.map(x=>`<option ${x===(item?.status||'Presente (Integral)')?'selected':''}>${x}</option>`).join('')}</select>`)}</div>
  <div class="person-services"><div class="allocations principal-service">${allocationRow(unit,services[0],0)}</div>
- <div class="form-grid">${field('Extra',`<select class="control row-extra">${extraOptions}</select>`)}${field('Financeiro (R$)',`<input class="control row-financeiro" type="number" min="0" step="0.01" value="${item?.financeiro??0}">`)}${field('Acordos / Bonificações (R$)',`<input class="control row-acordo" type="number" min="0" step="0.01" value="${item?.acordo||0}">`)}${perfilAtual==='SUPERVISOR'?field('Passagens/Ajuda de custo (R$)',`<input class="control row-ajuda-custo" type="number" min="0" step="0.01" list="passagens-ajuda-valores" value="${Number(item?.ajudaCusto)||0}" ${item?.financeAdjusted?'readonly title="Valor confirmado pelo Financeiro"':''}>`):''}</div>
- <div class="row-extra-panel section ${extraEnabled?'':'hidden'}"><div class="notice info">O serviço do dia é sugerido automaticamente. Você pode trocar a obra e a unidade da extra; o lançamento vai para o Financeiro e os relatórios, sem alterar a presença normal.</div><div class="form-grid">${field('Obra / Serviço da extra',`<select class="control row-extra-work">${extraWorkOptions(workId)}</select>`)}${field('Observação da extra',`<input class="control row-extra-obs" maxlength="2000" value="${escapeHtml(extraObservation)}" placeholder="Opcional">`)}</div></div>
- <details class="more-services"><summary>Mais opções</summary>${field('Observação / justificativa',`<input class="control row-obs" value="${escapeHtml(item?.observacao||'')}">`)}${field('Adic. noturno (SEBRAE)',`<input class="control row-noturno" type="number" min="0" step="0.01" value="${unit==='SEBRAE'&&presence(item?.status||'Presente (Integral)')?(item?.financeAdjusted?(item?.noturno||0):Math.max(90,item?.noturno||0)):0}" readonly>`)}<div class="additional-services">${services.slice(1).map((x,i)=>allocationRow(unit,x,i+1)).join('')}</div><div class="inline-actions section"><button type="button" class="btn btn-primary add-service">+ Adicionar serviço</button><button type="button" class="btn btn-secondary remove-last-service">− Remover último</button><span class="service-count">${Math.max(0,services.length-1)} serviço(s) adicional(is)</span></div></details></div></div>`;
+ <div class="form-grid">${field('Extra?',`<select class="control row-extra" aria-label="Extra"><option value="Não" ${extraEnabled?'':'selected'}>Não</option><option value="Sim" ${extraEnabled?'selected':''}>Sim</option></select>`)}${field('Valor informado para pagamento (R$)',`<input class="control row-financeiro" type="number" min="0" step="0.01" value="${item?.financeiro??0}">`)}${field('Acordos / Bonificações (R$)',`<input class="control row-acordo" type="number" min="0" step="0.01" value="${item?.acordo||0}">`)}${perfilAtual==='SUPERVISOR'?field('Passagens/Ajuda de custo (R$)',`<input class="control row-ajuda-custo" type="number" min="0" step="0.01" list="passagens-ajuda-valores" value="${Number(item?.ajudaCusto)||0}" ${item?.financeAdjusted?'readonly title="Valor confirmado pelo Financeiro"':''}>`):''}</div>
+ <div class="row-extra-panel section ${extraEnabled?'':'hidden'}"><div class="notice info">A categoria determina o valor sugerido da extra a partir da diária cadastrada para o colaborador. A extra é registrada separadamente, sem modificar a presença normal.</div><div class="form-grid">
+ ${field('Categoria da Extra',`<select class="control row-extra-category">${EXTRA_OPTIONS.filter(x=>x!=='Não').map(x=>`<option value="${x}" ${x===extraCategory?'selected':''}>${x}</option>`).join('')}</select>`)}
+ ${field('Valor da Extra (R$)',`<input class="control row-extra-value" type="number" step="0.01" readonly value="${suggestedExtra.toFixed(2)}" title="Calculado com base na diária cadastrada de R$ ${cost.toFixed(2)}">`)}
+ ${field('Obra / Serviço da extra',`<select class="control row-extra-work">${extraWorkOptions(workId)}</select>`)}
+ ${field('Observação da extra',`<input class="control row-extra-obs" maxlength="2000" value="${escapeHtml(extraObservation)}" placeholder="Opcional">`)}
+ </div></div>
+ <div class="form-grid section">${field('Adicional noturno (SEBRAE)',`<select class="control row-noturno" ${unit==='SEBRAE'&&!item?.financeAdjusted?'':'disabled'}><option value="0" ${nightValue===0?'selected':''}>Sem adicional (R$ 0,00)</option><option value="50" ${nightValue===50?'selected':''}>R$ 50,00</option><option value="90" ${nightValue===90?'selected':''}>R$ 90,00</option>${![0,50,90].includes(nightValue)?`<option value="${nightValue}" selected>R$ ${nightValue.toFixed(2)} (valor já registrado)</option>`:''}</select>`)}</div>
+ <div class="row-total-summary" role="status"><span>TOTAL DO DIA (R$)</span><strong class="row-total">${roundMoney(Number(item?.financeiro||0)+suggestedExtra+nightValue+Number(item?.acordo||0)+Number(item?.ajudaCusto||0)).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</strong><small>Pagamento informado + extra + adicional noturno + acordos + passagens/ajuda de custo</small></div>
+ <details class="more-services"><summary>Mais opções</summary>${field('Observação / justificativa',`<input class="control row-obs" value="${escapeHtml(item?.observacao||'')}">`)}<div class="additional-services">${services.slice(1).map((x,i)=>allocationRow(unit,x,i+1)).join('')}</div><div class="inline-actions section"><button type="button" class="btn btn-primary add-service">+ Adicionar serviço</button><button type="button" class="btn btn-secondary remove-last-service">− Remover último</button><span class="service-count">${Math.max(0,services.length-1)} serviço(s) adicional(is)</span></div></details></div></div>`;
 }
-  function bindServiceRows(){$$('.person-card').forEach(card=>{const update=()=>card.querySelector('.service-count').textContent=card.querySelectorAll('.additional-services .allocation-row').length+' serviço(s) adicional(is)';card.querySelector('.add-service').onclick=()=>{card.querySelector('.additional-services').insertAdjacentHTML('beforeend',allocationRow(card.dataset.unit,{},card.querySelectorAll('.allocation-row').length));update();};card.querySelector('.row-status').onchange=()=>{const n=card.querySelector('.row-noturno');n.value=card.dataset.unit==='SEBRAE'&&presence(card.querySelector('.row-status').value)?(card.dataset.financeAdjusted==='true'?n.value:Math.max(90,Number(n.value)||0)):0;};card.querySelector('.remove-last-service').onclick=()=>{card.querySelector('.additional-services .allocation-row:last-child')?.remove();update();};const toggle=card.querySelector('.row-extra'),panel=card.querySelector('.row-extra-panel');if(toggle&&panel)toggle.onchange=()=>panel.classList.toggle('hidden',toggle.value==='Não');});}
-  function readPersonRows(ids,scope=document){return ids.map(cid=>{const row=scope.querySelector(`[data-person="${cid}"]`),servicos=[...row.querySelectorAll('.allocation-row')].map(r=>({obraId:(OBRAS.find(o=>o.unidade===row.dataset.unit&&clean(o.nome)===clean(r.querySelector('.service-work').value))?.id||''),periodo:r.querySelector('.service-period').value}));const extraValue=row.querySelector('.row-extra').value;return {colaboradorId:cid,status:row.querySelector('.row-status').value,extra:extraValue,extraLancamento:{enabled:extraValue!=='Não',extra:extraValue,obraId:row.querySelector('.row-extra-work').value,observacao:row.querySelector('.row-extra-obs').value.trim(),dayWorkId:servicos.find(x=>x.obraId)?.obraId||''},valorExtraOriginal:0,observacao:row.querySelector('.row-obs').value.trim(),servicos,obraId:servicos[0]?.obraId||'',financeAdjusted:row.dataset.financeAdjusted==='true',financeiro:Number(row.querySelector('.row-financeiro').value||0),noturno:Number(row.querySelector('.row-noturno').value),acordo:Number(row.querySelector('.row-acordo').value),ajudaCusto:Number(row.querySelector('.row-ajuda-custo')?.value??row.dataset.ajudaCusto)||0};});}
+  function bindServiceRows(){
+    $$('.person-card').forEach(card=>{
+      const field=selector=>card.querySelector(selector),extraChoice=field('.row-extra'),
+            extraCategory=field('.row-extra-category'),extraAmount=field('.row-extra-value'),
+            night=field('.row-noturno'),status=field('.row-status'),total=field('.row-total'),
+            panel=field('.row-extra-panel');
+      let priorCategory=extraCategory?.value||'Meia diária',wasEnabled=extraChoice?.value==='Sim';
+      const moneyValue=selector=>Math.max(0,Number(field(selector)?.value)||0);
+      const updateTotal=()=>{
+        const active=extraChoice?.value==='Sim',chosen=extraCategory?.value||'Meia diária';
+        if(extraAmount&&(chosen!==priorCategory||active&&!wasEnabled)){
+          extraAmount.value=roundMoney(dayCost(colaboradorById(card.dataset.person))*extraMultiplier(chosen)).toFixed(2);
+        }
+        if(extraAmount&& !active)extraAmount.value='0.00';
+        const extra=active?moneyValue('.row-extra-value'):0;
+        const ordinary=presence(status.value)?moneyValue('.row-financeiro')+moneyValue('.row-acordo')+moneyValue('.row-ajuda-custo')+moneyValue('.row-noturno'):0;
+        const sum=roundMoney(extra+ordinary);
+        if(total)total.textContent=sum.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+        priorCategory=chosen;wasEnabled=active;
+        panel?.classList.toggle('hidden',!active);
+      };
+      const countServices=()=>{const counter=field('.service-count');if(counter)counter.textContent=card.querySelectorAll('.additional-services .allocation-row').length+' serviço(s) adicional(is)';};
+      field('.add-service').onclick=()=>{
+        field('.additional-services').insertAdjacentHTML('beforeend',allocationRow(card.dataset.unit,{},card.querySelectorAll('.allocation-row').length));countServices();
+      };
+      field('.remove-last-service').onclick=()=>{field('.additional-services .allocation-row:last-child')?.remove();countServices();};
+      status.onchange=()=>{
+        if(night&&!night.disabled){
+          if(!presence(status.value))night.value='0';
+          else if(card.dataset.unit==='SEBRAE'&&Number(night.value)===0)night.value='90';
+        }
+        updateTotal();
+      };
+      if(extraChoice)extraChoice.onchange=updateTotal;
+      if(extraCategory)extraCategory.onchange=updateTotal;
+      for(const selector of ['.row-financeiro','.row-acordo','.row-ajuda-custo','.row-noturno']){
+        const control=field(selector);if(control){control.addEventListener('input',updateTotal);control.addEventListener('change',updateTotal);}
+      }
+      updateTotal();
+    });
+  }
+  function readPersonRows(ids,scope=document){
+    return ids.map(cid=>{
+      const row=scope.querySelector(`[data-person="${cid}"]`),
+            servicos=[...row.querySelectorAll('.allocation-row')].map(r=>({
+              obraId:OBRAS.find(o=>o.unidade===row.dataset.unit&&clean(o.nome)===clean(r.querySelector('.service-work').value))?.id||'',
+              periodo:r.querySelector('.service-period').value
+            })),
+            enabled=row.querySelector('.row-extra')?.value==='Sim',
+            category=row.querySelector('.row-extra-category')?.value||'Meia diária';
+      return {
+        colaboradorId:cid,status:row.querySelector('.row-status').value,extra:'Não',
+        extraLancamento:{
+          enabled,extra:category,
+          obraId:row.querySelector('.row-extra-work')?.value||'',
+          observacao:row.querySelector('.row-extra-obs')?.value.trim()||'',
+          dayWorkId:servicos.find(x=>x.obraId)?.obraId||''
+        },
+        valorExtraOriginal:0,observacao:row.querySelector('.row-obs').value.trim(),servicos,
+        obraId:servicos[0]?.obraId||'',financeAdjusted:row.dataset.financeAdjusted==='true',
+        financeiro:Number(row.querySelector('.row-financeiro').value||0),
+        noturno:Number(row.querySelector('.row-noturno').value)||0,
+        acordo:Number(row.querySelector('.row-acordo').value)||0,
+        ajudaCusto:Number(row.querySelector('.row-ajuda-custo')?.value??row.dataset.ajudaCusto)||0
+      };
+    });
+  }
   function applyInlineExtras(items,date,supervisor){const pending=items.map(item=>({item,extra:item.extraLancamento||{enabled:false}}));for(const p of pending){if(!p.extra.enabled)continue;if(!colaboradorById(p.item.colaboradorId)){toast('Selecione um funcionário válido para a extra.',true);return false;}if(!OBRAS.some(o=>String(o.id)===String(p.extra.obraId))){toast('Selecione a obra/unidade onde a extra foi realizada.',true);return false;}if(!['Meia diária','Diária','Uma e meia diária','Duas diárias'].includes(p.extra.extra)){toast('Selecione o tipo de extra.',true);return false;}if(date>isoToday()){toast('Extra não aceita data futura.',true);return false;}}
  let extras=[...(state.extras||[])];for(const p of pending){const personId=String(p.item.colaboradorId),owner=String(supervisor||supervisorAtual),matches=extras.filter(x=>String(x.dataServico)===String(date)&&String(x.colaboradorId)===personId&&String(x.supervisor)===owner);if(p.extra.enabled){const previous=matches[0],work=obraById(p.extra.obraId),kind=p.extra.extra,workDay=String(p.extra.dayWorkId||p.item.servicos?.find(x=>x.obraId)?.obraId||mainWorkForPersonOnDate(personId,date).workId||previous?.servicoDiaId||'');const record={...(previous||{}),id:previous?.id||uid('extra'),supervisor:owner,dataServico:date,unidade:work.unidade,obraId:String(work.id),colaboradorId:personId,extra:kind,valorExtraOriginal:previous?.extra===kind?(Number(previous.valorExtraOriginal)||0):0,observacao:String(p.extra.observacao||'').trim().slice(0,2000),criadoEm:previous?.criadoEm||now().toISOString(),executor:previous?.executor||owner,servicoDiaId:workDay};extras=extras.filter(x=>!matches.includes(x));extras.push(record);}else{extras=extras.filter(x=>!matches.includes(x));}delete p.item.extraLancamento;p.item.extra='Não';}state.extras=extras;return true;}
     // Filtra apenas os cartões exibidos: seleção e alterações não são apagadas.
@@ -560,17 +636,6 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       cards().forEach(card=>{card.style.display=!query||clean(card.textContent).includes(query)?'':'none';});
     };
     input.onkeydown=e=>{if(e.key==='Enter')e.preventDefault();};
-  }
-  function bindServiceRows(){
-    $$('.person-card').forEach(card=>{
-      const update=()=>card.querySelector('.service-count').textContent=card.querySelectorAll('.additional-services .allocation-row').length+' serviço(s) adicional(is)';
-      card.querySelector('.add-service').onclick=()=>{card.querySelector('.additional-services').insertAdjacentHTML('beforeend',allocationRow(card.dataset.unit,{},card.querySelectorAll('.allocation-row').length));update();};
-      card.querySelector('.row-status').onchange=()=>{const n=card.querySelector('.row-noturno');n.value=card.dataset.unit==='SEBRAE'&&presence(card.querySelector('.row-status').value)?(card.dataset.financeAdjusted==='true'?n.value:Math.max(90,Number(n.value)||0)):0;};
-      card.querySelector('.remove-last-service').onclick=()=>{card.querySelector('.additional-services .allocation-row:last-child')?.remove();update();};
-    });
-  }
-  function readPersonRows(ids,scope=document){
-    return ids.map(cid=>{const row=scope.querySelector(`[data-person="${cid}"]`);const servicos=[...row.querySelectorAll('.allocation-row')].map(r=>({obraId:(OBRAS.find(o=>o.unidade===row.dataset.unit&&clean(o.nome)===clean(r.querySelector('.service-work').value))?.id||''),periodo:r.querySelector('.service-period').value}));return {colaboradorId:cid,status:row.querySelector('.row-status').value,extra:row.querySelector('.row-extra').value,valorExtraOriginal:Number(row.dataset.extraOriginal)||0,observacao:row.querySelector('.row-obs').value.trim(),servicos,obraId:servicos[0]?.obraId||'',financeAdjusted:row.dataset.financeAdjusted==='true',financeiro:Number(row.querySelector('.row-financeiro').value||0),noturno:Number(row.querySelector('.row-noturno').value),acordo:Number(row.querySelector('.row-acordo').value),ajudaCusto:Number(row.querySelector('.row-ajuda-custo')?.value??row.dataset.ajudaCusto)||0};});
   }
   function validServices(items,unit){
     for(const i of items){if(!presence(i.status))continue;const ss=i.servicos;
@@ -609,7 +674,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       </div>`;
 
     const unidade = $('#retro-unidade'), rows = $('#retro-rows');
-    bindPersonSearch($('#retro-person-search'),()=>$('.retro-person-list .check-card'));
+    bindPersonSearch($('#retro-person-search'),()=>$$('.retro-person-list .check-card'));
     let retroDrafts=new Map();
     if(perfilAtual==='SUPERVISOR'){
       const pending=new Map();for(const c of state.convocacoes.filter(c=>c.supervisor===supervisorAtual&&c.dataServico<=isoToday()&&!completeConv(c))){const done=new Set(apForConv(c.id)?.itens.map(i=>i.colaboradorId)||[]),ids=c.colaboradores.filter(id=>!done.has(id));if(!ids.length)continue;const key=c.dataServico+'|'+c.unidade+'|'+c.turno;if(!pending.has(key))pending.set(key,{date:c.dataServico,unit:c.unidade,turn:c.turno,ids:new Set()});ids.forEach(id=>pending.get(key).ids.add(id));}
@@ -638,7 +703,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       e.preventDefault();
       const dataServico = $('#retro-data').value;
       if (!dataServico) return toast('Escolha a data do serviço.', true);if(dataServico>isoToday())return toast('O apontamento retroativo não aceita data futura.',true);
-      const ids = $('input[name="retro-colab"]:checked').map(x=>x.value);
+      const ids = $$('input[name="retro-colab"]:checked').map(x=>x.value);
       if (!ids.length) return toast('Selecione pelo menos um colaborador.', true);
       const responsavel=$('#retro-sup')?.value||supervisorAtual;
       const itens=readPersonRows(ids);if(!validServices(itens,unidade.value))return;
@@ -708,7 +773,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       const action=onlineWritable&&onlineStage!=='producao'?'<button class="link-btn" data-extra-delete="'+escapeHtml(x.id)+'">Excluir</button>':'—';
       return [formatDate(x.dataServico),escapeHtml(x.supervisor),escapeHtml(person?.nome||x.colaboradorId),escapeHtml(work?.unidade||x.unidade),escapeHtml(work?.nome||'Serviço removido'),escapeHtml(x.extra),money(value),escapeHtml(x.observacao||''),action];
     }));
-    $('[data-extra-delete]').forEach(button=>button.onclick=()=>{
+    $$('[data-extra-delete]').forEach(button=>button.onclick=()=>{
       const id=button.dataset.extraDelete,entry=(state.extras||[]).find(x=>String(x.id)===String(id));
       if(!entry)return;
       if(supervisorOnly&&entry.supervisor!==supervisorAtual)return toast('Você só pode excluir as extras que lançou.',true);
@@ -999,7 +1064,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
   function completeConv(c){const ap=apForConv(c.id);return !!ap&&c.colaboradores.every(id=>ap.itens.some(i=>i.colaboradorId===id));}
   function serviceList(i,c){const raw=i.servicos?.length?i.servicos:itemServices(i,c.obraId);const seen=new Set();return raw.filter(s=>{if(!s.obraId)return false;const key=s.obraId+'|'+(s.periodo||c.turno);if(seen.has(key))return false;seen.add(key);return true;}).map(s=>({...s,periodo:s.periodo||c.turno||'Integral'}));}
   function hasSebrae(i,c){return clean(c.unidade)==='SEBRAE'||serviceList(i,c).some(s=>clean(obraById(s.obraId)?.unidade)==='SEBRAE');}
-  function nocturnal(i,c){if(!presence(i.status)||!hasSebrae(i,c))return 0;const v=Math.max(0,Number(i.noturno)||0);return roundMoney(i.financeAdjusted?v:Math.max(90,v));}
+  function nocturnal(i,c){if(!presence(i.status)||!hasSebrae(i,c))return 0;const v=Math.max(0,Number(i.noturno)||0);return roundMoney(i.financeAdjusted||[50,90].includes(v)?v:Math.max(90,v));}
   function periodBlocks(p){return p==='Manhã'?{M:.5}:p==='Tarde'?{T:.5}:p==='Noite'?{N:1}:{M:.5,T:.5};}
   function presenceBlocks(i,c){if(!presence(i.status))return {};if(i.status==='Presente (Só Manhã)')return {M:.5};if(i.status==='Presente (Só Tarde)')return {T:.5};if(i.status==='Saída Antecipada')return c.turno==='Noite'?{N:.5}:c.turno==='Tarde'?{T:.5}:{M:.5};return periodBlocks(c.turno);}
   function entries(){
@@ -1143,7 +1208,7 @@ function renderEquipeDia(){
  <div id="day-extra-fields" class="form-grid hidden">${field('Obra / Serviço e unidade da extra',`<select class="control" id="day-extra-work">${extraWorkOptions('')}</select>`)}${field('Observação da extra','<input class="control" id="day-extra-obs" maxlength="2000" placeholder="Opcional">')}</div>
  <div id="day-extra-origin" class="notice info section">Escolha o funcionário. O serviço registrado para ele neste dia será sugerido automaticamente, mas pode ser trocado.</div></details>
  <div class="form-actions"><button class="btn btn-primary">Salvar apontamento do dia</button></div></form>`;
- bindServiceRows();bindPersonSearch($('#day-person-search'),()=>$('#day-form .person-card'));
+ bindServiceRows();bindPersonSearch($('#day-person-search'),()=>$$('#day-form .person-card'));
  const extraToggle=$('#day-extra-kind'),extraFields=$('#day-extra-fields');
  const refreshExternalFields=()=>extraFields.classList.toggle('hidden',extraToggle.value==='Não');
  const suggestExternalWork=()=>{

@@ -604,6 +604,15 @@ table td .control {text-align:inherit;}
 #pay-body .pay-detail-section .help-text {margin:0 0 18px;line-height:1.65;}
 #pay-body .pay-detail-section .table-wrap {margin-top:0;}
 .person-card .row-ajuda-custo[readonly] {background:#eef2f7;color:#59697f;}
+
+/* Conferência visual do apontamento: categoria, valores e total do dia. */
+.person-card .row-extra-panel {padding:14px;border:1px solid #dce6f1;border-radius:12px;background:rgba(238,244,251,.65);}
+.person-card .row-extra-value {font-weight:700;background:#f4f7fb;color:#173b64;}
+.person-card .row-total-summary {display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px;background:#eaf1fa;border:1px solid #bfd2ed;border-radius:12px;padding:14px 16px;margin-top:18px;}
+.person-card .row-total-summary span {font-weight:700;font-size:13px;letter-spacing:.04em;color:#254c7a;}
+.person-card .row-total-summary strong {font-size:22px;font-weight:800;letter-spacing:-.02em;color:#12396b;}
+.person-card .row-total-summary small {flex-basis:100%;font-size:12px;color:#56718f;line-height:1.5;}
+@media (max-width:620px){.person-card .row-total-summary strong{font-size:20px;}}
 </style>
 </head>
 <body>
@@ -664,6 +673,6 @@ table td .control {text-align:inherit;}
 
   <script src="/pdf-lib.min.js"></script>
 <script src="/financeiro-consolidado.js?v=20261014-1"></script>
-  <script src="/app.js?v=aproar-extra-dropdown-20261014-1"></script>
+  <script src="/app.js?v=aproar-extra-categoria-total-20261014-2"></script>
 <div id="online-saving" class="hidden" role="status" aria-live="polite" style="position:fixed;inset:0;background:rgba(11,27,51,.4);z-index:99999;display:grid;place-items:center"><div class="card card-pad"><strong>Salvando alterações no Neon…</strong><p>Aguarde a confirmação.</p></div></div></body>
 </html>

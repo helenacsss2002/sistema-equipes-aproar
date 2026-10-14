@@ -1,0 +1,114 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+
+const ui=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
+const html=fs.readFileSync(new URL('../public/index.html',import.meta.url),'utf8');
+function block(start,end){
+ const a=ui.indexOf(start),b=ui.indexOf(end,a+start.length);
+ assert.ok(a>=0&&b>a,'Bloco não encontrado: '+start);
+ return ui.slice(a,b);
+}
+function setup(){
+ const cards=[],rows=new Map(),toggled=[],p={
+   id:'1',nome:'Colaborador QA',funcao:'Eletricista',custo:241.74
+ };
+ const control=(value)=>({value:String(value),listeners:{},
+   addEventListener(event,callback){this.listeners[event]=callback;},
+   fire(event){this.listeners[event]?.();}
+ });
+ const inputs={
+  '.row-extra':control('Não'),
+  '.row-extra-category':control('Meia diária'),
+  '.row-extra-value':control('0'),
+  '.row-noturno':control('50'),
+  '.row-status':control('Presente (Integral)'),
+  '.row-financeiro':control('120'),
+  '.row-acordo':control('5'),
+  '.row-ajuda-custo':control('11'),
+  '.row-extra-panel':{classList:{toggle(className,enabled){toggled.push([className,enabled]);}}},
+  '.row-total':{textContent:''},
+  '.service-count':{textContent:''},
+  '.add-service':{},
+  '.remove-last-service':{},
+  '.additional-services':{insertAdjacentHTML(){}}
+ };
+ const serviceFields={
+  '.service-work':{value:'SEBRAE obra'},
+  '.service-period':{value:'Noite'}
+ };
+ const service={querySelector:sel=>serviceFields[sel]};
+ inputs['.row-extra-work']={value:'3'};
+ inputs['.row-extra-obs']={value:'serviço de extra'};
+ inputs['.row-obs']={value:'comprovado'};
+ const card={
+  dataset:{person:'1',unit:'SEBRAE',financeAdjusted:'false',ajudaCusto:'11'},
+  querySelector:sel=>inputs[sel]||null,
+  querySelectorAll:sel=>sel==='.allocation-row'?[service]:[]
+ };
+ const ctx={
+  $$:sel=>sel==='.person-card'?[card]:[],
+  document:{querySelector:sel=>sel==='[data-person="1"]'?card:null},
+  OBRAS:[{id:'3',nome:'SEBRAE obra',unidade:'SEBRAE'}],
+  dayCost:()=>241.74,
+  roundMoney:n=>Math.round(n*100)/100,
+  extraMultiplier:value=>value==='Meia diária'?.5:value==='Diária'?1:value==='Uma e meia diária'?1.5:2,
+  colaboradorById:()=>p,
+  clean:v=>String(v||'').trim().toUpperCase(),
+  presence:status=>status.startsWith('Presente'),
+  allocationRow:()=>'<div></div>'
+ };
+ ctx.globalThis=ctx;
+ vm.createContext(ctx);
+ vm.runInContext(block('  function bindServiceRows(){','  function readPersonRows(')+block('  function readPersonRows(','  function applyInlineExtras(')+'\nglobalThis.bind=bindServiceRows;globalThis.read=readPersonRows;',ctx);
+ return {ctx,inputs,card,toggled};
+}
+test('Extra volta a permitir Sim/Não, categoria e total automático sem alterar valor pago',()=>{
+ const {ctx,inputs,toggled}=setup();
+ ctx.bind();
+ assert.match(inputs['.row-total'].textContent,/186,00/);
+ inputs['.row-extra'].value='Sim';inputs['.row-extra'].onchange();
+ assert.equal(Number(inputs['.row-extra-value'].value),120.87);
+ assert.match(inputs['.row-total'].textContent,/306,87/);
+ assert.deepEqual(toggled.at(-1),['hidden',false]);
+ inputs['.row-extra-category'].value='Diária';inputs['.row-extra-category'].onchange();
+ assert.equal(Number(inputs['.row-extra-value'].value),241.74);
+ assert.match(inputs['.row-total'].textContent,/427,74/);
+ inputs['.row-noturno'].value='90';inputs['.row-noturno'].fire('change');
+ assert.match(inputs['.row-total'].textContent,/467,74/);
+ assert.equal(inputs['.row-financeiro'].value,'120','O valor base não é alterado ao escolher extra');
+});
+test('Apontamento normal e retroativo recebem extraLancamento para gravar categoria, obra e observação',()=>{
+ const {ctx,inputs}=setup();
+ inputs['.row-extra'].value='Sim';
+ inputs['.row-extra-category'].value='Uma e meia diária';
+ const [item]=ctx.read(['1']);
+ assert.equal(item.extra,'Não','Extra independente não pode ser duplicada na presença');
+ assert.equal(item.extraLancamento.enabled,true);
+ assert.equal(item.extraLancamento.extra,'Uma e meia diária');
+ assert.equal(item.extraLancamento.obraId,'3');
+ assert.equal(item.extraLancamento.observacao,'serviço de extra');
+ assert.equal(item.noturno,50);
+ assert.equal(item.financeiro,120);
+ assert.equal(item.ajudaCusto,11);
+ inputs['.row-extra'].value='Não';
+ const [other]=ctx.read(['1']);
+ assert.equal(other.extraLancamento.enabled,false);
+});
+test('Não há funções duplicadas que sobrescrevam Extra e apontamento da equipe',()=>{
+ assert.equal((ui.match(/function bindServiceRows\(\)/g)||[]).length,1);
+ assert.equal((ui.match(/function readPersonRows\(/g)||[]).length,1);
+ assert.match(ui,/field\('Extra\?'/);
+ assert.match(ui,/Categoria da Extra/);
+ assert.match(ui,/Valor da Extra \(R\$\)/);
+ assert.match(ui,/row-total-summary/);
+ assert.match(ui,/valorExtraOriginal:0/);
+ assert.match(ui,/\.row-extra-category/);
+ assert.match(ui,/option value="50"/);
+ assert.match(ui,/option value="90"/);
+ assert.match(html,/row-total-summary/);
+ assert.match(html,/app\.js\?v=aproar-extra-categoria-total-20261014-2/);
+ assert.match(ui,/bindPersonSearch\(\$\('#retro-person-search'\),\(\)=>\$\$\('\.retro-person-list/);
+ assert.match(ui,/const ids = \$\$\('input\[name="retro-colab"\]:checked'\)\.map/);
+});
