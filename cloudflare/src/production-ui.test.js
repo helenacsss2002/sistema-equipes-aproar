@@ -295,3 +295,14 @@ test('Relatorios da Controladoria e Financeiro mostram 13 colunas sem barra late
  assert.match(ui,/,'Total'\],selected\.map/);
  assert.match(ui,/refresh\(\);bindExports\(\)/);
 });
+
+test('Independent extras can be entered without changing the regular attendance form',()=>{
+ const ui=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
+ const html=fs.readFileSync(new URL('../public/index.html',import.meta.url),'utf8');
+ assert.match(ui,/function renderExtras\(\)/);
+ assert.match(ui,/item\('extras','Extras'/);
+ assert.match(ui,/extra-day-service/);
+ assert.match(ui,/state\.extras\.push/);
+ assert.match(ui,/Extra independente/);
+ assert.match(html,/aproar-extras-independentes-20261014-1/);
+});
