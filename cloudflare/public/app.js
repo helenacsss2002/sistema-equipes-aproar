@@ -828,25 +828,33 @@
       const selectedWork=OBRAS.find(o=>String(o.id)===String(reportFilters.obra));
       const label=o=>o.nome+' | '+o.unidade;
       workCombo.value=selectedWork?label(selectedWork):'Todas';
-      const choose=()=>{
+      const choose=(allowCode=false)=>{
         const raw=clean(workCombo.value);
         const matched=OBRAS.find(o=>clean(label(o))===raw);
-        const id=raw==='TODAS'?'Todas':matched?.id;
-        if(id===undefined)return;
+        // A digitação de um número exato seleciona a obra somente se não houver ambiguidade.
+        // Durante a digitação não mudamos o filtro para uma correspondência parcial.
+        const byCode=allowCode===true&&!matched?OBRAS.filter(o=>
+          clean(financialWorkNumber(o.id))===raw||clean(o.nome)===raw
+        ):[];
+        const chosen=matched||(byCode.length===1?byCode[0]:null);
+        const id=raw==='TODAS'?'Todas':chosen?.id;
+        if(id===undefined)return false;
         const source=$('#r-obra');
-        if(source.value===String(id))return;
+        // Mantém o rótulo completo no mesmo campo, após informar somente o número.
+        if(chosen&&allowCode===true)workCombo.value=label(chosen);
+        if(source.value===String(id))return true;
         source.value=String(id);
         source.dispatchEvent(new Event('change',{bubbles:true}));
+        return true;
       };
       workCombo.oninput=choose;
-      workCombo.onchange=choose;
+      workCombo.onchange=()=>choose(true);
       workCombo.onblur=()=>{
-        const raw=clean(workCombo.value);
-        if(raw==='TODAS'||OBRAS.some(o=>clean(label(o))===raw))return;
+        if(choose(true))return;
         const current=OBRAS.find(o=>String(o.id)===String($('#r-obra').value));
         workCombo.value=current?label(current):'Todas';
       };
-      workCombo.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();choose();}};
+      workCombo.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();choose(true);}};
     }
     const workSearch=$('#r-obra-search');
     if(workSearch){
@@ -952,7 +960,7 @@
   function cycleControl(){return `<div class="card card-pad section">${field('Ciclo de pagamento',`<select class="control" id="financial-cycle">${Array.from({length:26},(_,index)=>{const c=financialCycle(isoToday(),-index);return `<option value="${-index}" ${String(-index)===selectedCycle?'selected':''}>${formatDate(c.inicio)} a ${formatDate(c.fim)} · pagamento ${formatDate(c.pagamento)}</option>`;}).join('')}<option value="custom" ${selectedCycle==='custom'?'selected':''}>Período personalizado</option></select>`)}<p id="cycle-caption" style="font-size:12px"></p></div>`;}
   function renderPayments(){
     if(selectedCycle!=='custom'){const cycle=financialCycle(isoToday(),Number(selectedCycle));reportFilters.inicio=cycle.inicio;reportFilters.fim=cycle.fim;}
-    $('#main-content').innerHTML=head('Pagamentos','Ciclo de terça a segunda, com pagamento na terça seguinte.')+cycleControl()+filterControls()+'<div class="section" id="pay-body"></div>'+exportButtons()+financialSummaryButtons();
+    $('#main-content').innerHTML=head('Pagamentos','Ciclo de terça a segunda, com pagamento na terça seguinte.')+cycleControl()+filterControls('combined')+'<div class="section" id="pay-body"></div>'+exportButtons()+financialSummaryButtons();
     const refresh=()=>{
       const e=financialEntries().filter(x=>x.finance>0.005||x.night>0.005||x.bonus>0.005||x.ajudaCusto>0.005)
         .sort((a,b)=>a.c.dataServico.localeCompare(b.c.dataServico)||(a.p?.nome||'').localeCompare(b.p?.nome||'','pt-BR',{sensitivity:'base'})||(a.p?.id||'').localeCompare(b.p?.id||''));
