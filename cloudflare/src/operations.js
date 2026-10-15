@@ -12,7 +12,9 @@ const date=d=>{if(!/^\d{4}-\d{2}-\d{2}$/.test(d)||new Date(d+'T12:00:00Z').toISO
 const period=p=>{if(!['Manhã','Tarde','Noite','Integral'].includes(p))fail('Escolha um turno válido.');return p;};
 const present=s=>!['Falta','Atestado'].includes(s);
 const mult=e=>({'Não':0,'Meia diária':.5,'Diária':1,'Uma e meia diária':1.5,'Duas diárias':2}[e]);
-const editableAp=['status','extra','observacao','servicos','financeiro','noturno','acordo','ajudaCusto'];
+const editableAp=['status','extra','observacao','servicos','financeiro','noturno','acordo','ajudaCusto','tipoDiariaAvulso'];
+const avulsoDailyTypes=['Meia diária','Diária','Uma e meia diária','Duas diárias'];
+const pendingAvulsoInvalid=(i,p)=>i.tipoDiariaAvulso!=null&&(!p||p.avulso!=='Sim'||!avulsoDailyTypes.includes(i.tipoDiariaAvulso));
 const normServices=i=>(i?.servicos||[]).map(s=>({obraId:String(s.obraId||''),periodo:s.periodo||'Integral'}));
 const apView=i=>({...field(i,editableAp),ajudaCusto:Number(i?.ajudaCusto)||0,servicos:normServices(i)});
 const overlap=(a,b)=>a===b||(a==='Integral'&&['Manhã','Tarde'].includes(b))||(b==='Integral'&&['Manhã','Tarde'].includes(a));
@@ -63,14 +65,14 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
    const data={obra_id:work,colaborador_id:pid,data:c.dataServico,engenheiro:c.supervisor,turno:c.turno,observacao:'Turno: '+c.turno+' ||APROAR_META|| '+JSON.stringify(meta)};if(!raw)Object.assign(data,{status:'Presente (Integral)',valor_extra:0,criado_em:timestamp,criado_por:session.user});add('convocacoes',raw?'update':'insert',key,data);
   }
   if(!pointChanged)continue;
-  const i={...ap.i};if(session.role==='SUPERVISOR'&&oldPoint?.financeAdjusted){for(const k of ['financeiro','noturno','acordo','ajudaCusto'])i[k]=oldPoint[k];}const p=staff.get(pid),isPresent=present(i.status),ss=normServices(i).filter(s=>s.obraId),hasSebrae=ss.some(s=>clean(works.get(s.obraId)?.unidade)==='SEBRAE'),financialAdjusted=session.role==='FINANCEIRO'||oldPoint?.financeAdjusted===true;
+  const i={...ap.i};if(pendingAvulsoInvalid(i,staff.get(pid)))fail('Escolha um tipo válido de diária para o avulso.');if(session.role==='SUPERVISOR'&&oldPoint?.financeAdjusted){for(const k of ['financeiro','noturno','acordo','ajudaCusto'])i[k]=oldPoint[k];}const p=staff.get(pid),isPresent=present(i.status),ss=normServices(i).filter(s=>s.obraId),hasSebrae=ss.some(s=>clean(works.get(s.obraId)?.unidade)==='SEBRAE'),financialAdjusted=session.role==='FINANCEIRO'||oldPoint?.financeAdjusted===true;
   const extra=isPresent?(i.extra==='Valor específico'?Number(oldPoint.valorExtraOriginal):money(Number(p.custo)*mult(i.extra))):0;
   const night=isPresent&&hasSebrae?(financialAdjusted||[50,90].includes(Number(i.noturno))?Number(i.noturno):Math.max(90,Number(i.noturno)||0)):0,finance=isPresent?Number(i.financeiro):0,bonus=isPresent?Number(i.acordo):0,ajudaCusto=isPresent?Number(i.ajudaCusto||0):0;
-  const weight=!isPresent?0:['Presente (Só Manhã)','Presente (Só Tarde)','Saída Antecipada'].includes(i.status)?.5:['Manhã','Tarde'].includes(c.turno)?.5:1;
+  const weight=!isPresent?0:p.avulso==='Sim'&&avulsoDailyTypes.includes(i.tipoDiariaAvulso)?mult(i.tipoDiariaAvulso):['Presente (Só Manhã)','Presente (Só Tarde)','Saída Antecipada'].includes(i.status)?.5:['Manhã','Tarde'].includes(c.turno)?.5:1;
   const oldRow=rawAps.get(key),pointTime=oldRow?.apontado_em||metadata(raw?.observacao).meta.apontado_em||timestamp,executor=oldRow?.apontado_por||metadata(raw?.observacao).meta.apontado_por||session.user;
   const values={status:i.status,valor_extra:extra,observacao:String(i.observacao||''),tipo_diaria:i.extra==='Valor específico'?(oldPoint?.tipoDiariaOriginal||'Não'):i.extra,custo_pago:money(finance),custo_pago_definido_financeiro:financialAdjusted,valor_acordo:money(bonus),valor_adicional_noturno:money(night),custo_encargos_base:money(Number(p.custo)*weight+extra),custos_separados:true,migracao_sebrae_noturno_v2:true};
   add('apontamentos',oldRow?'update':'insert',oldRow?.id||'ap:'+key,{...values,convocacao_id:key,data_servico:c.dataServico,colaborador_id:pid,engenheiro:c.supervisor,apontado_em:pointTime,apontado_por:executor,retroativo:Boolean(oldRow?.retroativo||ap.a.retroativo),atualizado_em:timestamp});
-  const oldMeta=metadata(raw?.observacao).meta,first=ss[0],meta={...oldMeta,apontado_em:pointTime,apontado_por:executor,custos_separados:true,custo_pago:money(finance),valor_acordo:money(bonus),valor_adicional_noturno:money(night),valor_ajuda_custo:money(ajudaCusto),servico_a_definir:!first,periodo_principal:first?.periodo||c.turno,servicos_adicionais:ss.slice(1).map(s=>({servico:works.get(s.obraId)?.nome,obra_id:s.obraId,periodo:s.periodo}))};
+  const oldMeta=metadata(raw?.observacao).meta,first=ss[0],meta={...oldMeta,apontado_em:pointTime,apontado_por:executor,custos_separados:true,custo_pago:money(finance),valor_acordo:money(bonus),valor_adicional_noturno:money(night),valor_ajuda_custo:money(ajudaCusto),servico_a_definir:!first,tipo_diaria_avulso:p.avulso==='Sim'?(i.tipoDiariaAvulso||'Diária'):null,periodo_principal:first?.periodo||c.turno,servicos_adicionais:ss.slice(1).map(s=>({servico:works.get(s.obraId)?.nome,obra_id:s.obraId,periodo:s.periodo}))};
   add('convocacoes','update',key,{...values,obra_id:first?.obraId||work,observacao:'Turno: '+c.turno+(i.observacao?' | Obs: '+i.observacao:'')+' ||APROAR_META|| '+JSON.stringify(meta)});
   if(!same(normServices(oldPoint),ss)){
     const previousServices=(rawServicesByConv.get(key)||[]).slice().sort((a,b)=>Number(b.principal)-Number(a.principal)||Number(a.id)-Number(b.id));
