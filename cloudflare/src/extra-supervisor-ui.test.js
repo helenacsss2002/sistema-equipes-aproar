@@ -133,7 +133,7 @@ test('Não há funções duplicadas que sobrescrevam Extra e apontamento da equi
  assert.match(ui,/option value="50"/);
  assert.match(ui,/option value="90"/);
  assert.match(html,/row-total-summary/);
- assert.match(html,/app\.js\?v=aproar-convocados-amarelo-20261014-7/);
+ assert.match(html,/app\.js\?v=aproar-chaves-supervisores-20261015-1/);
  assert.match(ui,/bindPersonSearch\(\$\('#retro-person-search'\),\(\)=>\$\$\('\.retro-person-list/);
  assert.match(ui,/const ids = \$\$\('input\[name="retro-colab"\]:checked'\)\.map/);
 });
