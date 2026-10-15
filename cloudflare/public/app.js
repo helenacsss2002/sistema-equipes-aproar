@@ -722,6 +722,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
 
     $('#form-retro').onsubmit = (e) => {
       e.preventDefault();
+      try{
       const dataServico = $('#retro-data').value;
       if (!dataServico) return toast('Escolha a data do serviço.', true);if(dataServico>isoToday())return toast('O apontamento retroativo não aceita data futura.',true);
       const ids = $$('input[name="retro-colab"]:checked').map(x=>x.value);
@@ -736,6 +737,10 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       if(newIds.length){const conv={id:uid('cv'),supervisor:responsavel,dataServico,unidade:unidade.value,obraId:obraRef?.id||'',turno:$('#retro-turno').value,colaboradores:newIds,criadoEm:now().toISOString(),origem:'retroativo'};state.convocacoes.push(conv);batches.set(conv.id,{conv,items:itens.filter(i=>newIds.includes(i.colaboradorId))});}
       for(const {conv,items} of batches.values()){const selected=new Set(items.map(i=>i.colaboradorId));let ap=apForConv(conv.id);if(ap){ap.itens=[...ap.itens.filter(i=>!selected.has(i.colaboradorId)),...items];ap.atualizadoEm=now().toISOString();ap.retroativo=true;}else state.apontamentos.push({executor:supervisorAtual||perfilLabel(perfilAtual),id:uid('ap'),convocacaoId:conv.id,supervisor:conv.supervisor,dataServico,apontadoEm:now().toISOString(),retroativo:true,itens:items});}
       audit('Apontamento retroativo',dataServico);const savedMessage=[...batches.values()].every(({conv})=>completeConv(conv))?'Apontamento retroativo salvo. Equipe regularizada.':'Apontamento salvo. Há colaboradores convocados que continuam pendentes.';if(!saveData(()=>setView('pendencias')))return;toast(savedMessage);
+      }catch(error){
+        console.error('APROAR retroactive form submit failure',String(error?.message||error).slice(0,240));
+        showToast('Não foi possível preparar o apontamento retroativo. Confira os campos e tente novamente.',true);
+      }
     };
   }
 
