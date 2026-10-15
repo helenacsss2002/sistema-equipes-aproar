@@ -521,7 +521,7 @@
     const candidates=()=>state.convocacoes.filter(c=>c.dataServico===adminApDate);
     const refreshSupervisors=()=>{adminApDate=$('#ap-data').value;const sups=[...new Set(candidates().map(c=>c.supervisor))].sort((a,b)=>a==='PAULO'?-1:b==='PAULO'?1:a.localeCompare(b,'pt-BR'));if(!sups.includes(adminApSup))adminApSup=sups[0]||'';$('#ap-supervisor').innerHTML=sups.length?options(sups):'<option value="">Nenhum supervisor com convocação</option>';$('#ap-supervisor').value=adminApSup;refreshUnits();};
     const refreshUnits=()=>{adminApSup=$('#ap-supervisor').value;const units=[...new Set(candidates().filter(c=>c.supervisor===adminApSup).map(c=>c.unidade))].sort();if(!units.includes(adminApUnit))adminApUnit=units[0]||'';$('#ap-unit').innerHTML=units.length?options(units):'<option value="">Nenhuma unidade convocada</option>';$('#ap-unit').value=adminApUnit;refreshTeam();};
-    const refreshTeam=()=>{adminApUnit=$('#ap-unit').value;const convs=candidates().filter(c=>c.supervisor===adminApSup&&c.unidade===adminApUnit);$('#ap-equipe').innerHTML=convs.length?convs.map((conv,index)=>{const ap=apForConv(conv.id);return `<section class="section"><div class="section-title"><div><h3>${escapeHtml(conv.unidade)} · ${escapeHtml(conv.turno)}</h3><p>${escapeHtml(conv.supervisor)} · ${conv.colaboradores.length} colaborador(es)</p></div>${badgeForStatus(statusConv(conv))}</div><form id="admin-ap-form-${index}"><div class="person-search-wrap"><input class="control admin-person-search" type="search" autocomplete="off" placeholder="Buscar na equipe..." aria-label="Buscar colaborador na equipe"></div>${conv.colaboradores.map(cid=>personRow(cid,ap?.itens.find(i=>i.colaboradorId===cid),conv.unidade,conv.obraId,conv.dataServico,conv.supervisor)).join('')}<details class="section"><summary>Incluir colaborador que não estava na convocação</summary><select class="control" id="admin-ap-add-${index}"><option value="">Selecione</option>${options(COLABORADORES.filter(c=>!c.inativo&&!conv.colaboradores.includes(c.id)))}</select><button class="btn btn-secondary section" id="admin-ap-include-${index}" type="button">Incluir na equipe</button></details><div class="form-actions"><button class="btn btn-primary">${ap?'Atualizar':'Salvar'} apontamento · ${escapeHtml(conv.turno)}</button></div></form></section>`;}).join(''):'<div class="empty">Nenhuma convocação nesta data para o supervisor selecionado. Use o retroativo para um serviço sem convocação prévia.</div>';bindServiceRows();convs.forEach((conv,index)=>{const form=$('#admin-ap-form-'+index);bindPersonSearch(form.querySelector('.admin-person-search'),()=>[...form.querySelectorAll('.person-card')]);form.onsubmit=e=>{e.preventDefault();const itens=readPersonRows(conv.colaboradores,form);if(!validServices(itens,conv.unidade))return;if(!applyInlineExtras(itens,conv.dataServico,conv.supervisor))return;const ap=apForConv(conv.id);if(ap){ap.itens=itens;ap.atualizadoEm=now().toISOString();}else state.apontamentos.push({id:uid('ap'),convocacaoId:conv.id,supervisor:conv.supervisor,executor:'CONTROLADORIA',dataServico:conv.dataServico,apontadoEm:now().toISOString(),retroativo:false,itens});audit('Apontamento administrativo',conv.supervisor+' · '+conv.unidade);if(!saveData())return;toast('Apontamento salvo.');refreshTeam();};$('#admin-ap-include-'+index).onclick=()=>{const id=$('#admin-ap-add-'+index).value;if(!id)return;if(blocked(id,conv.dataServico)||state.convocacoes.some(c=>c.id!==conv.id&&c.dataServico===conv.dataServico&&c.colaboradores.includes(id)&&overlaps(c.turno,conv.turno)))return toast('Colaborador indisponível ou já convocado neste turno.',true);conv.colaboradores.push(id);audit('Inclusão na equipe',conv.id);saveData();refreshTeam();};});};
+    const refreshTeam=()=>{adminApUnit=$('#ap-unit').value;const convs=candidates().filter(c=>c.supervisor===adminApSup&&c.unidade===adminApUnit);$('#ap-equipe').innerHTML=convs.length?convs.map((conv,index)=>{const ap=apForConv(conv.id);return `<section class="section"><div class="section-title"><div><h3>${escapeHtml(conv.unidade)} · ${escapeHtml(conv.turno)}</h3><p>${escapeHtml(conv.supervisor)} · ${conv.colaboradores.length} colaborador(es)</p></div>${badgeForStatus(statusConv(conv))}</div><form id="admin-ap-form-${index}"><div class="person-search-wrap"><input class="control admin-person-search" type="search" autocomplete="off" placeholder="Buscar na equipe..." aria-label="Buscar colaborador na equipe"></div>${conv.colaboradores.map(cid=>personRow(cid,ap?.itens.find(i=>i.colaboradorId===cid),conv.unidade,conv.obraId,conv.dataServico,conv.supervisor)).join('')}<details class="section"><summary>Incluir colaborador que não estava na convocação</summary><select class="control" id="admin-ap-add-${index}"><option value="">Selecione</option>${options(COLABORADORES.filter(c=>!c.inativo&&!conv.colaboradores.includes(c.id)))}</select><button class="btn btn-secondary section" id="admin-ap-include-${index}" type="button">Incluir na equipe</button></details><div class="form-actions"><button class="btn btn-primary">${ap?'Atualizar':'Salvar'} apontamento · ${escapeHtml(conv.turno)}</button></div></form></section>`;}).join(''):'<div class="empty">Nenhuma convocação nesta data para o supervisor selecionado. Use o retroativo para um serviço sem convocação prévia.</div>';bindServiceRows();convs.forEach((conv,index)=>{const form=$('#admin-ap-form-'+index);bindPersonSearch(form.querySelector('.admin-person-search'),()=>[...form.querySelectorAll('.person-card')]);form.noValidate=true;form.onsubmit=e=>{e.preventDefault();const itens=readPersonRows(conv.colaboradores,form);if(!validateExtraAmounts(itens,form))return;if(!validServices(itens,conv.unidade))return;if(!applyInlineExtras(itens,conv.dataServico,conv.supervisor))return;const ap=apForConv(conv.id);if(ap){ap.itens=itens;ap.atualizadoEm=now().toISOString();}else state.apontamentos.push({id:uid('ap'),convocacaoId:conv.id,supervisor:conv.supervisor,executor:'CONTROLADORIA',dataServico:conv.dataServico,apontadoEm:now().toISOString(),retroativo:false,itens});audit('Apontamento administrativo',conv.supervisor+' · '+conv.unidade);if(!saveData())return;toast('Apontamento salvo.');refreshTeam();};$('#admin-ap-include-'+index).onclick=()=>{const id=$('#admin-ap-add-'+index).value;if(!id)return;if(blocked(id,conv.dataServico)||state.convocacoes.some(c=>c.id!==conv.id&&c.dataServico===conv.dataServico&&c.colaboradores.includes(id)&&overlaps(c.turno,conv.turno)))return toast('Colaborador indisponível ou já convocado neste turno.',true);conv.colaboradores.push(id);audit('Inclusão na equipe',conv.id);saveData();refreshTeam();};});};
     $('#ap-data').onchange=refreshSupervisors;$('#ap-supervisor').onchange=refreshUnits;$('#ap-unit').onchange=refreshTeam;refreshSupervisors();
   }
 
@@ -618,6 +618,21 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       return false;
     }
     scope.querySelectorAll('.row-obs').forEach(input=>input.setCustomValidity(''));
+    return true;
+  }
+  function validateExtraAmounts(items,scope=document){
+    for(const item of items){
+      const extra=item?.extraLancamento||{};
+      if(String(extra.extra||'Não')==='Não')continue;
+      const amount=Number(extra.valorExtraOriginal);
+      if(!Number.isFinite(amount)||amount<=0||amount>10000000){
+        const row=[...scope.querySelectorAll('.person-card')].find(el=>String(el.dataset.person)===String(item.colaboradorId));
+        row?.querySelector('.more-services')?.setAttribute('open','');
+        row?.querySelector('.row-extra-value')?.focus();
+        toast('Informe um valor da extra maior que R$ 0,00 para cada colaborador cuja opção de extra seja diferente de “Não”.',true);
+        return false;
+      }
+    }
     return true;
   }
   function readPersonRows(ids,scope=document){
@@ -720,6 +735,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
     }
     $$('input[name="retro-colab"]').forEach(x=>x.onchange = ()=>refreshRows());
 
+    $('#form-retro').noValidate=true;
     $('#form-retro').onsubmit = (e) => {
       e.preventDefault();
       try{
@@ -728,7 +744,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       const ids = $$('input[name="retro-colab"]:checked').map(x=>x.value);
       if (!ids.length) return toast('Selecione pelo menos um colaborador.', true);
       const responsavel=$('#retro-sup')?.value||supervisorAtual;
-      const itens=readPersonRows(ids);if(!validateAgreementObservations(itens,$('#form-retro')))return;if(!validServices(itens,unidade.value))return;
+      const itens=readPersonRows(ids);if(!validateAgreementObservations(itens,$('#form-retro')))return;if(!validateExtraAmounts(itens,$('#form-retro')))return;if(!validServices(itens,unidade.value))return;
       if(!applyInlineExtras(itens,dataServico,responsavel))return;
       const obraRef=obraById(itens.find(i=>i.servicos[0]?.obraId)?.servicos[0]?.obraId)||OBRAS.find(o=>o.unidade===unidade.value);
       const matching=state.convocacoes.filter(c=>c.supervisor===responsavel&&c.dataServico===dataServico&&c.unidade===unidade.value&&c.turno===$('#retro-turno').value);
@@ -826,7 +842,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
 
       <div class="section card card-pad">
         <div class="section-title"><div><h3>Apontamentos pendentes</h3><p>Só aparecem quando existe convocação e o prazo já venceu.</p></div></div>
-        ${pend.length ? `<div class="table-wrap"><table><thead><tr><th>Data</th><th>Unidade</th><th>Serviço</th><th>Prazo</th><th>Ação</th></tr></thead><tbody>${pend.map(c=>`<tr><td>${formatDate(c.dataServico)}</td><td>${c.unidade}</td><td>${obraById(c.obraId)?.nome || '-'}</td><td>${formatDateTime(deadlineApontamento(c.dataServico))}<br><small>${apForConv(c.id)?'Apontamento parcial':'Não apontado'}</small></td><td><button class="link-btn regularizar" data-date="${c.dataServico}">Regularizar</button></td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">Nenhum apontamento pendente.</div>'}
+        ${pend.length ? `<div class="table-wrap"><table><thead><tr><th>Data</th><th>Unidade</th><th>Serviço</th><th>Prazo</th><th>Ação</th></tr></thead><tbody>${pend.map(c=>`<tr><td>${formatDate(c.dataServico)}</td><td>${c.unidade}</td><td>${obraById(c.obraId)?.nome || '-'}</td><td>${formatDateTime(deadlineApontamento(c.dataServico))}<br><small>${apForConv(c.id)?'Apontamento parcial':'Não apontado'}</small></td><td><button class="link-btn regularizar" data-date="${c.dataServico}" data-convocacao="${escapeHtml(c.id)}">Regularizar</button></td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">Nenhum apontamento pendente.</div>'}
       </div>
 
       <div class="section card card-pad">
@@ -840,10 +856,25 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       </div>`}`;
 
     $('#go-retro').onclick = () => { apontamentoTab = 'retroativo'; setView('apontamento'); };
-    $$('.regularizar').forEach(b => b.onclick = () => {
-      apontamentoTab = 'retroativo';
+    $('.regularizar').forEach(b => b.onclick = () => {
+      const source=state.convocacoes.find(c=>String(c.id)===String(b.dataset.convocacao));
+      if(!source)return toast('Não foi possível localizar a convocação pendente. Atualize os dados e tente novamente.',true);
+      const done=new Set((apForConv(source.id)?.itens||[]).map(i=>String(i.colaboradorId)));
+      const missing=source.colaboradores.filter(id=>!done.has(String(id)));
+      apontamentoTab='retroativo';retroDateSelected=source.dataServico;portalDate=source.dataServico;portalUnit=source.unidade;
       setView('apontamento');
-      setTimeout(() => { const inp = $('#retro-data'); if (inp){inp.value=b.dataset.date;inp.onchange?.();const source=state.convocacoes.find(c=>c.dataServico===b.dataset.date&&(perfilAtual!=='SUPERVISOR'||c.supervisor===supervisorAtual)&&c.unidade===$('#retro-unidade')?.value&&!completeConv(c));if(source){$$('input[name="retro-colab"]').forEach(x=>x.checked=source.colaboradores.includes(x.value));$('input[name="retro-colab"]:checked')?.onchange?.();}} }, 0);
+      setTimeout(()=>{
+        const date=$('#retro-data'),unit=$('#retro-unidade'),turn=$('#retro-turno'),supervisor=$('#retro-sup');
+        if(!date||!unit||!turn)return showToast('Não foi possível abrir o formulário retroativo. Entre novamente e tente de novo.',true);
+        if(supervisor)supervisor.value=source.supervisor;
+        date.value=source.dataServico;date.onchange?.();
+        if([...unit.options].some(option=>option.value===source.unidade))unit.value=source.unidade;
+        unit.onchange?.();turn.value=source.turno;
+        const checkboxes=$('input[name="retro-colab"]');
+        checkboxes.forEach(input=>input.checked=missing.some(id=>String(id)===String(input.value)));
+        checkboxes.find(input=>input.checked)?.onchange?.();
+        syncRetroHeader();
+      },0);
     });
   }
 
@@ -1249,13 +1280,14 @@ function renderEquipeDia(){
  extraToggle.onchange=refreshExternalFields;$('#day-extra-person').onchange=suggestExternalWork;suggestExternalWork();
  $('#day-all-present').onclick=()=>{if(!people.size)return toast('Adicione pessoas à equipe.',true);const items=readPersonRows([...people.keys()]);if(items.some(i=>i.servicos.some(s=>!s.obraId)))return toast('Selecione primeiro os serviços de todos os colaboradores.',true);$$('#day-form .row-status').forEach(x=>{x.value='Presente (Integral)';x.onchange?.();});};
  $('#day-add-button').onclick=()=>{const unit=portalUnit==='Todas'?(convs[0]?.unidade||adminUnits()[0]):portalUnit;if(!unit)return toast('Cadastre uma unidade antes de incluir o colaborador.',true);if(!OBRAS.some(o=>o.unidade===unit))return toast('Esta unidade ainda não possui obra cadastrada. Solicite à Controladoria o cadastro de uma obra antes da inclusão.',true);const name=$('#day-avulso-nome').value.trim();let id=$('#day-add-person').value;if(!id&&!name)return toast('Escolha um colaborador ou informe o nome do avulso.',true);if(!id){id=uid('c');COLABORADORES.push({id,nome:name,funcao:$('#day-avulso-funcao').value.trim()||'Avulso',avulso:'Sim',custo:180});}if(blocked(id,portalDate)||state.convocacoes.some(c=>c.dataServico===portalDate&&c.colaboradores.includes(id)&&overlaps(c.turno,'Integral')))return toast('Colaborador indisponível ou convocado em outra equipe.',true);let conv=convs.find(c=>c.unidade===unit);if(!conv){conv={id:uid('cv'),supervisor:supervisorAtual,dataServico:portalDate,unidade:unit,obraId:'',turno:'Integral',colaboradores:[],criadoEm:now().toISOString(),origem:'inclusao_apontamento'};state.convocacoes.push(conv);}conv.colaboradores.push(id);saveData();render();};
+ $('#day-form').noValidate=true;
  $('#day-form').onsubmit=e=>{
   e.preventDefault();
   try{
     if(portalDate>isoToday())return toast('Não é possível apontar uma data futura.',true);
-    const items=readPersonRows([...people.keys()]);if(!validateAgreementObservations(items,$('#day-form')))return;for(const i of items)if(!validServices([i],people.get(i.colaboradorId).conv.unidade))return;
+    const items=readPersonRows([...people.keys()]);if(!validateAgreementObservations(items,$('#day-form')))return;if(!validateExtraAmounts(items,$('#day-form')))return;for(const i of items)if(!validServices([i],people.get(i.colaboradorId).conv.unidade))return;
     const selectedExternal=$('#day-extra-person').value,toggleExternal=$('#day-extra-kind').value!=='Não';
-    if(toggleExternal&&!selectedExternal)return toast('Selecione o funcionário que realizou a extra.',true);
+    if(toggleExternal&&!selectedExternal)return toast('Selecione o funcionário que realizou a extra.',true);if(toggleExternal){const amount=Number($('#day-extra-amount').value);if(!Number.isFinite(amount)||amount<=0||amount>10000000){$('#day-extra-amount').focus();return toast('Informe um valor da extra maior que R$ 0,00. A opção de extra está diferente de “Não”.',true);}}
     if(!items.length&&!selectedExternal)return toast('Selecione funcionários para o apontamento normal ou informe uma extra.',true);
     const extraBatch=items.slice();
     if(selectedExternal){const day=mainWorkForPersonOnDate(selectedExternal,portalDate);extraBatch.push({colaboradorId:selectedExternal,status:'Extra independente',extra:'Não',servicos:[],extraLancamento:{enabled:toggleExternal,extra:$('#day-extra-kind').value,valorExtraOriginal:Number($('#day-extra-amount').value),obraId:$('#day-extra-work').value,observacao:$('#day-extra-obs').value.trim(),dayWorkId:day.workId}});}
