@@ -11,5 +11,5 @@ test('Só a seção Já convocados do Portal do Supervisor recebe o destaque ama
   assert.equal((app.match(/convocados-destaque/g)||[]).length,1,'Não destacar outros blocos por acidente');
   assert.match(html,/details\.convocados-destaque\s*\{[^}]*background:#fff3bf;[^}]*border:1px solid #e6b84c;/);
   assert.match(html,/details\.convocados-destaque\s*>\s*summary\s*\{[^}]*color:#835307;/);
-  assert.match(html,/app\.js\?v=aproar-chaves-supervisores-20261015-2/);
+  assert.match(html,/app\.js\?v=aproar-observacao-acordo-20261015-1/);
 });
