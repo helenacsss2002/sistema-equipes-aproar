@@ -3,7 +3,21 @@ const decode=v=>JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(v.repla
 const secretKey=env=>env.SESSION_SECRET||env.CONNECTION_CHECK_TOKEN;
 const key=async env=>crypto.subtle.importKey('raw',new TextEncoder().encode(secretKey(env)),{name:'HMAC',hash:'SHA-256'},false,['sign','verify']);
 export async function equalSecret(a,b){if(!a||!b)return false;const hash=v=>crypto.subtle.digest('SHA-256',new TextEncoder().encode(v));const [x,y]=await Promise.all([hash(a),hash(b)]);const aa=new Uint8Array(x),bb=new Uint8Array(y);let diff=0;for(let i=0;i<aa.length;i++)diff|=aa[i]^bb[i];return diff===0;}
-async function verifySupervisorPassword(sql,user,password){if(!sql||typeof password!=='string'||!password)throw Object.assign(Error('Supervisor ou chave de acesso inválidos.'),{status:401});let rows;try{rows=await sql`SELECT password_salt,password_hash,iterations FROM public.aproar_supervisor_access WHERE supervisor=${user} AND active=true LIMIT 1`;}catch{throw Object.assign(Error('Não foi possível validar a chave de acesso.'),{status:503});}if(!rows?.length)throw Object.assign(Error('Supervisor ou chave de acesso inválidos.'),{status:401});const c=rows[0],salt=Uint8Array.from(c.password_salt.match(/../g)||[],x=>parseInt(x,16)),iterations=Number(c.iterations);if(salt.length!==16||!/^[0-9a-f]{64}$/i.test(c.password_hash)||!Number.isInteger(iterations)||iterations<100000||iterations>500000)throw Object.assign(Error('Configuração de chave inválida.'),{status:503});const material=await crypto.subtle.importKey('raw',new TextEncoder().encode(password),'PBKDF2',false,['deriveBits']);const bits=await crypto.subtle.deriveBits({name:'PBKDF2',hash:'SHA-256',salt,iterations},material,256);const actual=[...new Uint8Array(bits)].map(x=>x.toString(16).padStart(2,'0')).join('');let diff=actual.length^c.password_hash.length;for(let i=0;i<actual.length;i++)diff|=actual.charCodeAt(i)^(c.password_hash.toLowerCase().charCodeAt(i)||0);if(diff!==0)throw Object.assign(Error('Supervisor ou chave de acesso inválidos.'),{status:401});}
+async function verifySupervisorPassword(sql,user,password){
+ if(!sql||typeof password!=='string'||!password)
+   throw Object.assign(Error('Supervisor ou chave de acesso inválidos.'),{status:401});
+ let rows;
+ try{
+  // bcrypt verification runs on Neon, avoiding unsupported PBKDF2 iteration counts in Workers.
+  // Never return password hashes or perform password comparisons in the browser.
+  rows=await sql`SELECT (password_hash_bcrypt IS NOT NULL AND password_hash_bcrypt=public.crypt(${password},password_hash_bcrypt)) AS password_matches
+   FROM public.aproar_supervisor_access WHERE supervisor=${user} AND active=true LIMIT 1`;
+ }catch{
+  throw Object.assign(Error('Não foi possível validar a chave de acesso. Confira a configuração do Neon.'),{status:503});
+ }
+ if(rows?.[0]?.password_matches!==true)
+  throw Object.assign(Error('Supervisor ou chave de acesso inválidos.'),{status:401});
+}
 export async function login(body,env,sql=null){if(!secretKey(env))throw Object.assign(Error('Configure CONNECTION_CHECK_TOKEN ou SESSION_SECRET.'),{status:503});const role=body.role;let pass,user=role;
  if(role==='CONTROLADORIA')pass=env.ADMIN_PASSWORD;
  else if(role==='FINANCEIRO')pass=env.FINANCE_PASSWORD;
