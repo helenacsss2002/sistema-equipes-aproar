@@ -135,5 +135,8 @@ test('Não há funções duplicadas que sobrescrevam Extra e apontamento da equi
  assert.match(html,/row-total-summary/);
  assert.match(html,/app\.js\?v=aproar-salvamento-extra-required-20261015-1/);
  assert.match(ui,/bindPersonSearch\(\$\('#retro-person-search'\),\(\)=>\$\$\('\.retro-person-list/);
+ assert.match(ui,/function validateExtraAmounts\(items,scope=document\)/);
+ assert.match(ui,/noValidate=true/);
+ assert.match(ui,/data-convocacao="\$\{escapeHtml\(c\.id\)\}"/);
  assert.match(ui,/const ids = \$\$\('input\[name="retro-colab"\]:checked'\)\.map/);
 });
