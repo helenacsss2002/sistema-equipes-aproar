@@ -557,7 +557,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
  </div></div>
  <div class="form-grid section">${field('Adicional noturno (SEBRAE)',`<select class="control row-noturno" ${unit==='SEBRAE'&&!item?.financeAdjusted?'':'disabled'}><option value="0" ${nightValue===0?'selected':''}>Sem adicional (R$ 0,00)</option><option value="50" ${nightValue===50?'selected':''}>R$ 50,00</option><option value="90" ${nightValue===90?'selected':''}>R$ 90,00</option>${![0,50,90].includes(nightValue)?`<option value="${nightValue}" selected>R$ ${nightValue.toFixed(2)} (valor já registrado)</option>`:''}</select>`)}</div>
  <div class="row-total-summary" role="status"><span>TOTAL A PAGAR AO COLABORADOR</span><strong class="row-total">${roundMoney(Number(item?.financeiro||0)+extraAmount+nightValue+Number(item?.acordo||0)+Number(item?.ajudaCusto||0)).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</strong><small>Valor da extra + adicional noturno + acordos + passagens/ajuda de custo${Number(item?.financeiro)>0?' + valor complementar já registrado':''}. Total calculado automaticamente, não editável.</small></div>
- <details class="more-services"><summary>Mais opções</summary>${field('Observação / justificativa',`<input class="control row-obs" value="${escapeHtml(item?.observacao||'')}">`)}<div class="additional-services">${services.slice(1).map((x,i)=>allocationRow(unit,x,i+1)).join('')}</div><div class="inline-actions section"><button type="button" class="btn btn-primary add-service">+ Adicionar serviço</button><button type="button" class="btn btn-secondary remove-last-service">− Remover último</button><span class="service-count">${Math.max(0,services.length-1)} serviço(s) adicional(is)</span></div></details></div></div>`;
+ <details class="more-services"><summary>Mais opções</summary>${field('Observação / justificativa do acordo (obrigatória se houver bonificação)',`<input class="control row-obs" maxlength="2000" value="${escapeHtml(item?.observacao||'')}" placeholder="Descreva o motivo do acordo ou bonificação">`)}<div class="additional-services">${services.slice(1).map((x,i)=>allocationRow(unit,x,i+1)).join('')}</div><div class="inline-actions section"><button type="button" class="btn btn-primary add-service">+ Adicionar serviço</button><button type="button" class="btn btn-secondary remove-last-service">− Remover último</button><span class="service-count">${Math.max(0,services.length-1)} serviço(s) adicional(is)</span></div></details></div></div>`;
 }
   function bindServiceRows(){
     $$('.person-card').forEach(card=>{
@@ -603,6 +603,22 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       }
       updateTotal();
     });
+  }
+  function validateAgreementObservations(items,scope=document){
+    if(perfilAtual!=='SUPERVISOR')return true;
+    for(const item of items){
+      if(!(Number(item.acordo)>0))continue;
+      const row=[...scope.querySelectorAll('.person-card')].find(el=>String(el.dataset.person)===String(item.colaboradorId));
+      const observation=row?.querySelector('.row-obs');
+      if(observation?.value.trim())continue;
+      const details=row?.querySelector('.more-services');if(details)details.open=true;
+      observation?.setCustomValidity('Descreva o acordo ou a bonificação para continuar.');
+      observation?.reportValidity();observation?.focus();
+      toast('Informe a observação descrevendo o acordo/bonificação para cada colaborador com valor preenchido.',true);
+      return false;
+    }
+    scope.querySelectorAll('.row-obs').forEach(input=>input.setCustomValidity(''));
+    return true;
   }
   function readPersonRows(ids,scope=document){
     return ids.map(cid=>{
@@ -711,7 +727,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       const ids = $$('input[name="retro-colab"]:checked').map(x=>x.value);
       if (!ids.length) return toast('Selecione pelo menos um colaborador.', true);
       const responsavel=$('#retro-sup')?.value||supervisorAtual;
-      const itens=readPersonRows(ids);if(!validServices(itens,unidade.value))return;
+      const itens=readPersonRows(ids);if(!validateAgreementObservations(itens,$('#form-retro')))return;if(!validServices(itens,unidade.value))return;
       if(!applyInlineExtras(itens,dataServico,responsavel))return;
       const obraRef=obraById(itens.find(i=>i.servicos[0]?.obraId)?.servicos[0]?.obraId)||OBRAS.find(o=>o.unidade===unidade.value);
       const matching=state.convocacoes.filter(c=>c.supervisor===responsavel&&c.dataServico===dataServico&&c.unidade===unidade.value&&c.turno===$('#retro-turno').value);
@@ -1231,7 +1247,7 @@ function renderEquipeDia(){
  $('#day-add-button').onclick=()=>{const unit=portalUnit==='Todas'?(convs[0]?.unidade||adminUnits()[0]):portalUnit;if(!unit)return toast('Cadastre uma unidade antes de incluir o colaborador.',true);if(!OBRAS.some(o=>o.unidade===unit))return toast('Esta unidade ainda não possui obra cadastrada. Solicite à Controladoria o cadastro de uma obra antes da inclusão.',true);const name=$('#day-avulso-nome').value.trim();let id=$('#day-add-person').value;if(!id&&!name)return toast('Escolha um colaborador ou informe o nome do avulso.',true);if(!id){id=uid('c');COLABORADORES.push({id,nome:name,funcao:$('#day-avulso-funcao').value.trim()||'Avulso',avulso:'Sim',custo:180});}if(blocked(id,portalDate)||state.convocacoes.some(c=>c.dataServico===portalDate&&c.colaboradores.includes(id)&&overlaps(c.turno,'Integral')))return toast('Colaborador indisponível ou convocado em outra equipe.',true);let conv=convs.find(c=>c.unidade===unit);if(!conv){conv={id:uid('cv'),supervisor:supervisorAtual,dataServico:portalDate,unidade:unit,obraId:'',turno:'Integral',colaboradores:[],criadoEm:now().toISOString(),origem:'inclusao_apontamento'};state.convocacoes.push(conv);}conv.colaboradores.push(id);saveData();render();};
  $('#day-form').onsubmit=e=>{
   e.preventDefault();if(portalDate>isoToday())return toast('Não é possível apontar uma data futura.',true);
-  const items=readPersonRows([...people.keys()]);for(const i of items)if(!validServices([i],people.get(i.colaboradorId).conv.unidade))return;
+  const items=readPersonRows([...people.keys()]);if(!validateAgreementObservations(items,$('#day-form')))return;for(const i of items)if(!validServices([i],people.get(i.colaboradorId).conv.unidade))return;
   const selectedExternal=$('#day-extra-person').value,toggleExternal=$('#day-extra-kind').value!=='Não';
   if(toggleExternal&&!selectedExternal)return toast('Selecione o funcionário que realizou a extra.',true);
   if(!items.length&&!selectedExternal)return toast('Selecione funcionários para o apontamento normal ou informe uma extra.',true);
