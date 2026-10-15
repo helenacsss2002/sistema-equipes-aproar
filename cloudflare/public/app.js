@@ -1236,7 +1236,7 @@ function renderEquipeDia(){
  <div class="form-actions"><button class="btn btn-primary">Salvar apontamento do dia</button></div></form>`;
  bindServiceRows();bindPersonSearch($('#day-person-search'),()=>$$('#day-form .person-card'));
  const extraToggle=$('#day-extra-kind'),extraFields=$('#day-extra-fields');
- const refreshExternalFields=()=>extraFields.classList.toggle('hidden',extraToggle.value==='Não');
+ const refreshExternalFields=()=>{const enabled=extraToggle.value!=='Não';extraFields.classList.toggle('hidden',!enabled);$('#day-extra-amount').required=enabled;};
  const suggestExternalWork=()=>{
   const personId=$('#day-extra-person').value,existing=extraRecordFor(portalDate,personId,supervisorAtual),day=mainWorkForPersonOnDate(personId,portalDate);
   const defaultWork=existing?.obraId||day.workId||convs.find(c=>c.obraId)?.obraId||OBRAS[0]?.id||'';
