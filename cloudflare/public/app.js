@@ -1245,16 +1245,22 @@ function renderEquipeDia(){
  $('#day-all-present').onclick=()=>{if(!people.size)return toast('Adicione pessoas à equipe.',true);const items=readPersonRows([...people.keys()]);if(items.some(i=>i.servicos.some(s=>!s.obraId)))return toast('Selecione primeiro os serviços de todos os colaboradores.',true);$$('#day-form .row-status').forEach(x=>{x.value='Presente (Integral)';x.onchange?.();});};
  $('#day-add-button').onclick=()=>{const unit=portalUnit==='Todas'?(convs[0]?.unidade||adminUnits()[0]):portalUnit;if(!unit)return toast('Cadastre uma unidade antes de incluir o colaborador.',true);if(!OBRAS.some(o=>o.unidade===unit))return toast('Esta unidade ainda não possui obra cadastrada. Solicite à Controladoria o cadastro de uma obra antes da inclusão.',true);const name=$('#day-avulso-nome').value.trim();let id=$('#day-add-person').value;if(!id&&!name)return toast('Escolha um colaborador ou informe o nome do avulso.',true);if(!id){id=uid('c');COLABORADORES.push({id,nome:name,funcao:$('#day-avulso-funcao').value.trim()||'Avulso',avulso:'Sim',custo:180});}if(blocked(id,portalDate)||state.convocacoes.some(c=>c.dataServico===portalDate&&c.colaboradores.includes(id)&&overlaps(c.turno,'Integral')))return toast('Colaborador indisponível ou convocado em outra equipe.',true);let conv=convs.find(c=>c.unidade===unit);if(!conv){conv={id:uid('cv'),supervisor:supervisorAtual,dataServico:portalDate,unidade:unit,obraId:'',turno:'Integral',colaboradores:[],criadoEm:now().toISOString(),origem:'inclusao_apontamento'};state.convocacoes.push(conv);}conv.colaboradores.push(id);saveData();render();};
  $('#day-form').onsubmit=e=>{
-  e.preventDefault();if(portalDate>isoToday())return toast('Não é possível apontar uma data futura.',true);
-  const items=readPersonRows([...people.keys()]);if(!validateAgreementObservations(items,$('#day-form')))return;for(const i of items)if(!validServices([i],people.get(i.colaboradorId).conv.unidade))return;
-  const selectedExternal=$('#day-extra-person').value,toggleExternal=$('#day-extra-kind').value!=='Não';
-  if(toggleExternal&&!selectedExternal)return toast('Selecione o funcionário que realizou a extra.',true);
-  if(!items.length&&!selectedExternal)return toast('Selecione funcionários para o apontamento normal ou informe uma extra.',true);
-  const extraBatch=items.slice();
-  if(selectedExternal){const day=mainWorkForPersonOnDate(selectedExternal,portalDate);extraBatch.push({colaboradorId:selectedExternal,status:'Extra independente',extra:'Não',servicos:[],extraLancamento:{enabled:toggleExternal,extra:$('#day-extra-kind').value,valorExtraOriginal:Number($('#day-extra-amount').value),obraId:$('#day-extra-work').value,observacao:$('#day-extra-obs').value.trim(),dayWorkId:day.workId}});}
-  if(!applyInlineExtras(extraBatch,portalDate,supervisorAtual))return;
-  for(const c of convs){const selected=items.filter(i=>c.colaboradores.includes(i.colaboradorId));if(!selected.length)continue;let ap=apForConv(c.id);if(ap){ap.itens=[...ap.itens.filter(i=>!selected.some(x=>x.colaboradorId===i.colaboradorId)),...selected];ap.atualizadoEm=now().toISOString();}else state.apontamentos.push({executor:supervisorAtual||perfilLabel(perfilAtual),id:uid('ap'),convocacaoId:c.id,supervisor:c.supervisor,dataServico:c.dataServico,apontadoEm:now().toISOString(),retroativo:false,itens:selected});}
-  audit('Apontamento da equipe',portalDate);if(!saveData())return;toast('Apontamento do dia e extras salvos.');
+  e.preventDefault();
+  try{
+    if(portalDate>isoToday())return toast('Não é possível apontar uma data futura.',true);
+    const items=readPersonRows([...people.keys()]);if(!validateAgreementObservations(items,$('#day-form')))return;for(const i of items)if(!validServices([i],people.get(i.colaboradorId).conv.unidade))return;
+    const selectedExternal=$('#day-extra-person').value,toggleExternal=$('#day-extra-kind').value!=='Não';
+    if(toggleExternal&&!selectedExternal)return toast('Selecione o funcionário que realizou a extra.',true);
+    if(!items.length&&!selectedExternal)return toast('Selecione funcionários para o apontamento normal ou informe uma extra.',true);
+    const extraBatch=items.slice();
+    if(selectedExternal){const day=mainWorkForPersonOnDate(selectedExternal,portalDate);extraBatch.push({colaboradorId:selectedExternal,status:'Extra independente',extra:'Não',servicos:[],extraLancamento:{enabled:toggleExternal,extra:$('#day-extra-kind').value,valorExtraOriginal:Number($('#day-extra-amount').value),obraId:$('#day-extra-work').value,observacao:$('#day-extra-obs').value.trim(),dayWorkId:day.workId}});}
+    if(!applyInlineExtras(extraBatch,portalDate,supervisorAtual))return;
+    for(const c of convs){const selected=items.filter(i=>c.colaboradores.includes(i.colaboradorId));if(!selected.length)continue;let ap=apForConv(c.id);if(ap){ap.itens=[...ap.itens.filter(i=>!selected.some(x=>x.colaboradorId===i.colaboradorId)),...selected];ap.atualizadoEm=now().toISOString();}else state.apontamentos.push({executor:supervisorAtual||perfilLabel(perfilAtual),id:uid('ap'),convocacaoId:c.id,supervisor:c.supervisor,dataServico:c.dataServico,apontadoEm:now().toISOString(),retroativo:false,itens:selected});}
+    audit('Apontamento da equipe',portalDate);if(!saveData())return;toast('Apontamento do dia e extras salvos.');
+  }catch(error){
+    console.error('APROAR day-form submit failure',String(error?.message||error).slice(0,240));
+    showToast('Não foi possível preparar o apontamento. Confira os campos e tente novamente.',true);
+  }
  };
 }
     let unitConvDate='';let avulsoDraft=[];
@@ -1595,12 +1601,33 @@ function renderEquipeDia(){
     }
     if(onlineQueued||onlineSaving){showToast('Já existe um salvamento em andamento. Aguarde a confirmação antes de enviar outro apontamento.',true);return false;}
     state.obras=OBRAS;state.colaboradores=COLABORADORES;onlineQueued=true;lockOnline(true);
-    queueMicrotask(async()=>{onlineQueued=false;onlineSaving=true;const payload=JSON.stringify({requestId:crypto.randomUUID(),version:onlineVersion,state:copy(state)});try{
-      let result;for(let attempt=0;attempt<2;attempt++){try{result=await api('/api/save',{method:'POST',body:payload});break;}catch(e){if(e.status||attempt===1)throw e;}}
-      applyOnline(result);onlineSaving=false;render();showToast(onlineMessage||'Alterações salvas no Neon.');
-      if(typeof onSuccess==='function'){try{onSuccess(result);}catch(callbackError){console.error('APROAR post-save callback failure',String(callbackError?.message||callbackError));}}
-    }catch(e){try{applyOnline(await restoreOnlineSession());}catch{if(onlineConfirmed){state=copy(onlineConfirmed);OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);}}onlineSaving=false;render();showToast(e.message,true);
-    }finally{onlineQueued=false;onlineSaving=false;onlineMessage='';lockOnline(false);}});
+    queueMicrotask(async()=>{
+      onlineQueued=false;onlineSaving=true;
+      try{
+        const requestId=typeof crypto!=='undefined'&&typeof crypto.randomUUID==='function'
+          ?crypto.randomUUID()
+          :'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return(c==='x'?r:(r&0x3|0x8)).toString(16);});
+        const payload=JSON.stringify({requestId,version:onlineVersion,state:copy(state)});
+        if(typeof payload!=='string')throw new Error('Não foi possível preparar os dados para salvar.');
+        let result;
+        for(let attempt=0;attempt<2;attempt++){
+          try{result=await api('/api/save',{method:'POST',body:payload});break;}
+          catch(error){if(error.status||attempt===1)throw error;}
+        }
+        if(!result||!result.state||typeof result.version!=='string'||!result.session)throw new Error('O servidor não confirmou os dados do apontamento. Atualize a tela e confira o histórico antes de tentar novamente.');
+        applyOnline(result);onlineSaving=false;render();showToast(onlineMessage||'Apontamento salvo com sucesso.');
+        if(typeof onSuccess==='function'){try{onSuccess(result);}catch(callbackError){console.error('APROAR post-save callback failure',String(callbackError?.message||callbackError));}}
+      }catch(error){
+        console.error('APROAR save failure',JSON.stringify({message:String(error?.message||error).slice(0,240),status:Number(error?.status||0),name:String(error?.name||'Error').slice(0,60)}));
+        const message=String(error?.message||'Não foi possível salvar o apontamento. Confira a conexão e tente novamente.');
+        try{applyOnline(await restoreOnlineSession());}
+        catch(refreshError){
+          console.error('APROAR state refresh after save failure',String(refreshError?.message||refreshError).slice(0,240));
+          if(onlineConfirmed){state=copy(onlineConfirmed);OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);}
+        }
+        onlineSaving=false;render();showToast(message,true);
+      }finally{onlineQueued=false;onlineSaving=false;onlineMessage='';lockOnline(false);}
+    });
     return true;
   }
   // Financial changes are sent as a small, explicit batch: never re-upload the entire system.
