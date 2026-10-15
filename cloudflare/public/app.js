@@ -841,7 +841,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
   }
 
   let loginRole='CONTROLADORIA';
-  function syncLoginProfileUI(){ const role=loginRole;$('#login-supervisor-wrap').classList.toggle('hidden',role!=='SUPERVISOR');$('#login-password').required=!['SUPERVISOR','VISUALIZAR'].includes(role);$('#login-password').closest('.password-wrap').classList.toggle('hidden',['SUPERVISOR','VISUALIZAR'].includes(role));document.querySelector('label[for="login-password"]').classList.toggle('hidden',['SUPERVISOR','VISUALIZAR'].includes(role));$('#login-error').textContent='';$('#login-password').value=''; }
+  function syncLoginProfileUI(){ const role=loginRole,passwordRequired=role!=='VISUALIZAR';$('#login-supervisor-wrap').classList.toggle('hidden',role!=='SUPERVISOR');$('#login-password').required=passwordRequired;$('#login-password').closest('.password-wrap').classList.toggle('hidden',!passwordRequired);document.querySelector('label[for="login-password"]').classList.toggle('hidden',!passwordRequired);$('#login-error').textContent='';$('#login-password').value=''; }
   function enterProfile(profile){
     perfilAtual=profile;sessionStorage.setItem(PROFILE_KEY,profile);
     if(profile==='SUPERVISOR'){supervisorAtual=SUPERVISORES.includes(supervisorAtual)?supervisorAtual:SUPERVISORES[0];sessionStorage.setItem(SESSION_KEY,supervisorAtual);viewAtual='apontamento';portalUnit=state.convocacoes.find(c=>c.supervisor===supervisorAtual&&c.dataServico===portalDate)?.unidade||OBRAS[0]?.unidade||'Todas';}
