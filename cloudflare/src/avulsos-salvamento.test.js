@@ -57,5 +57,5 @@ test('avulso admite meia, uma, uma e meia e duas diarias sem mudar o financeiro'
  assert.match(op,/tipo_diaria_avulso:p\.avulso==='Sim'/);
  assert.match(op,/avulsoDailyTypes\.includes\(i\.tipoDiariaAvulso\)/);
  assert.match(adapter,/tipoDiariaAvulso:people\.get\(person\)\?\.avulso==='Sim'/);
- assert.match(op,/const finance=isPresent\?Number\(i\.financeiro\):0/);
+ assert.match(op,/finance=isPresent\?Number\(i\.financeiro\):0/);
 });
