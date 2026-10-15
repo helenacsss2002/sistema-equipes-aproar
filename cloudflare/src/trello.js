@@ -37,10 +37,14 @@ async function lerJSONTrello(url,fetcher){
   return body;
  }finally{clearTimeout(timer);}
 }
-export async function consultarTrello(fetcher=fetch){
+export async function consultarTrello(fetcher=fetch,credentials={}){
+ const key=String(credentials.key||'').trim();
+ const token=String(credentials.token||'').trim();
+ if(Boolean(key)!==Boolean(token))throw Object.assign(Error('Configure ambos os segredos TRELLO_API_KEY e TRELLO_API_TOKEN.'),{status:503});
  // API oficial primeiro: endpoint de dados, em vez da pagina do quadro.
  // O endereco publico .json fica como contingencia quando o Trello permite seu acesso.
- const candidates=[{url:URL_TRELLO_API,source:'api.trello.com'},{url:URL_TRELLO,source:'trello.com'}];
+ const apiUrl=key?URL_TRELLO_API+'&key='+encodeURIComponent(key)+'&token='+encodeURIComponent(token):URL_TRELLO_API;
+ const candidates=[{url:apiUrl,source:'api.trello.com'},{url:URL_TRELLO,source:'trello.com'}];
  const errors=[];
  for(const c of candidates){
   try{
@@ -91,8 +95,8 @@ export function planejar(works,cards){
  return {updates,inserts,skipped,unchanged};
 }
 
-export async function sincronizarTrello(sql,filter={},fetcher=fetch){
- const board=await consultarTrello(fetcher),selected=selecionar(board,filter);
+export async function sincronizarTrello(sql,filter={},fetcher=fetch,credentials={}){
+ const board=await consultarTrello(fetcher,credentials),selected=selecionar(board,filter);
  if(selected.cards.length>450)throw Object.assign(Error('Lista extensa demais para uma gravação única.'),{status:413});
  const current=await sql`SELECT id,nome,unidade,trello_card_id,trello_list_id,trello_unidade_manual FROM obras`;
  const p=planejar(current.map(x=>({...x})),selected.cards);
