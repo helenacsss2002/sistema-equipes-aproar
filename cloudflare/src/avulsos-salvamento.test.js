@@ -49,7 +49,7 @@ test('avulso admite meia, uma, uma e meia e duas diarias sem mudar o financeiro'
   }
  }
  assert.deepEqual(Object.keys(q),['Meia diária','Diária','Uma e meia diária','Duas diárias']);
- assert.match(ui,/class=\\"control row-avulso-diaria\\"/);
+ assert.match(ui,/class="control row-avulso-diaria"/);
  assert.match(ui,/tipoDiariaAvulso:row\.querySelector\('\.row-avulso-diaria'\)/);
  assert.match(ui,/avulsoDiaria\*w\/\(weightSum\|\|1\)/);
  const op=readFileSync(new URL('./operations.js',import.meta.url),'utf8');
