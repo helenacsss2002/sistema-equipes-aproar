@@ -25,9 +25,9 @@ if(role==='CONTROLADORIA'||role==='FINANCEIRO'){
 }
 
  if(!['CONTROLADORIA','FINANCEIRO','SUPERVISOR','VISUALIZAR'].includes(role))throw Object.assign(Error('Perfil inválido.'),{status:401});
- const payload=encode({role,user,exp:Math.floor(Date.now()/1000)+8*3600}),signature=new Uint8Array(await crypto.subtle.sign('HMAC',await key(env),new TextEncoder().encode(payload)));
+ const claims={role,user,exp:Math.floor(Date.now()/1000)+8*3600,...(role==='SUPERVISOR'?{supervisorPasswordAuth:true}:{})},payload=encode(claims),signature=new Uint8Array(await crypto.subtle.sign('HMAC',await key(env),new TextEncoder().encode(payload)));
  return {session:{role,user},cookie:`aproar_session=${payload}.${encode([...signature])}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=28800`};
 }
-export async function identity(request,env){try{if(!secretKey(env))return null;const token=request.headers.get('cookie')?.match(/(?:^|;\s*)aproar_session=([^;]+)/)?.[1],parts=token?.split('.');if(parts?.length!==2)return null;const verified=await crypto.subtle.verify('HMAC',await key(env),new Uint8Array(decode(parts[1])),new TextEncoder().encode(parts[0]));if(!verified)return null;const p=decode(parts[0]);if(p.exp<=Date.now()/1000||!['CONTROLADORIA','FINANCEIRO','SUPERVISOR','VISUALIZAR'].includes(p.role))return null;return p;}catch{return null;}}
+export async function identity(request,env){try{if(!secretKey(env))return null;const token=request.headers.get('cookie')?.match(/(?:^|;\s*)aproar_session=([^;]+)/)?.[1],parts=token?.split('.');if(parts?.length!==2)return null;const verified=await crypto.subtle.verify('HMAC',await key(env),new Uint8Array(decode(parts[1])),new TextEncoder().encode(parts[0]));if(!verified)return null;const p=decode(parts[0]);if(p.exp<=Date.now()/1000||!['CONTROLADORIA','FINANCEIRO','SUPERVISOR','VISUALIZAR'].includes(p.role)||(p.role==='SUPERVISOR'&&p.supervisorPasswordAuth!==true))return null;return p;}catch{return null;}}
 export function sameOrigin(request){return request.headers.get('origin')===new URL(request.url).origin;}
 export const logoutCookie='aproar_session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0';
