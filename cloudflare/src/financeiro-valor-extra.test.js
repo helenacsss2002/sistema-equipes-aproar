@@ -56,5 +56,5 @@ test('Todos os relatórios financeiros usam Valor da Extra e explicitam valores 
   assert.match(area,/Valores (complementares já registrados|anteriores)/,start);
   assert.doesNotMatch(area,/'Financeiro \(R\$\)'/,start);
  }
- assert.match(html,/app\.js\?v=aproar-chaves-supervisores-20261015-1/);
+ assert.match(html,/app\.js\?v=aproar-chaves-supervisores-20261015-2/);
 });
