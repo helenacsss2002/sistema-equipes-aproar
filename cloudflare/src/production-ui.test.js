@@ -313,3 +313,11 @@ test('Extras are launched from daily attendance and remain available to reports 
  assert.doesNotMatch(ui,/item\('extras','Extras'/);
  assert.match(html,/aproar-chaves-supervisores-20261015-2/);
 });
+
+test('Login do supervisor exige chave individual; visualizar permanece sem senha',()=>{
+ const ui=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
+ const chooser=ui.slice(ui.indexOf('function chooseLogin(role)'),ui.indexOf('function enterConnectedSession'));
+ assert.ok(chooser.includes("const passwordRequired=role!=='VISUALIZAR'"),'Supervisor deve exigir chave');
+ assert.ok(chooser.includes("$('#login-password').required=passwordRequired"),'Campo de senha deve ser obrigatório');
+ assert.ok(chooser.includes("classList.toggle('hidden',!passwordRequired)"),'Campo só fica oculto para Visualizar');
+});
