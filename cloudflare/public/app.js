@@ -18,6 +18,7 @@
   ];
 
   const EXTRA_OPTIONS = ['Não', 'Meia diária', 'Diária', 'Uma e meia diária', 'Duas diárias'];
+  const AVULSO_DIARIA_OPTIONS=['Meia diária','Diária','Uma e meia diária','Duas diárias'];
   // Opções do apontamento cotidiano; registros antigos de "Uma e meia diária" continuam preservados.
   const APONTAMENTO_EXTRA_OPTIONS = [['Não','Não'],['Meia diária','Meia Diária'],['Diária','Diária'],['Uma e meia diária','1 e meia diária'],['Duas diárias','Duas diárias']];
 
@@ -459,7 +460,7 @@
               <div><label class="field-label">Obra / Serviço</label><select class="control" id="conv-obra"></select></div>
               <div class="full"><label class="field-label">Equipe</label><div class="checkbox-grid">${COLABORADORES.filter(c=>!c.inativo).map(c=>`<label class="check-card"><input type="checkbox" name="conv-colab" value="${c.id}"><span><strong>${c.nome}</strong><br><small>${c.funcao}</small></span></label>`).join('')}</div></div>
             </div>
-            <details class="section"><summary>Incluir colaborador avulso</summary><div class="form-grid">${field('Nome do avulso','<input class="control" id="avulso-nome">')}${field('Função','<input class="control" id="avulso-funcao">')}${field('Categoria da diária','<select class="control" id="avulso-categoria"><option>Profissional</option><option>Ajudante</option></select>')}</div></details>
+            <details class="section"><summary>Incluir colaborador avulso</summary><div class="form-grid">${field('Nome do avulso','<input class="control" id="avulso-nome">')}${field('Categoria do avulso',avulsoFuncaoSelect('avulso-funcao'))}</div></details>
             <div class="form-actions"><button class="btn btn-primary" type="submit">Salvar convocação</button></div>
           </form>
         </div>
@@ -485,7 +486,7 @@
       const colaboradores = $$('input[name="conv-colab"]:checked').map(x=>x.value);
       if (!colaboradores.length && !$('#avulso-nome')?.value.trim()) return toast('Selecione pelo menos um colaborador.', true);
       const avulso=$('#avulso-nome')?.value.trim();
-      if(avulso){const id=uid('c');COLABORADORES.push({id,nome:avulso,funcao:$('#avulso-funcao').value.trim()||'Avulso',categoria:$('#avulso-categoria').value,avulso:'Sim',custo:180});colaboradores.push(id);}
+      if(avulso){const funcao=$('#avulso-funcao').value;if(!funcao)return toast('Selecione Profissional ou Servente para o avulso.',true);const id=uid('c');COLABORADORES.push({id,nome:avulso,...avulsoData(funcao)});colaboradores.push(id);}
       const obraRef = obraById(obra.value);
       const conv = {
         id: uid('cv'), supervisor: $('#conv-supervisor')?.value || supervisorAtual, dataServico: $('#conv-data').value,
@@ -548,7 +549,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
  savedExtraAmount=draft?.valorExtraOriginal??existingExtra?.valorExtraOriginal??(legacyExtra?item?.valorExtraOriginal:null),extraAmount=extraEnabled&&Number(savedExtraAmount)>0?roundMoney(Number(savedExtraAmount)):0,
  nightValue=unit==='SEBRAE'&&presence(item?.status||'Presente (Integral)')?(item?.financeAdjusted?Number(item?.noturno||0):[50,90].includes(Number(item?.noturno))?Number(item.noturno):90):0;
  return `<div class="person-row person-card" data-person="${cid}" data-unit="${escapeHtml(unit)}" data-extra-original="0" data-finance-adjusted="${item?.financeAdjusted?'true':'false'}" data-financeiro-original="${Number(item?.financeiro)||0}" data-ajuda-custo="${Number(item?.ajudaCusto)||0}"><div class="person-name">${escapeHtml(c?.nome||cid)}<br><small>${escapeHtml(c?.funcao||'')} · ${escapeHtml(unit)}</small></div>
- <div class="person-top">${field('Status',`<select class="control row-status">${STATUS_OPTIONS.map(x=>`<option ${x===(item?.status||'Presente (Integral)')?'selected':''}>${x}</option>`).join('')}</select>`)}</div>
+ <div class="person-top">${field('Status',`<select class="control row-status">${STATUS_OPTIONS.map(x=>`<option ${x===(item?.status||'Presente (Integral)')?'selected':''}>${x}</option>`).join('')}</select>`)}</div>${c?.avulso==='Sim'?`<div class="form-grid section">${field('Diárias trabalhadas · avulso (custo da Controladoria)',`<select class="control row-avulso-diaria">${AVULSO_DIARIA_OPTIONS.map(x=>`<option value="${x}" ${x===(item?.tipoDiariaAvulso||'Diária')?'selected':''}>${x}</option>`).join('')}</select>`)}</div>`:''}
  <div class="person-services"><div class="allocations principal-service">${allocationRow(unit,services[0],0)}</div>
  <div class="form-grid">${field('Houve extra?',`<select class="control row-extra" aria-label="Houve extra?">${APONTAMENTO_EXTRA_OPTIONS.map(([value,label])=>`<option value="${value}" ${extraValue===value?'selected':''}>${label}</option>`).join('')}${extraEnabled&&!APONTAMENTO_EXTRA_OPTIONS.some(([value])=>value===extraValue)?`<option value="${escapeHtml(extraValue)}" selected>${escapeHtml(extraValue)} (registro anterior)</option>`:''}</select>`)}${field('Valor da Extra (R$)',`<input class="control row-extra-value" type="${extraEnabled?'number':'text'}" min="0.01" step="0.01" value="${extraEnabled?(extraAmount?extraAmount.toFixed(2):''):'R$ 0,00'}" ${extraEnabled?'required':'disabled'} placeholder="Digite o valor" title="${extraEnabled?'Digite o valor da extra em reais':'Sem extra: R$ 0,00'}">`)}${Number(item?.financeiro)>0?field('Valor complementar já registrado (R$)',`<input class="control row-financeiro-historico" type="number" readonly value="${Number(item.financeiro).toFixed(2)}" title="Lançamento anterior preservado, sem edição pelo supervisor">`):''}${field('Acordos / Bonificações (R$)',`<input class="control row-acordo" type="number" min="0" step="0.01" value="${item?.acordo||0}">`)}${perfilAtual==='SUPERVISOR'?field('Passagens/Ajuda de custo (R$)',`<input class="control row-ajuda-custo" type="number" min="0" step="0.01" list="passagens-ajuda-valores" value="${Number(item?.ajudaCusto)||0}" ${item?.financeAdjusted?'readonly title="Valor confirmado pelo Financeiro"':''}>`):''}</div>
  <div class="row-extra-panel section ${extraEnabled?'':'hidden'}"><div class="notice info">Informe o valor da extra realizado pelo colaborador. A categoria identifica o tipo de extra, mas não define o valor. O registro é separado da presença normal.</div><div class="form-grid">
@@ -645,7 +646,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
             category=row.querySelector('.row-extra')?.value||'Não',
             enabled=category!=='Não';
       return {
-        colaboradorId:cid,status:row.querySelector('.row-status').value,extra:'Não',
+        colaboradorId:cid,status:row.querySelector('.row-status').value,extra:'Não',tipoDiariaAvulso:row.querySelector('.row-avulso-diaria')?.value||null,
         extraLancamento:{
           enabled,extra:category,
           valorExtraOriginal:enabled?Number(row.querySelector('.row-extra-value')?.value||0):0,
@@ -1110,6 +1111,15 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
   const clean=x=>String(x||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().trim();
   function presence(status){return ['Presente (Integral)','Presente (Só Manhã)','Presente (Só Tarde)','Saída Antecipada','Presente','Extra'].includes(status);}
   function category(p){const cat=clean(p?.categoria||p?.categoria_diaria);if(/AJUD|SERVENT|AUX/.test(cat))return 'Ajudante';if(/PROF/.test(cat))return 'Profissional';if(/AJUDANTE|AUXILIAR|AUX[. ]|SERVENTE/.test(clean(p?.funcao)))return 'Ajudante';const ref=Number(p?.custo??p?.valor_diaria)||0;return ref>0&&ref<220?'Ajudante':'Profissional';}
+  // Avulso: valores integrais com encargos, exclusivos do custo da Controladoria.
+  // O Financeiro continua registrando o valor efetivamente pago em seus próprios campos.
+  function avulsoData(funcao){
+    if(!['Profissional','Servente'].includes(funcao))throw Error('Selecione Profissional ou Servente para o avulso.');
+    return {funcao,categoria:funcao==='Servente'?'Ajudante':'Profissional',custo:funcao==='Servente'?182.34:241.74,avulso:'Sim'};
+  }
+  function avulsoFuncaoSelect(id){
+    return `<select class="control" id="${id}"><option value="">Selecione a categoria</option><option value="Profissional">Profissional</option><option value="Servente">Servente</option></select>`;
+  }
   function dayCost(p){const v=Number(p?.custo??p?.valor_diaria);return v>0?v:category(p)==='Ajudante'?182.34:241.74;}
   function extraMultiplier(value){const v=clean(value);if(!v||['NAO','N','SEM EXTRA','SEM'].includes(v))return 0;if(/UMA E MEIA|1 E MEIA|1[.,]5/.test(v))return 1.5;if(/DUAS|2 DIARIA|2DIARIA/.test(v))return 2;if(v.includes('MEIA'))return .5;return 1;}
   function defaultFinancial(p,extra){return roundMoney((category(p)==='Ajudante'?80:120)*extraMultiplier(extra));}
@@ -1133,12 +1143,14 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
         const isPresent=presence(i.status),serviceBlocks=[...new Set(ss.flatMap(s=>Object.keys(periodBlocks(s.periodo))))];
         const financial=isPresent?Math.max(0,Number(i.financeiro)||0):0,extra=isPresent?(i.extra==='Valor específico'?Number(i.valorExtraOriginal)||0:roundMoney(dayCost(p)*extraMultiplier(i.extra))):0;
         for(const b of serviceBlocks){blocks.finance[b]=Math.max(blocks.finance[b]||0,financial/serviceBlocks.length);blocks.extra[b]=Math.max(blocks.extra[b]||0,extra/serviceBlocks.length);}
-        for(const [b,w] of Object.entries(presenceBlocks(i,c)))blocks.daily[b]=Math.max(blocks.daily[b]||0,roundMoney(dayCost(p)*w));
+        const dailyBlocks=presenceBlocks(i,c),avulsoDiaria=p?.avulso==='Sim'&&AVULSO_DIARIA_OPTIONS.includes(i.tipoDiariaAvulso)?extraMultiplier(i.tipoDiariaAvulso):null;
+        const dailyWeights=Object.entries(dailyBlocks),weightSum=dailyWeights.reduce((sum,[,w])=>sum+w,0);
+        for(const [b,w] of dailyWeights)blocks.daily[b]=Math.max(blocks.daily[b]||0,roundMoney(dayCost(p)*(avulsoDiaria===null?w:avulsoDiaria*w/(weightSum||1))));
         const sb=ss.filter(s=>clean(obraById(s.obraId)?.unidade||c.unidade)==='SEBRAE');
         for(const s of ss){const key=s.obraId||'unassigned_'+c.unidade;let row=services.get(key);if(!row){row={c:{...c,obraId:s.obraId,unidade:obraById(s.obraId)?.unidade||c.unidade},i,p,refs,blocks:new Set(),periods:new Set(),supervisors:new Set(),statuses:new Set(),extras:new Set(),daily:0,extra:0,finance:0,night:0,bonus:0,ajudaCusto:0,danger:0,share:1};services.set(key,row);}Object.keys(periodBlocks(s.periodo)).forEach(b=>row.blocks.add(b));row.periods.add(s.periodo);row.supervisors.add(c.supervisor);row.statuses.add(i.status);row.extras.add(i.extra||'Não');if(sb.includes(s))row.night+=nocturnal(i,c)/sb.length;row.bonus+=(isPresent?Math.max(0,Number(i.acordo)||0):0)/ss.length;row.ajudaCusto+=(isPresent?Math.max(0,Number(i.ajudaCusto)||0):0)/ss.length;}
       }
       for(const b of new Set([...Object.keys(blocks.daily),...Object.keys(blocks.extra),...Object.keys(blocks.finance)])){let participants=[...services.values()].filter(x=>x.blocks.has(b));if(!participants.length)participants=[...services.values()];for(const row of participants)for(const field of ['daily','extra','finance'])row[field]+=(blocks[field][b]||0)/participants.length;}
-      for(const row of services.values()){row.daily=roundMoney(row.daily);row.extra=roundMoney(row.extra);row.finance=roundMoney(row.finance);row.night=roundMoney(row.night);row.bonus=roundMoney(row.bonus);row.ajudaCusto=roundMoney(row.ajudaCusto);if(dangerEligible(p))row.danger=roundMoney(row.daily*1.3)-row.daily+roundMoney(row.extra*1.3)-row.extra;row.danger=roundMoney(row.danger);row.service={obraId:row.c.obraId,periodo:[...row.periods].join(' + ')};row.c.supervisor=[...row.supervisors].join(' / ');row.displayStatus=[...row.statuses].join(' / ');row.displayExtra=[...row.extras].join(' / ');if(reportFilters.obra==='Todas'||row.c.obraId===reportFilters.obra)out.push(row);}
+      for(const row of services.values()){row.daily=roundMoney(row.daily);row.extra=roundMoney(row.extra);row.finance=roundMoney(row.finance);row.night=roundMoney(row.night);row.bonus=roundMoney(row.bonus);row.ajudaCusto=roundMoney(row.ajudaCusto);if(dangerEligible(p))row.danger=roundMoney(row.daily*1.3)-row.daily+roundMoney(row.extra*1.3)-row.extra;row.danger=roundMoney(row.danger);row.service={obraId:row.c.obraId,periodo:[...row.periods].join(' + ')};row.c.supervisor=[...row.supervisors].join(' / ');row.displayStatus=[...row.statuses].join(' / ')+(p?.avulso==='Sim'&&AVULSO_DIARIA_OPTIONS.includes(row.i?.tipoDiariaAvulso)?' · '+row.i.tipoDiariaAvulso:'');row.displayExtra=[...row.extras].join(' / ');if(reportFilters.obra==='Todas'||row.c.obraId===reportFilters.obra)out.push(row);}
     }
     for(const x of state.extras||[]){
       if(x.dataServico<reportFilters.inicio||x.dataServico>reportFilters.fim||(reportFilters.supervisor!=='Todos'&&x.supervisor!==reportFilters.supervisor))continue;
@@ -1256,7 +1268,7 @@ function renderEquipeDia(){
  const people=new Map();for(const c of convs)for(const id of c.colaboradores)if(!people.has(id))people.set(id,{conv:c,item:apForConv(c.id)?.itens.find(i=>i.colaboradorId===id)});
  const extraTypes=['Meia diária','Diária','Uma e meia diária','Duas diárias'];
  body.innerHTML=`<h3>Equipe do dia</h3><p style="font-size:12px">Preencha o apontamento normal. Se houver extra, selecione a categoria diretamente na ficha do funcionário.</p>
- <details class="card card-pad"><summary>Adicionar colaborador / avulso ao apontamento normal</summary><div class="form-grid">${field('Colaborador',`<select class="control" id="day-add-person"><option value="">Selecione</option>${options(COLABORADORES.filter(c=>!c.inativo&&!people.has(c.id)))}</select>`)}${field('Nome do avulso','<input class="control" id="day-avulso-nome">')}${field('Função do avulso','<input class="control" id="day-avulso-funcao">')}</div><div class="form-actions"><button class="btn btn-secondary" type="button" id="day-add-button">Adicionar à equipe normal</button></div></details>
+ <details class="card card-pad"><summary>Adicionar colaborador / avulso ao apontamento normal</summary><div class="form-grid">${field('Colaborador',`<select class="control" id="day-add-person"><option value="">Selecione</option>${options(COLABORADORES.filter(c=>!c.inativo&&!people.has(c.id)))}</select>`)}${field('Nome do avulso','<input class="control" id="day-avulso-nome">')}${field('Categoria do avulso',avulsoFuncaoSelect('day-avulso-funcao'))}</div><div class="form-actions"><button class="btn btn-secondary" type="button" id="day-add-button">Adicionar à equipe normal</button></div></details>
  <p style="font-size:12px">Para marcar todos como presentes, defina primeiro a obra/serviço de todos os colaboradores exibidos.</p><button class="btn btn-primary" style="width:100%" id="day-all-present">Marcar todos como presentes</button>
  <form id="day-form" class="section"><div class="person-search-wrap"><input id="day-person-search" class="control" type="search" autocomplete="off" placeholder="Buscar na equipe..." aria-label="Buscar colaborador na equipe"></div>
  ${people.size?[...people].map(([id,x])=>personRow(id,x.item,x.conv.unidade,x.conv.obraId,portalDate,x.conv.supervisor)).join(''):'<div class="empty">Não há equipe convocada para esta unidade e data. Use Convocação ou adicione um colaborador acima.</div>'}
@@ -1279,7 +1291,7 @@ function renderEquipeDia(){
  };
  extraToggle.onchange=refreshExternalFields;$('#day-extra-person').onchange=suggestExternalWork;suggestExternalWork();
  $('#day-all-present').onclick=()=>{if(!people.size)return toast('Adicione pessoas à equipe.',true);const items=readPersonRows([...people.keys()]);if(items.some(i=>i.servicos.some(s=>!s.obraId)))return toast('Selecione primeiro os serviços de todos os colaboradores.',true);$$('#day-form .row-status').forEach(x=>{x.value='Presente (Integral)';x.onchange?.();});};
- $('#day-add-button').onclick=()=>{const unit=portalUnit==='Todas'?(convs[0]?.unidade||adminUnits()[0]):portalUnit;if(!unit)return toast('Cadastre uma unidade antes de incluir o colaborador.',true);if(!OBRAS.some(o=>o.unidade===unit))return toast('Esta unidade ainda não possui obra cadastrada. Solicite à Controladoria o cadastro de uma obra antes da inclusão.',true);const name=$('#day-avulso-nome').value.trim();let id=$('#day-add-person').value;if(!id&&!name)return toast('Escolha um colaborador ou informe o nome do avulso.',true);if(!id){id=uid('c');COLABORADORES.push({id,nome:name,funcao:$('#day-avulso-funcao').value.trim()||'Avulso',avulso:'Sim',custo:180});}if(blocked(id,portalDate)||state.convocacoes.some(c=>c.dataServico===portalDate&&c.colaboradores.includes(id)&&overlaps(c.turno,'Integral')))return toast('Colaborador indisponível ou convocado em outra equipe.',true);let conv=convs.find(c=>c.unidade===unit);if(!conv){conv={id:uid('cv'),supervisor:supervisorAtual,dataServico:portalDate,unidade:unit,obraId:'',turno:'Integral',colaboradores:[],criadoEm:now().toISOString(),origem:'inclusao_apontamento'};state.convocacoes.push(conv);}conv.colaboradores.push(id);saveData();render();};
+ $('#day-add-button').onclick=()=>{const unit=portalUnit==='Todas'?(convs[0]?.unidade||adminUnits()[0]):portalUnit;if(!unit)return toast('Cadastre uma unidade antes de incluir o colaborador.',true);if(!OBRAS.some(o=>o.unidade===unit))return toast('Esta unidade ainda não possui obra cadastrada. Solicite à Controladoria o cadastro de uma obra antes da inclusão.',true);const name=$('#day-avulso-nome').value.trim();let id=$('#day-add-person').value;if(!id&&!name)return toast('Escolha um colaborador ou informe o nome do avulso.',true);if(!id){const funcao=$('#day-avulso-funcao').value;if(!funcao)return toast('Selecione Profissional ou Servente para o avulso.',true);id=uid('c');COLABORADORES.push({id,nome:name,...avulsoData(funcao)});}if(blocked(id,portalDate)||state.convocacoes.some(c=>c.dataServico===portalDate&&c.colaboradores.includes(id)&&overlaps(c.turno,'Integral')))return toast('Colaborador indisponível ou convocado em outra equipe.',true);let conv=convs.find(c=>c.unidade===unit);if(!conv){conv={id:uid('cv'),supervisor:supervisorAtual,dataServico:portalDate,unidade:unit,obraId:'',turno:'Integral',colaboradores:[],criadoEm:now().toISOString(),origem:'inclusao_apontamento'};state.convocacoes.push(conv);}conv.colaboradores.push(id);saveData();render();};
  $('#day-form').noValidate=true;
  $('#day-form').onsubmit=e=>{
   e.preventDefault();
@@ -1304,7 +1316,7 @@ function renderEquipeDia(){
   function renderUnitConvocacao(){
     if(!unitConvDate){const d=dateLocal(isoToday());d.setDate(d.getDate()+1);unitConvDate=calendarISO(d);}
     const existing=convocacoesSupervisor().filter(c=>c.dataServico===unitConvDate);const total=existing.reduce((v,c)=>v+c.colaboradores.length,0);
-    $('#main-content').innerHTML=head('Convocação','Escolha unidade, turno e pessoas. Os serviços serão definidos individualmente no apontamento.')+`<div class="grid grid-3">${metric('DATA',formatDate(unitConvDate),'data da convocação')}${metric('CONVOCADOS',total,'já registrados')}${metric('AÇÃO','Montar','e confirmar abaixo')}</div><details class="card card-pad section convocados-destaque"><summary>Já convocados · ${total}</summary>${existing.map(c=>c.colaboradores.map(id=>{const p=colaboradorById(id);return `<div class="team-list-item"><strong>${escapeHtml(p?.nome)}</strong><small>${escapeHtml(p?.funcao)} · ${escapeHtml(c.unidade)} · ${c.turno}</small></div>`;}).join('')).join('')||'<p>Nenhum convocado nesta data.</p>'}</details><form id="unit-conv-form" class="card card-pad section unit-conv"><h3>Adicionar à equipe</h3><p style="font-size:12px">Ao confirmar, a equipe é salva de uma vez.</p><div class="convocation-fields">${field('Data',`<input class="control" id="unit-conv-date" type="date" value="${unitConvDate}" required>`)}${field('Unidade',`<select class="control" id="unit-conv-unit">${options(adminUnits())}</select>`)}${field('Turno',`<select class="control" id="unit-conv-turn">${options(['Integral','Manhã','Tarde','Noite'])}</select>`)}${field('Função',`<select class="control" id="unit-conv-function">${options(['Todas',...[...new Set(COLABORADORES.map(c=>c.funcao))]])}</select>`)}</div><details class="card card-pad section" id="previous-team-panel"><summary>Usar equipe do dia anterior</summary><p style="font-size:12px">Confira a equipe desta unidade. Desmarque quem não precisa ser convocado.</p>${field('Data da equipe de referência','<input id="previous-team-date" type="date" class="control">')}<div id="previous-team-list" class="rect-list section"></div><div class="form-actions"><button id="previous-team-use" type="button" class="btn btn-secondary">Usar pessoas selecionadas</button></div></details>${field('Colaboradores','<input class="control" id="unit-conv-search" placeholder="Digite um nome para buscar…">')}<div id="unit-conv-people" class="checkbox-grid section"></div><details class="section"><summary>Adicionar pessoas que não estão na lista</summary><p style="font-size:12px">Adicione quantos avulsos precisar e confirme toda a equipe de uma vez.</p>${field('Nome','<input class="control" id="unit-avulso-name" placeholder="Nome completo">')}${field('Função','<input class="control" id="unit-avulso-function">')}<label class="field-label"><input id="unit-avulso-check" type="checkbox" checked> É avulso?</label><button class="btn btn-secondary" type="button" id="unit-avulso-add">Adicionar pessoa</button><div id="unit-avulso-list" class="section"></div></details><div class="form-actions"><button class="btn btn-primary">Confirmar convocação da equipe</button></div></form>`;
+    $('#main-content').innerHTML=head('Convocação','Escolha unidade, turno e pessoas. Os serviços serão definidos individualmente no apontamento.')+`<div class="grid grid-3">${metric('DATA',formatDate(unitConvDate),'data da convocação')}${metric('CONVOCADOS',total,'já registrados')}${metric('AÇÃO','Montar','e confirmar abaixo')}</div><details class="card card-pad section convocados-destaque"><summary>Já convocados · ${total}</summary>${existing.map(c=>c.colaboradores.map(id=>{const p=colaboradorById(id);return `<div class="team-list-item"><strong>${escapeHtml(p?.nome)}</strong><small>${escapeHtml(p?.funcao)} · ${escapeHtml(c.unidade)} · ${c.turno}</small></div>`;}).join('')).join('')||'<p>Nenhum convocado nesta data.</p>'}</details><form id="unit-conv-form" class="card card-pad section unit-conv"><h3>Adicionar à equipe</h3><p style="font-size:12px">Ao confirmar, a equipe é salva de uma vez.</p><div class="convocation-fields">${field('Data',`<input class="control" id="unit-conv-date" type="date" value="${unitConvDate}" required>`)}${field('Unidade',`<select class="control" id="unit-conv-unit">${options(adminUnits())}</select>`)}${field('Turno',`<select class="control" id="unit-conv-turn">${options(['Integral','Manhã','Tarde','Noite'])}</select>`)}${field('Função',`<select class="control" id="unit-conv-function">${options(['Todas',...[...new Set(COLABORADORES.map(c=>c.funcao))]])}</select>`)}</div><details class="card card-pad section" id="previous-team-panel"><summary>Usar equipe do dia anterior</summary><p style="font-size:12px">Confira a equipe desta unidade. Desmarque quem não precisa ser convocado.</p>${field('Data da equipe de referência','<input id="previous-team-date" type="date" class="control">')}<div id="previous-team-list" class="rect-list section"></div><div class="form-actions"><button id="previous-team-use" type="button" class="btn btn-secondary">Usar pessoas selecionadas</button></div></details>${field('Colaboradores','<input class="control" id="unit-conv-search" placeholder="Digite um nome para buscar…">')}<div id="unit-conv-people" class="checkbox-grid section"></div><details class="section"><summary>Adicionar pessoas que não estão na lista</summary><p style="font-size:12px">Adicione quantos avulsos precisar e confirme toda a equipe de uma vez.</p>${field('Nome','<input class="control" id="unit-avulso-name" placeholder="Nome completo">')}${field('Categoria do avulso',avulsoFuncaoSelect('unit-avulso-function'))}<button class="btn btn-secondary" type="button" id="unit-avulso-add">Adicionar pessoa</button><div id="unit-avulso-list" class="section"></div></details><div class="form-actions"><button class="btn btn-primary">Confirmar convocação da equipe</button></div></form>`;
     const selected=new Set();const refresh=(sync=true)=>{if(sync)$$('#unit-conv-people input').forEach(x=>x.checked?selected.add(x.value):selected.delete(x.value));const term=$('#unit-conv-search').value.toLowerCase(),func=$('#unit-conv-function').value;$('#unit-conv-people').innerHTML=COLABORADORES.filter(c=>!c.inativo&&c.nome.toLowerCase().includes(term)&&(func==='Todas'||c.funcao===func)).map(c=>`<label class="check-card"><input type="checkbox" value="${c.id}" ${selected.has(c.id)?'checked':''}><span>${escapeHtml(c.nome)}<small style="display:block;color:var(--muted)">${escapeHtml(c.funcao)}</small></span></label>`).join('');};$('#unit-conv-search').oninput=refresh;$('#unit-conv-function').onchange=refresh;refresh();
     if(portalUnit!=='Todas')$('#unit-conv-unit').value=portalUnit;
     const referenceDate=()=>{const d=dateLocal(unitConvDate);d.setDate(d.getDate()-1);return calendarISO(d);};$('#previous-team-date').value=referenceDate();
@@ -1316,7 +1328,7 @@ function renderEquipeDia(){
     $('#previous-team-use').onclick=()=>{const ids=$$('.previous-team-person:checked').filter(x=>!x.disabled).map(x=>x.value);if(!ids.length)return toast('Nenhuma pessoa disponível foi selecionada.',true);selected.clear();ids.forEach(id=>selected.add(id));$('#unit-conv-function').value='Todas';$('#unit-conv-search').value='';refresh(false);toast('Equipe carregada. Você pode desmarcar pessoas antes de confirmar.');};
     $('#unit-conv-date').onchange=()=>{unitConvDate=$('#unit-conv-date').value;render();};
     const avulsoList=()=>$('#unit-avulso-list').innerHTML=avulsoDraft.map(x=>`<div class="team-list-item">${escapeHtml(x.nome)} · ${escapeHtml(x.funcao)}</div>`).join('');avulsoList();
-    $('#unit-avulso-add').onclick=()=>{const nome=$('#unit-avulso-name').value.trim();if(!nome)return toast('Informe o nome.',true);avulsoDraft.push({id:uid('c'),nome,funcao:$('#unit-avulso-function').value.trim()||'Avulso',avulso:$('#unit-avulso-check').checked?'Sim':'Não',custo:180});$('#unit-avulso-name').value='';$('#unit-avulso-function').value='';avulsoList();};
+    $('#unit-avulso-add').onclick=()=>{const nome=$('#unit-avulso-name').value.trim();if(!nome)return toast('Informe o nome.',true);const funcao=$('#unit-avulso-function').value;if(!funcao)return toast('Selecione Profissional ou Servente para o avulso.',true);avulsoDraft.push({id:uid('c'),nome,...avulsoData(funcao)});$('#unit-avulso-name').value='';$('#unit-avulso-function').value='';avulsoList();};
     $('#unit-conv-form').onsubmit=e=>{e.preventDefault();$$('#unit-conv-people input').forEach(x=>x.checked?selected.add(x.value):selected.delete(x.value));const ids=[...selected,...avulsoDraft.map(x=>x.id)],date=$('#unit-conv-date').value,turno=$('#unit-conv-turn').value,unit=$('#unit-conv-unit').value;if(!ids.length)return toast('Selecione pelo menos uma pessoa.',true);if(!OBRAS.some(o=>o.unidade===unit))return toast('Esta unidade já está cadastrada, mas ainda não possui obra. Solicite à Controladoria o cadastro de uma obra nesta unidade antes da convocação.',true);const conflict=ids.find(id=>blocked(id,date)||state.convocacoes.some(c=>c.dataServico===date&&c.colaboradores.includes(id)&&overlaps(c.turno,turno)));if(conflict){registerConvocationConflicts(ids,date,turno,unit,supervisorAtual);return toast('Colaborador indisponível ou já convocado neste turno: '+(colaboradorById(conflict)?.nome||conflict),true);}COLABORADORES.push(...avulsoDraft);state.convocacoes.push({id:uid('cv'),supervisor:supervisorAtual,dataServico:date,unidade:unit,obraId:'',turno,colaboradores:ids,criadoEm:now().toISOString(),origem:'normal',executor:supervisorAtual});avulsoDraft=[];audit('Convocação da equipe',date);saveData();toast('Equipe convocada. Serviços serão escolhidos no apontamento.');render();};
   }
 
@@ -1630,11 +1642,25 @@ function renderEquipeDia(){
   function applyOnline(result){state=result.state;OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);onlineVersion=result.version;onlineSession=result.session;onlineWritable=result.writesEnabled;onlineStage=result.stage||'homologacao';onlineConfirmed=copy(state);perfilAtual=result.session.role;supervisorAtual=result.session.role==='SUPERVISOR'?result.session.user:'';}
   function lockOnline(locked){$('#app-view').inert=locked;$('#online-saving').classList.toggle('hidden',!locked);}
   function toast(message,error=false){if((onlineQueued||onlineSaving)&&!error){onlineMessage=message;return;}showToast(message,error);}
+  function showSaveFeedback(message,error=false){
+    let node=$('#online-save-feedback');
+    if(!node){
+      node=document.createElement('div');node.id='online-save-feedback';
+      node.setAttribute('role','status');node.setAttribute('aria-live','polite');
+      Object.assign(node.style,{position:'fixed',right:'20px',bottom:'20px',zIndex:'100010',maxWidth:'min(440px,calc(100vw - 40px))',padding:'16px 20px',borderRadius:'10px',boxShadow:'0 5px 24px rgba(0,0,0,.24)',color:'#fff',fontWeight:'600'});
+      document.body.appendChild(node);
+    }
+    node.textContent=message;
+    node.style.background=error?'#8f2d2d':'#126244';
+    node.style.display='block';
+    clearTimeout(showSaveFeedback._timer);
+    showSaveFeedback._timer=setTimeout(()=>{node.style.display='none';},error?18000:12000);
+  }
   function saveData(onSuccess=null){
     if(!onlineSession||!onlineWritable||onlineSession.role==='VISUALIZAR'){
       if(onlineConfirmed){state=copy(onlineConfirmed);OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);}
       const reason=!onlineSession?'Sua sessão não está autenticada. Entre novamente.':onlineSession.role==='VISUALIZAR'?'Este perfil é somente para visualização.':'A gravação está bloqueada no ambiente do Worker. Confira a autorização de escrita da produção.';
-      toast(reason,true);queueMicrotask(()=>render());return false;
+      toast(reason,true);showSaveFeedback(reason,true);queueMicrotask(()=>render());return false;
     }
     if(onlineQueued||onlineSaving){showToast('Já existe um salvamento em andamento. Aguarde a confirmação antes de enviar outro apontamento.',true);return false;}
     state.obras=OBRAS;state.colaboradores=COLABORADORES;onlineQueued=true;lockOnline(true);
@@ -1646,13 +1672,16 @@ function renderEquipeDia(){
           :'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return(c==='x'?r:(r&0x3|0x8)).toString(16);});
         const payload=JSON.stringify({requestId,version:onlineVersion,state:copy(state)});
         if(typeof payload!=='string')throw new Error('Não foi possível preparar os dados para salvar.');
+        // Nunca reenviar automaticamente um POST incerto: o Neon pode tê-lo confirmado.
+        const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),35000);
         let result;
-        for(let attempt=0;attempt<2;attempt++){
-          try{result=await api('/api/save',{method:'POST',body:payload});break;}
-          catch(error){if(error.status||attempt===1)throw error;}
-        }
+        try{result=await api('/api/save',{method:'POST',body:payload,signal:controller.signal});}
+        catch(error){
+          if(error?.name==='AbortError')throw new Error('A gravação demorou mais de 35 segundos. Confira o histórico antes de tentar novamente para evitar duplicidade.');
+          throw error;
+        }finally{clearTimeout(timeout);}
         if(!result||!result.state||typeof result.version!=='string'||!result.session)throw new Error('O servidor não confirmou os dados do apontamento. Atualize a tela e confira o histórico antes de tentar novamente.');
-        applyOnline(result);onlineSaving=false;render();showToast(onlineMessage||'Apontamento salvo com sucesso.');
+        applyOnline(result);onlineSaving=false;render();showSaveFeedback(onlineMessage||'Apontamento confirmado e gravado no Neon.');showToast(onlineMessage||'Apontamento salvo com sucesso.');
         if(typeof onSuccess==='function'){try{onSuccess(result);}catch(callbackError){console.error('APROAR post-save callback failure',String(callbackError?.message||callbackError));}}
       }catch(error){
         console.error('APROAR save failure',JSON.stringify({message:String(error?.message||error).slice(0,240),status:Number(error?.status||0),name:String(error?.name||'Error').slice(0,60)}));
@@ -1662,7 +1691,7 @@ function renderEquipeDia(){
           console.error('APROAR state refresh after save failure',String(refreshError?.message||refreshError).slice(0,240));
           if(onlineConfirmed){state=copy(onlineConfirmed);OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);}
         }
-        onlineSaving=false;render();showToast(message,true);
+        onlineSaving=false;render();showSaveFeedback(message,true);showToast(message,true);
       }finally{onlineQueued=false;onlineSaving=false;onlineMessage='';lockOnline(false);}
     });
     return true;
