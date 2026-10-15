@@ -1,20 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {pbkdf2Sync} from 'node:crypto';
 import {login,identity} from './auth.js';
 
 const env={SESSION_SECRET:'test-only-session-signing-secret'};
-const iterations=100000;
-const makeCredential=(password,salt)=>({
- password_salt:salt,
- password_hash:pbkdf2Sync(password,Buffer.from(salt,'hex'),iterations,32,'sha256').toString('hex'),
- iterations
-});
-const credentials={
- EDUARDO:makeCredential('EDUARDO-KEY-123','00112233445566778899aabbccddeeff'),
- FELIPE:makeCredential('FELIPE-KEY-456','ffeeddccbbaa99887766554433221100')
-};
-const sql=async(_strings,...values)=>credentials[values[0]]?[credentials[values[0]]]:[];
+const credentials={EDUARDO:'TEST-KEY-EDUARDO',FELIPE:'TEST-KEY-FELIPE'};
+const sql=async(strings,...values)=>{const [input,user]=values;return credentials[user]?[{password_matches:input===credentials[user]}]:[];};
 const status=fn=>assert.rejects(fn,error=>error.status===401);
 
 test('Supervisor login requires a key and rejects missing or incorrect keys',async()=>{
@@ -23,8 +13,8 @@ test('Supervisor login requires a key and rejects missing or incorrect keys',asy
 });
 
 test('Each supervisor key only authenticates the corresponding supervisor and creates a signed session',async()=>{
- await status(()=>login({role:'SUPERVISOR',supervisor:'FELIPE',password:'EDUARDO-KEY-123'},env,sql));
- const result=await login({role:'SUPERVISOR',supervisor:'EDUARDO',password:'EDUARDO-KEY-123'},env,sql);
+ await status(()=>login({role:'SUPERVISOR',supervisor:'FELIPE',password:'TEST-KEY-EDUARDO'},env,sql));
+ const result=await login({role:'SUPERVISOR',supervisor:'EDUARDO',password:'TEST-KEY-EDUARDO'},env,sql);
  assert.deepEqual(result.session,{role:'SUPERVISOR',user:'EDUARDO'});
  assert.match(result.cookie,/HttpOnly/);
  const request=new Request('https://aproar.test/api/bootstrap',{headers:{cookie:result.cookie.split(';')[0]}});
