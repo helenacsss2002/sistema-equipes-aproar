@@ -16,7 +16,7 @@ function summary(db,session,env){return {state:visibleState(db,session),version:
 export default {async fetch(request,env){const url=new URL(request.url),path=url.pathname;
  try{
   if(path==='/api/health'&&request.method==='GET')return json({application:'APROAR',stage:stage(env),databaseConfigured:Boolean(env.DATABASE_URL),writesEnabled:writes(env)});
-  if(path==='/api/login'&&request.method==='POST'){if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);if(!limit(request))return json({error:'Muitas tentativas. Aguarde um minuto.'},429);const result=await login(await bodyJSON(request),env);return json({session:result.session},200,{'set-cookie':result.cookie});}
+  if(path==='/api/login'&&request.method==='POST'){if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);if(!limit(request))return json({error:'Muitas tentativas. Aguarde um minuto.'},429);const body=await bodyJSON(request);let authSql=null;if(body.role==='SUPERVISOR'){if(!env.DATABASE_URL)return json({error:'Banco não configurado para validar a chave do supervisor.'},503);authSql=neon(env.DATABASE_URL);}const result=await login(body,env,authSql);return json({session:result.session},200,{'set-cookie':result.cookie});}
   if(path==='/api/logout'&&request.method==='POST'){if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);return json({ok:true},200,{'set-cookie':logoutCookie});}
   if(path==='/api/check-database'||path==='/api/preview-data'){
    if(request.method!=='POST')return json({error:'Método não permitido.'},405);
