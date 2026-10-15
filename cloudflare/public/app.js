@@ -1700,8 +1700,8 @@ function renderEquipeDia(){
       if(!card)continue;
       const extraRows=()=>card.querySelectorAll('.additional-services .allocation-row').length;
       const wanted=Math.max(0,saved.services.length-1);
-      while(extraRows()<wanted)card.querySelector('.add-service')?.click();
-      while(extraRows()>wanted)card.querySelector('.remove-last-service')?.click();
+      for(let i=extraRows();i<wanted&&i<50;i++)card.querySelector('.add-service')?.click();
+      for(let i=extraRows();i>wanted&&i>0;i--)card.querySelector('.remove-last-service')?.click();
       const services=card.querySelectorAll('.allocation-row');
       saved.services.forEach((item,i)=>{
         if(!services[i])return;
@@ -1730,7 +1730,7 @@ function renderEquipeDia(){
     if(!onlineSession||!onlineWritable||onlineSession.role==='VISUALIZAR'){
       if(onlineConfirmed){state=copy(onlineConfirmed);OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);}
       const reason=!onlineSession?'Sua sessão não está autenticada. Entre novamente.':onlineSession.role==='VISUALIZAR'?'Este perfil é somente para visualização.':'A gravação está bloqueada no ambiente do Worker. Confira a autorização de escrita da produção.';
-      toast(reason,true);showSaveFeedback(reason,true);queueMicrotask(()=>render());return false;
+      toast(reason,true);showSaveFeedback(reason,true);queueMicrotask(()=>{render();restoreSupervisorDraft(pendingSupervisorDraft);});return false;
     }
     if(onlineQueued||onlineSaving){showToast('Já existe um salvamento em andamento. Aguarde a confirmação antes de enviar outro apontamento.',true);return false;}
     state.obras=OBRAS;state.colaboradores=COLABORADORES;onlineQueued=true;lockOnline(true);
