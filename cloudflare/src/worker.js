@@ -13,10 +13,10 @@ const failedLogins=new Map();
 function limit(request){const ip=request.headers.get('cf-connecting-ip')||'unknown',time=Date.now(),entry=failedLogins.get(ip);if(entry&&entry.until>time&&entry.n>=10)return false;if(!entry||entry.until<time)failedLogins.set(ip,{n:0,until:time+60000});failedLogins.get(ip).n++;if(failedLogins.size>5000)failedLogins.clear();return true;}
 async function bodyJSON(request){if(Number(request.headers.get('content-length')||0)>8e6)throw Object.assign(Error('Dados muito grandes. Divida a operação.'),{status:413});const text=await request.text();if(text.length>8e6)throw Object.assign(Error('Dados muito grandes.'),{status:413});try{return JSON.parse(text);}catch{throw Object.assign(Error('Requisição inválida.'),{status:400});}}
 function summary(db,session,env){return {state:visibleState(db,session),version:db.version,session:{role:session.role,user:session.user},supervisors,writesEnabled:writes(env),stage:stage(env)};}
-export default {async fetch(request,env){const url=new URL(request.url),path=url.pathname;
+export default {async fetch(request,env){const url=new URL(request.url),path=url.pathname;let loginStage='request';
  try{
   if(path==='/api/health'&&request.method==='GET')return json({application:'APROAR',stage:stage(env),databaseConfigured:Boolean(env.DATABASE_URL),writesEnabled:writes(env)});
-  if(path==='/api/login'&&request.method==='POST'){if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);if(!limit(request))return json({error:'Muitas tentativas. Aguarde um minuto.'},429);const body=await bodyJSON(request);let authSql=null;if(body.role==='SUPERVISOR'){if(!env.DATABASE_URL)return json({error:'Banco não configurado para validar a chave do supervisor.'},503);authSql=neon(env.DATABASE_URL);}const result=await login(body,env,authSql);return json({session:result.session},200,{'set-cookie':result.cookie});}
+  if(path==='/api/login'&&request.method==='POST'){loginStage='check-origin';if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);loginStage='rate-limit';if(!limit(request))return json({error:'Muitas tentativas. Aguarde um minuto.'},429);loginStage='parse-request';const body=await bodyJSON(request);let authSql=null;if(body.role==='SUPERVISOR'){loginStage='check-database-config';if(!env.DATABASE_URL)return json({error:'Banco não configurado para validar a chave do supervisor.'},503);loginStage='create-database-client';authSql=neon(env.DATABASE_URL);}loginStage='authenticate';const result=await login(body,env,authSql);loginStage='format-response';return json({session:result.session},200,{'set-cookie':result.cookie});}
   if(path==='/api/logout'&&request.method==='POST'){if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);return json({ok:true},200,{'set-cookie':logoutCookie});}
   if(path==='/api/check-database'||path==='/api/preview-data'){
    if(request.method!=='POST')return json({error:'Método não permitido.'},405);
@@ -106,6 +106,7 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
   if(env.ASSETS){const response=await env.ASSETS.fetch(request);const headers=new Headers(response.headers);for(const [k,v] of Object.entries(common))headers.set(k,v);headers.set('content-security-policy',"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");return new Response(response.body,{status:response.status,headers});}
   return json({message:'Interface ainda não publicada.'},404);
  }catch(e){
+  if(path==='/api/login'){console.error('APROAR login failure',JSON.stringify({stage:loginStage,type:String(e?.name||'Error').slice(0,60),code:String(e?.code||'none').slice(0,60),status:Number(e?.status||0)}));return json({error:'Falha interna no login. Etapa: '+loginStage+'. Consulte o registro do Worker.'},502);}
   if(path.startsWith('/api/trello/')){
    console.error('APROAR Trello route failure', JSON.stringify({
     route:path, type:String(e?.name||'Error').slice(0,80),
