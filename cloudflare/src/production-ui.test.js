@@ -159,7 +159,7 @@ test('Portal Supervisor remove a data duplicada apenas da aba de convocacao',()=
 test('Convocacao inicia no proximo dia corrido inclusive sabado e domingo e permite alteracao',()=>{
  const js=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
  const conv=js.slice(js.indexOf('function renderUnitConvocacao(){'),js.indexOf('function operationalRows('));
- assert.ok(conv.includes('if(!unitConvDate){const d=dateLocal(isoToday());d.setDate(d.getDate()+1);unitConvDate=calendarISO(d);}'));
+ assert.ok(conv.includes('if(!unitConvDate)unitConvDate=tomorrowISO();'));
  assert.doesNotMatch(conv,/nextBusinessDay\(/);
  assert.ok(conv.includes('id="unit-conv-date" type="date" value="${unitConvDate}" required'));
  assert.ok(conv.includes("$('#unit-conv-date').onchange=()=>{unitConvDate=$('#unit-conv-date').value;render();}"));

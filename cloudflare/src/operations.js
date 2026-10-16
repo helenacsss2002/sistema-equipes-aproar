@@ -157,7 +157,10 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
   const key=noConvKey(x),old=oldNoConv.get(key);
   if(incomingKeys.has(key))fail('Confirmação sem convocação duplicada.');
   incomingKeys.add(key);
-  if(old&&same(old,x)){savedNoConv.push(old);continue;}
+  if(old&&same(old,x)){
+   if(next.convocacoes.some(c=>c.supervisor===x.supervisor&&c.unidade===x.unidade&&c.dataServico===x.dataServico))fail('Já existe convocação nesta unidade e data. Desfaça a confirmação antes de convocar.');
+   savedNoConv.push(old);continue;
+  }
   if(old)fail('Não é permitido alterar confirmação existente. Desfaça e registre novamente.');
   if(!supervisors.includes(x.supervisor))fail('Supervisor inválido na confirmação sem convocação.');
   date(x.dataServico);
