@@ -145,8 +145,37 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
  const sync=(name,table,convert,allowed)=>{const old=new Map(base[name].map(x=>[String(x.id),x]));for(const x of next[name]){const previous=old.get(String(x.id));if(previous&&same(previous,x))continue;if(!allowed(x,previous))fail('Sem permissão para alterar '+name+'.',403);if(!previous&&numericId(x.id))fail('Identificador novo inválido.');add(table,previous?'update':'insert',x.id,convert(x,previous));}for(const x of base[name])if(!next[name].some(y=>String(y.id)===String(x.id))){if(session.role!=='CONTROLADORIA')fail('Sem permissão para excluir registro.',403);add(table,'delete',x.id);}};
  sync('indisponibilidades','indisponibilidades',x=>{if(!staff.has(String(x.colaboradorId)))fail('Colaborador inválido.');date(x.inicio);date(x.fim);if(x.fim<x.inicio)fail('Período inválido.');return {colaborador_id:String(x.colaboradorId),colaborador_nome_snapshot:staff.get(String(x.colaboradorId)).nome,motivo:required(x.motivo,'Motivo'),inicio:x.inicio,fim:x.fim,observacao:String(x.obs||x.observacao||''),criado_por:session.user,ativo:true};},()=>session.role==='CONTROLADORIA');
  sync('conflitosTentados','conflitos_convocacao',(x,previous)=>previous?{resolvido:Boolean(x.resolvido),resolvido_em:x.resolvido?timestamp:null,resolvido_por:x.resolvido?session.user:null}:{colaborador_id:String(x.colaboradorId),colaborador_nome_snapshot:staff.get(String(x.colaboradorId))?.nome||'',data:date(x.dataServico),convocacao_existente_id:String(x.convocacaoExistenteId||''),engenheiro_original:required(x.supervisorExistente,'Supervisor original'),turno_original:period(x.turnoExistente),unidade_original:String(x.unidadeExistente||''),engenheiro_tentativa:session.role==='SUPERVISOR'?session.user:required(x.supervisor,'Supervisor'),turno_tentativa:period(x.turno),unidade_tentativa:String(x.unidade||''),criado_em:timestamp,resolvido:false,contexto:{origem:'aproar-web'}},(x,previous)=>previous?session.role==='CONTROLADORIA':['CONTROLADORIA','SUPERVISOR'].includes(session.role));
+ // Registro de unidade sem convocação: não altera apontamentos, custos nem convocações anteriores.
+ const baseNoConv=base.semConvocacoesUnidade||[],incomingNoConv=next.semConvocacoesUnidade??baseNoConv;
+ if(!Array.isArray(incomingNoConv)||incomingNoConv.length>30000)fail('Confirmações sem convocação inválidas.');
+ const noConvKey=x=>String(x.supervisor)+'|'+String(x.unidade)+'|'+String(x.dataServico);
+ const oldNoConv=new Map(baseNoConv.map(x=>[noConvKey(x),x]));
+ if(oldNoConv.size!==baseNoConv.length)fail('Há confirmações históricas duplicadas.');
+ const savedNoConv=[],incomingKeys=new Set();
+ for(const x of incomingNoConv){
+  if(!x||typeof x!=='object'||Array.isArray(x))fail('Confirmação sem convocação inválida.');
+  const key=noConvKey(x),old=oldNoConv.get(key);
+  if(incomingKeys.has(key))fail('Confirmação sem convocação duplicada.');
+  incomingKeys.add(key);
+  if(old&&same(old,x)){savedNoConv.push(old);continue;}
+  if(old)fail('Não é permitido alterar confirmação existente. Desfaça e registre novamente.');
+  if(!supervisors.includes(x.supervisor))fail('Supervisor inválido na confirmação sem convocação.');
+  date(x.dataServico);
+  if(typeof x.unidade!=='string'||!base.units.includes(x.unidade))fail('Unidade inválida na confirmação sem convocação.');
+  if(session.role!=='CONTROLADORIA'&&(session.role!=='SUPERVISOR'||x.supervisor!==session.user))fail('Somente o supervisor responsável pode confirmar sua unidade.',403);
+  const owner=base.unitOwners?.[x.unidade];
+  if(owner&&owner!==x.supervisor)fail('Esta unidade está atribuída a outro supervisor.',403);
+  if(next.convocacoes.some(c=>c.supervisor===x.supervisor&&c.unidade===x.unidade&&c.dataServico===x.dataServico))fail('Já existe convocação nesta unidade e data. Desfaça a confirmação antes de convocar.');
+  savedNoConv.push({supervisor:x.supervisor,unidade:x.unidade,dataServico:x.dataServico,registradoEm:timestamp,registradoPor:session.user});
+ }
+ for(const old of baseNoConv){
+  if(incomingKeys.has(noConvKey(old)))continue;
+  if(session.role!=='CONTROLADORIA'&&(session.role!=='SUPERVISOR'||old.supervisor!==session.user))fail('Sem permissão para desfazer confirmação de outro supervisor.',403);
+ }
+ const noConvChanged=!same(savedNoConv,baseNoConv);
  if(session.role!=='CONTROLADORIA'){
   for(const k of ['units','teamsConfig','unitOwners','teamsAutomation','teamsMessage','teamsHistory'])if(!same(next[k]??base[k],base[k]))fail('Sem permissão para alterar configurações.',403);
+  if(noConvChanged){const config=db.raw.settings[0]?.data||{};add('aproar_web_settings','update',1,{data:{...config,semConvocacoesUnidade:savedNoConv}});}
  }else{
   for(const [s,x] of Object.entries(next.teamsConfig||{})){
    const previous=base.teamsConfig?.[s];
@@ -172,7 +201,7 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
     // become permanent unit registrations just because another edit was saved.
     const previousConfig=db.raw.settings[0]?.data||{};
     const persistedUnits=units.filter(u=>u.length<=200||(Array.isArray(previousConfig.units)&&previousConfig.units.includes(u)));
-    const config={units:persistedUnits,unitOwners:next.unitOwners||{},teamsAutomation:!!next.teamsAutomation,teamsMessage:next.teamsMessage||'',teamsHistory:history};if(!same(config,previousConfig))add('aproar_web_settings','update',1,{data:config});
+    const config={...previousConfig,units:persistedUnits,unitOwners:next.unitOwners||{},teamsAutomation:!!next.teamsAutomation,teamsMessage:next.teamsMessage||'',teamsHistory:history,...(noConvChanged?{semConvocacoesUnidade:savedNoConv}:{})};if(!same(config,previousConfig))add('aproar_web_settings','update',1,{data:config});
  }
  // Always generate a server audit record for actual changes, rather than trusting browser audit text.
  if(ops.length)add('auditoria','insert','audit:'+crypto.randomUUID(),{entidade:'aproar-web',entidade_id:null,acao:'SALVAR',usuario:session.user,ocorrido_em:timestamp,contexto:{perfil:session.role,operacoes:ops.map(o=>({tabela:o.table,acao:o.action,id:o.id}))}});

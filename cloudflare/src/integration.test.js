@@ -460,3 +460,41 @@ test('Optional extra availability value persists without being charged when cate
   assert.equal(after.state.apontamentos[0].itens[0].valorExtraDisponivel,123.45);
  }finally{await pg.close();}
 });
+
+
+test('Supervisor confirms no convocation by unit/date; persists, rejects impersonation and can undo',async()=>{
+ const {pg,sql}=await fixture();
+ try{
+  let db=await readDatabase(sql),next=structuredClone(db.state);
+  next.semConvocacoesUnidade.push({supervisor:'EDUARDO',unidade:'FIEC',dataServico:'2026-10-07',registradoEm:now});
+  const result=await save(sql,next,actor);db=result.after;
+  assert.equal(db.state.semConvocacoesUnidade.length,1);
+  assert.equal(db.raw.settings[0].data.semConvocacoesUnidade[0].supervisor,'EDUARDO');
+  assert.equal(db.raw.settings[0].data.semConvocacoesUnidade[0].registradoPor,'EDUARDO');
+  assert(result.ops.some(op=>op.table==='aproar_web_settings'&&op.action==='update'));
+  next=structuredClone(db.state);
+  next.semConvocacoesUnidade.push({supervisor:'FELIPE',unidade:'FIEC',dataServico:'2026-10-07'});
+  assert.throws(()=>buildOperations(db,next,actor,now),/Somente o supervisor responsável/);
+  next=structuredClone(db.state);conv(next);
+  assert.throws(()=>buildOperations(db,next,actor,now),/Já existe convocação nesta unidade/);
+  next=structuredClone(db.state);
+  next.semConvocacoesUnidade=[];
+  db=(await save(sql,next,actor)).after;
+  assert.equal(db.state.semConvocacoesUnidade.length,0);
+  assert.equal(db.raw.convocacoes.length,0);
+  assert.equal(db.raw.apontamentos.length,0);
+ }finally{await pg.close();}
+});
+
+test('Controladoria configuration update retains supervisors no-convocation confirmations',async()=>{
+ const {pg,sql}=await fixture();
+ try{
+  let db=await readDatabase(sql),next=structuredClone(db.state);
+  next.semConvocacoesUnidade.push({supervisor:'EDUARDO',unidade:'FIEC',dataServico:'2026-10-07'});
+  db=(await save(sql,next,actor)).after;
+  next=structuredClone(db.state);next.teamsMessage='Alteração segura';
+  db=(await save(sql,next,admin)).after;
+  assert.equal(db.state.semConvocacoesUnidade.length,1);
+  assert.equal(db.raw.settings[0].data.semConvocacoesUnidade[0].supervisor,'EDUARDO');
+ }finally{await pg.close();}
+});
