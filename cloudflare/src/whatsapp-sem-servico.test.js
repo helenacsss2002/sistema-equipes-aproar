@@ -26,7 +26,7 @@ vm.runInContext(panel+'\nglobalThis.buildPanel=painelWhatsAppSemServico;',ctx);
 
 test('WhatsApp lists only supervisor-confirmed no-service units for selected date',()=>{
  const html=ctx.buildPanel('2026-10-17');
- assert.match(html,/Unidades que não funcionaram · 3/);
+ assert.match(html,/Unidades que não funcionarão · 3/);
  assert.match(html,/Barra Do Ceará/);
  assert.match(html,/sinalizado por <strong>EDUARDO<\/strong>/);
  assert.match(html,/Fiec/);
@@ -39,7 +39,7 @@ test('WhatsApp lists only supervisor-confirmed no-service units for selected dat
 
 test('WhatsApp no-service panel updates with date and shows an empty state',()=>{
  const html=ctx.buildPanel('2026-10-18');
- assert.match(html,/Unidades que não funcionaram · 0/);
+ assert.match(html,/Unidades que não funcionarão · 0/);
  assert.match(html,/Nenhuma unidade foi sinalizada sem serviço nesta data/);
  const whatsApp=app.slice(app.indexOf('  function renderWhatsApp(){'),app.indexOf('  let indicatorUnit=',app.indexOf('  function renderWhatsApp(){')));
  assert.match(whatsApp,/id="wp-no-service"/);
