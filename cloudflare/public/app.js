@@ -546,7 +546,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
  const extraValue=draft&&typeof draft.enabled==='boolean'?(draft.enabled?draft.extra:'Não'):(existingExtra?.extra||(legacyExtra?item.extra:'Não')),extraEnabled=extraValue!=='Não',
  extraCategory=EXTRA_OPTIONS.includes(extraValue)&&extraEnabled?extraValue:'Meia diária',
  proposedWork=draft?.obraId||existingExtra?.obraId||services.find(x=>x.obraId)?.obraId||defaultObra||'',workId=OBRAS.some(o=>String(o.id)===String(proposedWork))?proposedWork:(OBRAS[0]?.id||''),extraObservation=draft?.observacao??existingExtra?.observacao??'',
- savedExtraAmount=draft?.valorExtraOriginal??existingExtra?.valorExtraOriginal??item?.valorExtraOriginal??null,extraAmount=Number(savedExtraAmount)>0?roundMoney(Number(savedExtraAmount)):0,
+ savedExtraAmount=draft?.valorExtraOriginal??existingExtra?.valorExtraOriginal??item?.valorExtraDisponivel??item?.valorExtraOriginal??null,extraAmount=Number(savedExtraAmount)>0?roundMoney(Number(savedExtraAmount)):0,
  nightValue=unit==='SEBRAE'&&presence(item?.status||'Presente (Integral)')?(item?.financeAdjusted?Number(item?.noturno||0):[50,90].includes(Number(item?.noturno))?Number(item.noturno):90):0;
  return `<div class="person-row person-card" data-person="${cid}" data-unit="${escapeHtml(unit)}" data-extra-original="0" data-finance-adjusted="${item?.financeAdjusted?'true':'false'}" data-financeiro-original="${Number(item?.financeiro)||0}" data-ajuda-custo="${Number(item?.ajudaCusto)||0}"><div class="person-name">${escapeHtml(c?.nome||cid)}<br><small>${escapeHtml(c?.funcao||'')} · ${escapeHtml(unit)}</small></div>
  <div class="person-top">${field('Status',`<select class="control row-status">${STATUS_OPTIONS.map(x=>`<option ${x===(item?.status||'Presente (Integral)')?'selected':''}>${x}</option>`).join('')}</select>`)}</div>${c?.avulso==='Sim'?`<div class="form-grid section">${field('Diárias trabalhadas · avulso (custo da Controladoria)',`<select class="control row-avulso-diaria">${AVULSO_DIARIA_OPTIONS.map(x=>`<option value="${x}" ${x===(item?.tipoDiariaAvulso||'Diária')?'selected':''}>${x}</option>`).join('')}</select>`)}</div>`:''}
@@ -650,7 +650,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
           observacao:row.querySelector('.row-extra-obs')?.value.trim()||'',
           dayWorkId:servicos.find(x=>x.obraId)?.obraId||''
         },
-        valorExtraOriginal:Math.max(0,Number(row.querySelector('.row-extra-value')?.value)||0),observacao:row.querySelector('.row-obs').value.trim(),servicos,
+        valorExtraOriginal:0,valorExtraDisponivel:Math.max(0,Number(row.querySelector('.row-extra-value')?.value)||0),observacao:row.querySelector('.row-obs').value.trim(),servicos,
         obraId:servicos[0]?.obraId||'',financeAdjusted:row.dataset.financeAdjusted==='true',
         financeiro:Math.max(0,Number(row.dataset.financeiroOriginal)||0),
         noturno:Number(row.querySelector('.row-noturno').value)||0,
