@@ -79,8 +79,18 @@ def unidade_do_card(card):
 
 
 def main():
+    api_key = os.environ.get('TRELLO_API_KEY', '').strip()
+    api_token = os.environ.get('TRELLO_API_TOKEN', '').strip()
+    if not api_key or not api_token:
+        raise RuntimeError('Configure TRELLO_API_KEY e TRELLO_API_TOKEN nos GitHub Actions secrets.')
     r = requests.get(
-        TRELLO_JSON_URL,
+        'https://api.trello.com/1/boards/TX8hGvmI',
+        params={
+            'fields': 'id,name', 'lists': 'all', 'cards': 'all',
+            'card_fields': 'id,idList,name,desc,closed,labels',
+            'list_fields': 'id,name,closed',
+            'key': api_key, 'token': api_token,
+        },
         timeout=(10, 45),
         headers={"User-Agent": "APROAR-Trello-Sync/1.0"},
     )
