@@ -30,7 +30,7 @@ test('Portal do Supervisor tem um único campo Valor da Extra e total em azul n�
  assert.match(person,/field\('Valor da Extra Disponível \(R\$\)'/);
  assert.equal((person.match(/field\('Valor da Extra Disponível \(R\$\)'/g)||[]).length,1);
  assert.match(person,/class="control row-extra-value"[^>]*type="number"[^>]*min="0"[^>]*step="0\.01"/);
- assert.match(person,/placeholder="Preenchimento disponível mesmo com Não"/);
+ assert.doesNotMatch(person,/class="control row-extra-value"[^>]*placeholder=/,'O campo deve ficar vazio, sem texto de preenchimento');
  assert.doesNotMatch(person,/class="control row-extra-value"[^>]*disabled/);
  const binder=app.slice(app.indexOf('function bindServiceRows()'),app.indexOf('function validateAgreementObservations('));
  assert.match(binder,/extraAmount\.disabled=false/);
