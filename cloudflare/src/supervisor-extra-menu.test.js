@@ -47,7 +47,10 @@ test('Houve extra? possui cinco opções, incluindo 1 e meia diária, e Não sel
   ]);
   assert.match(menu[1],/<option value="Não" selected>/);
   assert.doesNotMatch(html,/row-extra-category/);
-  assert.match(html,/row-extra-value[^>]*type="text"[^>]*value="R\$ 0,00"[^>]*disabled/);
+  assert.match(html,/row-extra-value[^>]*type="number"[^>]*min="0"[^>]*step="0\.01"/);
+  assert.doesNotMatch(html,/row-extra-value[^>]*disabled/);
+  assert.match(app,/extraAmount\.disabled=false/);
+  assert.match(app,/extraAmount\.required=active/);
   assert.match(html,/row-total-summary/);
   assert.doesNotMatch(html,/row-extra-value[^>]*readonly/);
   assert.doesNotMatch(app.slice(app.indexOf('function renderSupervisorHeader()'),app.indexOf('function audit(action')),/\['extras','Lançar extra'\]/);
@@ -63,6 +66,7 @@ test('Registro existente de Uma e meia diária aparece na lista normal, com valo
   const menu=html.match(/<select class="control row-extra"[^>]*>([\s\S]*?)<\/select>/)?.[1];
   assert.ok(menu);
   assert.match(menu,/value="Uma e meia diária" selected>1 e meia diária<\/option>/);
-  assert.match(html,/row-extra-value[^>]*type="number"[^>]*value="300\.00"[^>]*required/);
+  assert.match(html,/row-extra-value[^>]*type="number"[^>]*value="300\.00"/);
+  assert.doesNotMatch(html,/row-extra-value[^>]*disabled/);
   assert.match(html,/Registro anterior/);
 });
