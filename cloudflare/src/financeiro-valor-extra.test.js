@@ -29,7 +29,12 @@ test('Portal do Supervisor tem um único campo Valor da Extra e total em azul n�
  const person=app.slice(app.indexOf('function personRow('),app.indexOf('function bindServiceRows()'));
  assert.match(person,/field\('Valor da Extra \(R\$\)'/);
  assert.equal((person.match(/field\('Valor da Extra \(R\$\)'/g)||[]).length,1);
- assert.match(person,/class="control row-extra-value"[^>]*placeholder="Digite o valor"/);
+ assert.match(person,/class="control row-extra-value"[^>]*type="number"[^>]*min="0"[^>]*step="0\.01"/);
+ assert.match(person,/placeholder="\$\{extraEnabled\?'Digite o valor':'Valor disponível \(opcional\)'\}"/);
+ assert.doesNotMatch(person,/class="control row-extra-value"[^>]*disabled/);
+ const binder=app.slice(app.indexOf('function bindServiceRows()'),app.indexOf('function validateAgreementObservations('));
+ assert.match(binder,/extraAmount\.disabled=false/);
+ assert.match(binder,/extraAmount\.required=active/);
  assert.doesNotMatch(person,/class="control row-extra-value"[^>]*readonly/);
  assert.match(person,/data-financeiro-original=/);
  assert.doesNotMatch(person,/class="control row-financeiro"/);
@@ -56,5 +61,5 @@ test('Todos os relatórios financeiros usam Valor da Extra e explicitam valores 
   assert.match(area,/Valores (complementares já registrados|anteriores)/,start);
   assert.doesNotMatch(area,/'Financeiro \(R\$\)'/,start);
  }
- assert.match(html,/app\.js\?v=aproar-avulso-save-feedback-20261015-2/);
+ assert.match(html,/app\.js\?v=aproar-supervisor-extra-disponivel-20261016-2/);
 });
