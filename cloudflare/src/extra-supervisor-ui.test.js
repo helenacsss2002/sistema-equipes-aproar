@@ -20,7 +20,7 @@ function setup(){
  });
  const inputs={
   '.row-extra':control('Não'),
-  '.row-extra-value':control('R$ 0,00'),
+  '.row-extra-value':control(''),
   '.row-noturno':control('50'),
   '.row-status':control('Presente (Integral)'),
   '.row-financeiro-historico':control('120'),
@@ -66,9 +66,10 @@ function setup(){
 test('Categoria de Extra não predefine valor; supervisor digita o valor e o total é recalculado',()=>{
  const {ctx,inputs,toggled}=setup();
  ctx.bind();
- assert.equal(inputs['.row-extra-value'].value,'R$ 0,00');
- assert.equal(inputs['.row-extra-value'].disabled,true);
- assert.equal(inputs['.row-extra-value'].type,undefined,'Simulador não cria tipo até selecionar extra');
+ assert.equal(inputs['.row-extra-value'].value,'');
+ assert.equal(inputs['.row-extra-value'].disabled,false,'Valor disponível permanece editável mesmo com Não');
+ assert.equal(inputs['.row-extra-value'].type,'number');
+ assert.equal(inputs['.row-extra-value'].required,false,'Valor não é obrigatório quando a opção é Não');
  assert.match(inputs['.row-total'].textContent,/186,00/);
  inputs['.row-extra'].value='Diária';inputs['.row-extra'].onchange();
  assert.equal(inputs['.row-extra-value'].value,'','Selecionar Diária não preenche automaticamente a quantia');
@@ -88,15 +89,16 @@ test('Categoria de Extra não predefine valor; supervisor digita o valor e o tot
  assert.match(inputs['.row-total'].textContent,/538,50/);
  assert.equal(inputs['.row-financeiro-historico'].value,'120','Valor histórico não é alterado');
  inputs['.row-extra'].value='Não';inputs['.row-extra'].onchange();
- assert.equal(inputs['.row-extra-value'].disabled,true);
- assert.equal(inputs['.row-extra-value'].value,'R$ 0,00');
- assert.equal(inputs['.row-extra-value'].type,'text');
+ assert.equal(inputs['.row-extra-value'].disabled,false,'Alternar para Não não bloqueia o campo');
+ assert.equal(inputs['.row-extra-value'].value,'312.50','Alternar para Não preserva o valor digitado');
+ assert.equal(inputs['.row-extra-value'].type,'number');
  assert.equal(inputs['.row-extra-value'].required,false);
  assert.match(inputs['.row-total'].textContent,/226,00/);
  inputs['.row-extra'].value='Meia diária';inputs['.row-extra'].onchange();
- assert.equal(inputs['.row-extra-value'].value,'','Ao ativar novamente, precisa digitar novo valor');
+ assert.equal(inputs['.row-extra-value'].value,'312.50','O valor continua disponível ao ativar novamente');
  assert.equal(inputs['.row-extra-value'].type,'number');
  assert.equal(inputs['.row-extra-value'].disabled,false);
+ assert.equal(inputs['.row-extra-value'].required,true);
 });
 test('Apontamento normal e retroativo enviam categoria e valor informado sem duplicar a presença',()=>{
  const {ctx,inputs}=setup();
@@ -107,6 +109,7 @@ test('Apontamento normal e retroativo enviam categoria e valor informado sem dup
  assert.equal(item.extraLancamento.enabled,true);
  assert.equal(item.extraLancamento.extra,'Duas diárias');
  assert.equal(item.extraLancamento.valorExtraOriginal,213.45);
+ assert.equal(item.valorExtraDisponivel,213.45);
  assert.equal(item.extraLancamento.obraId,'3');
  assert.equal(item.extraLancamento.observacao,'serviço de extra');
  assert.equal(item.noturno,50);
@@ -115,6 +118,7 @@ test('Apontamento normal e retroativo enviam categoria e valor informado sem dup
  inputs['.row-extra'].value='Não';
  const [other]=ctx.read(['1']);
  assert.equal(other.extraLancamento.enabled,false);
+ assert.equal(other.valorExtraDisponivel,213.45,'O valor opcional continua no apontamento mesmo quando extra está Não');
 });
 test('Não há funções duplicadas que sobrescrevam Extra e apontamento da equipe',()=>{
  assert.equal((ui.match(/function bindServiceRows\(\)/g)||[]).length,1);
@@ -128,15 +132,19 @@ test('Não há funções duplicadas que sobrescrevam Extra e apontamento da equi
  assert.match(ui,/data-financeiro-original/);
  assert.doesNotMatch(ui,/class="control row-financeiro"/);
  assert.match(ui,/TOTAL A PAGAR AO COLABORADOR/);
- assert.match(ui,/valorExtraOriginal:enabled\?Number/);
+ assert.match(ui,/valorExtraOriginal:Math\.max/);
+ assert.match(ui,/valorExtraDisponivel:Math\.max/);
  assert.match(ui,/category=row.querySelector\('\.row-extra'\)/);
  assert.match(ui,/option value="50"/);
  assert.match(ui,/option value="90"/);
  assert.match(html,/row-total-summary/);
- assert.match(html,/app\.js\?v=aproar-avulso-save-feedback-20261015-2/);
+ assert.match(html,/app\.js\?v=aproar-supervisor-extra-disponivel-20261016-2/);
  assert.match(ui,/bindPersonSearch\(\$\('#retro-person-search'\),\(\)=>\$\$\('\.retro-person-list/);
  assert.match(ui,/function validateExtraAmounts\(items,scope=document\)/);
  assert.match(ui,/noValidate=true/);
  assert.match(ui,/data-convocacao="\$\{escapeHtml\(c\.id\)\}"/);
  assert.match(ui,/const ids = \$\$\('input\[name="retro-colab"\]:checked'\)\.map/);
+ assert.match(ui,/saveData\(\(\)=>setView\('pendencias'\)\)/,'Regularização retroativa navega após salvar');
+ assert.match(ui,/showSaveFeedback\('Enviando apontamento para gravação no banco…'/,'Clique mostra progresso da gravação');
+ assert.match(ui,/extraAmount\.required=active/,'Valor obrigatório apenas quando a opção de extra não é Não');
 });
