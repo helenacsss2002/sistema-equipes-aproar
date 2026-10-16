@@ -445,3 +445,18 @@ test('Realocação com apontamento e troca de obra da mesma unidade mantém o ID
   assert.equal(db.raw.servicos_apontamento[0].obra_id,'2');
  }finally{await pg.close();}
 });
+
+test('Optional extra availability value persists without being charged when category is No',async()=>{
+ const {pg,sql}=await fixture();
+ try{
+  const db=await readDatabase(sql),next=structuredClone(db.state);
+  conv(next);attendance(next,'draft-conv');
+  next.apontamentos[0].itens[0].extra='Não';
+  next.apontamentos[0].itens[0].valorExtraDisponivel=123.45;
+  const after=(await save(sql,next,actor)).after;
+  assert.equal(Number(after.raw.apontamentos[0].valor_extra),0);
+  assert.equal(Number(after.raw.apontamentos[0].custo_encargos_base),241.74);
+  assert.equal(after.state.apontamentos[0].itens[0].extra,'Não');
+  assert.equal(after.state.apontamentos[0].itens[0].valorExtraDisponivel,123.45);
+ }finally{await pg.close();}
+});
