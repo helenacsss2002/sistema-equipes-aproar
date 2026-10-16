@@ -5,3 +5,12 @@ test('Structured attendance keeps several services and exact financial values',(
 test('Legacy metadata establishes actual attendance',()=>{const d=fixture();d.convocacoes[0].observacao='Turno: Manhã ||APROAR_META|| {"apontado_em":"2026-10-08T11:00:00Z"}';assert.equal(mapNeonData(d).apontamentos.length,1);});
 test('Unmapped extra is retained and flagged rather than silently lost',()=>{const d=fixture();d.apontamentos=[{id:2,convocacao_id:'7',status:'Presente (Integral)',valor_extra:75}];const r=mapNeonData(d);assert.equal(r.apontamentos[0].itens[0].valorExtraOriginal,75);assert.equal(r.warnings[0].code,'NONSTANDARD_EXTRA');});
 test('Malformed metadata does not crash preview',()=>assert.deepEqual(metadata('a ||APROAR_META|| broken').meta,{}));
+test('Available extra amount metadata survives reload without becoming payroll expense',()=>{
+ const d=fixture();
+ d.convocacoes[0].observacao='Turno: Integral ||APROAR_META|| {"valor_extra_disponivel":123.45}';
+ d.apontamentos=[{id:2,convocacao_id:'7',status:'Presente (Integral)',tipo_diaria:'Não',valor_extra:0}];
+ const item=mapNeonData(d).apontamentos[0].itens[0];
+ assert.equal(item.valorExtraDisponivel,123.45);
+ assert.equal(item.valorExtraOriginal,0);
+ assert.equal(item.extra,'Não');
+});
