@@ -32,7 +32,8 @@ test('extra exige valor e gravacao depende da resposta do Neon',()=>{
  assert.match(ui,/function validateExtraAmounts\(items,scope=document\)/);
  assert.match(ui,/amount<=0/);
  assert.match(ui,/showSaveFeedback\(onlineMessage\|\|'Apontamento confirmado e gravado no Neon\.'/);
- assert.match(ui,/showSaveFeedback\(message,true\)/);
+ assert.match(ui,/showSaveFeedback\(feedback,true\)/);
+ assert.match(ui,/restoreSupervisorDraft\(pendingSupervisorDraft\)/);
  assert.match(ui,/AbortController\(\)/);
  assert.match(ui,/Confira o histórico antes de tentar novamente para evitar duplicidade/);
  assert.doesNotMatch(ui,/for\(let attempt=0;attempt<2;attempt\+\+\)/);

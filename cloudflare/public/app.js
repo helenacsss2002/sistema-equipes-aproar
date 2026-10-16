@@ -1652,11 +1652,81 @@ function renderEquipeDia(){
     clearTimeout(showSaveFeedback._timer);
     showSaveFeedback._timer=setTimeout(()=>{node.style.display='none';},duration||(error?18000:12000));
   }
+
+  // Guarda apenas os campos visíveis do apontamento antes da confirmação do Neon.
+  // Uma resposta de erro não deve apagar o trabalho digitado pelo supervisor.
+  function captureSupervisorDraft(){
+    if(perfilAtual!=='SUPERVISOR'||viewAtual!=='apontamento')return null;
+    const form=document.querySelector('#day-form, #form-retro');
+    if(!form)return null;
+    const take=el=>({value:el.value,checked:!!el.checked});
+    const fields=[...form.querySelectorAll('input,select,textarea')]
+      .filter(el=>!el.closest('.person-card')).map(take);
+    const cards=[...form.querySelectorAll('.person-card')].map(card=>({
+      personId:card.dataset.person,
+      services:[...card.querySelectorAll('.allocation-row')].map(row=>({
+        work:row.querySelector('.service-work')?.value||'',
+        period:row.querySelector('.service-period')?.value||'Integral'
+      })),
+      fields:[...card.querySelectorAll('input,select,textarea')]
+        .filter(el=>!el.closest('.allocation-row')).map(take),
+      detailsOpen:!!card.querySelector('.more-services')?.open
+    }));
+    return {formId:form.id,fields,cards};
+  }
+  function restoreSupervisorDraft(draft){
+    if(!draft)return false;
+    const form=document.getElementById(draft.formId);
+    if(!form)return false;
+    const put=(el,v)=>{if(!el||!v)return;if(el.type==='checkbox'||el.type==='radio')el.checked=v.checked;else el.value=v.value;};
+    const regular=()=>[...form.querySelectorAll('input,select,textarea')].filter(el=>!el.closest('.person-card'));
+    // Reconstrói as fichas retroativas antes de preencher os valores digitados.
+    if(draft.formId==='form-retro'){
+      const current=regular();
+      for(let i=0;i<current.length;i++)put(current[i],draft.fields[i]);
+      const selected=form.querySelector('input[name="retro-colab"]:checked');
+      if(selected)selected.onchange?.();
+    }
+    const controls=regular();
+    for(let i=0;i<controls.length;i++)put(controls[i],draft.fields[i]);
+    if(draft.formId==='day-form')form.querySelector('#day-extra-kind')?.onchange?.();
+    let recovered=0;
+    for(const saved of draft.cards){
+      const card=[...form.querySelectorAll('.person-card')].find(el=>el.dataset.person===saved.personId);
+      if(!card)continue;
+      const extraRows=()=>card.querySelectorAll('.additional-services .allocation-row').length;
+      const wanted=Math.max(0,saved.services.length-1);
+      for(let i=extraRows();i<wanted&&i<50;i++)card.querySelector('.add-service')?.click();
+      for(let i=extraRows();i>wanted&&i>0;i--)card.querySelector('.remove-last-service')?.click();
+      const services=card.querySelectorAll('.allocation-row');
+      saved.services.forEach((item,i)=>{
+        if(!services[i])return;
+        const work=services[i].querySelector('.service-work'),period=services[i].querySelector('.service-period');
+        if(work)work.value=item.work;
+        if(period)period.value=item.period;
+      });
+      const cardFields=()=>[...card.querySelectorAll('input,select,textarea')]
+        .filter(el=>!el.closest('.allocation-row'));
+      let current=cardFields();
+      for(let i=0;i<current.length;i++)put(current[i],saved.fields[i]);
+      card.querySelector('.row-extra')?.onchange?.();
+      card.querySelector('.row-status')?.onchange?.();
+      current=cardFields();
+      for(let i=0;i<current.length;i++)put(current[i],saved.fields[i]);
+      const details=card.querySelector('.more-services');if(details)details.open=saved.detailsOpen;
+      card.querySelector('.row-extra-value')?.dispatchEvent(new Event('input',{bubbles:true}));
+      recovered++;
+    }
+    // Não confirma salvamento: apenas recupera o preenchimento para revisão.
+    return draft.cards.length===0||recovered>0;
+  }
+
   function saveData(onSuccess=null){
+    const pendingSupervisorDraft=captureSupervisorDraft();
     if(!onlineSession||!onlineWritable||onlineSession.role==='VISUALIZAR'){
       if(onlineConfirmed){state=copy(onlineConfirmed);OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);}
       const reason=!onlineSession?'Sua sessão não está autenticada. Entre novamente.':onlineSession.role==='VISUALIZAR'?'Este perfil é somente para visualização.':'A gravação está bloqueada no ambiente do Worker. Confira a autorização de escrita da produção.';
-      toast(reason,true);showSaveFeedback(reason,true);queueMicrotask(()=>render());return false;
+      toast(reason,true);showSaveFeedback(reason,true);queueMicrotask(()=>{render();restoreSupervisorDraft(pendingSupervisorDraft);});return false;
     }
     if(onlineQueued||onlineSaving){const message='Já existe um salvamento em andamento. Aguarde a confirmação antes de enviar outro apontamento.';showToast(message,true);showSaveFeedback(message,true);return false;}
     showSaveFeedback('Enviando apontamento para gravação no banco…',false,40000);
@@ -1688,7 +1758,10 @@ function renderEquipeDia(){
           console.error('APROAR state refresh after save failure',String(refreshError?.message||refreshError).slice(0,240));
           if(onlineConfirmed){state=copy(onlineConfirmed);OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);}
         }
-        onlineSaving=false;render();showSaveFeedback(message,true);showToast(message,true);
+        onlineSaving=false;render();
+        const restored=restoreSupervisorDraft(pendingSupervisorDraft);
+        const feedback=restored?'O salvamento não foi confirmado. Seus campos foram recuperados para conferência. Verifique o histórico antes de tentar novamente. '+message:message;
+        showSaveFeedback(feedback,true);showToast(feedback,true);
       }finally{onlineQueued=false;onlineSaving=false;onlineMessage='';lockOnline(false);}
     });
     return true;
