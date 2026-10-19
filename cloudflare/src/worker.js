@@ -114,8 +114,17 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
     detail:String(e?.message||'No error message').slice(0,320)
    }));
   }
+  if(path==='/api/save')console.error('APROAR save rejected',JSON.stringify({
+   code:String(e?.code||'unknown').slice(0,32),
+   name:String(e?.name||'Error').slice(0,60),
+   reason:String(e?.message||'').slice(0,320),
+   actorRole:session?.role||'unknown',
+   route:path
+  }));
   if(e.status)return json({error:e.message,...(e.details?{details:e.details}:{})},e.status);
-  const message=String(e.message||'');if(message.includes('APROAR_STALE'))return json({error:'Os dados mudaram durante a gravação. Nenhuma alteração foi salva. Atualize e tente novamente.'},409);
+  const message=String(e.message||'');
+  if(message.includes('APROAR_CONFLITO_TURNO'))return json({error:'Há outra convocação no mesmo turno para um dos colaboradores. Confira a data antes de regularizar o apontamento.'},409);
+  if(e.code==='57014'||e.code==='55P03')return json({error:'O banco está ocupado ou excedeu o tempo permitido. Confira o histórico antes de tentar novamente.'},503);if(message.includes('APROAR_STALE'))return json({error:'Os dados mudaram durante a gravação. Nenhuma alteração foi salva. Atualize e tente novamente.'},409);
   if(message.includes('APROAR_REQUEST_MISMATCH'))return json({error:'Requisição repetida com conteúdo diferente.'},409);
   if(e.code==='23505')return json({error:'Já existe um registro equivalente. Atualize os dados e confira antes de repetir.'},409);
   if(e.code==='23503')return json({error:'Este registro está vinculado ao histórico e não pode ser excluído.'},409);
