@@ -498,3 +498,34 @@ test('Controladoria configuration update retains supervisors no-convocation conf
   assert.equal(db.raw.settings[0].data.semConvocacoesUnidade[0].supervisor,'EDUARDO');
  }finally{await pg.close();}
 });
+
+test('EDUARDO retroactive pendencies: partial and multi-person team regularization preserves records',async()=>{
+ const {pg,sql}=await fixture();
+ try{
+  await pg.exec("INSERT INTO colaboradores(nome,funcao,valor_diaria) VALUES('Pessoa 2 QA','Servente',180),('Pessoa 3 QA','Pedreiro',250)");
+  let db=await readDatabase(sql),next=structuredClone(db.state);
+  next.convocacoes.push({id:'eduardo-team',supervisor:'EDUARDO',dataServico:'2026-10-07',unidade:'FIEC',obraId:'',turno:'Integral',colaboradores:['1','2','3']});
+  db=(await save(sql,next,actor)).after;
+  assert.equal(db.state.convocacoes.length,3);
+  assert.equal(db.state.apontamentos.length,0);
+  assert.equal(db.raw.convocacoes.length,3);
+  next=structuredClone(db.state);
+  const source=next.convocacoes.slice(0,2);
+  for(const c of source)next.apontamentos.push({id:'retro-'+c.id,convocacaoId:c.id,supervisor:'EDUARDO',dataServico:'2026-10-07',executor:'EDUARDO',retroativo:true,itens:[{colaboradorId:c.colaboradores[0],status:'Presente (Integral)',extra:'Não',valorExtraDisponivel:0,financeiro:0,noturno:0,acordo:0,ajudaCusto:0,observacao:'',servicos:[{obraId:'1',periodo:'Integral'}]}]});
+  let operations=buildOperations(db,next,actor,now);
+  assert.equal(operations.filter(x=>x.table==='apontamentos'&&x.action==='insert').length,2);
+  assert.equal(operations.filter(x=>x.action==='delete').length,0);
+  db=(await save(sql,next,actor)).after;
+  assert.equal(db.state.apontamentos.length,2);
+  assert.equal(db.raw.servicos_apontamento.length,2);
+  next=structuredClone(db.state);
+  const last=next.convocacoes.find(c=>!next.apontamentos.some(a=>a.convocacaoId===c.id));
+  assert(last);
+  next.apontamentos.push({id:'retro-final',convocacaoId:last.id,supervisor:'EDUARDO',dataServico:'2026-10-07',executor:'EDUARDO',retroativo:true,itens:[{colaboradorId:last.colaboradores[0],status:'Falta',extra:'Não',valorExtraDisponivel:0,financeiro:0,noturno:0,acordo:0,ajudaCusto:0,observacao:'',servicos:[]}]});
+  db=(await save(sql,next,actor)).after;
+  assert.equal(db.raw.convocacoes.length,3);
+  assert.equal(db.state.apontamentos.length,3);
+  assert.equal(db.raw.servicos_apontamento.length,2);
+  assert.equal(db.state.apontamentos.filter(a=>a.retroativo).length,3);
+ }finally{await pg.close();}
+});

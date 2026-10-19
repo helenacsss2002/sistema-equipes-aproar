@@ -120,6 +120,10 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
   if(e.code==='23505')return json({error:'Já existe um registro equivalente. Atualize os dados e confira antes de repetir.'},409);
   if(e.code==='23503')return json({error:'Este registro está vinculado ao histórico e não pode ser excluído.'},409);
   if(e.code==='42883'||e.code==='42P01')return json({error:'Estrutura do banco incompleta: confira a migração de banco correspondente ao ambiente.'},503);
+  if(path==='/api/save'){
+   const diagnosis=/^[0-9A-Z]{5}$/.test(String(e?.code||''))?String(e.code):'INDEFINIDO';
+   return json({error:'O banco não confirmou o salvamento. Referência técnica DB-'+diagnosis+'. O formulário foi preservado: confira as pendências antes de tentar novamente.'},502);
+  }
   return json({error:'Não foi possível concluir a operação. Confira a conexão e a estrutura do banco.'},502);
  }
 },

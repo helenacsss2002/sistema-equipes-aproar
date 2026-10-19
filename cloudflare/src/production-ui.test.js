@@ -311,7 +311,7 @@ test('Extras are launched from daily attendance and remain available to reports 
  assert.match(ui,/Valor da Extra \(R\$\)/);
  assert.match(ui,/Extra independente/);
  assert.doesNotMatch(ui,/item\('extras','Extras'/);
- assert.match(html,/aproar-whatsapp-sem-servico-20261016-2/);
+ assert.match(html,/aproar-retro-pendentes-20261019-1/);
 });
 
 test('Login do supervisor exige chave individual; visualizar permanece sem senha',()=>{

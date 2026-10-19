@@ -1736,7 +1736,10 @@ function renderEquipeDia(){
           console.error('APROAR state refresh after save failure',String(refreshError?.message||refreshError).slice(0,240));
           if(onlineConfirmed){state=copy(onlineConfirmed);OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);}
         }
-        onlineSaving=false;render();showSaveFeedback(message,true);showToast(message,true);
+        // Retain the retroactive form values on a rejected write. The authoritative state
+        // has already been restored above, so a later retry rebuilds the request safely.
+        const preserveRetroDraft=Boolean(document.querySelector('#form-retro')&&viewAtual==='apontamento'&&apontamentoTab==='retroativo');
+        onlineSaving=false;if(!preserveRetroDraft)render();showSaveFeedback(message,true);showToast(message,true);
       }finally{onlineQueued=false;onlineSaving=false;onlineMessage='';lockOnline(false);}
     });
     return true;

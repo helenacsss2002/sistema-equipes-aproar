@@ -138,7 +138,7 @@ test('Não há funções duplicadas que sobrescrevam Extra e apontamento da equi
  assert.match(ui,/option value="50"/);
  assert.match(ui,/option value="90"/);
  assert.match(html,/row-total-summary/);
- assert.match(html,/app\.js\?v=aproar-whatsapp-sem-servico-20261016-2/);
+ assert.match(html,/app\.js\?v=aproar-retro-pendentes-20261019-1/);
  assert.match(ui,/bindPersonSearch\(\$\('#retro-person-search'\),\(\)=>\$\$\('\.retro-person-list/);
  assert.match(ui,/function validateExtraAmounts\(items,scope=document\)/);
  assert.match(ui,/noValidate=true/);
