@@ -63,7 +63,7 @@ function setup(){
  vm.runInContext(block('  function bindServiceRows(){','  function readPersonRows(')+block('  function readPersonRows(','  function applyInlineExtras(')+'\nglobalThis.bind=bindServiceRows;globalThis.read=readPersonRows;',ctx);
  return {ctx,inputs,card,toggled};
 }
-test('Categoria de Extra não predefine valor; supervisor digita o valor e o total é recalculado',()=>{
+test('Valor disponível entra no total com Extra = Não e categoria selecionada',()=>{
  const {ctx,inputs,toggled}=setup();
  ctx.bind();
  assert.equal(inputs['.row-extra-value'].value,'');
@@ -93,7 +93,7 @@ test('Categoria de Extra não predefine valor; supervisor digita o valor e o tot
  assert.equal(inputs['.row-extra-value'].value,'312.50','Alternar para Não preserva o valor digitado');
  assert.equal(inputs['.row-extra-value'].type,'number');
  assert.equal(inputs['.row-extra-value'].required,false);
- assert.match(inputs['.row-total'].textContent,/226,00/);
+ assert.match(inputs['.row-total'].textContent,/538,50/,'Valor disponível continua no total mesmo quando Extra = Não');
  inputs['.row-extra'].value='Meia diária';inputs['.row-extra'].onchange();
  assert.equal(inputs['.row-extra-value'].value,'312.50','O valor continua disponível ao ativar novamente');
  assert.equal(inputs['.row-extra-value'].type,'number');
@@ -138,7 +138,7 @@ test('Não há funções duplicadas que sobrescrevam Extra e apontamento da equi
  assert.match(ui,/option value="50"/);
  assert.match(ui,/option value="90"/);
  assert.match(html,/row-total-summary/);
- assert.match(html,/app\.js\?v=aproar-retro-pendentes-20261019-1/);
+ assert.match(html,/app\.js\?v=aproar-financeiro-valor-disponivel-20261019-1/);
  assert.match(ui,/bindPersonSearch\(\$\('#retro-person-search'\),\(\)=>\$\$\('\.retro-person-list/);
  assert.match(ui,/function validateExtraAmounts\(items,scope=document\)/);
  assert.match(ui,/noValidate=true/);

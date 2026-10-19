@@ -594,7 +594,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
           extraAmount.required=active;
           extraAmount.min=active?'0.01':'0';
         }
-        const extra=active?moneyValue('.row-extra-value'):0;
+        const extra=moneyValue('.row-extra-value');
         const ordinary=presence(status.value)?Math.max(0,Number(card.dataset.financeiroOriginal)||0)+moneyValue('.row-acordo')+moneyValue('.row-ajuda-custo')+moneyValue('.row-noturno'):0;
         const sum=roundMoney(extra+ordinary);
         if(total)total.textContent=sum.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
@@ -1172,13 +1172,53 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       const p=colaboradorById(x.colaboradorId),work=obraById(x.obraId);
       if(!p||!work||(reportFilters.obra!=='Todas'&&String(x.obraId)!==String(reportFilters.obra)))continue;
       const amount=Number(x.valorExtraOriginal)||roundMoney(dayCost(p)*extraMultiplier(x.extra));
+      const serviceExtra=roundMoney(dayCost(p)*extraMultiplier(x.extra));
       const c={id:'extra-'+x.id,dataServico:x.dataServico,supervisor:x.supervisor,unidade:work.unidade,obraId:work.id,turno:'Integral',extraAvulsa:true};
       const i={colaboradorId:x.colaboradorId,status:'Extra independente',extra:x.extra,valorExtraOriginal:amount,financeiro:0,noturno:0,acordo:0,ajudaCusto:0,observacao:x.observacao||'',extraAvulsa:true};
-      out.push({c,i,p,refs:[],blocks:new Set(),periods:new Set(['Integral']),supervisors:new Set([x.supervisor]),statuses:new Set(['Extra independente']),extras:new Set([x.extra]),daily:0,extra:roundMoney(amount),finance:0,night:0,bonus:0,ajudaCusto:0,danger:dangerEligible(p)?roundMoney(amount*1.3)-amount:0,share:1,service:{obraId:work.id,periodo:'Extra'},units:new Set([work.unidade]),works:new Set([work.id]),displayStatus:'Extra independente',displayExtra:x.extra});
+      out.push({c,i,p,refs:[],blocks:new Set(),periods:new Set(['Integral']),supervisors:new Set([x.supervisor]),statuses:new Set(['Extra independente']),extras:new Set([x.extra]),daily:0,extra:serviceExtra,finance:0,night:0,bonus:0,ajudaCusto:0,danger:dangerEligible(p)?roundMoney(serviceExtra*1.3)-serviceExtra:0,share:1,service:{obraId:work.id,periodo:'Extra'},units:new Set([work.unidade]),works:new Set([work.id]),displayStatus:'Extra independente',displayExtra:x.extra});
     }
     return out;
   }
-  function financialEntries(){const map=new Map();for(const x of entries()){const key=x.c.dataServico+'|'+x.i.colaboradorId+'|'+x.c.supervisor;if(!map.has(key))map.set(key,{...x,refs:[...x.refs],units:new Set([x.c.unidade]),works:new Set([x.c.obraId])});else{const prev=map.get(key);for(const k of ['daily','extra','danger','night','bonus','finance','ajudaCusto'])prev[k]+=x[k];prev.units.add(x.c.unidade);prev.works.add(x.c.obraId);prev.refs=[...new Set([...prev.refs,...x.refs])];}}return [...map.values()];}
+  // O Financeiro considera o valor informado pelo supervisor, independentemente
+  // de "Houve extra?". O custo operacional continua com extras por categoria.
+  function financialEntries(){
+    const map=new Map();
+    for(const x of entries()){
+      const key=x.c.dataServico+'|'+x.i.colaboradorId+'|'+x.c.supervisor;
+      const valorExtraFinanceiro=x.c.extraAvulsa?roundMoney(Math.max(0,Number(x.i.valorExtraOriginal)||0)):0;
+      if(!map.has(key)){
+        map.set(key,{...x,extra:valorExtraFinanceiro,extraServico:x.extra,
+          refs:[...x.refs],units:new Set([x.c.unidade]),works:new Set([x.c.obraId])});
+      }else{
+        const previous=map.get(key);
+        previous.extra+=valorExtraFinanceiro;previous.extraServico+=x.extra;
+        for(const k of ['daily','danger','night','bonus','finance','ajudaCusto'])previous[k]+=x[k];
+        previous.units.add(x.c.unidade);previous.works.add(x.c.obraId);
+        previous.refs=[...new Set([...previous.refs,...x.refs])];
+      }
+    }
+    // O valor disponível é o pagamento informado na presença normal e substitui,
+    // não soma novamente, um eventual registro de extra independente no mesmo dia.
+    const valoresDisponiveis=new Map();
+    for(const ap of state.apontamentos){
+      if(ap.dataServico<reportFilters.inicio||ap.dataServico>reportFilters.fim)continue;
+      if(reportFilters.supervisor!=='Todos'&&ap.supervisor!==reportFilters.supervisor)continue;
+      for(const i of ap.itens||[]){
+        if(!presence(i.status))continue;
+        const amount=roundMoney(Math.max(0,Number(i.valorExtraDisponivel)||0));
+        if(!amount)continue;
+        const key=ap.dataServico+'|'+i.colaboradorId+'|'+ap.supervisor;
+        valoresDisponiveis.set(key,roundMoney((valoresDisponiveis.get(key)||0)+amount));
+      }
+    }
+    for(const [key,entry] of map){
+      const available=valoresDisponiveis.get(key);
+      if(available>0)entry.extra=available;
+      else if(entry.extra<=0&&entry.extraServico>0)entry.extra=roundMoney(entry.extraServico);
+      entry.extra=roundMoney(entry.extra);
+    }
+    return [...map.values()];
+  }
   function financialSummaryRows(rows=financialEntries()){return globalThis.APROARFinanceConsolidado.summarize(rows);}
   function adjustPayment(row,field,value){if(onlineSaving||onlineQueued)return showToast('Aguarde a gravação em andamento.',true);const data={financeiro:row.finance,noturno:row.night,acordo:row.bonus,ajudaCusto:row.ajudaCusto};data[field]=Math.max(0,Number(value)||0);for(const [index,i] of row.refs.entries()){i.financeiro=index===0?roundMoney(data.financeiro):0;i.noturno=index===0&&row.units.has('SEBRAE')?roundMoney(data.noturno):0;i.acordo=index===0?roundMoney(data.acordo):0;i.ajudaCusto=index===0?roundMoney(data.ajudaCusto):0;i.financeAdjusted=true;}saveFinancialUpdates(row.refs);}
   function financialCycle(ref=isoToday(),offset=0){const d=dateLocal(ref),n=(d.getDay()-2+7)%7;d.setDate(d.getDate()-n+offset*7);const end=new Date(d);end.setDate(end.getDate()+6);const pay=new Date(end);pay.setDate(pay.getDate()+1);return {inicio:calendarISO(d),fim:calendarISO(end),pagamento:calendarISO(pay)};}
@@ -1208,7 +1248,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
   function renderReports(){
     const financial=perfilAtual==='FINANCEIRO';if(financial&&selectedCycle!=='custom'){const cycle=financialCycle(isoToday(),Number(selectedCycle));reportFilters.inicio=cycle.inicio;reportFilters.fim=cycle.fim;}
     $('#main-content').innerHTML=head('Relatórios','Dados por período, com consolidado e detalhamento por dia.')+(financial?cycleControl():'')+filterControls(financial?true:'combined')+'<div class="section report-toolbar"><div class="report-view" id="report-tabs"></div>'+exportButtons()+(financial?financialSummaryButtons():'')+'</div><div class="section" id="report-body"></div>';let day='Todos';
-    const refresh=()=>{const rows=entries().filter(x=>!financial||(x.c.extraAvulsa||(presence(x.i.status)&&x.extra+x.finance+x.night+x.bonus+x.ajudaCusto>0.005))),dates=[...new Set(filteredConvs().map(c=>c.dataServico))].sort();if(!dates.includes(day))day='Todos';$('#report-tabs').innerHTML=field('Visualização',`<select id="report-day-select" class="control"><option value="Todos">Consolidado do período</option>${dates.map(d=>`<option value="${d}">${formatDate(d)}</option>`).join('')}</select>`);$('#report-day-select').value=day;const selected=rows.filter(x=>day==='Todos'||x.c.dataServico===day);const fin=perfilAtual==='FINANCEIRO';$('#report-body').innerHTML=table(['Data','Supervisor','Unidade','Obra','Colaborador','Período','Status',fin?'Valor da Extra (R$)':'Custo normal',fin?'Valores complementares já registrados (R$)':'Extra','Adic. noturno','Acordos / Bonificações',...(fin?['Passagens/Ajuda de custo']:['Periculosidade 30%']),'Total'],selected.map(x=>[formatDate(x.c.dataServico),x.c.supervisor,escapeHtml(x.c.unidade),escapeHtml(fin?financialWorkNumber(x.c.obraId):obraById(x.c.obraId)?.nome),escapeHtml(x.p?.nome),escapeHtml(x.service.periodo),escapeHtml(x.displayStatus||x.i.status),money(fin?x.extra:x.daily),fin?money(x.finance):escapeHtml(x.displayExtra||x.i.extra),money(x.night),money(x.bonus),...(fin?[money(x.ajudaCusto)]:[money(x.danger)]),money(fin?x.extra+x.finance+x.night+x.bonus+x.ajudaCusto:x.daily+x.extra+x.danger+x.night+x.bonus)]))+`<div class="notice info section">Valores de demonstração. ${fin?'Financeiro sem adicional de periculosidade.':'Periculosidade de 30% para eletricista e auxiliar de eletricista, somente na Controladoria.'} Convocações sem apontamento ficam fora dos custos.</div>`;configureReportTable(fin);$('#report-day-select').onchange=()=>{day=$('#report-day-select').value;refresh();};};bindFilters(()=>{if(financial){selectedCycle='custom';$('#financial-cycle').value='custom';}refresh();});if(financial){$('#financial-cycle').onchange=()=>{selectedCycle=$('#financial-cycle').value;renderReports();};if(selectedCycle!=='custom')$('#cycle-caption').textContent='Pagamento em '+formatDate(financialCycle(isoToday(),Number(selectedCycle)).pagamento);}refresh();bindExports();if(financial)bindFinancialSummaryExports();
+    const refresh=()=>{const rows=(financial?financialEntries():entries()).filter(x=>!financial||(x.c.extraAvulsa||(presence(x.i.status)&&x.extra+x.finance+x.night+x.bonus+x.ajudaCusto>0.005))),dates=[...new Set(filteredConvs().map(c=>c.dataServico))].sort();if(!dates.includes(day))day='Todos';$('#report-tabs').innerHTML=field('Visualização',`<select id="report-day-select" class="control"><option value="Todos">Consolidado do período</option>${dates.map(d=>`<option value="${d}">${formatDate(d)}</option>`).join('')}</select>`);$('#report-day-select').value=day;const selected=rows.filter(x=>day==='Todos'||x.c.dataServico===day);const fin=perfilAtual==='FINANCEIRO';$('#report-body').innerHTML=table(['Data','Supervisor','Unidade','Obra','Colaborador','Período','Status',fin?'Valor da Extra (R$)':'Custo normal',fin?'Valores complementares já registrados (R$)':'Extra','Adic. noturno','Acordos / Bonificações',...(fin?['Passagens/Ajuda de custo']:['Periculosidade 30%']),'Total'],selected.map(x=>[formatDate(x.c.dataServico),x.c.supervisor,escapeHtml(x.c.unidade),escapeHtml(fin?financialWorkNumber(x.c.obraId):obraById(x.c.obraId)?.nome),escapeHtml(x.p?.nome),escapeHtml(x.service.periodo),escapeHtml(x.displayStatus||x.i.status),money(fin?x.extra:x.daily),fin?money(x.finance):escapeHtml(x.displayExtra||x.i.extra),money(x.night),money(x.bonus),...(fin?[money(x.ajudaCusto)]:[money(x.danger)]),money(fin?x.extra+x.finance+x.night+x.bonus+x.ajudaCusto:x.daily+x.extra+x.danger+x.night+x.bonus)]))+`<div class="notice info section">Valores de demonstração. ${fin?'Financeiro sem adicional de periculosidade.':'Periculosidade de 30% para eletricista e auxiliar de eletricista, somente na Controladoria.'} Convocações sem apontamento ficam fora dos custos.</div>`;configureReportTable(fin);$('#report-day-select').onchange=()=>{day=$('#report-day-select').value;refresh();};};bindFilters(()=>{if(financial){selectedCycle='custom';$('#financial-cycle').value='custom';}refresh();});if(financial){$('#financial-cycle').onchange=()=>{selectedCycle=$('#financial-cycle').value;renderReports();};if(selectedCycle!=='custom')$('#cycle-caption').textContent='Pagamento em '+formatDate(financialCycle(isoToday(),Number(selectedCycle)).pagamento);}refresh();bindExports();if(financial)bindFinancialSummaryExports();
   }
   function renderDashboard(){
     $('#main-content').innerHTML=head('Dashboard','Presença, faltas e custos confirmados por unidade e responsável.')+filterControls(true)+'<div class="section" id="dash-body"></div>';
@@ -1589,7 +1629,7 @@ function renderEquipeDia(){
     exportWorkbook([{name:'CONSOLIDADO POR PESSOA',rows,headers:[3],titles:[0,1],sections:[rows.length-1],blue:true,freeze:4,merges:['A1:K1','A2:K2'],center:[4],money:[5,6,7,8,9,10],widths:[38,24,30,28,11,23,23,23,20,31,22]}],'financeiro_consolidado_colaboradores_'+reportFilters.inicio+'_a_'+reportFilters.fim);
   }
   function financialWorkbook(){
-    const data=entries().filter(x=>presence(x.i.status)&&x.extra+x.finance+x.night+x.bonus+x.ajudaCusto>0.005);
+    const data=financialEntries().filter(x=>presence(x.i.status)&&x.extra+x.finance+x.night+x.bonus+x.ajudaCusto>0.005);
     function sheet(name,xs){
       const rows=[['RELATÓRIO FINANCEIRO - '+reportPeriod()],[]],headers=[],sections=[],merges=['A1:N1'],groups=new Map();
       for(const x of xs){const k=x.c.unidade+'|'+x.c.obraId;if(!groups.has(k))groups.set(k,[]);groups.get(k).push(x);}

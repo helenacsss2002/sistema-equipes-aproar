@@ -213,7 +213,7 @@ test('Passagens/Ajuda de custo: quatro precos sugeridos e campo editavel com per
  assert.ok(payments.includes('x.extra+x.finance+x.night+x.bonus+x.ajudaCusto'),'Total de pagamentos inclui extra e passagem');
  assert.ok(ui.includes('i.ajudaCusto=index===0?roundMoney(data.ajudaCusto):0'));
  assert.ok(ui.includes('row.ajudaCusto+=(isPresent?Math.max(0,Number(i.ajudaCusto)||0):0)/ss.length'),'Rateio único por serviço');
- assert.ok(ui.includes("['daily','extra','danger','night','bonus','finance','ajudaCusto']"),'Consolidado por colaborador soma passagem');
+ assert.ok(ui.includes("['daily','danger','night','bonus','finance','ajudaCusto']"),'Consolidado separa extra de serviço e pagamento financeiro');
  assert.ok(reports.includes("fin?['Passagens/Ajuda de custo']:['Periculosidade 30%']"),'Campo aparece só Financeiro');
  assert.ok(reports.includes('x.extra+x.finance+x.night+x.bonus+x.ajudaCusto'),'Total do relatório inclui extra');
  assert.ok(workbook.includes("'Passagens/Ajuda de custo (R$)'"));
@@ -311,7 +311,7 @@ test('Extras are launched from daily attendance and remain available to reports 
  assert.match(ui,/Valor da Extra \(R\$\)/);
  assert.match(ui,/Extra independente/);
  assert.doesNotMatch(ui,/item\('extras','Extras'/);
- assert.match(html,/aproar-retro-pendentes-20261019-1/);
+ assert.match(html,/aproar-financeiro-valor-disponivel-20261019-1/);
 });
 
 test('Login do supervisor exige chave individual; visualizar permanece sem senha',()=>{
