@@ -16,7 +16,7 @@ const ctx={
  reportFilters:{inicio:'2026-10-15',fim:'2026-10-19',supervisor:'Todos',obra:'Todas'},
  state:{apontamentos:[]},
  currentEntries:[],
- entries(){return this.currentEntries;},
+ entries:()=>ctx.currentEntries,
 };
 ctx.globalThis=ctx;vm.createContext(ctx);
 vm.runInContext(finance+'\nglobalThis.calcFinance=financialEntries;',ctx);
