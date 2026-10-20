@@ -578,8 +578,71 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
  <div class="row-total-summary" role="status"><span>TOTAL A PAGAR AO COLABORADOR</span><strong class="row-total">${roundMoney(Number(item?.financeiro||0)+extraAmount+nightValue+Number(item?.acordo||0)+Number(item?.ajudaCusto||0)).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</strong><small>Valor da extra + adicional noturno + acordos + passagens/ajuda de custo${Number(item?.financeiro)>0?' + valor complementar já registrado':''}. Total calculado automaticamente, não editável.</small></div>
  <details class="more-services"><summary>Mais opções</summary>${field('Observação / justificativa do acordo (obrigatória se houver bonificação)',`<input class="control row-obs" maxlength="2000" value="${escapeHtml(item?.observacao||'')}" placeholder="Descreva o motivo do acordo ou bonificação">`)}<div class="additional-services">${services.slice(1).map((x,i)=>allocationRow(unit,x,i+1)).join('')}</div><div class="inline-actions section"><button type="button" class="btn btn-primary add-service">+ Adicionar serviço</button><button type="button" class="btn btn-secondary remove-last-service">− Remover último</button><span class="service-count">${Math.max(0,services.length-1)} serviço(s) adicional(is)</span></div></details></div></div>`;
 }
+  // Busca viva independente do datalist do navegador. Mantém o texto e o cursor
+  // enquanto a pessoa digita; somente uma escolha explícita preenche a opção.
+  function wireLiveSuggestions(input,candidates,onPick=()=>{}){
+    if(!input||input.dataset.liveSearch==='ready')return;
+    input.dataset.liveSearch='ready';
+    const host=input.parentElement;
+    if(!host)return;
+    host.classList.add('live-search-host');
+    const menu=document.createElement('div');
+    menu.className='live-search-suggestions';
+    menu.setAttribute('role','listbox');
+    menu.hidden=true;host.appendChild(menu);
+    input.setAttribute('aria-autocomplete','list');
+    input.setAttribute('aria-expanded','false');
+    // O datalist nativo pode cobrir o texto e ficar congelado em alguns navegadores.
+    // Mantemos suas opções no HTML para compatibilidade, mas usamos uma lista própria.
+    input.removeAttribute('list');
+    let visible=[],active=-1;
+    const close=()=>{menu.hidden=true;input.setAttribute('aria-expanded','false');active=-1;};
+    const pick=index=>{
+      const choice=visible[index];if(!choice)return;
+      input.value=choice.label;
+      close();onPick(choice);
+      input.focus();
+    };
+    const highlight=()=>{
+      menu.querySelectorAll('[data-live-choice]').forEach((node,index)=>{
+        node.classList.toggle('active',index===active);
+        node.setAttribute('aria-selected',String(index===active));
+      });
+    };
+    const update=()=>{
+      const typed=clean(input.value);
+      if(!typed){close();return;}
+      const all=candidates(),matches=all.filter(item=>clean(item.label).includes(typed));
+      visible=matches.slice(0,12);active=-1;
+      menu.innerHTML=visible.length
+        ?visible.map((item,index)=>`<button type="button" class="live-search-option" role="option" aria-selected="false" data-live-choice="${index}">${escapeHtml(item.label)}</button>`).join('')
+         +`<div class="live-search-hint">${matches.length} resultado(s) · selecione uma opção</div>`
+        :'<div class="live-search-empty">Nenhum resultado. Continue digitando ou revise o termo.</div>';
+      menu.hidden=false;input.setAttribute('aria-expanded','true');
+      menu.querySelectorAll('[data-live-choice]').forEach(button=>{
+        button.addEventListener('mousedown',event=>event.preventDefault());
+        button.addEventListener('click',()=>pick(Number(button.dataset.liveChoice)));
+      });
+    };
+    input.addEventListener('input',update);
+    input.addEventListener('focus',update);
+    input.addEventListener('blur',close);
+    input.addEventListener('keydown',event=>{
+      if(event.key==='Escape'){close();return;}
+      if(!['ArrowDown','ArrowUp','Enter'].includes(event.key)||menu.hidden)return;
+      if(event.key==='Enter'&&active<0)return;
+      event.preventDefault();
+      if(event.key==='Enter'){pick(active);return;}
+      if(!visible.length)return;
+      active=event.key==='ArrowDown'?(active+1)%visible.length:(active+visible.length-1)%visible.length;
+      highlight();
+    });
+  }
   function bindServiceRows(){
-    $$('.person-card').forEach(card=>{
+    $('.person-card .service-work').forEach(input=>{
+      wireLiveSuggestions(input,()=>OBRAS.filter(o=>o.unidade===input.closest('.person-card')?.dataset.unit).map(o=>({label:o.nome,id:o.id})));
+    });
+    $('.person-card').forEach(card=>{
       const field=selector=>card.querySelector(selector),extraChoice=field('.row-extra'),
             extraAmount=field('.row-extra-value'),
             night=field('.row-noturno'),status=field('.row-status'),total=field('.row-total'),
@@ -602,7 +665,10 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       };
       const countServices=()=>{const counter=field('.service-count');if(counter)counter.textContent=card.querySelectorAll('.additional-services .allocation-row').length+' serviço(s) adicional(is)';};
       field('.add-service').onclick=()=>{
-        field('.additional-services').insertAdjacentHTML('beforeend',allocationRow(card.dataset.unit,{},card.querySelectorAll('.allocation-row').length));countServices();
+        field('.additional-services').insertAdjacentHTML('beforeend',allocationRow(card.dataset.unit,{},card.querySelectorAll('.allocation-row').length));
+        const added=card.querySelector('.additional-services .allocation-row:last-child .service-work');
+        wireLiveSuggestions(added,()=>OBRAS.filter(o=>o.unidade===card.dataset.unit).map(o=>({label:o.nome,id:o.id})));
+        countServices();
       };
       field('.remove-last-service').onclick=()=>{field('.additional-services .allocation-row:last-child')?.remove();countServices();};
       status.onchange=()=>{
@@ -1104,6 +1170,12 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
         workCombo.value=current?label(current):'Todas';
       };
       workCombo.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();choose(true);}};
+    }
+    if(workCombo){
+      wireLiveSuggestions(workCombo,()=>[
+        {label:'Todas',id:'Todas'},
+        ...OBRAS.map(o=>({label:o.nome+' | '+o.unidade,id:String(o.id)}))
+      ],choice=>{if(choice.id!=='Todas'&&$('#r-obra').value===choice.id)return;workCombo.dispatchEvent(new Event('input',{bubbles:true}));});
     }
     const workSearch=$('#r-obra-search');
     if(workSearch){

@@ -525,6 +525,17 @@ table td .control {text-align:inherit;}
 .person-search-wrap .control { width: 100%; }
 @media print { #app-view .main-shell { background-image: none; background-attachment: scroll; } }
 
+/* Busca instantânea com resultados visíveis, sem ocultar o que está sendo digitado. */
+input.control:not([type="checkbox"]):not([type="radio"]), textarea.control {caret-color:#174fa4;color:#162d49;-webkit-text-fill-color:currentColor;}
+input.control[type="search"], input.control.service-work, #r-obra-combo {text-overflow:clip;white-space:nowrap;min-width:0;}
+.live-search-host {position:relative;min-width:0;}
+.live-search-host:focus-within {z-index:35;}
+.live-search-suggestions {position:absolute;inset-inline:0;top:calc(100% + 4px);z-index:60;max-height:245px;overflow-y:auto;border:1px solid #9bb9dc;border-radius:8px;background:#fff;box-shadow:0 12px 30px #142f4c25;padding:4px;}
+.live-search-suggestions[hidden] {display:none!important;}
+.live-search-option {display:block;width:100%;border:0;border-radius:5px;background:#fff;color:#163457;font:inherit;font-size:13px;text-align:left;overflow-wrap:anywhere;padding:9px 11px;cursor:pointer;}
+.live-search-option:hover,.live-search-option.active,.live-search-option:focus-visible {background:#eaf2ff;color:#124c9a;}
+.live-search-hint,.live-search-empty {padding:8px 11px;font-size:12px;color:#607793;}
+
 /* Pesquisa de obras apenas nos filtros de relatórios. */
 #r-obra-search { margin-bottom: 8px; }
 
@@ -693,6 +704,6 @@ details.convocados-destaque .team-list-item {border-color:#eddaab;}
 
   <script src="/pdf-lib.min.js"></script>
 <script src="/financeiro-consolidado.js?v=20261014-1"></script>
-  <script src="/app.js?v=aproar-financeiro-valor-disponivel-20261019-1"></script>
+  <script src="/app.js?v=aproar-busca-tempo-real-20261020-1"></script>
 <div id="online-saving" class="hidden" role="status" aria-live="polite" style="position:fixed;inset:0;background:rgba(11,27,51,.4);z-index:99999;display:grid;place-items:center"><div class="card card-pad"><strong>Salvando alterações no Neon…</strong><p>Aguarde a confirmação.</p></div></div></body>
 </html>
