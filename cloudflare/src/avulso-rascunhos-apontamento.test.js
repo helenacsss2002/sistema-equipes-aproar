@@ -15,7 +15,7 @@ const forms=section('  function readPersonRows(','  function applyInlineExtras('
 
 test('Retroativo adiciona avulso sem apagar fichas e mantém busca, seleção e preenchimentos',()=>{
  assert.match(retro,/id="retro-avulso-name"/);
- assert.match(retro,/id="retro-avulso-funcao"/);
+ assert.match(retro,/avulsoFuncaoSelect\('retro-avulso-funcao'\)/);
  assert.match(retro,/id="retro-avulso-add"/);
  assert.match(retro,/const checked=new Set\(\$\$\('input\[name="retro-colab"\]:checked'\)/);
  assert.match(retro,/checked\.add\(id\)/);
