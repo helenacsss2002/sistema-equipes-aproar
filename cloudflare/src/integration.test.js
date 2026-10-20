@@ -555,7 +555,7 @@ test('Supervisor não consegue duplicar o mesmo valor como complemento e acordo'
  }finally{await pg.close();}
 });
 
-test('Financeiro pode confirmar valores iguais distintos, sem bloquear lançamentos legítimos',async()=>{
+test('Financeiro precisa confirmar valores iguais por uma rota explícita, sem aprovação automática',async()=>{
  const {pg,sql}=await fixture();
  try{
   const original=await readDatabase(sql),next=structuredClone(original.state);
@@ -563,9 +563,10 @@ test('Financeiro pode confirmar valores iguais distintos, sem bloquear lançamen
   let db=(await save(sql,next,actor)).after;
   const follow=structuredClone(db.state);
   follow.apontamentos[0].itens[0].financeiro=20;
-  assert.doesNotThrow(()=>buildOperations(db,follow,finance,now));
+  assert.throws(()=>buildOperations(db,follow,finance,now),/O valor complementar repete o acordo/);
+  follow.apontamentos[0].itens[0].financeiro=15;
   db=(await save(sql,follow,finance)).after;
-  assert.equal(Number(db.raw.apontamentos[0].custo_pago),20);
+  assert.equal(Number(db.raw.apontamentos[0].custo_pago),15);
   assert.equal(Number(db.raw.apontamentos[0].valor_acordo),20);
   assert.equal(db.raw.apontamentos[0].custo_pago_definido_financeiro,true);
  }finally{await pg.close();}

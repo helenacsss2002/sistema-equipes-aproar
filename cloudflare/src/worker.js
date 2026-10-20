@@ -3,6 +3,7 @@ import {mapNeonData} from './neon-adapter.js';
 import {readDatabase,visibleState,supervisors} from './data.js';
 import {buildOperations} from './operations.js';
 import {validateFinancialPayload,buildFinancialOperations} from './financial-adjust.js';
+import {validateComplementConfirmation,buildComplementConfirmationOperations} from './financial-approval.js';
 import {login,identity,sameOrigin,equalSecret,logoutCookie} from './auth.js';
 import {writes,writeControls,stage,permittedProductionDeletion} from './environment.js';
 import {consultarTrello,sincronizarTrello,unidadeCard} from './trello.js';
@@ -66,6 +67,22 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
    // Avoid retrieving multi-year audit logs for users who do not view them.
    const readOptions=session.role==='FINANCEIRO'?{includeAudit:false}:session.role==='SUPERVISOR'?{auditUser:session.user}:{};
    if(path==='/api/bootstrap'&&request.method==='GET')return json(summary(await readDatabase(sql,readOptions),session,env));
+   if(path==='/api/financial-confirm-duplicate'&&request.method==='POST'){
+    if(session.role!=='FINANCEIRO')return json({error:'Somente o Financeiro pode confirmar pagamentos distintos.'},403);
+    if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);
+    if(!writes(env))return json({error:'Gravação não autorizada neste ambiente.'},403);
+    const body=validateComplementConfirmation(await bodyJSON(request));
+    const rows=await sql`SELECT c.id::text AS convocacao_id,c.observacao,
+     c.custo_pago AS complemento_convocacao,c.valor_acordo AS acordo_convocacao,
+     a.id::text AS apontamento_id,a.status,
+     a.custo_pago AS complemento_atual,a.valor_acordo AS acordo_atual
+     FROM convocacoes c JOIN apontamentos a ON a.convocacao_id=c.id::text
+     WHERE c.id::text=${body.convocacaoId}`;
+    const operations=buildComplementConfirmationOperations(body,rows[0],session.user);
+    const digest=await sha(JSON.stringify(body));
+    const applied=await sql`SELECT aproar_web_apply(${body.version},${body.requestId},${session.user},${digest},${JSON.stringify(operations)}::jsonb) AS result`;
+    return json({ok:true,version:applied[0].result.version});
+   }
    if(path==='/api/financial-adjust'&&request.method==='POST'){
     if(session.role!=='FINANCEIRO')return json({error:'Somente o Financeiro pode lançar pagamentos e passagens.'},403);
     if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);

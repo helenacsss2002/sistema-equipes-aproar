@@ -1354,8 +1354,33 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
         +'<section class="pay-detail-section" aria-labelledby="pay-detail-heading"><h3 id="pay-detail-heading">Detalhamento por dia</h3>'
         +'<p class="help-text">Passagens/Ajuda de custo: Fortaleza R$ 11, Caucaia R$ 10, Maracanaú R$ 12 e Horizonte R$ 25. Selecione um valor sugerido ou digite outro. Sem lançamento, o valor é R$ 0.</p>'
         +table(['Data','Colaborador','Status','Valor da Extra (R$)','Valores complementares já registrados (R$)','Noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total a Pagar (R$)'],e.map((x,index)=>[formatDate(x.c.dataServico),escapeHtml(x.p?.nome),escapeHtml(x.i.status),money(x.extra),money(x.finance),...fields.map(k=>`<input aria-label="${k==='ajudaCusto'?'Passagens/Ajuda de custo':k}" class="control pay-input" type="number" min="0" step="0.01" ${k==='ajudaCusto'?'list="passagens-ajuda-valores"':''} data-index="${index}" data-field="${k}" value="${k==='noturno'?x.night:k==='acordo'?x.bonus:x.ajudaCusto}" ${(!x.refs?.length||(k==='noturno'&&!x.units.has('SEBRAE')))?'disabled':''}>`),'<strong class="pay-total-display">'+money(total(x))+'</strong>']))
-        +predefinidos+'</section>';
-      $$('.pay-input').forEach(inp=>inp.onchange=()=>{adjustPayment(e[Number(inp.dataset.index)],inp.dataset.field,inp.value);refresh();});
+        +predefinidos+'</section>'
+        +'<section class="card card-pad section" id="financial-duplicate-review"><h3>Confirmação de valores complementares</h3>'
+        +'<p>Use apenas quando o complemento financeiro e o acordo/bonificação forem dois pagamentos distintos, ainda que tenham o mesmo valor. Informe o motivo; a confirmação fica registrada com data e responsável.</p>'
+        +e.map((x,index)=>{
+          if(!(x.bonus>0&&x.refs?.length===1&&presence(x.i.status)))return '';
+          const approval=x.i.confirmacaoComplemento;
+          const isApproved=approval&&approval.aprovadoPor==='FINANCEIRO'&&
+            roundMoney(Number(approval.financeiro))===roundMoney(x.finance)&&
+            roundMoney(Number(approval.acordo))===roundMoney(x.bonus)&&x.finance>0&&roundMoney(x.finance)===roundMoney(x.bonus);
+          if(isApproved)return `<div class="notice info section"><strong>${escapeHtml(x.p?.nome)} · ${formatDate(x.c.dataServico)}</strong> — Dois pagamentos distintos confirmados por ${escapeHtml(approval.aprovadoPor)} em ${escapeHtml(formatDateTime(approval.aprovadoEm))}. Justificativa: ${escapeHtml(approval.justificativa||'')}</div>`;
+          return `<div class="card card-pad section"><strong>${escapeHtml(x.p?.nome)} · ${formatDate(x.c.dataServico)} · ${escapeHtml(x.c.unidade)}</strong>
+            <p>Acordo/bonificação registrado: <strong>${money(x.bonus)}</strong>. O complemento só será aprovado se for um pagamento adicional e independente.</p>
+            <div class="form-grid">${field('Valor complementar distinto (R$)',`<input class="control" type="number" min="0.01" step="0.01" id="approve-finance-${index}" value="${x.finance>0?x.finance:''}" placeholder="Informe o valor a confirmar">`)}
+              ${field('Motivo de serem dois pagamentos distintos',`<textarea class="control" rows="2" id="approve-reason-${index}" placeholder="Explique o motivo para auditoria"></textarea>`)}</div>
+            <div class="form-actions"><button type="button" class="btn btn-secondary confirm-finance-duplicate" data-index="${index}">Confirmar valores complementares</button></div></div>`;
+        }).join('')+'</section>';
+      $('.pay-input').forEach(inp=>inp.onchange=()=>{adjustPayment(e[Number(inp.dataset.index)],inp.dataset.field,inp.value);refresh();});
+      $('.confirm-finance-duplicate').forEach(button=>button.onclick=()=>{
+        const index=Number(button.dataset.index),entry=e[index];
+        const amount=Number($('#approve-finance-'+index)?.value),reason=$('#approve-reason-'+index)?.value.trim()||'';
+        if(!Number.isFinite(amount)||amount<=0||roundMoney(amount)!==roundMoney(entry.bonus))
+          return showToast('O valor complementar deve ser igual ao acordo registrado para confirmar dois pagamentos de mesmo valor.',true);
+        if(reason.length<10||reason.length>400)
+          return showToast('Descreva o motivo de serem dois pagamentos distintos (10 a 400 caracteres).',true);
+        if(!window.confirm('Confirmar DOIS pagamentos distintos para '+entry.p?.nome+' em '+formatDate(entry.c.dataServico)+'? Complemento '+money(amount)+' mais acordo '+money(entry.bonus)+'. A aprovação ficará registrada em auditoria.'))return;
+        submitComplementConfirmation(entry,amount,reason);
+      });
     };
     bindFilters(()=>{selectedCycle='custom';$('#financial-cycle').value='custom';refresh();});
     $('#financial-cycle').onchange=()=>{selectedCycle=$('#financial-cycle').value;renderPayments();};
@@ -1854,6 +1879,26 @@ function renderEquipeDia(){
       }finally{onlineQueued=false;onlineSaving=false;onlineMessage='';lockOnline(false);}
     });
     return true;
+  }
+  async function submitComplementConfirmation(row,amount,justificativa){
+    if(onlineSaving||onlineQueued||!onlineWritable||onlineSession?.role!=='FINANCEIRO')
+      return showToast('A confirmação requer acesso ativo do Financeiro e gravação disponível.',true);
+    const convId=state.apontamentos.find(a=>a.itens.includes(row.refs?.[0]))?.convocacaoId;
+    if(!convId||!row.refs||row.refs.length!==1)return showToast('Não foi possível identificar um apontamento único. Atualize os dados.',true);
+    const payload={requestId:crypto.randomUUID(),version:onlineVersion,
+      convocacaoId:String(convId),financeiro:roundMoney(amount),acordo:roundMoney(row.bonus),justificativa};
+    onlineSaving=true;lockOnline(true);
+    try{
+      await api('/api/financial-confirm-duplicate',{method:'POST',body:JSON.stringify(payload)});
+      applyOnline(await restoreOnlineSession());
+      onlineSaving=false;render();
+      showToast('Dois pagamentos confirmados pelo Financeiro e registrados na auditoria.');
+    }catch(error){
+      let refreshed=false;
+      try{applyOnline(await restoreOnlineSession());refreshed=true;}catch{}
+      onlineSaving=false;render();
+      showToast(refreshed?'Confirmação não verificada. Confira o histórico antes de repetir. '+String(error.message||''):'Falha de conexão. Não repita a confirmação sem consultar o histórico.',true);
+    }finally{onlineSaving=false;lockOnline(false);}
   }
   // Financial changes are sent as a small, explicit batch: never re-upload the entire system.
   async function saveFinancialUpdates(items){

@@ -1,4 +1,5 @@
 import {metadata} from './neon-adapter.js';
+import {hasValidComplementApproval,clearObsoleteApproval} from './financial-approval.js';
 
 const moneyFields=['financeiro','noturno','acordo','ajudaCusto'];
 const invalid=(message,status=400)=>{throw Object.assign(new Error(message),{status});};
@@ -34,8 +35,9 @@ export function buildFinancialOperations(changes,rows,actor,timestamp=new Date()
     if(['Falta','Atestado'].includes(record.status))invalid('Não é permitido lançar valores para falta ou atestado.');
     if(!record.has_sebrae&&entry.noturno>0&&Math.abs(Number(record.noturno_atual||0)-entry.noturno)>0.005)invalid('Adicional noturno disponível somente para o SEBRAE.');
     const {text,meta}=metadata(record.observacao);
+    if(entry.financeiro>0&&entry.acordo>0&&rounded(entry.financeiro)===rounded(entry.acordo)&&!hasValidComplementApproval(meta,entry.financeiro,entry.acordo))invalid('Valor complementar igual ao acordo exige confirmação explícita no Portal Financeiro.');
     const financial={custo_pago:entry.financeiro,valor_acordo:entry.acordo,valor_adicional_noturno:entry.noturno,custo_pago_definido_financeiro:true,custos_separados:true,migracao_sebrae_noturno_v2:true};
-    const nextMeta={...meta,custo_pago:entry.financeiro,valor_acordo:entry.acordo,valor_adicional_noturno:entry.noturno,valor_ajuda_custo:entry.ajudaCusto,custos_separados:true};
+    const nextMeta={...clearObsoleteApproval(meta,entry.financeiro,entry.acordo),custo_pago:entry.financeiro,valor_acordo:entry.acordo,valor_adicional_noturno:entry.noturno,valor_ajuda_custo:entry.ajudaCusto,custos_separados:true};
     ops.push({table:'apontamentos',action:'update',id:String(record.apontamento_id),data:{...financial,atualizado_em:timestamp}});
     ops.push({table:'convocacoes',action:'update',id:entry.convocacaoId,data:{...financial,observacao:text+' ||APROAR_META|| '+JSON.stringify(nextMeta)}});
   }

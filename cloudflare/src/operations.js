@@ -1,4 +1,5 @@
 import {metadata} from './neon-adapter.js';
+import {hasValidComplementApproval,clearObsoleteApproval} from './financial-approval.js';
 import {supervisors,visibleState} from './data.js';
 const numericId=v=>/^\d+$/.test(String(v));
 const clean=v=>String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().trim();
@@ -71,14 +72,14 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
   // Avoid recording the same unapproved payment as both complementary finance and
   // agreement/bonus. Existing historical values remain readable and unchanged.
   // A distinct, explicitly approved financial adjustment remains permitted.
-  const alreadySame=oldPoint&&money(Number(oldPoint.financeiro||0))===money(finance)&&money(Number(oldPoint.acordo||0))===money(bonus);
-  if(!financialAdjusted&&finance>0&&bonus>0&&money(finance)===money(bonus)&&!alreadySame)
+  const approvedMeta=metadata(raw?.observacao).meta;
+  if(finance>0&&bonus>0&&money(finance)===money(bonus)&&!hasValidComplementApproval(approvedMeta,finance,bonus))
    fail('O valor complementar repete o acordo/bonificação. Não grave duas vezes o mesmo pagamento: deixe apenas o acordo ou solicite confirmação ao Financeiro.');
   const weight=!isPresent?0:p.avulso==='Sim'&&avulsoDailyTypes.includes(i.tipoDiariaAvulso)?mult(i.tipoDiariaAvulso):['Presente (Só Manhã)','Presente (Só Tarde)','Saída Antecipada'].includes(i.status)?.5:['Manhã','Tarde'].includes(c.turno)?.5:1;
   const oldRow=rawAps.get(key),pointTime=oldRow?.apontado_em||metadata(raw?.observacao).meta.apontado_em||timestamp,executor=oldRow?.apontado_por||metadata(raw?.observacao).meta.apontado_por||session.user;
   const values={status:i.status,valor_extra:extra,observacao:String(i.observacao||''),tipo_diaria:i.extra==='Valor específico'?(oldPoint?.tipoDiariaOriginal||'Não'):i.extra,custo_pago:money(finance),custo_pago_definido_financeiro:financialAdjusted,valor_acordo:money(bonus),valor_adicional_noturno:money(night),custo_encargos_base:money(Number(p.custo)*weight+extra),custos_separados:true,migracao_sebrae_noturno_v2:true};
   add('apontamentos',oldRow?'update':'insert',oldRow?.id||'ap:'+key,{...values,convocacao_id:key,data_servico:c.dataServico,colaborador_id:pid,engenheiro:c.supervisor,apontado_em:pointTime,apontado_por:executor,retroativo:Boolean(oldRow?.retroativo||ap.a.retroativo),atualizado_em:timestamp});
-  const oldMeta=metadata(raw?.observacao).meta,first=ss[0],meta={...oldMeta,valor_extra_disponivel:money(Number(i.valorExtraDisponivel??0)),apontado_em:pointTime,apontado_por:executor,custos_separados:true,custo_pago:money(finance),valor_acordo:money(bonus),valor_adicional_noturno:money(night),valor_ajuda_custo:money(ajudaCusto),servico_a_definir:!first,tipo_diaria_avulso:p.avulso==='Sim'?(i.tipoDiariaAvulso||'Diária'):null,periodo_principal:first?.periodo||c.turno,servicos_adicionais:ss.slice(1).map(s=>({servico:works.get(s.obraId)?.nome,obra_id:s.obraId,periodo:s.periodo}))};
+  const oldMeta=clearObsoleteApproval(metadata(raw?.observacao).meta,finance,bonus),first=ss[0],meta={...oldMeta,valor_extra_disponivel:money(Number(i.valorExtraDisponivel??0)),apontado_em:pointTime,apontado_por:executor,custos_separados:true,custo_pago:money(finance),valor_acordo:money(bonus),valor_adicional_noturno:money(night),valor_ajuda_custo:money(ajudaCusto),servico_a_definir:!first,tipo_diaria_avulso:p.avulso==='Sim'?(i.tipoDiariaAvulso||'Diária'):null,periodo_principal:first?.periodo||c.turno,servicos_adicionais:ss.slice(1).map(s=>({servico:works.get(s.obraId)?.nome,obra_id:s.obraId,periodo:s.periodo}))};
   add('convocacoes','update',key,{...values,obra_id:first?.obraId||work,observacao:'Turno: '+c.turno+(i.observacao?' | Obs: '+i.observacao:'')+' ||APROAR_META|| '+JSON.stringify(meta)});
   if(!same(normServices(oldPoint),ss)){
     const previousServices=(rawServicesByConv.get(key)||[]).slice().sort((a,b)=>Number(b.principal)-Number(a.principal)||Number(a.id)-Number(b.id));
