@@ -367,6 +367,14 @@ test('SEBRAE accepts R$ 50 and R$ 90 night additions from a supervisor, preservi
   next=structuredClone(db.state);next.apontamentos[0].itens[0].noturno=50;
   db=(await save(sql,next,actor)).after;
   assert.equal(Number(db.raw.apontamentos[0].valor_adicional_noturno),50);
+  next=structuredClone(db.state);next.apontamentos[0].itens[0].noturno=0;
+  db=(await save(sql,next,actor)).after;
+  assert.equal(Number(db.raw.apontamentos[0].valor_adicional_noturno),0,'Valor zero deve ser gravado sem ser trocado por 90');
+  assert.equal(Number(db.raw.convocacoes[0].valor_adicional_noturno),0,'Convocação não pode manter o valor antigo');
+  assert.equal(db.state.apontamentos[0].itens[0].noturno,0,'Ao carregar do Neon, o valor zero deve ser preservado');
+  next=structuredClone(db.state);next.apontamentos[0].itens[0].noturno=50;
+  db=(await save(sql,next,actor)).after;
+  assert.equal(db.state.apontamentos[0].itens[0].noturno,50);
  }finally{await pg.close();}
 });
 

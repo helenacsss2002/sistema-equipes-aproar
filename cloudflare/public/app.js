@@ -565,7 +565,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
  extraCategory=EXTRA_OPTIONS.includes(extraValue)&&extraEnabled?extraValue:'Meia diária',
  proposedWork=draft?.obraId||existingExtra?.obraId||services.find(x=>x.obraId)?.obraId||defaultObra||'',workId=OBRAS.some(o=>String(o.id)===String(proposedWork))?proposedWork:(OBRAS[0]?.id||''),extraObservation=draft?.observacao??existingExtra?.observacao??'',
  savedExtraAmount=draft?.valorExtraOriginal??existingExtra?.valorExtraOriginal??item?.valorExtraDisponivel??item?.valorExtraOriginal??null,extraAmount=Number(savedExtraAmount)>0?roundMoney(Number(savedExtraAmount)):0,
- nightValue=unit==='SEBRAE'&&presence(item?.status||'Presente (Integral)')?(item?.financeAdjusted?Number(item?.noturno||0):[50,90].includes(Number(item?.noturno))?Number(item.noturno):90):0;
+ nightValue=unit==='SEBRAE'&&presence(item?.status||'Presente (Integral)')?(item&&Number.isFinite(Number(item.noturno))?Number(item.noturno):90):0;
  return `<div class="person-row person-card" data-person="${cid}" data-unit="${escapeHtml(unit)}" data-extra-original="0" data-finance-adjusted="${item?.financeAdjusted?'true':'false'}" data-financeiro-original="${Number(item?.financeiro)||0}" data-ajuda-custo="${Number(item?.ajudaCusto)||0}"><div class="person-name">${escapeHtml(c?.nome||cid)}<br><small>${escapeHtml(c?.funcao||'')} · ${escapeHtml(unit)}</small></div>
  <div class="person-top">${field('Status',`<select class="control row-status">${STATUS_OPTIONS.map(x=>`<option ${x===(item?.status||'Presente (Integral)')?'selected':''}>${x}</option>`).join('')}</select>`)}</div>${c?.avulso==='Sim'?`<div class="form-grid section">${field('Diárias trabalhadas · avulso (custo da Controladoria)',`<select class="control row-avulso-diaria">${AVULSO_DIARIA_OPTIONS.map(x=>`<option value="${x}" ${x===(item?.tipoDiariaAvulso||'Diária')?'selected':''}>${x}</option>`).join('')}</select>`)}</div>`:''}
  <div class="person-services"><div class="allocations principal-service">${allocationRow(unit,services[0],0)}</div>
@@ -674,7 +674,6 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       status.onchange=()=>{
         if(night&&!night.disabled){
           if(!presence(status.value))night.value='0';
-          else if(card.dataset.unit==='SEBRAE'&&Number(night.value)===0)night.value='90';
         }
         updateTotal();
       };
@@ -1218,7 +1217,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
   function completeConv(c){const ap=apForConv(c.id);return !!ap&&c.colaboradores.every(id=>ap.itens.some(i=>i.colaboradorId===id));}
   function serviceList(i,c){const raw=i.servicos?.length?i.servicos:itemServices(i,c.obraId);const seen=new Set();return raw.filter(s=>{if(!s.obraId)return false;const key=s.obraId+'|'+(s.periodo||c.turno);if(seen.has(key))return false;seen.add(key);return true;}).map(s=>({...s,periodo:s.periodo||c.turno||'Integral'}));}
   function hasSebrae(i,c){return clean(c.unidade)==='SEBRAE'||serviceList(i,c).some(s=>clean(obraById(s.obraId)?.unidade)==='SEBRAE');}
-  function nocturnal(i,c){if(!presence(i.status)||!hasSebrae(i,c))return 0;const v=Math.max(0,Number(i.noturno)||0);return roundMoney(i.financeAdjusted||[50,90].includes(v)?v:Math.max(90,v));}
+  function nocturnal(i,c){if(!presence(i.status)||!hasSebrae(i,c))return 0;return roundMoney(Math.max(0,Number(i.noturno)||0));}
   function periodBlocks(p){return p==='Manhã'?{M:.5}:p==='Tarde'?{T:.5}:p==='Noite'?{N:1}:{M:.5,T:.5};}
   function presenceBlocks(i,c){if(!presence(i.status))return {};if(i.status==='Presente (Só Manhã)')return {M:.5};if(i.status==='Presente (Só Tarde)')return {T:.5};if(i.status==='Saída Antecipada')return c.turno==='Noite'?{N:.5}:c.turno==='Tarde'?{T:.5}:{M:.5};return periodBlocks(c.turno);}
   function entries(){
