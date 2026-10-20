@@ -63,7 +63,7 @@ test('Pagamentos vincula todos os cinco botões de exportação após montar o d
   assert.doesNotThrow(()=>ctx.openPayments(),'A tela deve abrir sem TypeError antes de vincular os botões');
   assert.equal(typeof inputs[0].onchange,'function','Campos de adicionais e passagens continuam editáveis');
   assert.equal(tables.length,2);
-  assert.ok(tables[1].head.includes('Valor da Extra (R$)'));
+  assert.ok(tables[1].head.includes('Extra / Diária avulso (R$)'));
   assert.ok(tables[1].head.includes('Valores complementares já registrados (R$)'));
   assert.ok(!tables[1].head.includes('Financeiro (R$)'));
   assert.equal(tables[1].rows[0][3],'R$ 50');
