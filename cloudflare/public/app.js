@@ -1469,10 +1469,29 @@ function renderEquipeDia(){
  };
 }
     let unitConvDate='';let avulsoDraft=[];
+  function convocationReviewMarkup(review){
+    const people=review.ids.map(id=>review.avulsos.find(p=>p.id===id)||colaboradorById(id)||{id,nome:id,funcao:'Não informado'});
+    const sorted=alphabeticalPeople(people);
+    const detail=(label,value)=>`<div><span class="field-label">${label}</span><strong>${escapeHtml(value)}</strong></div>`;
+    return `<div class="section-title"><div><h3>Espelho da convocação</h3>
+      <p>Confira todos os dados antes de confirmar definitivamente. Ainda não foi salvo.</p></div></div>
+      <div class="grid grid-3">${detail('Data do serviço',formatDate(review.date))}
+        ${detail('Unidade',review.unit)}${detail('Turno',review.turno)}
+        ${detail('Supervisor responsável',review.supervisor)}
+        ${detail('Colaboradores',String(sorted.length))}</div>
+      <h4 class="section">Equipe selecionada (ordem alfabética)</h4>
+      <div class="rect-list">${sorted.map((p,index)=>`<div class="team-list-item">
+        <strong>${index+1}. ${escapeHtml(p.nome)}</strong>
+        <small>${escapeHtml(p.funcao||'Não informado')}${review.avulsos.some(a=>a.id===p.id)?' · Avulso':''}</small>
+      </div>`).join('')}</div>
+      <p class="notice info section">A convocação só será gravada depois que você clicar em <strong>Confirmar convocação definitiva</strong>. Os serviços serão definidos no apontamento.</p>
+      <div class="form-actions"><button type="button" class="btn btn-secondary" id="unit-conv-correct">Voltar e corrigir</button>
+      <button type="button" class="btn btn-primary" id="unit-conv-final">Confirmar convocação definitiva</button></div>`;
+  }
   function renderUnitConvocacao(){
     if(!unitConvDate)unitConvDate=tomorrowISO();
     const existing=convocacoesSupervisor().filter(c=>c.dataServico===unitConvDate);const total=existing.reduce((v,c)=>v+c.colaboradores.length,0);
-    $('#main-content').innerHTML=head('Convocação','Escolha unidade, turno e pessoas. Os serviços serão definidos individualmente no apontamento.')+`<div class="grid grid-3">${metric('DATA',formatDate(unitConvDate),'data da convocação')}${metric('CONVOCADOS',total,'já registrados')}${metric('AÇÃO','Montar','e confirmar abaixo')}</div><details class="card card-pad section convocados-destaque"><summary>Já convocados · ${total}</summary>${existing.flatMap(c=>c.colaboradores.map(id=>({c,id}))).sort((a,b)=>comparePersonNames(colaboradorById(a.id)||{id:a.id},colaboradorById(b.id)||{id:b.id})).map(({c,id})=>{const p=colaboradorById(id);return `<div class="team-list-item"><strong>${escapeHtml(p?.nome)}</strong><small>${escapeHtml(p?.funcao)} · ${escapeHtml(c.unidade)} · ${c.turno}</small></div>`;}).join('')||'<p>Nenhum convocado nesta data.</p>'}</details><form id="unit-conv-form" class="card card-pad section unit-conv"><h3>Adicionar à equipe</h3><p style="font-size:12px">Ao confirmar, a equipe é salva de uma vez.</p><div class="convocation-fields">${field('Data',`<input class="control" id="unit-conv-date" type="date" value="${unitConvDate}" required>`)}${field('Unidade',`<select class="control" id="unit-conv-unit">${options(adminUnits())}</select>`)}${field('Turno',`<select class="control" id="unit-conv-turn">${options(['Integral','Manhã','Tarde','Noite'])}</select>`)}${field('Função',`<select class="control" id="unit-conv-function">${options(['Todas',...[...new Set(COLABORADORES.map(c=>c.funcao))]])}</select>`)}</div><details class="card card-pad section" id="previous-team-panel"><summary>Usar equipe do dia anterior</summary><p style="font-size:12px">Confira a equipe desta unidade. Desmarque quem não precisa ser convocado.</p>${field('Data da equipe de referência','<input id="previous-team-date" type="date" class="control">')}<div id="previous-team-list" class="rect-list section"></div><div class="form-actions"><button id="previous-team-use" type="button" class="btn btn-secondary">Usar pessoas selecionadas</button></div></details>${field('Colaboradores','<input class="control" id="unit-conv-search" placeholder="Digite um nome para buscar…">')}<div id="unit-conv-people" class="checkbox-grid section"></div><details class="section"><summary>Adicionar pessoas que não estão na lista</summary><p style="font-size:12px">Adicione quantos avulsos precisar e confirme toda a equipe de uma vez.</p>${field('Nome','<input class="control" id="unit-avulso-name" placeholder="Nome completo">')}${field('Categoria do avulso',avulsoFuncaoSelect('unit-avulso-function'))}<button class="btn btn-secondary" type="button" id="unit-avulso-add">Adicionar pessoa</button><div id="unit-avulso-list" class="section"></div></details><div class="form-actions"><button class="btn btn-primary">Confirmar convocação da equipe</button></div></form><section class="card card-pad section" id="unit-no-conv-box"><h3>Sem convocação para a unidade</h3><p>Confirme quando não houver atividade nem necessidade de equipe na unidade e na data selecionadas. A confirmação justifica a ausência de convocação no acompanhamento do responsável.</p><div id="unit-no-conv-status" class="notice info" role="status"></div><div class="form-actions"><button id="unit-no-conv-button" type="button" class="btn btn-secondary">Sem convocação para a unidade</button></div></section>`;
+    $('#main-content').innerHTML=head('Convocação','Escolha unidade, turno e pessoas. Os serviços serão definidos individualmente no apontamento.')+`<div class="grid grid-3">${metric('DATA',formatDate(unitConvDate),'data da convocação')}${metric('CONVOCADOS',total,'já registrados')}${metric('AÇÃO','Montar','e confirmar abaixo')}</div><details class="card card-pad section convocados-destaque"><summary>Já convocados · ${total}</summary>${existing.flatMap(c=>c.colaboradores.map(id=>({c,id}))).sort((a,b)=>comparePersonNames(colaboradorById(a.id)||{id:a.id},colaboradorById(b.id)||{id:b.id})).map(({c,id})=>{const p=colaboradorById(id);return `<div class="team-list-item"><strong>${escapeHtml(p?.nome)}</strong><small>${escapeHtml(p?.funcao)} · ${escapeHtml(c.unidade)} · ${c.turno}</small></div>`;}).join('')||'<p>Nenhum convocado nesta data.</p>'}</details><form id="unit-conv-form" class="card card-pad section unit-conv"><h3>Adicionar à equipe</h3><p style="font-size:12px">Primeiro revise o espelho da convocação. A equipe será gravada somente após a confirmação definitiva.</p><div class="convocation-fields">${field('Data',`<input class="control" id="unit-conv-date" type="date" value="${unitConvDate}" required>`)}${field('Unidade',`<select class="control" id="unit-conv-unit">${options(adminUnits())}</select>`)}${field('Turno',`<select class="control" id="unit-conv-turn">${options(['Integral','Manhã','Tarde','Noite'])}</select>`)}${field('Função',`<select class="control" id="unit-conv-function">${options(['Todas',...[...new Set(COLABORADORES.map(c=>c.funcao))]])}</select>`)}</div><details class="card card-pad section" id="previous-team-panel"><summary>Usar equipe do dia anterior</summary><p style="font-size:12px">Confira a equipe desta unidade. Desmarque quem não precisa ser convocado.</p>${field('Data da equipe de referência','<input id="previous-team-date" type="date" class="control">')}<div id="previous-team-list" class="rect-list section"></div><div class="form-actions"><button id="previous-team-use" type="button" class="btn btn-secondary">Usar pessoas selecionadas</button></div></details>${field('Colaboradores','<input class="control" id="unit-conv-search" placeholder="Digite um nome para buscar…">')}<div id="unit-conv-people" class="checkbox-grid section"></div><details class="section"><summary>Adicionar pessoas que não estão na lista</summary><p style="font-size:12px">Adicione quantos avulsos precisar e confirme toda a equipe de uma vez.</p>${field('Nome','<input class="control" id="unit-avulso-name" placeholder="Nome completo">')}${field('Categoria do avulso',avulsoFuncaoSelect('unit-avulso-function'))}<button class="btn btn-secondary" type="button" id="unit-avulso-add">Adicionar pessoa</button><div id="unit-avulso-list" class="section"></div></details><div class="form-actions"><button class="btn btn-primary">Revisar convocação</button></div></form><section id="unit-conv-review" class="card card-pad section hidden" aria-live="polite"></section><section class="card card-pad section" id="unit-no-conv-box"><h3>Sem convocação para a unidade</h3><p>Confirme quando não houver atividade nem necessidade de equipe na unidade e na data selecionadas. A confirmação justifica a ausência de convocação no acompanhamento do responsável.</p><div id="unit-no-conv-status" class="notice info" role="status"></div><div class="form-actions"><button id="unit-no-conv-button" type="button" class="btn btn-secondary">Sem convocação para a unidade</button></div></section>`;
     const selected=new Set();const refresh=(sync=true)=>{if(sync)$$('#unit-conv-people input').forEach(x=>x.checked?selected.add(x.value):selected.delete(x.value));const term=$('#unit-conv-search').value.toLowerCase(),func=$('#unit-conv-function').value;$('#unit-conv-people').innerHTML=alphabeticalPeople(COLABORADORES.filter(c=>!c.inativo&&c.nome.toLowerCase().includes(term)&&(func==='Todas'||c.funcao===func))).map(c=>`<label class="check-card"><input type="checkbox" value="${c.id}" ${selected.has(c.id)?'checked':''}><span>${escapeHtml(c.nome)}<small style="display:block;color:var(--muted)">${escapeHtml(c.funcao)}</small></span></label>`).join('');};$('#unit-conv-search').oninput=refresh;$('#unit-conv-function').onchange=refresh;refresh();
     if(portalUnit!=='Todas')$('#unit-conv-unit').value=portalUnit;
     const referenceDate=()=>{const d=dateLocal(unitConvDate);d.setDate(d.getDate()-1);return calendarISO(d);};$('#previous-team-date').value=referenceDate();
@@ -1504,7 +1523,72 @@ function renderEquipeDia(){
     $('#unit-conv-date').onchange=()=>{unitConvDate=$('#unit-conv-date').value;render();};
     const avulsoList=()=>$('#unit-avulso-list').innerHTML=avulsoDraft.map(x=>`<div class="team-list-item">${escapeHtml(x.nome)} · ${escapeHtml(x.funcao)}</div>`).join('');avulsoList();
     $('#unit-avulso-add').onclick=()=>{const nome=$('#unit-avulso-name').value.trim();if(!nome)return toast('Informe o nome.',true);const funcao=$('#unit-avulso-function').value;if(!funcao)return toast('Selecione Profissional ou Servente para o avulso.',true);avulsoDraft.push({id:uid('c'),nome,...avulsoData(funcao)});$('#unit-avulso-name').value='';$('#unit-avulso-function').value='';avulsoList();};
-    $('#unit-conv-form').onsubmit=e=>{e.preventDefault();$$('#unit-conv-people input').forEach(x=>x.checked?selected.add(x.value):selected.delete(x.value));const ids=[...selected,...avulsoDraft.map(x=>x.id)],date=$('#unit-conv-date').value,turno=$('#unit-conv-turn').value,unit=$('#unit-conv-unit').value;if(!ids.length)return toast('Selecione pelo menos uma pessoa.',true);if(temConfirmacaoSemConvocacao(supervisorAtual,unit,date))return toast('Desfaça primeiro a confirmação sem convocação da unidade.',true);if(!OBRAS.some(o=>o.unidade===unit))return toast('Esta unidade já está cadastrada, mas ainda não possui obra. Solicite à Controladoria o cadastro de uma obra nesta unidade antes da convocação.',true);const conflict=ids.find(id=>blocked(id,date)||state.convocacoes.some(c=>c.dataServico===date&&c.colaboradores.includes(id)&&overlaps(c.turno,turno)));if(conflict){registerConvocationConflicts(ids,date,turno,unit,supervisorAtual);return toast('Colaborador indisponível ou já convocado neste turno: '+(colaboradorById(conflict)?.nome||conflict),true);}COLABORADORES.push(...avulsoDraft);state.convocacoes.push({id:uid('cv'),supervisor:supervisorAtual,dataServico:date,unidade:unit,obraId:'',turno,colaboradores:ids,criadoEm:now().toISOString(),origem:'normal',executor:supervisorAtual});avulsoDraft=[];audit('Convocação da equipe',date);saveData();toast('Equipe convocada. Serviços serão escolhidos no apontamento.');render();};
+    const form=$('#unit-conv-form'),reviewBox=$('#unit-conv-review'),noConvBox=$('#unit-no-conv-box');
+    let reviewDraft=null;
+    const leaveReview=()=>{
+      reviewDraft=null;
+      reviewBox.classList.add('hidden');
+      form.classList.remove('hidden');
+      noConvBox.classList.remove('hidden');
+      refreshNoConv();
+    };
+    const validateReview=draft=>{
+      if(!draft||!draft.ids.length){toast('Selecione pelo menos uma pessoa.',true);return false;}
+      if(temConfirmacaoSemConvocacao(draft.supervisor,draft.unit,draft.date)){
+        toast('Desfaça primeiro a confirmação sem convocação da unidade.',true);return false;
+      }
+      if(!OBRAS.some(o=>o.unidade===draft.unit)){
+        toast('Esta unidade já está cadastrada, mas ainda não possui obra. Solicite à Controladoria o cadastro de uma obra nesta unidade antes da convocação.',true);
+        return false;
+      }
+      const conflict=draft.ids.find(id=>blocked(id,draft.date)||state.convocacoes.some(c=>c.dataServico===draft.date&&c.colaboradores.includes(id)&&overlaps(c.turno,draft.turno)));
+      if(conflict){
+        registerConvocationConflicts(draft.ids,draft.date,draft.turno,draft.unit,draft.supervisor);
+        toast('Colaborador indisponível ou já convocado neste turno: '+(colaboradorById(conflict)?.nome||draft.avulsos.find(p=>p.id===conflict)?.nome||conflict),true);
+        return false;
+      }
+      return true;
+    };
+    form.onsubmit=e=>{
+      e.preventDefault();
+      if(onlineQueued||onlineSaving)return toast('Aguarde a gravação em andamento.',true);
+      if(!onlineWritable)return toast('Gravação indisponível nesta sessão.',true);
+      $('#unit-conv-people input').forEach(x=>x.checked?selected.add(x.value):selected.delete(x.value));
+      const draft={
+        ids:[...new Set([...selected,...avulsoDraft.map(x=>x.id)])],
+        date:$('#unit-conv-date').value,turno:$('#unit-conv-turn').value,
+        unit:$('#unit-conv-unit').value,supervisor:supervisorAtual,
+        avulsos:avulsoDraft.map(x=>({...x}))
+      };
+      if(!validateReview(draft))return;
+      reviewDraft=draft;
+      reviewBox.innerHTML=convocationReviewMarkup(draft);
+      form.classList.add('hidden');
+      noConvBox.classList.add('hidden');
+      reviewBox.classList.remove('hidden');
+      reviewBox.scrollIntoView?.({behavior:'smooth',block:'start'});
+      $('#unit-conv-correct').onclick=leaveReview;
+      $('#unit-conv-final').onclick=()=>{
+        const approved=reviewDraft;
+        if(!approved||onlineQueued||onlineSaving)return;
+        if(!onlineWritable)return toast('Gravação indisponível nesta sessão.',true);
+        if(!validateReview(approved)){leaveReview();return;}
+        // A primeira confirmação é somente uma prévia. Criamos a convocação
+        // e os avulsos apenas aqui, após a revisão definitiva.
+        const duplicateAvulsos=approved.avulsos.some(p=>COLABORADORES.some(c=>String(c.id)===String(p.id)));
+        if(duplicateAvulsos){toast('A equipe foi modificada. Volte e revise novamente.',true);leaveReview();return;}
+        COLABORADORES.push(...approved.avulsos);
+        state.convocacoes.push({id:uid('cv'),supervisor:approved.supervisor,
+          dataServico:approved.date,unidade:approved.unit,obraId:'',
+          turno:approved.turno,colaboradores:[...approved.ids],
+          criadoEm:now().toISOString(),origem:'normal',executor:approved.supervisor});
+        audit('Convocação da equipe',approved.date);
+        const queued=saveData();
+        if(!queued)return;
+        reviewDraft=null;avulsoDraft=[];
+        toast('Equipe convocada. Serviços serão escolhidos no apontamento.');
+      };
+    };
   }
 
   function operationalRows(convs){return convs.flatMap(c=>c.colaboradores.map(id=>({c,p:colaboradorById(id),i:(apForConv(c.id)?.itens||[]).find(i=>i.colaboradorId===id),id})));}
