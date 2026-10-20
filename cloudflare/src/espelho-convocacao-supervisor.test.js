@@ -39,7 +39,7 @@ function setup(){
   alphabeticalPeople:xs=>[...xs].sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR',{sensitivity:'base'})),
   escapeHtml:v=>String(v??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'),
   formatDate:s=>s.split('-').reverse().join('/'),
-  blocked:()=>false,temConfirmacaoSemConvocacao:()=>false,
+  blocked:()=>false,temConfirmacaoSemConvocacao:()=>false,refreshNoConv:()=>{},
   overlaps:()=>true,registerConvocationConflicts:()=>{},
   toast:(msg,error=false)=>messages.push({msg,error}),
   now:()=>new Date('2026-10-20T13:00:00Z'),uid:()=> 'cv_test',
