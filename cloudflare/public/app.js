@@ -639,10 +639,10 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
     });
   }
   function bindServiceRows(){
-    $('.person-card .service-work').forEach(input=>{
+    $$('.person-card .service-work').forEach(input=>{
       wireLiveSuggestions(input,()=>OBRAS.filter(o=>o.unidade===input.closest('.person-card')?.dataset.unit).map(o=>({label:o.nome,id:o.id})));
     });
-    $('.person-card').forEach(card=>{
+    $$('.person-card').forEach(card=>{
       const field=selector=>card.querySelector(selector),extraChoice=field('.row-extra'),
             extraAmount=field('.row-extra-value'),
             night=field('.row-noturno'),status=field('.row-status'),total=field('.row-total'),
