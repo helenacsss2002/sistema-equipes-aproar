@@ -1553,7 +1553,7 @@ function renderEquipeDia(){
       e.preventDefault();
       if(onlineQueued||onlineSaving)return toast('Aguarde a gravação em andamento.',true);
       if(!onlineWritable)return toast('Gravação indisponível nesta sessão.',true);
-      $('#unit-conv-people input').forEach(x=>x.checked?selected.add(x.value):selected.delete(x.value));
+      $$('#unit-conv-people input').forEach(x=>x.checked?selected.add(x.value):selected.delete(x.value));
       const draft={
         ids:[...new Set([...selected,...avulsoDraft.map(x=>x.id)])],
         date:$('#unit-conv-date').value,turno:$('#unit-conv-turn').value,
