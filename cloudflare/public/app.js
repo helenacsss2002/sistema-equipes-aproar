@@ -42,8 +42,8 @@
   let retroDateSelected='';
 
   const $ = (sel) => document.querySelector(sel);
-  const $ = (sel) => Array.from(document.querySelectorAll(sel));
-  // Ordena apenas a apresentação: não modifica a sequência histórica no banco.
+  const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+  // Ordena somente a apresentação sem modificar o histórico ou os IDs.
   const comparePersonNames=(a,b)=>String(a?.nome||'').localeCompare(String(b?.nome||''),'pt-BR',{sensitivity:'base'})||String(a?.id||'').localeCompare(String(b?.id||''),'pt-BR');
   const alphabeticalPeople=people=>[...people].sort(comparePersonNames);
   const alphabeticalPersonIds=ids=>[...ids].sort((a,b)=>comparePersonNames(colaboradorById(a)||{id:a},colaboradorById(b)||{id:b}));
@@ -810,7 +810,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
 
     function refreshRows(reset=false) {
       const current=$$('#retro-rows [data-person]').map(x=>x.dataset.person);if(!reset)readPersonRows(current).forEach(i=>retroDrafts.set(i.colaboradorId,i));
-      const ids = alphabeticalPersonIds($('input[name="retro-colab"]:checked').map(x=>x.value));
+      const ids = alphabeticalPersonIds($$('input[name="retro-colab"]:checked').map(x=>x.value));
       const retroDate=$('#retro-data').value,retroTurn=$('#retro-turno').value,retroSupervisor=$('#retro-sup')?.value||supervisorAtual;
       const previousItem=id=>{
         const conv=state.convocacoes.find(c=>c.dataServico===retroDate&&c.unidade===unidade.value&&c.turno===retroTurn&&c.supervisor===retroSupervisor&&c.colaboradores.includes(id));
@@ -827,7 +827,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       try{
       const dataServico = $('#retro-data').value;
       if (!dataServico) return toast('Escolha a data do serviço.', true);if(dataServico>isoToday())return toast('O apontamento retroativo não aceita data futura.',true);
-      const ids = alphabeticalPersonIds($('input[name="retro-colab"]:checked').map(x=>x.value));
+      const ids = alphabeticalPersonIds($$('input[name="retro-colab"]:checked').map(x=>x.value));
       if (!ids.length) return toast('Selecione pelo menos um colaborador.', true);
       const responsavel=$('#retro-sup')?.value||supervisorAtual;
       const itens=readPersonRows(ids);if(!validateAgreementObservations(itens,$('#form-retro')))return;if(!validateExtraAmounts(itens,$('#form-retro')))return;if(!validServices(itens,unidade.value))return;
