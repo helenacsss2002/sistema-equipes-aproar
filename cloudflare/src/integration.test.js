@@ -537,3 +537,36 @@ test('EDUARDO retroactive pendencies: partial and multi-person team regularizati
   assert.equal(db.state.apontamentos.filter(a=>a.retroativo).length,3);
  }finally{await pg.close();}
 });
+
+
+test('Supervisor não consegue duplicar o mesmo valor como complemento e acordo',async()=>{
+ const {pg,sql}=await fixture();
+ try{
+  const original=await readDatabase(sql),next=structuredClone(original.state);
+  conv(next);attendance(next,'draft-conv');
+  next.apontamentos[0].itens[0].financeiro=90;
+  next.apontamentos[0].itens[0].acordo=90;
+  assert.throws(()=>buildOperations(original,next,actor,now),/O valor complementar repete o acordo/);
+  next.apontamentos[0].itens[0].financeiro=0;
+  const db=(await save(sql,next,actor)).after;
+  assert.equal(Number(db.raw.apontamentos[0].custo_pago),0);
+  assert.equal(Number(db.raw.apontamentos[0].valor_acordo),90);
+  assert.equal(Number(db.raw.convocacoes[0].custo_pago),0);
+ }finally{await pg.close();}
+});
+
+test('Financeiro pode confirmar valores iguais distintos, sem bloquear lançamentos legítimos',async()=>{
+ const {pg,sql}=await fixture();
+ try{
+  const original=await readDatabase(sql),next=structuredClone(original.state);
+  conv(next);attendance(next,'draft-conv');
+  let db=(await save(sql,next,actor)).after;
+  const follow=structuredClone(db.state);
+  follow.apontamentos[0].itens[0].financeiro=20;
+  assert.doesNotThrow(()=>buildOperations(db,follow,finance,now));
+  db=(await save(sql,follow,finance)).after;
+  assert.equal(Number(db.raw.apontamentos[0].custo_pago),20);
+  assert.equal(Number(db.raw.apontamentos[0].valor_acordo),20);
+  assert.equal(db.raw.apontamentos[0].custo_pago_definido_financeiro,true);
+ }finally{await pg.close();}
+});
