@@ -221,6 +221,7 @@
   function setView(view) {
     const permitidas = navConfig().map(x => x.view);
     const previousView=viewAtual;
+    if(view!=='apontamento')discardRetroUnsavedAvulsos();
     viewAtual = permitidas.includes(view) ? view : 'inicio';
     if(perfilAtual==='CONTROLADORIA'&&viewAtual==='convocacao'&&previousView!=='convocacao')adminConvDate=tomorrowISO();
     renderNav();
@@ -533,10 +534,21 @@
       <div id="apontamento-body"></div>
       ${perfilAtual==='SUPERVISOR'?'<datalist id="passagens-ajuda-valores"><option value="11" label="Fortaleza - R$ 11,00"></option><option value="10" label="Caucaia - R$ 10,00"></option><option value="12" label="Maracanaú - R$ 12,00"></option><option value="25" label="Horizonte - R$ 25,00"></option></datalist>':''}
     `;
-    $$('.tab-btn').forEach(b => b.onclick = () => { apontamentoTab = b.dataset.tab; render(); });
+    $$('.tab-btn').forEach(b => b.onclick = () => {
+      if(b.dataset.tab!=='retroativo')discardRetroUnsavedAvulsos();
+      apontamentoTab = b.dataset.tab; render();
+    });
     if (apontamentoTab === 'normal') renderApontamentoNormal(); else renderApontamentoRetroativo();
   }
 
+  // Dados ainda não gravados: mantidos ao incluir colaborador ou avulso.
+  const dayUnsavedDrafts=new Map();
+  const retroUnsavedAvulsos=new Map();
+  function discardRetroUnsavedAvulsos(){
+    if(!retroUnsavedAvulsos.size)return;
+    for(let i=COLABORADORES.length-1;i>=0;i--)if(retroUnsavedAvulsos.has(COLABORADORES[i].id))COLABORADORES.splice(i,1);
+    retroUnsavedAvulsos.clear();
+  }
   let adminApDate='',adminApSup='',adminApUnit='';
   function renderApontamentoNormal(){
     if(perfilAtual==='SUPERVISOR')return renderEquipeDia();
@@ -796,6 +808,14 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       </div>`;
 
     const unidade = $('#retro-unidade'), rows = $('#retro-rows');
+    const list=$('.retro-person-list');
+    const avulsoPanel=document.createElement('details');
+    avulsoPanel.className='section card card-pad';
+    avulsoPanel.innerHTML='<summary>Incluir colaborador avulso no retroativo</summary><div class="form-grid">'
+      +field('Nome do avulso','<input class="control" id="retro-avulso-name" maxlength="120" placeholder="Nome completo">')
+      +field('Categoria do avulso',avulsoFuncaoSelect('retro-avulso-funcao'))
+      +'</div><div class="form-actions"><button type="button" class="btn btn-secondary" id="retro-avulso-add">Adicionar avulso ao apontamento</button></div>';
+    list.insertAdjacentElement('afterend',avulsoPanel);
     bindPersonSearch($('#retro-person-search'),()=>$$('.retro-person-list .check-card'));
     let retroDrafts=new Map();
     if(perfilAtual==='SUPERVISOR'){
@@ -819,7 +839,24 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       rows.innerHTML = ids.length ? `<div class="section-title" style="margin-top:12px"><div><h3>Apontamento da equipe</h3><p>Defina status e a categoria da extra. O padrão é “Não”.</p></div></div>${ids.map(id=>personRow(id,retroDrafts.get(id)||previousItem(id),unidade.value,OBRAS.find(o=>o.unidade===unidade.value)?.id||'',retroDate,retroSupervisor)).join('')}` : '';
       bindServiceRows();
     }
-    $$('input[name="retro-colab"]').forEach(x=>x.onchange = ()=>refreshRows());
+    const connectRetroChoices=()=>$$('input[name="retro-colab"]').forEach(x=>x.onchange=()=>refreshRows());
+    connectRetroChoices();
+    $('#retro-avulso-add').onclick=()=>{
+      const nome=$('#retro-avulso-name').value.trim(),funcao=$('#retro-avulso-funcao').value;
+      if(!nome)return toast('Informe o nome do colaborador avulso.',true);
+      if(!funcao)return toast('Selecione Profissional ou Servente para o avulso.',true);
+      if(!$('#retro-data').value||$('#retro-data').value>isoToday())return toast('Selecione uma data retroativa válida.',true);
+      // Guardar todos os campos atuais ANTES de atualizar a lista de seleção.
+      const checked=new Set($$('input[name="retro-colab"]:checked').map(x=>x.value));
+      const id=uid('c'),novo={id,nome,...avulsoData(funcao)};
+      COLABORADORES.push(novo);retroUnsavedAvulsos.set(id,novo);checked.add(id);
+      list.innerHTML=alphabeticalPeople(COLABORADORES.filter(c=>!c.inativo))
+        .map(c=>`<label class="check-card"><input type="checkbox" name="retro-colab" value="${escapeHtml(c.id)}" ${checked.has(c.id)?'checked':''}><span><strong>${escapeHtml(c.nome)}</strong><br><small>${escapeHtml(c.funcao)}</small></span></label>`).join('');
+      connectRetroChoices();
+      refreshRows();
+      $('#retro-avulso-name').value='';$('#retro-avulso-funcao').value='';
+      toast('Avulso incluído. Os dados já preenchidos foram mantidos; confira a diária e o serviço.');
+    };
 
     $('#form-retro').noValidate=true;
     $('#form-retro').onsubmit = (e) => {
@@ -838,7 +875,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       for(const id of ids){const c=matching.find(c=>c.colaboradores.includes(id));if(c){if(!batches.has(c.id))batches.set(c.id,{conv:c,items:[]});batches.get(c.id).items.push(itens.find(i=>i.colaboradorId===id));}else newIds.push(id);}
       if(newIds.length){const conv={id:uid('cv'),supervisor:responsavel,dataServico,unidade:unidade.value,obraId:obraRef?.id||'',turno:$('#retro-turno').value,colaboradores:newIds,criadoEm:now().toISOString(),origem:'retroativo'};state.convocacoes.push(conv);batches.set(conv.id,{conv,items:itens.filter(i=>newIds.includes(i.colaboradorId))});}
       for(const {conv,items} of batches.values()){const selected=new Set(items.map(i=>i.colaboradorId));let ap=apForConv(conv.id);if(ap){ap.itens=[...ap.itens.filter(i=>!selected.has(i.colaboradorId)),...items];ap.atualizadoEm=now().toISOString();ap.retroativo=true;}else state.apontamentos.push({executor:supervisorAtual||perfilLabel(perfilAtual),id:uid('ap'),convocacaoId:conv.id,supervisor:conv.supervisor,dataServico,apontadoEm:now().toISOString(),retroativo:true,itens:items});}
-      audit('Apontamento retroativo',dataServico);const savedMessage=[...batches.values()].every(({conv})=>completeConv(conv))?'Apontamento retroativo salvo. Equipe regularizada.':'Apontamento salvo. Há colaboradores convocados que continuam pendentes.';if(!saveData(()=>setView('pendencias')))return;toast(savedMessage);
+      audit('Apontamento retroativo',dataServico);const savedMessage=[...batches.values()].every(({conv})=>completeConv(conv))?'Apontamento retroativo salvo. Equipe regularizada.':'Apontamento salvo. Há colaboradores convocados que continuam pendentes.';if(!saveData(()=>{retroUnsavedAvulsos.clear();setView('pendencias');}))return;toast(savedMessage);
       }catch(error){
         console.error('APROAR retroactive form submit failure',String(error?.message||error).slice(0,240));
         showToast('Não foi possível preparar o apontamento retroativo. Confira os campos e tente novamente.',true);showSaveFeedback('Não foi possível preparar o apontamento retroativo. Confira os campos e tente novamente.',true);
@@ -1044,10 +1081,10 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       rows=[
         ['APROAR | CONSOLIDADO FINANCEIRO POR COLABORADOR'],
         ['Período',reportPeriod()],
-        ['Colaborador','Função','Supervisor(es)','Unidade(s)','Dias','Valor da Extra (R$)','Valores complementares já registrados (R$)','Noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total (R$)'],
+        ['Colaborador','Função','Supervisor(es)','Unidade(s)','Dias','Extra / Diária avulso (R$)','Valores complementares já registrados (R$)','Noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total (R$)'],
         ...people.map(p=>[p.nome,p.funcao,p.supervisores,p.unidades,p.dias,p.extra,p.finance,p.night,p.bonus,p.ajudaCusto,p.total]),
         [],['DETALHAMENTO POR DIA'],
-        ['Data','Supervisor','Unidade','Obra','Colaborador','Status','Valor da Extra (R$)','Valores complementares já registrados (R$)','Noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total (R$)'],
+        ['Data','Supervisor','Unidade','Obra','Colaborador','Status','Extra / Diária avulso (R$)','Valores complementares já registrados (R$)','Noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total (R$)'],
         ...details.sort((a,b)=>a.c.dataServico.localeCompare(b.c.dataServico)||(a.p?.nome||'').localeCompare(b.p?.nome||'','pt-BR',{sensitivity:'base'})).map(x=>[
           formatDate(x.c.dataServico),x.c.supervisor,[...x.units].join(', '),[...x.works].map(financialWorkNumber).join(', '),
           x.p?.nome||'',x.i.status,x.extra,x.finance,x.night,x.bonus,x.ajudaCusto,roundMoney(x.extra+x.finance+x.night+x.bonus+x.ajudaCusto)
@@ -1262,12 +1299,13 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
     for(const x of entries()){
       const key=x.c.dataServico+'|'+x.i.colaboradorId+'|'+x.c.supervisor;
       const valorExtraFinanceiro=x.c.extraAvulsa?roundMoney(Math.max(0,Number(x.i.valorExtraOriginal)||0)):0;
+      const diariaAvulso=x.p?.avulso==='Sim'&&presence(x.i.status)?roundMoney(x.daily):0;
       if(!map.has(key)){
-        map.set(key,{...x,extra:valorExtraFinanceiro,extraServico:x.extra,
+        map.set(key,{...x,extra:valorExtraFinanceiro,extraServico:x.extra,diariaAvulso,
           refs:[...x.refs],units:new Set([x.c.unidade]),works:new Set([x.c.obraId])});
       }else{
         const previous=map.get(key);
-        previous.extra+=valorExtraFinanceiro;previous.extraServico+=x.extra;
+        previous.extra+=valorExtraFinanceiro;previous.extraServico+=x.extra;previous.diariaAvulso+=diariaAvulso;
         for(const k of ['daily','danger','night','bonus','finance','ajudaCusto'])previous[k]+=x[k];
         previous.units.add(x.c.unidade);previous.works.add(x.c.obraId);
         previous.refs=[...new Set([...previous.refs,...x.refs])];
@@ -1291,7 +1329,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       const available=valoresDisponiveis.get(key);
       if(available>0)entry.extra=available;
       else if(entry.extra<=0&&entry.extraServico>0)entry.extra=roundMoney(entry.extraServico);
-      entry.extra=roundMoney(entry.extra);
+      entry.extra=roundMoney(entry.extra+entry.diariaAvulso);
     }
     return [...map.values()];
   }
@@ -1324,7 +1362,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
   function renderReports(){
     const financial=perfilAtual==='FINANCEIRO';if(financial&&selectedCycle!=='custom'){const cycle=financialCycle(isoToday(),Number(selectedCycle));reportFilters.inicio=cycle.inicio;reportFilters.fim=cycle.fim;}
     $('#main-content').innerHTML=head('Relatórios','Dados por período, com consolidado e detalhamento por dia.')+(financial?cycleControl():'')+filterControls(financial?true:'combined')+'<div class="section report-toolbar"><div class="report-view" id="report-tabs"></div>'+exportButtons()+(financial?financialSummaryButtons():'')+'</div><div class="section" id="report-body"></div>';let day='Todos';
-    const refresh=()=>{const rows=(financial?financialEntries():entries()).filter(x=>!financial||(x.c.extraAvulsa||(presence(x.i.status)&&x.extra+x.finance+x.night+x.bonus+x.ajudaCusto>0.005))),dates=[...new Set(filteredConvs().map(c=>c.dataServico))].sort();if(!dates.includes(day))day='Todos';$('#report-tabs').innerHTML=field('Visualização',`<select id="report-day-select" class="control"><option value="Todos">Consolidado do período</option>${dates.map(d=>`<option value="${d}">${formatDate(d)}</option>`).join('')}</select>`);$('#report-day-select').value=day;const selected=rows.filter(x=>day==='Todos'||x.c.dataServico===day);const fin=perfilAtual==='FINANCEIRO';$('#report-body').innerHTML=table(['Data','Supervisor','Unidade','Obra','Colaborador','Período','Status',fin?'Valor da Extra (R$)':'Custo normal',fin?'Valores complementares já registrados (R$)':'Extra','Adic. noturno','Acordos / Bonificações',...(fin?['Passagens/Ajuda de custo']:['Periculosidade 30%']),'Total'],selected.map(x=>[formatDate(x.c.dataServico),x.c.supervisor,escapeHtml(x.c.unidade),escapeHtml(fin?financialWorkNumber(x.c.obraId):obraById(x.c.obraId)?.nome),escapeHtml(x.p?.nome),escapeHtml(x.service.periodo),escapeHtml(x.displayStatus||x.i.status),money(fin?x.extra:x.daily),fin?money(x.finance):escapeHtml(x.displayExtra||x.i.extra),money(x.night),money(x.bonus),...(fin?[money(x.ajudaCusto)]:[money(x.danger)]),money(fin?x.extra+x.finance+x.night+x.bonus+x.ajudaCusto:x.daily+x.extra+x.danger+x.night+x.bonus)]))+`<div class="notice info section">Valores de demonstração. ${fin?'Financeiro sem adicional de periculosidade.':'Periculosidade de 30% para eletricista e auxiliar de eletricista, somente na Controladoria.'} Convocações sem apontamento ficam fora dos custos.</div>`;configureReportTable(fin);$('#report-day-select').onchange=()=>{day=$('#report-day-select').value;refresh();};};bindFilters(()=>{if(financial){selectedCycle='custom';$('#financial-cycle').value='custom';}refresh();});if(financial){$('#financial-cycle').onchange=()=>{selectedCycle=$('#financial-cycle').value;renderReports();};if(selectedCycle!=='custom')$('#cycle-caption').textContent='Pagamento em '+formatDate(financialCycle(isoToday(),Number(selectedCycle)).pagamento);}refresh();bindExports();if(financial)bindFinancialSummaryExports();
+    const refresh=()=>{const rows=(financial?financialEntries():entries()).filter(x=>!financial||(x.c.extraAvulsa||(presence(x.i.status)&&x.extra+x.finance+x.night+x.bonus+x.ajudaCusto>0.005))),dates=[...new Set(filteredConvs().map(c=>c.dataServico))].sort();if(!dates.includes(day))day='Todos';$('#report-tabs').innerHTML=field('Visualização',`<select id="report-day-select" class="control"><option value="Todos">Consolidado do período</option>${dates.map(d=>`<option value="${d}">${formatDate(d)}</option>`).join('')}</select>`);$('#report-day-select').value=day;const selected=rows.filter(x=>day==='Todos'||x.c.dataServico===day);const fin=perfilAtual==='FINANCEIRO';$('#report-body').innerHTML=table(['Data','Supervisor','Unidade','Obra','Colaborador','Período','Status',fin?'Extra / Diária avulso (R$)':'Custo normal',fin?'Valores complementares já registrados (R$)':'Extra','Adic. noturno','Acordos / Bonificações',...(fin?['Passagens/Ajuda de custo']:['Periculosidade 30%']),'Total'],selected.map(x=>[formatDate(x.c.dataServico),x.c.supervisor,escapeHtml(x.c.unidade),escapeHtml(fin?financialWorkNumber(x.c.obraId):obraById(x.c.obraId)?.nome),escapeHtml(x.p?.nome),escapeHtml(x.service.periodo),escapeHtml(x.displayStatus||x.i.status),money(fin?x.extra:x.daily),fin?money(x.finance):escapeHtml(x.displayExtra||x.i.extra),money(x.night),money(x.bonus),...(fin?[money(x.ajudaCusto)]:[money(x.danger)]),money(fin?x.extra+x.finance+x.night+x.bonus+x.ajudaCusto:x.daily+x.extra+x.danger+x.night+x.bonus)]))+`<div class="notice info section">Valores de demonstração. ${fin?'Financeiro sem adicional de periculosidade.':'Periculosidade de 30% para eletricista e auxiliar de eletricista, somente na Controladoria.'} Convocações sem apontamento ficam fora dos custos.</div>`;configureReportTable(fin);$('#report-day-select').onchange=()=>{day=$('#report-day-select').value;refresh();};};bindFilters(()=>{if(financial){selectedCycle='custom';$('#financial-cycle').value='custom';}refresh();});if(financial){$('#financial-cycle').onchange=()=>{selectedCycle=$('#financial-cycle').value;renderReports();};if(selectedCycle!=='custom')$('#cycle-caption').textContent='Pagamento em '+formatDate(financialCycle(isoToday(),Number(selectedCycle)).pagamento);}refresh();bindExports();if(financial)bindFinancialSummaryExports();
   }
   function renderDashboard(){
     $('#main-content').innerHTML=head('Dashboard','Presença, faltas e custos confirmados por unidade e responsável.')+filterControls(true)+'<div class="section" id="dash-body"></div>';
@@ -1355,10 +1393,10 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       const fields=['noturno','acordo','ajudaCusto'];
       const consolidated=financialSummaryRows(e);
       $('#pay-body').innerHTML=metric('TOTAL A PAGAR',money(e.reduce((v,x)=>v+total(x),0)),'sem periculosidade')
-        +'<div class="section"><h3>Consolidado por colaborador · ordem alfabética</h3>'+table(['Colaborador','Valor da Extra (R$)','Total a Pagar'],consolidated.map(x=>[escapeHtml(x.nome),money(x.extra),'<strong class="pay-total-display">'+money(x.total)+'</strong>']))+'</div>'
+        +'<div class="section"><h3>Consolidado por colaborador · ordem alfabética</h3>'+table(['Colaborador','Extra / Diária avulso (R$)','Total a Pagar'],consolidated.map(x=>[escapeHtml(x.nome),money(x.extra),'<strong class="pay-total-display">'+money(x.total)+'</strong>']))+'</div>'
         +'<section class="pay-detail-section" aria-labelledby="pay-detail-heading"><h3 id="pay-detail-heading">Detalhamento por dia</h3>'
         +'<p class="help-text">Passagens/Ajuda de custo: Fortaleza R$ 11, Caucaia R$ 10, Maracanaú R$ 12 e Horizonte R$ 25. Selecione um valor sugerido ou digite outro. Sem lançamento, o valor é R$ 0.</p>'
-        +table(['Data','Colaborador','Status','Valor da Extra (R$)','Valores complementares já registrados (R$)','Noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total a Pagar (R$)'],e.map((x,index)=>[formatDate(x.c.dataServico),escapeHtml(x.p?.nome),escapeHtml(x.i.status),money(x.extra),money(x.finance),...fields.map(k=>`<input aria-label="${k==='ajudaCusto'?'Passagens/Ajuda de custo':k}" class="control pay-input" type="number" min="0" step="0.01" ${k==='ajudaCusto'?'list="passagens-ajuda-valores"':''} data-index="${index}" data-field="${k}" value="${k==='noturno'?x.night:k==='acordo'?x.bonus:x.ajudaCusto}" ${(!x.refs?.length||(k==='noturno'&&!x.units.has('SEBRAE')))?'disabled':''}>`),'<strong class="pay-total-display">'+money(total(x))+'</strong>']))
+        +table(['Data','Colaborador','Status','Extra / Diária avulso (R$)','Valores complementares já registrados (R$)','Noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total a Pagar (R$)'],e.map((x,index)=>[formatDate(x.c.dataServico),escapeHtml(x.p?.nome),escapeHtml(x.i.status),money(x.extra),money(x.finance),...fields.map(k=>`<input aria-label="${k==='ajudaCusto'?'Passagens/Ajuda de custo':k}" class="control pay-input" type="number" min="0" step="0.01" ${k==='ajudaCusto'?'list="passagens-ajuda-valores"':''} data-index="${index}" data-field="${k}" value="${k==='noturno'?x.night:k==='acordo'?x.bonus:x.ajudaCusto}" ${(!x.refs?.length||(k==='noturno'&&!x.units.has('SEBRAE')))?'disabled':''}>`),'<strong class="pay-total-display">'+money(total(x))+'</strong>']))
         +predefinidos+'</section>'
         +'<section class="card card-pad section" id="financial-duplicate-review"><h3>Confirmação de valores complementares</h3>'
         +'<p>Use apenas quando o complemento financeiro e o acordo/bonificação forem dois pagamentos distintos, ainda que tenham o mesmo valor. Informe o motivo; a confirmação fica registrada com data e responsável.</p>'
@@ -1421,7 +1459,17 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
 
 function renderEquipeDia(){
  const body=$('#apontamento-body'),convs=convocacoesSupervisor().filter(c=>c.dataServico===portalDate&&(portalUnit==='Todas'||c.unidade===portalUnit));
- const people=new Map();for(const c of convs)for(const id of c.colaboradores)if(!people.has(id))people.set(id,{conv:c,item:apForConv(c.id)?.itens.find(i=>i.colaboradorId===id)});
+ const dayKey=portalDate+'|'+supervisorAtual,dayDraft=dayUnsavedDrafts.get(dayKey);
+ const people=new Map();for(const c of convs)for(const id of c.colaboradores)
+   if(!people.has(id))people.set(id,{conv:c,item:dayDraft?.items?.get(id)||apForConv(c.id)?.itens.find(i=>i.colaboradorId===id)});
+ const snapshotDayDraft=()=>{
+   const cards=$$('#day-form .person-card'),ids=cards.map(el=>el.dataset.person);
+   const items=ids.length?readPersonRows(ids,$('#day-form')):[];
+   const extra={person:$('#day-extra-person')?.value||'',kind:$('#day-extra-kind')?.value||'Não',
+     amount:$('#day-extra-amount')?.value||'',work:$('#day-extra-work')?.value||'',
+     obs:$('#day-extra-obs')?.value||'',search:$('#day-person-search')?.value||''};
+   dayUnsavedDrafts.set(dayKey,{items:new Map(items.map(item=>[item.colaboradorId,item])),extra});
+ };
  const extraTypes=['Meia diária','Diária','Uma e meia diária','Duas diárias'];
  body.innerHTML=`<h3>Equipe do dia</h3><p style="font-size:12px">Preencha o apontamento normal. Se houver extra, selecione a categoria diretamente na ficha do funcionário.</p>
  <details class="card card-pad"><summary>Adicionar colaborador / avulso ao apontamento normal</summary><div class="form-grid">${field('Colaborador',`<select class="control" id="day-add-person"><option value="">Selecione</option>${options(COLABORADORES.filter(c=>!c.inativo&&!people.has(c.id)))}</select>`)}${field('Nome do avulso','<input class="control" id="day-avulso-nome">')}${field('Categoria do avulso',avulsoFuncaoSelect('day-avulso-funcao'))}</div><div class="form-actions"><button class="btn btn-secondary" type="button" id="day-add-button">Adicionar à equipe normal</button></div></details>
@@ -1446,8 +1494,37 @@ function renderEquipeDia(){
   $('#day-extra-origin').textContent=day.work?'Serviço principal do funcionário neste dia: '+day.work.unidade+' · '+day.work.nome+'. A obra/unidade da extra pode ser alterada.':'Não foi encontrado apontamento principal para este funcionário nesta data. Escolha abaixo a obra/unidade onde a extra ocorreu.';
  };
  extraToggle.onchange=refreshExternalFields;$('#day-extra-person').onchange=suggestExternalWork;suggestExternalWork();
+ if(dayDraft?.extra){
+   const draft=dayDraft.extra;
+   if([...$('#day-extra-person').options].some(o=>o.value===draft.person))$('#day-extra-person').value=draft.person;
+   if([...extraToggle.options].some(o=>o.value===draft.kind))extraToggle.value=draft.kind;
+   $('#day-extra-amount').value=draft.amount;$('#day-extra-obs').value=draft.obs;
+   if([...$('#day-extra-work').options].some(o=>o.value===draft.work))$('#day-extra-work').value=draft.work;
+   $('#day-person-search').value=draft.search;
+   $('#day-person-search').dispatchEvent(new Event('input',{bubbles:true}));
+   refreshExternalFields();
+ }
  $('#day-all-present').onclick=()=>{if(!people.size)return toast('Adicione pessoas à equipe.',true);const items=readPersonRows([...people.keys()]);if(items.some(i=>i.servicos.some(s=>!s.obraId)))return toast('Selecione primeiro os serviços de todos os colaboradores.',true);$$('#day-form .row-status').forEach(x=>{x.value='Presente (Integral)';x.onchange?.();});};
- $('#day-add-button').onclick=()=>{const unit=portalUnit==='Todas'?(convs[0]?.unidade||adminUnits()[0]):portalUnit;if(!unit)return toast('Cadastre uma unidade antes de incluir o colaborador.',true);if(!OBRAS.some(o=>o.unidade===unit))return toast('Esta unidade ainda não possui obra cadastrada. Solicite à Controladoria o cadastro de uma obra antes da inclusão.',true);const name=$('#day-avulso-nome').value.trim();let id=$('#day-add-person').value;if(!id&&!name)return toast('Escolha um colaborador ou informe o nome do avulso.',true);if(!id){const funcao=$('#day-avulso-funcao').value;if(!funcao)return toast('Selecione Profissional ou Servente para o avulso.',true);id=uid('c');COLABORADORES.push({id,nome:name,...avulsoData(funcao)});}if(blocked(id,portalDate)||state.convocacoes.some(c=>c.dataServico===portalDate&&c.colaboradores.includes(id)&&overlaps(c.turno,'Integral')))return toast('Colaborador indisponível ou convocado em outra equipe.',true);let conv=convs.find(c=>c.unidade===unit);if(!conv){conv={id:uid('cv'),supervisor:supervisorAtual,dataServico:portalDate,unidade:unit,obraId:'',turno:'Integral',colaboradores:[],criadoEm:now().toISOString(),origem:'inclusao_apontamento'};state.convocacoes.push(conv);}conv.colaboradores.push(id);saveData();render();};
+ $('#day-add-button').onclick=()=>{
+   if(onlineQueued||onlineSaving)return toast('Aguarde o salvamento atual.',true);
+   const unit=portalUnit==='Todas'?(convs[0]?.unidade||adminUnits()[0]):portalUnit;
+   if(!unit)return toast('Cadastre uma unidade antes de incluir o colaborador.',true);
+   if(!OBRAS.some(o=>o.unidade===unit))return toast('Esta unidade ainda não possui obra cadastrada. Solicite à Controladoria o cadastro de uma obra antes da inclusão.',true);
+   const name=$('#day-avulso-nome').value.trim();
+   let id=$('#day-add-person').value,staff=null;
+   if(!id&&!name)return toast('Escolha um colaborador ou informe o nome do avulso.',true);
+   if(!id){const funcao=$('#day-avulso-funcao').value;if(!funcao)return toast('Selecione Profissional ou Servente para o avulso.',true);id=uid('c');staff={id,nome:name,...avulsoData(funcao)};}
+   if(people.has(id))return toast('Este colaborador já está na equipe.',true);
+   if(blocked(id,portalDate)||state.convocacoes.some(c=>c.dataServico===portalDate&&c.colaboradores.includes(id)&&overlaps(c.turno,'Integral')))return toast('Colaborador indisponível ou convocado em outra equipe.',true);
+   snapshotDayDraft();
+   if(staff)COLABORADORES.push(staff);
+   let conv=convs.find(c=>c.unidade===unit);
+   if(!conv){conv={id:uid('cv'),supervisor:supervisorAtual,dataServico:portalDate,unidade:unit,obraId:'',turno:'Integral',colaboradores:[],criadoEm:now().toISOString(),origem:'inclusao_apontamento'};state.convocacoes.push(conv);}
+   conv.colaboradores.push(id);
+   if(!saveData())return;
+   render();
+   toast('Colaborador adicionado. Os dados anteriormente preenchidos foram preservados.');
+ };
  $('#day-form').noValidate=true;
  $('#day-form').onsubmit=e=>{
   e.preventDefault();
@@ -1461,7 +1538,7 @@ function renderEquipeDia(){
     if(selectedExternal){const day=mainWorkForPersonOnDate(selectedExternal,portalDate);extraBatch.push({colaboradorId:selectedExternal,status:'Extra independente',extra:'Não',servicos:[],extraLancamento:{enabled:toggleExternal,extra:$('#day-extra-kind').value,valorExtraOriginal:Number($('#day-extra-amount').value),obraId:$('#day-extra-work').value,observacao:$('#day-extra-obs').value.trim(),dayWorkId:day.workId}});}
     if(!applyInlineExtras(extraBatch,portalDate,supervisorAtual))return;
     for(const c of convs){const selected=items.filter(i=>c.colaboradores.includes(i.colaboradorId));if(!selected.length)continue;let ap=apForConv(c.id);if(ap){ap.itens=[...ap.itens.filter(i=>!selected.some(x=>x.colaboradorId===i.colaboradorId)),...selected];ap.atualizadoEm=now().toISOString();}else state.apontamentos.push({executor:supervisorAtual||perfilLabel(perfilAtual),id:uid('ap'),convocacaoId:c.id,supervisor:c.supervisor,dataServico:c.dataServico,apontadoEm:now().toISOString(),retroativo:false,itens:selected});}
-    audit('Apontamento da equipe',portalDate);if(!saveData())return;toast('Apontamento do dia e extras salvos.');
+    audit('Apontamento da equipe',portalDate);if(!saveData(()=>dayUnsavedDrafts.delete(dayKey)))return;toast('Apontamento do dia e extras salvos.');
   }catch(error){
     console.error('APROAR day-form submit failure',String(error?.message||error).slice(0,240));
     showToast('Não foi possível preparar o apontamento. Confira os campos e tente novamente.',true);showSaveFeedback('Não foi possível preparar o apontamento. Confira os campos e tente novamente.',true);
@@ -1775,7 +1852,7 @@ function renderEquipeDia(){
     }
   }
   function exportVisibleWorkbook(filename){const tables=$$('#main-content table');if(!tables.length)return toast('Sem dados para exportar.',true);exportWorkbook(tables.map((t,i)=>({name:'Tabela '+(i+1),center:[...t.rows[0].cells].map((c,j)=>/data|status|situação|turno|quantidade|dias|atrasado|prazo|posição|extra|percentual|%/i.test(c.innerText)?j:-1).filter(j=>j>=0),rows:[...t.rows].map(r=>[...r.cells].map(c=>c.innerText))})),filename);}
-  function reportRowsForExport(rows){const fin=perfilAtual==='FINANCEIRO';return [['Data','Supervisor','Unidade','Obra','Colaborador','Período','Status',fin?'Valor da Extra (R$)':'Custo normal',fin?'Valores complementares já registrados (R$)':'Extra (R$)','Noturno','Acordos',...(fin?['Passagens/Ajuda de custo']:['Periculosidade']),'Total'],...rows.map(x=>[formatDate(x.c.dataServico),x.c.supervisor,x.c.unidade,fin?financialWorkNumber(x.c.obraId):obraById(x.c.obraId)?.nome||'',x.p?.nome||'',x.service.periodo,x.displayStatus||x.i.status,fin?x.extra:x.daily,fin?x.finance:x.extra,x.night,x.bonus,fin?x.ajudaCusto:x.danger,fin?x.extra+x.finance+x.night+x.bonus+x.ajudaCusto:x.daily+x.extra+x.danger+x.night+x.bonus])];}
+  function reportRowsForExport(rows){const fin=perfilAtual==='FINANCEIRO';return [['Data','Supervisor','Unidade','Obra','Colaborador','Período','Status',fin?'Extra / Diária avulso (R$)':'Custo normal',fin?'Valores complementares já registrados (R$)':'Extra (R$)','Noturno','Acordos',...(fin?['Passagens/Ajuda de custo']:['Periculosidade']),'Total'],...rows.map(x=>[formatDate(x.c.dataServico),x.c.supervisor,x.c.unidade,fin?financialWorkNumber(x.c.obraId):obraById(x.c.obraId)?.nome||'',x.p?.nome||'',x.service.periodo,x.displayStatus||x.i.status,fin?x.extra:x.daily,fin?x.finance:x.extra,x.night,x.bonus,fin?x.ajudaCusto:x.danger,fin?x.extra+x.finance+x.night+x.bonus+x.ajudaCusto:x.daily+x.extra+x.danger+x.night+x.bonus])];}
   const excelCol=n=>{let s='';for(n++;n;n=Math.floor((n-1)/26))s=String.fromCharCode(65+(n-1)%26)+s;return s;};
   function exportWorkbook(sheets,filename){
     const ns='http://schemas.openxmlformats.org/spreadsheetml/2006/main',rel='http://schemas.openxmlformats.org/package/2006/relationships',files={};
@@ -1799,7 +1876,7 @@ function renderEquipeDia(){
   function indicatorWorkbook(){const d=indicatorReportData(),make=(name,title,headers,rows,widths)=>({name,rows:[[title],['Período: '+reportPeriod()+' | Unidade: '+indicatorUnit],[],headers,...rows],headers:[3],titles:[],blue:true,merges:['A1:F1','A2:F2'],freeze:4,center:[1,2,3,4,5],widths});const sheets=[make('Resumo','INDICADOR DE CUMPRIMENTO DE PRAZOS',['Supervisor','Convocações feitas','Convocações atrasadas','Apontamentos feitos','Apontamentos atrasados','No prazo (%)'],d.summary,[18,21,24,22,25,15]),make('Ocorrências','OCORRÊNCIAS DE CONVOCAÇÃO E APONTAMENTO',['Supervisor','Data do serviço','Colaborador','Tipo','Registrado em','Atrasado'],d.events,[18,18,42,18,24,11])];sheets[1].center=[1,3,4,5];sheets.forEach(s=>s.rows[0][0]={value:s.rows[0][0],style:4});return sheets;}
   function financialWorkNumber(id){const name=obraById(id)?.nome||'';const obra=name.match(/\bOBRA\s*(?:N[º°.]*\s*)?(\d+(?:[.,/-]\d+)*)/i),code=name.match(/\b(APR[A-Z]*\s*[-.]?\s*\d+(?:[./-]\d+)*)/i),number=name.match(/^\s*(\d+(?:[.,/-]\d+)*)(?=\s|$|\s*-)/);return obra?obra[1]:code?code[1].replace(/\s+/g,'').toUpperCase():number?number[1]:'Sem número cadastrado';}
   function exportFinancialSummaryExcel(){
-    const people=financialSummaryRows(),columns=['Colaborador','Função','Supervisor(es)','Unidade(s)','Dias','Valor da Extra (R$)','Valores complementares já registrados (R$)','Adicional noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total (R$)'];
+    const people=financialSummaryRows(),columns=['Colaborador','Função','Supervisor(es)','Unidade(s)','Dias','Extra / Diária avulso (R$)','Valores complementares já registrados (R$)','Adicional noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total (R$)'];
     const rows=[['APROAR | CONSOLIDADO FINANCEIRO POR COLABORADOR'],['Período: '+reportPeriod()],[],columns];
     for(const p of people){
       const line=rows.length+1;
@@ -1823,7 +1900,7 @@ function renderEquipeDia(){
         sections.push(n-1);merges.push(`A${n}:N${n}`);
         rows.push(['UNIDADE: '+x.c.unidade+' | OBRA: '+financialWorkNumber(x.c.obraId)]);
         headers.push(rows.length);
-        rows.push(['Data','Supervisor','Unidade','Colaborador','Função','Período','Status','Valor da Extra (R$)','Valores complementares já registrados (R$)','Noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total (R$)','Observação']);
+        rows.push(['Data','Supervisor','Unidade','Colaborador','Função','Período','Status','Extra / Diária avulso (R$)','Valores complementares já registrados (R$)','Noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total (R$)','Observação']);
         let total=0;const first=rows.length+1;
         for(const x of group){
           const row=rows.length+1,value=roundMoney(x.extra+x.finance+x.night+x.bonus+x.ajudaCusto);total+=value;
@@ -1964,6 +2041,7 @@ function renderEquipeDia(){
         // Retain the retroactive form values on a rejected write. The authoritative state
         // has already been restored above, so a later retry rebuilds the request safely.
         const preserveRetroDraft=Boolean(document.querySelector('#form-retro')&&viewAtual==='apontamento'&&apontamentoTab==='retroativo');
+        if(preserveRetroDraft)for(const [id,staff] of retroUnsavedAvulsos)if(!COLABORADORES.some(c=>c.id===id))COLABORADORES.push(staff);
         onlineSaving=false;if(!preserveRetroDraft)render();showSaveFeedback(message,true);showToast(message,true);
       }finally{onlineQueued=false;onlineSaving=false;onlineMessage='';lockOnline(false);}
     });

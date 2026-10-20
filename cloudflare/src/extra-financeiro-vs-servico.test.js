@@ -72,3 +72,28 @@ test('Relatórios usam fontes financeiras e operacionais separadas em tela, Exce
  const control=section('  function controlWorkbook(){','  function indicatorReportData(){');
  assert.match(control,/const data=entries\(\)/);
 });
+
+test('Diária do avulso entra no financeiro e preserva os custos operacionais sem duplicação',()=>{
+ ctx.state.apontamentos=[{supervisor:'EDUARDO',dataServico:'2026-10-16',itens:[
+  {colaboradorId:'a1',status:'Presente (Integral)',extra:'Não',valorExtraDisponivel:0}
+ ]}];
+ ctx.currentEntries=[{...row({id:'a1',bonus:0}),p:{id:'a1',nome:'Avulso',avulso:'Sim'},daily:241.74}];
+ const [result]=ctx.calcFinance();
+ assert.equal(result.diariaAvulso,241.74);
+ assert.equal(result.extra,241.74,'O custo do avulso compõe o valor a pagar ao financeiro');
+ assert.equal(ctx.currentEntries[0].daily,241.74,'Custo do serviço permanece como diária original');
+ ctx.state.apontamentos[0].itens[0].valorExtraDisponivel=80;
+ assert.equal(ctx.calcFinance()[0].extra,321.74,'Diária do avulso e extra adicional são contabilizadas separadamente');
+});
+test('Colaborador regular não tem diária adicionada ao financeiro',()=>{
+ ctx.state.apontamentos=[{supervisor:'EDUARDO',dataServico:'2026-10-16',itens:[
+  {colaboradorId:'1',status:'Presente (Integral)',extra:'Não',valorExtraDisponivel:70}
+ ]}];
+ ctx.currentEntries=[{...row(),p:{id:'1',avulso:'Não'},daily:200}];
+ assert.equal(ctx.calcFinance()[0].extra,70);
+});
+test('Pagamento avulso não existe para falta ou atestado',()=>{
+ ctx.state.apontamentos=[];
+ ctx.currentEntries=[{...row({id:'a1'}),p:{id:'a1',avulso:'Sim'},daily:0,i:{colaboradorId:'a1',status:'Falta'}}];
+ assert.equal(ctx.calcFinance()[0].extra,0);
+});
