@@ -34,7 +34,7 @@ test('extra exige valor e gravacao depende da resposta do Neon',()=>{
  assert.match(ui,/showSaveFeedback\(onlineMessage\|\|'Apontamento confirmado e gravado no Neon\.'/);
  assert.match(ui,/showSaveFeedback\(message,true\)/);
  assert.match(ui,/AbortController\(\)/);
- assert.match(ui,/Consulte as pendências antes de tentar novamente/);
+ assert.match(ui,/Confira as pendências e o histórico antes de lançar novamente/);
   assert.match(ui,/api\('\/api\/save-status\?requestId='/,'Uma resposta interrompida deve ser verificada sem repetir o POST');
  assert.doesNotMatch(ui,/for\(let attempt=0;attempt<2;attempt\+\+\)/);
 });

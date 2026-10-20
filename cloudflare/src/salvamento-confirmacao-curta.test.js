@@ -110,3 +110,53 @@ test('O banco armazena a requestId depois do commit e permite consultas de confi
   assert.equal(Number((await pg.query('SELECT count(*) AS n FROM obras')).rows[0].n),1);
  }finally{await pg.close();}
 });
+
+test('Falha temporária 502 recupera gravando com MESMO ID e sem duplicar registros',async()=>{
+ let firstPayload=null,attempts=0,checks=0;
+ const x=setup({
+  post:async(_path,opts)=>{
+   attempts++;
+   if(!firstPayload)firstPayload=opts.body;
+   else assert.equal(opts.body,firstPayload,'Reenvio deve ser byte por byte idêntico');
+   if(attempts===1)throw Object.assign(Error('Cloudflare 502'),{status:502,nonJson:true});
+   return {ok:true,requestId:JSON.parse(opts.body).requestId};
+  },
+  check:async(path)=>{checks++;return {confirmed:false,requestId:new URL('https://site.local'+path).searchParams.get('requestId')};}
+ });
+ x.ctx.runSave();await x.done;
+ assert.equal(attempts,2);
+ assert.equal(x.calls.filter(c=>c.path==='/api/save').length,2);
+ assert.equal(checks,3,'Verifica antes do reenvio');
+ assert.equal(x.ui.synced,1);
+ assert(x.alerts.some(x=>/gravado no Neon/.test(x.message)));
+});
+
+test('Após 3 respostas 502 sem confirmação, nenhum pedido novo é criado automaticamente',async()=>{
+ const ids=[];
+ const x=setup({
+  post:async(_path,opts)=>{ids.push(JSON.parse(opts.body).requestId);throw Object.assign(Error('Cloudflare unavailable'),{status:502,nonJson:true});},
+  check:async path=>({confirmed:false,requestId:new URL('https://site.local'+path).searchParams.get('requestId')})
+ });
+ x.ctx.runSave();
+ await x.done;
+ assert.equal(ids.length,3,'Tentativas limitadas a três');
+ assert.equal(new Set(ids).size,1,'Nunca cria outra operação para a mesma confirmação');
+ assert.equal(x.ui.synced,1,'Falha atualiza base para não insistir cegamente');
+ assert(x.alerts.some(a=>/Nenhum segundo apontamento foi criado automaticamente/.test(a.message)));
+});
+
+test('Reenvio com 409 de versão antiga identifica gravação do envio anterior',async()=>{
+ let calls=0,requestId='';
+ const x=setup({
+  post:async(_path,opts)=>{
+   calls++;requestId=JSON.parse(opts.body).requestId;
+   if(calls===1)throw Object.assign(Error('Bad gateway'),{status:502});
+   throw Object.assign(Error('Versão alterada'),{status:409});
+  },
+  check:async path=>({confirmed:calls===2,requestId:new URL('https://site.local'+path).searchParams.get('requestId')})
+ });
+ x.ctx.runSave();await x.done;
+ assert.equal(calls,2);
+ assert.equal(x.ui.synced,1);
+ assert(x.alerts.some(a=>/gravado no Neon/.test(a.message)));
+});

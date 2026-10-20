@@ -2020,34 +2020,54 @@ function renderEquipeDia(){
           :'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return(c==='x'?r:(r&0x3|0x8)).toString(16);});
         const payload=JSON.stringify({requestId,version:onlineVersion,state:copy(state)});
         if(typeof payload!=='string')throw new Error('Não foi possível preparar os dados para salvar.');
-        // O POST recebe resposta curta. Caso a rede interrompa a resposta, conferir
-        // a MESMA requestId em consulta somente leitura: nunca repetir o POST.
-        const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),35000);
-        let reply;
-        try{
-          reply=await api('/api/save',{method:'POST',body:payload,signal:controller.signal,
-            headers:{'X-APROAR-Save-Ack':'1'}});
-          if(!reply?.ok||!(reply.requestId===requestId||reply.state))
-            throw new Error('O servidor respondeu sem confirmação do apontamento.');
-          savedOnServer=true;
-        }catch(error){
-          const interrupted=error?.name==='AbortError'||error?.nonJson||!error?.status||Number(error.status)>=500;
-          if(!interrupted)throw error;
-          for(let attempt=0;attempt<3&&!savedOnServer;attempt++){
-            if(attempt)await new Promise(resolve=>setTimeout(resolve,600*attempt));
+        // Reenviar EXATAMENTE o mesmo requestId e payload é seguro: aproar_web_apply
+        // é idempotente e registra o ID atomicamente na mesma transação.
+        // Sempre consultar o banco após erro de rede antes de tentar reenviar.
+        let reply=null,lastTransient=null;
+        const confirmById=async()=>{
+          for(let checkAttempt=0;checkAttempt<3;checkAttempt++){
+            if(checkAttempt)await new Promise(resolve=>setTimeout(resolve,700*checkAttempt));
             try{
               const check=await api('/api/save-status?requestId='+encodeURIComponent(requestId));
-              if(check.confirmed===true&&check.requestId===requestId)savedOnServer=true;
+              if(check?.confirmed===true&&check.requestId===requestId)return true;
+              if(check?.confirmed===false)continue;
             }catch(checkError){
-              console.warn('APROAR consulta do status do salvamento indisponível',String(checkError?.message||checkError).slice(0,160));
+              if(checkError?.status===401||checkError?.status===403)throw checkError;
+              console.warn('APROAR consulta de salvamento temporariamente indisponível',String(checkError?.message||checkError).slice(0,120));
             }
           }
-          if(!savedOnServer){
-            if(error?.name==='AbortError')
-              throw new Error('A resposta demorou mais de 35 segundos e ainda não foi possível confirmar a gravação. Consulte as pendências antes de tentar novamente.');
-            throw error;
+          return false;
+        };
+        for(let sendAttempt=0;sendAttempt<3&&!savedOnServer;sendAttempt++){
+          if(sendAttempt){
+            showSaveFeedback('Conexão instável. Recuperando o mesmo salvamento, sem duplicar apontamentos…',false,45000);
+            await new Promise(resolve=>setTimeout(resolve,900*sendAttempt));
           }
-        }finally{clearTimeout(timeout);}
+          const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),sendAttempt?22000:30000);
+          try{
+            reply=await api('/api/save',{method:'POST',body:payload,signal:controller.signal,
+              headers:{'X-APROAR-Save-Ack':'1'}});
+            if(!reply?.ok||!(reply.requestId===requestId||reply.state))
+              throw Object.assign(new Error('O servidor respondeu sem a confirmação do apontamento.'),{status:502});
+            savedOnServer=true;
+          }catch(error){
+            const status=Number(error?.status||0);
+            const temporary=error?.name==='AbortError'||(!status||status>=500);
+            if(!temporary){
+              // 409 pode ocorrer quando o primeiro POST salvou, mas o segundo
+              // encontrou uma versão antiga; conferir o ID antes de informar erro.
+              if(status===409&&await confirmById()){savedOnServer=true;break;}
+              throw error;
+            }
+            lastTransient=error;
+            if(await confirmById()){savedOnServer=true;break;}
+          }finally{clearTimeout(timeout);}
+        }
+        if(!savedOnServer){
+          throw Object.assign(new Error(
+            'Não foi possível confirmar o salvamento após recuperar a conexão. Confira as pendências e o histórico antes de lançar novamente. Nenhum segundo apontamento foi criado automaticamente.'
+          ),{status:lastTransient?.status||503,unconfirmed:true});
+        }
         const result=reply?.state?reply:await restoreOnlineSession();
         if(!result||!result.state||typeof result.version!=='string'||!result.session)
           throw new Error('O apontamento foi gravado, mas não foi possível atualizar os dados da tela.');
