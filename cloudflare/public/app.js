@@ -2013,25 +2013,56 @@ function renderEquipeDia(){
     state.obras=OBRAS;state.colaboradores=COLABORADORES;onlineQueued=true;lockOnline(true);
     queueMicrotask(async()=>{
       onlineQueued=false;onlineSaving=true;
+      let savedOnServer=false;
       try{
         const requestId=typeof crypto!=='undefined'&&typeof crypto.randomUUID==='function'
           ?crypto.randomUUID()
           :'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return(c==='x'?r:(r&0x3|0x8)).toString(16);});
         const payload=JSON.stringify({requestId,version:onlineVersion,state:copy(state)});
         if(typeof payload!=='string')throw new Error('Não foi possível preparar os dados para salvar.');
-        // Nunca reenviar automaticamente um POST incerto: o Neon pode tê-lo confirmado.
+        // O POST recebe resposta curta. Caso a rede interrompa a resposta, conferir
+        // a MESMA requestId em consulta somente leitura: nunca repetir o POST.
         const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),35000);
-        let result;
-        try{result=await api('/api/save',{method:'POST',body:payload,signal:controller.signal});}
-        catch(error){
-          if(error?.name==='AbortError')throw new Error('A gravação demorou mais de 35 segundos. Confira o histórico antes de tentar novamente para evitar duplicidade.');
-          throw error;
+        let reply;
+        try{
+          reply=await api('/api/save',{method:'POST',body:payload,signal:controller.signal,
+            headers:{'X-APROAR-Save-Ack':'1'}});
+          if(!reply?.ok||!(reply.requestId===requestId||reply.state))
+            throw new Error('O servidor respondeu sem confirmação do apontamento.');
+          savedOnServer=true;
+        }catch(error){
+          const interrupted=error?.name==='AbortError'||error?.nonJson||!error?.status||Number(error.status)>=500;
+          if(!interrupted)throw error;
+          for(let attempt=0;attempt<3&&!savedOnServer;attempt++){
+            if(attempt)await new Promise(resolve=>setTimeout(resolve,600*attempt));
+            try{
+              const check=await api('/api/save-status?requestId='+encodeURIComponent(requestId));
+              if(check.confirmed===true&&check.requestId===requestId)savedOnServer=true;
+            }catch(checkError){
+              console.warn('APROAR consulta do status do salvamento indisponível',String(checkError?.message||checkError).slice(0,160));
+            }
+          }
+          if(!savedOnServer){
+            if(error?.name==='AbortError')
+              throw new Error('A resposta demorou mais de 35 segundos e ainda não foi possível confirmar a gravação. Consulte as pendências antes de tentar novamente.');
+            throw error;
+          }
         }finally{clearTimeout(timeout);}
-        if(!result||!result.state||typeof result.version!=='string'||!result.session)throw new Error('O servidor não confirmou os dados do apontamento. Atualize a tela e confira o histórico antes de tentar novamente.');
+        const result=reply?.state?reply:await restoreOnlineSession();
+        if(!result||!result.state||typeof result.version!=='string'||!result.session)
+          throw new Error('O apontamento foi gravado, mas não foi possível atualizar os dados da tela.');
         applyOnline(result);onlineSaving=false;render();showSaveFeedback(onlineMessage||'Apontamento confirmado e gravado no Neon.');showToast(onlineMessage||'Apontamento salvo com sucesso.');
         if(typeof onSuccess==='function'){try{onSuccess(result);}catch(callbackError){console.error('APROAR post-save callback failure',String(callbackError?.message||callbackError));}}
       }catch(error){
         console.error('APROAR save failure',JSON.stringify({message:String(error?.message||error).slice(0,240),status:Number(error?.status||0),name:String(error?.name||'Error').slice(0,60)}));
+        if(savedOnServer){
+          // Confirmed on Neon, but reloading the full state failed. Do not allow
+          // another write from potentially stale data until the user refreshes.
+          onlineWritable=false;onlineSaving=false;
+          const notice='O banco confirmou que o apontamento foi SALVO. A atualização da tela falhou; pressione Ctrl + F5 para consultar o registro. Não lance novamente.';
+          showSaveFeedback(notice,true,60000);showToast(notice,true);
+          return;
+        }
         const message=String(error?.message||'Não foi possível salvar o apontamento. Confira a conexão e tente novamente.');
         try{applyOnline(await restoreOnlineSession());}
         catch(refreshError){

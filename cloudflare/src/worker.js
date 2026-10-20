@@ -67,6 +67,14 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
    // Avoid retrieving multi-year audit logs for users who do not view them.
    const readOptions=session.role==='FINANCEIRO'?{includeAudit:false}:session.role==='SUPERVISOR'?{auditUser:session.user}:{};
    if(path==='/api/bootstrap'&&request.method==='GET')return json(summary(await readDatabase(sql,readOptions),session,env));
+   // Read-only acknowledgement: disambiguates a write whose HTTP response was lost.
+   // Confirm only operations belonging to this authenticated user, never infer from a global version.
+   if(path==='/api/save-status'&&request.method==='GET'){
+    const requestId=url.searchParams.get('requestId')||'';
+    if(!/^[a-f0-9-]{36}$/i.test(requestId))return json({error:'Identificador de salvamento inválido.'},400);
+    const rows=await sql`SELECT 1 AS saved FROM aproar_web_requests WHERE id=${requestId} AND actor=${session.user} LIMIT 1`;
+    return json({confirmed:rows.length>0,requestId});
+   }
    if(path==='/api/financial-confirm-duplicate'&&request.method==='POST'){
     if(session.role!=='FINANCEIRO')return json({error:'Somente o Financeiro pode confirmar pagamentos distintos.'},403);
     if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);
@@ -106,16 +114,19 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
    }
    if(path==='/api/save'&&request.method==='POST'){
     if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);if(!writes(env))return json({error:'Gravação desativada ou sem autorização específica para este ambiente.'},403);
+    const compactAck=request.headers.get('x-aproar-save-ack')==='1';
     const body=await bodyJSON(request);if(!/^[a-f0-9-]{36}$/i.test(body.requestId||'')||typeof body.version!=='string')return json({error:'Identificador de requisição inválido.'},400);
     const digest=await sha(JSON.stringify(body)),previous=await sql`SELECT actor,payload_hash FROM aproar_web_requests WHERE id=${body.requestId}`;
-    if(previous.length){if(previous[0].actor!==session.user||previous[0].payload_hash!==digest)return json({error:'Identificador de requisição reutilizado.'},409);return json({...summary(await readDatabase(sql,readOptions),session,env),ok:true,replayed:true});}
+    if(previous.length){if(previous[0].actor!==session.user||previous[0].payload_hash!==digest)return json({error:'Identificador de requisição reutilizado.'},409);return compactAck?json({ok:true,requestId:body.requestId,replayed:true}):json({...summary(await readDatabase(sql,readOptions),session,env),ok:true,replayed:true});}
     const db=await readDatabase(sql,readOptions);if(body.version!==db.version)return json({error:'Outro usuário atualizou os dados. Suas alterações não foram gravadas; recarregue e confira os registros.'},409);
     const operations=buildOperations(db,body.state,session);
     if(!permittedProductionDeletion(env,session,db,operations))return json({error:'A Controladoria pode excluir uma convocação sem apontamento por vez ou até 50 obras sem vínculos. Registros com histórico devem ser preservados.'},403);
     // Work deletions run after dependent records, never before them.
     operations.sort((a,b)=>(a.table==='obras'&&a.action==='delete'?1:0)-(b.table==='obras'&&b.action==='delete'?1:0));
     if(operations.length)await sql`SELECT aproar_web_apply(${body.version},${body.requestId},${session.user},${digest},${JSON.stringify(operations)}::jsonb)`;
-    return json({...summary(await readDatabase(sql,readOptions),session,env),ok:true});
+    // No second full database read inside the POST for modern clients.
+    // Old open tabs continue receiving the legacy response until they refresh.
+    return compactAck?json({ok:true,requestId:body.requestId}):json({...summary(await readDatabase(sql,readOptions),session,env),ok:true});
    }
    return json({error:'Rota não encontrada.'},404);
   }
