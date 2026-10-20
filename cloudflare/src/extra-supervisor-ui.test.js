@@ -144,7 +144,7 @@ test('Não há funções duplicadas que sobrescrevam Extra e apontamento da equi
  assert.match(ui,/noValidate=true/);
  assert.match(ui,/data-convocacao="\$\{escapeHtml\(c\.id\)\}"/);
  assert.match(ui,/const ids = alphabeticalPersonIds\(\$\$\('input\[name="retro-colab"\]:checked'\)\.map/,'A seleção retroativa mantém o ID e passa a aparecer em ordem alfabética');
- assert.match(ui,/saveData\(\(\)=>setView\('pendencias'\)\)/,'Regularização retroativa navega após salvar');
+ assert.match(ui,/saveData\(\(\)=>\{retroUnsavedAvulsos\.clear\(\);setView\('pendencias'\);\}\)/,'Regularização retroativa navega após salvar e limpar avulsos provisórios');
  assert.match(ui,/showSaveFeedback\('Enviando apontamento para gravação no banco…'/,'Clique mostra progresso da gravação');
  assert.match(ui,/extraAmount\.required=active/,'Valor obrigatório apenas quando a opção de extra não é Não');
 });
