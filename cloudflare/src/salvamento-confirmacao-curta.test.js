@@ -107,6 +107,6 @@ test('O banco armazena a requestId depois do commit e permite consultas de confi
   const other=await pg.query('SELECT 1 AS saved FROM aproar_web_requests WHERE id=$1 AND actor=$2',[id,'SOARES']);
   assert.equal(own.rows.length,1);
   assert.equal(other.rows.length,0);
-  assert.equal((await pg.query('SELECT count(*) AS n FROM obras')).rows[0].n,'1');
+  assert.equal(Number((await pg.query('SELECT count(*) AS n FROM obras')).rows[0].n),1);
  }finally{await pg.close();}
 });
