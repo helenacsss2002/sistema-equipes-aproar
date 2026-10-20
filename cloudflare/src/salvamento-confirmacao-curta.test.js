@@ -24,6 +24,7 @@ function setup({post,check,bootstrap}){
   crypto:webcrypto,AbortController,queueMicrotask,
   setTimeout,clearTimeout,console,
   copy:v=>structuredClone(v),
+  document:{querySelector:()=>null},
   lockOnline:()=>{},
   render:()=>{ui.render++;resolveDone();},
   showSaveFeedback:(message,error)=>alerts.push({message,error}),
