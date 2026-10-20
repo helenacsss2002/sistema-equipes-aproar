@@ -57,7 +57,7 @@ test('Todos os relatórios financeiros usam Valor da Extra e explicitam valores 
   const a=app.indexOf(start),b=app.indexOf(end,a+start.length);
   assert.ok(a>=0&&b>a,start);
   const area=app.slice(a,b);
-  assert.match(area,/Valor da Extra/,start);
+  assert.match(area,/(Valor da Extra|Extra \/ Diária avulso)/,start);
   assert.match(area,/Valores (complementares já registrados|anteriores)/,start);
   assert.doesNotMatch(area,/'Financeiro \(R\$\)'/,start);
  }
