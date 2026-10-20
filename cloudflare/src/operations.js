@@ -68,6 +68,12 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
   const i={...ap.i};if(pendingAvulsoInvalid(i,staff.get(pid)))fail('Escolha um tipo válido de diária para o avulso.');if(session.role==='SUPERVISOR'&&oldPoint?.financeAdjusted){for(const k of ['financeiro','noturno','acordo','ajudaCusto'])i[k]=oldPoint[k];}const p=staff.get(pid),isPresent=present(i.status),ss=normServices(i).filter(s=>s.obraId),hasSebrae=ss.some(s=>clean(works.get(s.obraId)?.unidade)==='SEBRAE'),financialAdjusted=session.role==='FINANCEIRO'||oldPoint?.financeAdjusted===true;
   const extra=isPresent?(i.extra==='Valor específico'?Number(oldPoint.valorExtraOriginal):money(Number(p.custo)*mult(i.extra))):0;
   const night=isPresent&&hasSebrae?Number(i.noturno??0):0,finance=isPresent?Number(i.financeiro):0,bonus=isPresent?Number(i.acordo):0,ajudaCusto=isPresent?Number(i.ajudaCusto||0):0;
+  // Avoid recording the same unapproved payment as both complementary finance and
+  // agreement/bonus. Existing historical values remain readable and unchanged.
+  // A distinct, explicitly approved financial adjustment remains permitted.
+  const alreadySame=oldPoint&&money(Number(oldPoint.financeiro||0))===money(finance)&&money(Number(oldPoint.acordo||0))===money(bonus);
+  if(!financialAdjusted&&finance>0&&bonus>0&&money(finance)===money(bonus)&&!alreadySame)
+   fail('O valor complementar repete o acordo/bonificação. Não grave duas vezes o mesmo pagamento: deixe apenas o acordo ou solicite confirmação ao Financeiro.');
   const weight=!isPresent?0:p.avulso==='Sim'&&avulsoDailyTypes.includes(i.tipoDiariaAvulso)?mult(i.tipoDiariaAvulso):['Presente (Só Manhã)','Presente (Só Tarde)','Saída Antecipada'].includes(i.status)?.5:['Manhã','Tarde'].includes(c.turno)?.5:1;
   const oldRow=rawAps.get(key),pointTime=oldRow?.apontado_em||metadata(raw?.observacao).meta.apontado_em||timestamp,executor=oldRow?.apontado_por||metadata(raw?.observacao).meta.apontado_por||session.user;
   const values={status:i.status,valor_extra:extra,observacao:String(i.observacao||''),tipo_diaria:i.extra==='Valor específico'?(oldPoint?.tipoDiariaOriginal||'Não'):i.extra,custo_pago:money(finance),custo_pago_definido_financeiro:financialAdjusted,valor_acordo:money(bonus),valor_adicional_noturno:money(night),custo_encargos_base:money(Number(p.custo)*weight+extra),custos_separados:true,migracao_sebrae_noturno_v2:true};
