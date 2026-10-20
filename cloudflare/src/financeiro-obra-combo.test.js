@@ -29,6 +29,7 @@ function setup(works){
     escapeHtml:value=>String(value??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])),
     field:(_name,inner)=>inner,
     options:()=>'<option></option>',
+    wireLiveSuggestions:()=>{}, // Search UI is covered by live-search-interaction.test.js
     isoToday:()=> '2026-10-14',
     dateLocal:value=>new Date(value+'T12:00:00')
   };
