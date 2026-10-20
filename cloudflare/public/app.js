@@ -1370,8 +1370,8 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
               ${field('Motivo de serem dois pagamentos distintos',`<textarea class="control" rows="2" id="approve-reason-${index}" placeholder="Explique o motivo para auditoria"></textarea>`)}</div>
             <div class="form-actions"><button type="button" class="btn btn-secondary confirm-finance-duplicate" data-index="${index}">Confirmar valores complementares</button></div></div>`;
         }).join('')+'</section>';
-      $('.pay-input').forEach(inp=>inp.onchange=()=>{adjustPayment(e[Number(inp.dataset.index)],inp.dataset.field,inp.value);refresh();});
-      $('.confirm-finance-duplicate').forEach(button=>button.onclick=()=>{
+      $$('.pay-input').forEach(inp=>inp.onchange=()=>{adjustPayment(e[Number(inp.dataset.index)],inp.dataset.field,inp.value);refresh();});
+      $$('.confirm-finance-duplicate').forEach(button=>button.onclick=()=>{
         const index=Number(button.dataset.index),entry=e[index];
         const amount=Number($('#approve-finance-'+index)?.value),reason=$('#approve-reason-'+index)?.value.trim()||'';
         if(!Number.isFinite(amount)||amount<=0||roundMoney(amount)!==roundMoney(entry.bonus))

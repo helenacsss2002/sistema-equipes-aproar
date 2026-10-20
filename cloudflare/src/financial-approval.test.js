@@ -17,7 +17,7 @@ const record={
  observacao:'Turno: Integral ||APROAR_META|| '+JSON.stringify({valor_ajuda_custo:11,periodo_principal:'Integral'})};
 function driver(pg){
  const sql=(strings,...values)=>{const text=strings.reduce((t,s,i)=>t+(i?'$'+i:'')+s,'');return {
-  text,values,then(a,b){return pg.query(text,values).then(r=>r.rows).then(a,b)};
+  text,values,then(a,b){return pg.query(text,values).then(r=>r.rows).then(a,b)}
  };};
  sql.transaction=queries=>pg.transaction(async tx=>{const rows=[];for(const q of queries)rows.push((await tx.query(q.text,q.values)).rows);return rows;});
  return sql;
@@ -58,7 +58,7 @@ test('Confirmar valores iguais grava um evento auditável e permite atualizaçã
   await pg.exec(fs.readFileSync(new URL('./fixture-schema.sql',import.meta.url),'utf8'));
   await pg.exec(fs.readFileSync(new URL('../migracao_homologacao.sql',import.meta.url),'utf8'));
   await pg.exec("INSERT INTO colaboradores(nome,funcao,valor_diaria) VALUES('Pessoa QA','Servente',182.34); INSERT INTO obras(unidade,nome) VALUES('SEBRAE','Teste');");
-  await pg.exec("INSERT INTO convocacoes(obra_id,colaborador_id,data,engenheiro,observacao,valor_acordo) VALUES(1,1,'2026-10-13','SOARES','Turno: Integral ||APROAR_META|| {\\\"valor_ajuda_custo\\\":11}',90);");
+  await pg.query("INSERT INTO convocacoes(obra_id,colaborador_id,data,engenheiro,observacao,valor_acordo) VALUES(1,1,$1,$2,$3,90)",['2026-10-13','SOARES','Turno: Integral ||APROAR_META|| '+JSON.stringify({valor_ajuda_custo:11})]);
   await pg.exec("INSERT INTO apontamentos(convocacao_id,data_servico,colaborador_id,engenheiro,status,valor_acordo,custo_pago) VALUES('1','2026-10-13','1','SOARES','Presente (Integral)',90,0);");
   const sql=driver(pg),version=(await pg.query('SELECT aproar_web_fingerprint() AS version')).rows[0].version;
   const current=(await pg.query("SELECT c.id::text AS convocacao_id,c.observacao,c.custo_pago AS complemento_convocacao,c.valor_acordo AS acordo_convocacao,a.id::text AS apontamento_id,a.status,a.custo_pago AS complemento_atual,a.valor_acordo AS acordo_atual FROM convocacoes c JOIN apontamentos a ON a.convocacao_id=c.id::text")).rows[0];
