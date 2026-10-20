@@ -2080,7 +2080,7 @@ function renderEquipeDia(){
           // another write from potentially stale data until the user refreshes.
           onlineWritable=false;onlineSaving=false;
           const notice='O banco confirmou que o apontamento foi SALVO. A atualização da tela falhou; pressione Ctrl + F5 para consultar o registro. Não lance novamente.';
-          showSaveFeedback(notice,true,60000);showToast(notice,true);
+          showSaveFeedback(notice,true,60000);
           return;
         }
         const message=String(error?.message||'Não foi possível salvar o apontamento. Confira a conexão e tente novamente.');
@@ -2093,7 +2093,7 @@ function renderEquipeDia(){
         // has already been restored above, so a later retry rebuilds the request safely.
         const preserveRetroDraft=Boolean(document.querySelector('#form-retro')&&viewAtual==='apontamento'&&apontamentoTab==='retroativo');
         if(preserveRetroDraft)for(const [id,staff] of retroUnsavedAvulsos)if(!COLABORADORES.some(c=>c.id===id))COLABORADORES.push(staff);
-        onlineSaving=false;if(!preserveRetroDraft)render();showSaveFeedback(message,true);showToast(message,true);
+        onlineSaving=false;if(!preserveRetroDraft)render();showSaveFeedback(message,true);
       }finally{onlineQueued=false;onlineSaving=false;onlineMessage='';lockOnline(false);}
     });
     return true;
