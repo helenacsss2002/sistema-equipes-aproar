@@ -82,3 +82,17 @@ test('Trello: reporta duas fontes quando ambas deixam de retornar JSON',async()=
  const mock=async()=>({ok:true,status:200,headers:new Headers({'content-type':'text/html'})});
  await assert.rejects(()=>consultarTrello(mock),e=>e.status===502&&e.message.includes('api.trello.com')&&e.message.includes('trello.com')&&e.message.includes('HTML'));
 });
+
+test('Trello: adiciona autenticacao apenas na consulta ao servidor',async()=>{
+ const urls=[];
+ const mock=async url=>{urls.push(url);return {ok:true,status:200,headers:new Headers(),json:async()=>({lists:[],cards:[]})};};
+ await consultarTrello(mock,{key:'chave-teste',token:'token-teste'});
+ assert.equal(urls.length,1);
+ assert.match(urls[0],/key=chave-teste/);
+ assert.match(urls[0],/token=token-teste/);
+});
+test('Trello: rejeita configuração incompleta sem fazer consulta externa',async()=>{
+ let calls=0;
+ await assert.rejects(()=>consultarTrello(async()=>{calls++;},{key:'so-chave'}),/Configure ambos os segredos/);
+ assert.equal(calls,0);
+});
