@@ -132,7 +132,7 @@ test('Falha temporária 502 recupera gravando com MESMO ID e sem duplicar regist
  assert(x.alerts.some(x=>/gravado no Neon/.test(x.message)));
 });
 
-test('Após 3 respostas 502 sem confirmação, nenhum pedido novo é criado automaticamente',async()=>{
+test('Após 2 respostas 502 sem confirmação, nenhum pedido novo é criado automaticamente',async()=>{
  const ids=[];
  const x=setup({
   post:async(_path,opts)=>{ids.push(JSON.parse(opts.body).requestId);throw Object.assign(Error('Cloudflare unavailable'),{status:502,nonJson:true});},
@@ -140,7 +140,7 @@ test('Após 3 respostas 502 sem confirmação, nenhum pedido novo é criado auto
  });
  x.ctx.runSave();
  await x.done;
- assert.equal(ids.length,3,'Tentativas limitadas a três');
+ assert.equal(ids.length,2,'Tentativas limitadas a duas para não sobrecarregar o servidor');
  assert.equal(new Set(ids).size,1,'Nunca cria outra operação para a mesma confirmação');
  assert.equal(x.ui.synced,1,'Falha atualiza base para não insistir cegamente');
  assert(x.alerts.some(a=>/Nenhum segundo apontamento foi criado automaticamente/.test(a.message)));
