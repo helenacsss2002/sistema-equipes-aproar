@@ -1970,7 +1970,7 @@ function renderEquipeDia(){
     if(!data||typeof data!=='object'){
       const saving=path==='/api/save';
       throw Object.assign(new Error(saving
-        ?'O servidor interrompeu a resposta do salvamento. Confira se o valor foi registrado antes de lançar novamente.'
+        ?'A resposta do servidor não chegou completa. O sistema verificará automaticamente se o apontamento já foi registrado, sem criar outro.'
         :'O servidor da APROAR respondeu com uma página inválida ou ficou temporariamente indisponível. Aguarde e tente novamente.'),{status:response.ok?502:response.status||502,nonJson:true});
     }
     if(!response.ok)throw Object.assign(new Error(data.error||'Falha na comunicação.'),{status:response.status});
@@ -2038,7 +2038,7 @@ function renderEquipeDia(){
           }
           return false;
         };
-        for(let sendAttempt=0;sendAttempt<3&&!savedOnServer;sendAttempt++){
+        for(let sendAttempt=0;sendAttempt<2&&!savedOnServer;sendAttempt++){
           if(sendAttempt){
             showSaveFeedback('Conexão instável. Recuperando o mesmo salvamento, sem duplicar apontamentos…',false,45000);
             await new Promise(resolve=>setTimeout(resolve,900*sendAttempt));
@@ -2068,11 +2068,16 @@ function renderEquipeDia(){
             'Não foi possível confirmar o salvamento após recuperar a conexão. Confira as pendências e o histórico antes de lançar novamente. Nenhum segundo apontamento foi criado automaticamente.'
           ),{status:lastTransient?.status||503,unconfirmed:true});
         }
+        // A gravação já está confirmada pelo banco. Nunca tratar a falha de
+        // atualização da tela como uma falha do próprio apontamento.
         const result=reply?.state?reply:await restoreOnlineSession();
         if(!result||!result.state||typeof result.version!=='string'||!result.session)
           throw new Error('O apontamento foi gravado, mas não foi possível atualizar os dados da tela.');
-        applyOnline(result);onlineSaving=false;render();showSaveFeedback(onlineMessage||'Apontamento confirmado e gravado no Neon.');showToast(onlineMessage||'Apontamento salvo com sucesso.');
+        applyOnline(result);onlineSaving=false;
         if(typeof onSuccess==='function'){try{onSuccess(result);}catch(callbackError){console.error('APROAR post-save callback failure',String(callbackError?.message||callbackError));}}
+        else render();
+        showSaveFeedback(onlineMessage||'Apontamento confirmado e gravado no Neon.');
+        showToast(onlineMessage||'Apontamento salvo com sucesso.');
       }catch(error){
         console.error('APROAR save failure',JSON.stringify({message:String(error?.message||error).slice(0,240),status:Number(error?.status||0),name:String(error?.name||'Error').slice(0,60)}));
         if(savedOnServer){

@@ -161,3 +161,12 @@ test('Reenvio com 409 de versão antiga identifica gravação do envio anterior'
  assert.equal(x.ui.synced,1);
  assert(x.alerts.some(a=>/gravado no Neon/.test(a.message)));
 });
+
+test('Falha HTTP não mostra aviso antigo e nunca duplica a gravação ao confirmar o envio',async()=>{
+ const original=app;
+ assert.doesNotMatch(original,/O servidor interrompeu a resposta do salvamento\. Confira se o valor foi registrado antes de lançar novamente/);
+ assert.match(original,/O sistema verificará automaticamente se o apontamento já foi registrado/);
+ assert.match(original,/for\(let sendAttempt=0;sendAttempt<2&&!savedOnServer;sendAttempt\+\+\)/);
+ assert.match(original,/if\(status===409&&await confirmById\(\)\)/);
+ assert.match(original,/const result=reply\?\.state\?reply:await restoreOnlineSession\(\)/);
+});
