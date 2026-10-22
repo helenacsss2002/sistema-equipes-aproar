@@ -542,6 +542,10 @@
     `;
     $$('.tab-btn').forEach(b => b.onclick = () => {
       if(b.dataset.tab!=='retroativo')discardRetroUnsavedAvulsos();
+      if(b.dataset.tab==='retroativo'&&dayPendingAdds.size){
+        discardDayPendingAdds();
+        showToast('As inclusões ainda não salvas foram descartadas ao mudar de aba.',true);
+      }
       apontamentoTab = b.dataset.tab; render();
     });
     if (apontamentoTab === 'normal') renderApontamentoNormal(); else renderApontamentoRetroativo();
@@ -1491,7 +1495,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
 
 function renderEquipeDia(){
  const pendingDayKey=portalDate+'|'+supervisorAtual;
- if([...dayPendingAdds.values()].some(x=>x.dayKey!==pendingDayKey)){
+ if([...dayPendingAdds.values()].some(x=>x.dayKey!==pendingDayKey||x.selectedUnit!==portalUnit)){
    discardDayPendingAdds();
    showToast('Inclusões não salvas da outra data foram descartadas. Confira o novo apontamento.',true);
  }
@@ -1559,7 +1563,7 @@ function renderEquipeDia(){
    if(!conv){conv={id:uid('cv'),supervisor:supervisorAtual,dataServico:portalDate,unidade:unit,obraId:'',turno:'Integral',colaboradores:[],criadoEm:now().toISOString(),origem:'inclusao_apontamento'};state.convocacoes.push(conv);}
    conv.colaboradores.push(id);
    // Evita POST isolado: a equipe e o apontamento são gravados juntos.
-   dayPendingAdds.set(id,{id,staff,unit,dayKey,convId:conv.id});
+   dayPendingAdds.set(id,{id,staff,unit,dayKey,selectedUnit:portalUnit,convId:conv.id});
    const preferredWork=convs.find(c=>c.unidade===unit&&OBRAS.some(o=>o.id===c.obraId))?.obraId
      ||OBRAS.find(o=>o.unidade===unit)?.id||'';
    dayUnsavedDrafts.get(dayKey)?.items.set(id,{
