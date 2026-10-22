@@ -2153,7 +2153,7 @@ function renderEquipeDia(){
         const preserveRetroDraft=Boolean(document.querySelector('#form-retro')&&viewAtual==='apontamento'&&apontamentoTab==='retroativo');
         if(preserveRetroDraft)for(const [id,staff] of retroUnsavedAvulsos)if(!COLABORADORES.some(c=>c.id===id))COLABORADORES.push(staff);
         // Restaurar inclusões e rascunho local após rejeição de gravação.
-        if(dayPendingAdds.size)restoreDayPendingAdds();
+        if(typeof dayPendingAdds!=='undefined'&&dayPendingAdds.size)restoreDayPendingAdds();
         onlineSaving=false;if(!preserveRetroDraft)render();showSaveFeedback(message,true);
       }finally{onlineQueued=false;onlineSaving=false;onlineMessage='';lockOnline(false);}
     });
