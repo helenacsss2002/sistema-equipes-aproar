@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import vm from 'node:vm';
 
 const js=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
 
@@ -89,4 +90,61 @@ test('Na inclusão normal, avulso e convocados seguem juntos no POST definitivo;
  assert.match(submission,/dayUnsavedDrafts\.delete\(dayKey\)/);
  assert.match(submission,/dayPendingAdds\.clear\(\)/);
  assert.match(js,/if\(typeof dayPendingAdds!=='undefined'&&dayPendingAdds\.size\)restoreDayPendingAdds\(\)/);
+});
+
+test('O X aparece apenas no topo das fichas recém-incluídas; não dispara salvamento no Neon',()=>{
+ const normal=section('function renderEquipeDia(){','  function convocationReviewMarkup(');
+ const controls=section(" bindServiceRows();bindPersonSearch($('#day-person-search')"," const extraToggle=$('#day-extra-kind')");
+ assert.match(controls,/for\(const \[id,pending\] of dayPendingAdds\)/);
+ assert.match(controls,/remove\.type='button'/);
+ assert.match(controls,/remove\.textContent='×'/);
+ assert.match(controls,/remove\.className='day-remove-pending'/);
+ assert.match(controls,/position:'absolute',top:'8px',right:'9px'/);
+ assert.match(controls,/snapshotDayDraft\(\)/);
+ assert.match(controls,/removePendingDayAdd\(id,dayKey\)/);
+ assert(controls.indexOf('snapshotDayDraft()')<controls.indexOf('removePendingDayAdd(id,dayKey)'));
+ assert.doesNotMatch(controls,/saveData\(/);
+ assert.match(normal,/showToast\('Colaborador retirado do formulário/);
+});
+
+test('X retira apenas o avulso escolhido, conserva o rascunho dos colegas e não exclui históricos',()=>{
+ const code=section('  function removePendingDayAdd(id,dayKey){','  const retroUnsavedAvulsos=new Map();');
+ const dayKey='2026-10-22|EDUARDO';
+ const saved={id:'hist',nome:'Colega salvo',avulso:'Não'};
+ const alice={id:'alice',nome:'Avulso A',avulso:'Sim'};
+ const bruno={id:'bruno',nome:'Avulso B',avulso:'Sim'};
+ const state={convocacoes:[{id:'cvOriginal',colaboradores:['hist','alice','bruno']}],apontamentos:[],colaboradores:[saved,alice,bruno]};
+ const dayPendingAdds=new Map([
+  ['alice',{id:'alice',staff:alice,dayKey,convId:'cvOriginal'}],
+  ['bruno',{id:'bruno',staff:bruno,dayKey,convId:'cvOriginal'}]
+ ]);
+ const dayUnsavedDrafts=new Map([[dayKey,{items:new Map([
+  ['hist',{status:'Falta',observacao:'Preenchimento mantido'}],
+  ['alice',{status:'Presente (Integral)'}],
+  ['bruno',{status:'Presente (Integral)'}]
+ ]),extra:{person:'',search:'Teste'}}]]);
+ const ctx={state,COLABORADORES:state.colaboradores,dayPendingAdds,dayUnsavedDrafts,onlineConfirmed:{convocacoes:[{id:'cvOriginal',colaboradores:['hist']}],colaboradores:[saved]}};
+ vm.runInNewContext(code+'\nglobalThis.runRemove=removePendingDayAdd;',ctx);
+ assert.equal(ctx.runRemove('alice',dayKey),true);
+ assert.deepEqual(state.convocacoes[0].colaboradores,['hist','bruno']);
+ assert.deepEqual(ctx.COLABORADORES.map(c=>c.id),['hist','bruno']);
+ assert.equal(dayUnsavedDrafts.get(dayKey).items.get('hist').observacao,'Preenchimento mantido');
+ assert.equal(dayUnsavedDrafts.get(dayKey).items.has('alice'),false);
+ assert.equal(dayUnsavedDrafts.get(dayKey).items.has('bruno'),true);
+ assert.equal(dayPendingAdds.has('bruno'),true);
+ assert.equal(ctx.runRemove('hist',dayKey),false,'Histórico confirmado não pode ser apagado com X');
+ assert.equal(state.convocacoes[0].colaboradores.includes('hist'),true);
+});
+
+test('X do único avulso não salvo elimina convocação provisória vazia sem modificar banco',()=>{
+ const code=section('  function removePendingDayAdd(id,dayKey){','  const retroUnsavedAvulsos=new Map();');
+ const dayKey='2026-10-22|JOEL',p={id:'new1',nome:'Avulso provisório',avulso:'Sim'};
+ const state={convocacoes:[{id:'cvProvisorio',colaboradores:['new1']}],apontamentos:[],colaboradores:[p]};
+ const ctx={state,COLABORADORES:state.colaboradores,dayPendingAdds:new Map([['new1',{id:'new1',staff:p,dayKey,convId:'cvProvisorio'}]]),dayUnsavedDrafts:new Map([[dayKey,{items:new Map([['new1',{status:'Presente (Integral)'}]]),extra:{person:'new1'}}]]),onlineConfirmed:{convocacoes:[],colaboradores:[]}};
+ vm.runInNewContext(code+'\nglobalThis.runRemove=removePendingDayAdd;',ctx);
+ assert.equal(ctx.runRemove('new1',dayKey),true);
+ assert.equal(state.convocacoes.length,0);
+ assert.equal(state.colaboradores.length,0);
+ assert.equal(ctx.dayPendingAdds.size,0);
+ assert.equal(ctx.dayUnsavedDrafts.get(dayKey).extra.person,'');
 });
