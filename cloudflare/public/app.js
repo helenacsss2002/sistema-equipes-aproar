@@ -1549,7 +1549,7 @@ function renderEquipeDia(){
  <div id="day-extra-fields" class="form-grid">${field('Valor da Extra (R$)',`<input class="control" id="day-extra-amount" type="number" min="0.01" step="0.01" placeholder="Digite o valor" required>`)}${field('Obra / Serviço e unidade da extra',`<select class="control" id="day-extra-work">${extraWorkOptions('')}</select>`)}${field('Observação da extra','<input class="control" id="day-extra-obs" maxlength="2000" placeholder="Opcional">')}</div>
  <div id="day-extra-origin" class="notice info section">Escolha o funcionário. O serviço registrado para ele neste dia será sugerido automaticamente, mas pode ser trocado.</div></details>
  <div class="form-actions"><button class="btn btn-primary">Salvar apontamento do dia</button></div></form>`;
- bindServiceRows();bindPersonSearch($('#day-person-search'),()=>$('#day-form .person-card'));
+ bindServiceRows();bindPersonSearch($('#day-person-search'),()=>$$('#day-form .person-card'));
  // X apenas nas fichas de pessoas incluídas agora e ainda não salvas.
  for(const [id,pending] of dayPendingAdds){
    if(pending.dayKey!==dayKey)continue;
