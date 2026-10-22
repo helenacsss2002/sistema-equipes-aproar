@@ -79,7 +79,7 @@ test('Abandonar o retroativo descarta avulsos provisórios e falha de gravação
 
 test('Na inclusão normal, avulso e convocados seguem juntos no POST definitivo; falha mantém a equipe local',()=>{
  const add=section(" $('#day-add-button').onclick=()=>{"," $('#day-form').noValidate=true;");
- const submission=section(" $('#day-form').onsubmit=e=>{","     let unitConvDate='';");
+ const submission=section("$('#day-form').onsubmit=e=>{","let unitConvDate='';");
  assert.doesNotMatch(add,/saveData\(/);
  assert.match(add,/conv\.colaboradores\.push\(id\)/);
  assert.match(add,/dayPendingAdds\.set\(id/);
