@@ -32,7 +32,11 @@ test('Inserir avulso no apontamento normal salva um rascunho de cada colaborador
  assert.match(snapshot,/new Map\(items\.map\(item=>\[item\.colaboradorId,item\]\)\)/);
  assert.match(snapshot,/dayUnsavedDrafts\.set\(dayKey/);
  assert.match(add,/snapshotDayDraft\(\);/);
- assert(add.indexOf('snapshotDayDraft()')<add.indexOf('saveData()'),'A captura deve vir antes de salvar');
+ assert.doesNotMatch(add,/saveData\(/,'Adicionar avulso ao formulário não deve gravar antes do apontamento');
+ assert.match(add,/dayPendingAdds\.set\(id/);
+ assert.match(add,/dayUnsavedDrafts\.get\(dayKey\)\?\.items\.set\(id/);
+ assert.match(normal,/if\(!saveData\(\(\)=>\{/,'Somente o envio definitivo deve salvar equipe e apontamento');
+ assert.match(normal,/dayPendingAdds\.clear\(\)/);
  assert.match(normal,/dayDraft\?\.items\?\.get\(id\)\|\|apForConv/);
  assert.match(normal,/if\(dayDraft\?\.extra\)/);
  assert.match(normal,/\$\('#day-person-search'\)\.value=draft\.search/);
@@ -65,7 +69,24 @@ test('Avulso segue na gravação do apontamento e na apropriação operacional e
 });
 test('Abandonar o retroativo descarta avulsos provisórios e falha de gravação conserva os rascunhos',()=>{
  assert.match(js,/function discardRetroUnsavedAvulsos\(\)/);
- assert.match(js,/if\(view!=='apontamento'\)discardRetroUnsavedAvulsos\(\)/);
+ assert.match(js,/if\(view!=='apontamento'\)\{/);
+ assert.match(js,/discardRetroUnsavedAvulsos\(\)/);
+ assert.match(js,/discardDayPendingAdds\(\)/);
+ assert.match(js,/restoreDayPendingAdds\(\)/);
  assert.match(js,/if\(b\.dataset\.tab!=='retroativo'\)discardRetroUnsavedAvulsos\(\)/);
  assert.match(js,/if\(preserveRetroDraft\)for\(const \[id,staff\] of retroUnsavedAvulsos\)/);
+});
+
+test('Na inclusão normal, avulso e convocados seguem juntos no POST definitivo; falha mantém a equipe local',()=>{
+ const add=section(" $('#day-add-button').onclick=()=>{"," $('#day-form').noValidate=true;");
+ const submission=section("$('#day-form').onsubmit=e=>{","let unitConvDate='';");
+ assert.doesNotMatch(add,/saveData\(/);
+ assert.match(add,/conv\.colaboradores\.push\(id\)/);
+ assert.match(add,/dayPendingAdds\.set\(id/);
+ assert.match(add,/tipoDiariaAvulso:staff\?'Diária'/);
+ assert.match(add,/preferredWork/);
+ assert.match(submission,/snapshotDayDraft\(\)/);
+ assert.match(submission,/dayUnsavedDrafts\.delete\(dayKey\)/);
+ assert.match(submission,/dayPendingAdds\.clear\(\)/);
+ assert.match(js,/if\(typeof dayPendingAdds!=='undefined'&&dayPendingAdds\.size\)restoreDayPendingAdds\(\)/);
 });

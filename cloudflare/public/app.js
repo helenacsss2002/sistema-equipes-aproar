@@ -221,7 +221,13 @@
   function setView(view) {
     const permitidas = navConfig().map(x => x.view);
     const previousView=viewAtual;
-    if(view!=='apontamento')discardRetroUnsavedAvulsos();
+    if(view!=='apontamento'){
+      if(dayPendingAdds.size){
+        discardDayPendingAdds();
+        showToast('A inclusão não salva de colaboradores foi descartada ao sair do apontamento.',true);
+      }
+      discardRetroUnsavedAvulsos();
+    }
     viewAtual = permitidas.includes(view) ? view : 'inicio';
     if(perfilAtual==='CONTROLADORIA'&&viewAtual==='convocacao'&&previousView!=='convocacao')adminConvDate=tomorrowISO();
     renderNav();
@@ -536,6 +542,10 @@
     `;
     $$('.tab-btn').forEach(b => b.onclick = () => {
       if(b.dataset.tab!=='retroativo')discardRetroUnsavedAvulsos();
+      if(b.dataset.tab==='retroativo'&&dayPendingAdds.size){
+        discardDayPendingAdds();
+        showToast('As inclusões ainda não salvas foram descartadas ao mudar de aba.',true);
+      }
       apontamentoTab = b.dataset.tab; render();
     });
     if (apontamentoTab === 'normal') renderApontamentoNormal(); else renderApontamentoRetroativo();
@@ -543,6 +553,32 @@
 
   // Dados ainda não gravados: mantidos ao incluir colaborador ou avulso.
   const dayUnsavedDrafts=new Map();
+  // Pessoas adicionadas no apontamento normal são salvas junto com o apontamento.
+  const dayPendingAdds=new Map();
+  function discardDayPendingAdds(){
+    if(!dayPendingAdds.size)return;
+    dayPendingAdds.clear();
+    dayUnsavedDrafts.clear();
+    if(onlineConfirmed){
+      state=copy(onlineConfirmed);
+      OBRAS.splice(0,OBRAS.length,...state.obras);
+      COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);
+    }
+  }
+  function restoreDayPendingAdds(){
+    for(const {id,staff,unit,dayKey,convId} of dayPendingAdds.values()){
+      if(staff&&!COLABORADORES.some(c=>String(c.id)===String(id)))COLABORADORES.push(staff);
+      const [day,supervisor]=dayKey.split('|');
+      let conv=state.convocacoes.find(c=>String(c.id)===String(convId))
+        ||state.convocacoes.find(c=>c.dataServico===day&&c.supervisor===supervisor&&c.unidade===unit&&c.turno==='Integral');
+      if(!conv){
+        conv={id:convId,supervisor,dataServico:day,unidade:unit,obraId:'',turno:'Integral',colaboradores:[],criadoEm:now().toISOString(),origem:'inclusao_apontamento'};
+        state.convocacoes.push(conv);
+      }
+      if(!conv.colaboradores.includes(id))conv.colaboradores.push(id);
+    }
+    state.colaboradores=COLABORADORES;
+  }
   const retroUnsavedAvulsos=new Map();
   function discardRetroUnsavedAvulsos(){
     if(!retroUnsavedAvulsos.size)return;
@@ -1458,6 +1494,11 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
   }
 
 function renderEquipeDia(){
+ const pendingDayKey=portalDate+'|'+supervisorAtual;
+ if([...dayPendingAdds.values()].some(x=>x.dayKey!==pendingDayKey||x.selectedUnit!==portalUnit)){
+   discardDayPendingAdds();
+   showToast('Inclusões não salvas da outra data foram descartadas. Confira o novo apontamento.',true);
+ }
  const body=$('#apontamento-body'),convs=convocacoesSupervisor().filter(c=>c.dataServico===portalDate&&(portalUnit==='Todas'||c.unidade===portalUnit));
  const dayKey=portalDate+'|'+supervisorAtual,dayDraft=dayUnsavedDrafts.get(dayKey);
  const people=new Map();for(const c of convs)for(const id of c.colaboradores)
@@ -1521,15 +1562,24 @@ function renderEquipeDia(){
    let conv=convs.find(c=>c.unidade===unit);
    if(!conv){conv={id:uid('cv'),supervisor:supervisorAtual,dataServico:portalDate,unidade:unit,obraId:'',turno:'Integral',colaboradores:[],criadoEm:now().toISOString(),origem:'inclusao_apontamento'};state.convocacoes.push(conv);}
    conv.colaboradores.push(id);
-   if(!saveData())return;
+   // Evita POST isolado: a equipe e o apontamento são gravados juntos.
+   dayPendingAdds.set(id,{id,staff,unit,dayKey,selectedUnit:portalUnit,convId:conv.id});
+   const preferredWork=convs.find(c=>c.unidade===unit&&OBRAS.some(o=>o.id===c.obraId))?.obraId
+     ||OBRAS.find(o=>o.unidade===unit)?.id||'';
+   dayUnsavedDrafts.get(dayKey)?.items.set(id,{
+     colaboradorId:id,status:'Presente (Integral)',extra:'Não',
+     tipoDiariaAvulso:staff?'Diária':null,
+     servicos:[{obraId:preferredWork,periodo:'Integral'}]
+   });
    render();
-   toast('Colaborador adicionado. Os dados anteriormente preenchidos foram preservados.');
+   showToast('Colaborador incluído no formulário, ainda não salvo. Confira os dados e clique em “Salvar apontamento do dia”.');
  };
  $('#day-form').noValidate=true;
  $('#day-form').onsubmit=e=>{
   e.preventDefault();
   try{
     if(portalDate>isoToday())return toast('Não é possível apontar uma data futura.',true);
+    snapshotDayDraft();
     const items=readPersonRows([...people.keys()]);if(!validateAgreementObservations(items,$('#day-form')))return;if(!validateExtraAmounts(items,$('#day-form')))return;for(const i of items)if(!validServices([i],people.get(i.colaboradorId).conv.unidade))return;
     const selectedExternal=$('#day-extra-person').value,toggleExternal=$('#day-extra-kind').value!=='Não';
     if(toggleExternal&&!selectedExternal)return toast('Selecione o funcionário que realizou a extra.',true);if(toggleExternal){const amount=Number($('#day-extra-amount').value);if(!Number.isFinite(amount)||amount<=0||amount>10000000){$('#day-extra-amount').focus();return toast('Informe um valor da extra maior que R$ 0,00. A opção de extra está diferente de “Não”.',true);}}
@@ -1538,7 +1588,11 @@ function renderEquipeDia(){
     if(selectedExternal){const day=mainWorkForPersonOnDate(selectedExternal,portalDate);extraBatch.push({colaboradorId:selectedExternal,status:'Extra independente',extra:'Não',servicos:[],extraLancamento:{enabled:toggleExternal,extra:$('#day-extra-kind').value,valorExtraOriginal:Number($('#day-extra-amount').value),obraId:$('#day-extra-work').value,observacao:$('#day-extra-obs').value.trim(),dayWorkId:day.workId}});}
     if(!applyInlineExtras(extraBatch,portalDate,supervisorAtual))return;
     for(const c of convs){const selected=items.filter(i=>c.colaboradores.includes(i.colaboradorId));if(!selected.length)continue;let ap=apForConv(c.id);if(ap){ap.itens=[...ap.itens.filter(i=>!selected.some(x=>x.colaboradorId===i.colaboradorId)),...selected];ap.atualizadoEm=now().toISOString();}else state.apontamentos.push({executor:supervisorAtual||perfilLabel(perfilAtual),id:uid('ap'),convocacaoId:c.id,supervisor:c.supervisor,dataServico:c.dataServico,apontadoEm:now().toISOString(),retroativo:false,itens:selected});}
-    audit('Apontamento da equipe',portalDate);if(!saveData(()=>dayUnsavedDrafts.delete(dayKey)))return;toast('Apontamento do dia e extras salvos.');
+    audit('Apontamento da equipe',portalDate);if(!saveData(()=>{
+      dayUnsavedDrafts.delete(dayKey);
+      dayPendingAdds.clear();
+      render();
+    }))return;toast('Apontamento do dia e extras salvos.');
   }catch(error){
     console.error('APROAR day-form submit failure',String(error?.message||error).slice(0,240));
     showToast('Não foi possível preparar o apontamento. Confira os campos e tente novamente.',true);showSaveFeedback('Não foi possível preparar o apontamento. Confira os campos e tente novamente.',true);
@@ -2098,6 +2152,8 @@ function renderEquipeDia(){
         // has already been restored above, so a later retry rebuilds the request safely.
         const preserveRetroDraft=Boolean(document.querySelector('#form-retro')&&viewAtual==='apontamento'&&apontamentoTab==='retroativo');
         if(preserveRetroDraft)for(const [id,staff] of retroUnsavedAvulsos)if(!COLABORADORES.some(c=>c.id===id))COLABORADORES.push(staff);
+        // Restaurar inclusões e rascunho local após rejeição de gravação.
+        if(typeof dayPendingAdds!=='undefined'&&dayPendingAdds.size)restoreDayPendingAdds();
         onlineSaving=false;if(!preserveRetroDraft)render();showSaveFeedback(message,true);
       }finally{onlineQueued=false;onlineSaving=false;onlineMessage='';lockOnline(false);}
     });
