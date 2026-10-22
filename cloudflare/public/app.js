@@ -579,6 +579,33 @@
     }
     state.colaboradores=COLABORADORES;
   }
+
+  // Remoção local somente de inclusões ainda não confirmadas pelo banco.
+  function removePendingDayAdd(id,dayKey){
+    const pending=dayPendingAdds.get(id);
+    if(!pending||pending.dayKey!==dayKey)return false;
+    const conv=state.convocacoes.find(c=>String(c.id)===String(pending.convId));
+    const persisted=conv&&onlineConfirmed?.convocacoes?.some(c=>String(c.id)===String(conv.id));
+    if(conv){
+      const remaining=conv.colaboradores.filter(personId=>String(personId)!==String(id));
+      if(persisted&&!remaining.length)return false;
+      conv.colaboradores=remaining;
+      if(!remaining.length&&!persisted)
+        state.convocacoes=state.convocacoes.filter(c=>String(c.id)!==String(conv.id));
+    }
+    dayPendingAdds.delete(id);
+    const draft=dayUnsavedDrafts.get(dayKey);
+    draft?.items?.delete(id);
+    if(draft?.extra?.person===id)draft.extra.person='';
+    if(pending.staff&&!onlineConfirmed?.colaboradores?.some(c=>String(c.id)===String(id))
+      &&!state.convocacoes.some(c=>c.colaboradores?.some(personId=>String(personId)===String(id)))
+      &&!state.apontamentos.some(a=>a.itens?.some(i=>String(i.colaboradorId)===String(id)))){
+      const index=COLABORADORES.findIndex(c=>String(c.id)===String(id));
+      if(index>=0)COLABORADORES.splice(index,1);
+    }
+    state.colaboradores=COLABORADORES;
+    return true;
+  }
   const retroUnsavedAvulsos=new Map();
   function discardRetroUnsavedAvulsos(){
     if(!retroUnsavedAvulsos.size)return;
@@ -1522,7 +1549,34 @@ function renderEquipeDia(){
  <div id="day-extra-fields" class="form-grid">${field('Valor da Extra (R$)',`<input class="control" id="day-extra-amount" type="number" min="0.01" step="0.01" placeholder="Digite o valor" required>`)}${field('Obra / Serviço e unidade da extra',`<select class="control" id="day-extra-work">${extraWorkOptions('')}</select>`)}${field('Observação da extra','<input class="control" id="day-extra-obs" maxlength="2000" placeholder="Opcional">')}</div>
  <div id="day-extra-origin" class="notice info section">Escolha o funcionário. O serviço registrado para ele neste dia será sugerido automaticamente, mas pode ser trocado.</div></details>
  <div class="form-actions"><button class="btn btn-primary">Salvar apontamento do dia</button></div></form>`;
- bindServiceRows();bindPersonSearch($('#day-person-search'),()=>$$('#day-form .person-card'));
+ bindServiceRows();bindPersonSearch($('#day-person-search'),()=>$('#day-form .person-card'));
+ // X apenas nas fichas de pessoas incluídas agora e ainda não salvas.
+ for(const [id,pending] of dayPendingAdds){
+   if(pending.dayKey!==dayKey)continue;
+   const card=[...body.querySelectorAll('#day-form .person-card')].find(el=>el.dataset.person===id);
+   if(!card)continue;
+   card.style.position='relative';
+   card.style.paddingTop='42px';
+   const remove=document.createElement('button');
+   remove.type='button';
+   remove.className='day-remove-pending';
+   remove.textContent='×';
+   remove.title='Remover da equipe antes de salvar';
+   remove.setAttribute('aria-label','Remover '+(colaboradorById(id)?.nome||'avulso')+' da equipe antes de salvar');
+   Object.assign(remove.style,{
+     position:'absolute',top:'8px',right:'9px',width:'30px',height:'30px',
+     background:'#fff3f3',border:'1px solid #d9b0b0',borderRadius:'6px',
+     color:'#9c2929',fontSize:'21px',fontWeight:'700',cursor:'pointer',zIndex:'2'
+   });
+   remove.onclick=()=>{
+     if(onlineQueued||onlineSaving)return toast('Aguarde a conclusão do salvamento.',true);
+     snapshotDayDraft();
+     if(!removePendingDayAdd(id,dayKey))return toast('Não foi possível remover a inclusão pendente.',true);
+     render();
+     showToast('Colaborador retirado do formulário. Os outros preenchimentos foram mantidos.');
+   };
+   card.appendChild(remove);
+ }
  const extraToggle=$('#day-extra-kind'),extraFields=$('#day-extra-fields');
  const refreshExternalFields=()=>{const enabled=extraToggle.value!=='Não';extraFields.classList.remove('hidden');$('#day-extra-amount').required=enabled;$('#day-extra-amount').min=enabled?'0.01':'0';};
  const suggestExternalWork=()=>{
