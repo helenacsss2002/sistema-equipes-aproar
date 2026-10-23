@@ -1912,7 +1912,56 @@ function renderEquipeDia(){
           saveData();
         });
       };
-      $('#unit-form').onsubmit=e=>{e.preventDefault();const label=$('#unit-name').value.trim().toUpperCase();if(!label)return showToast('Informe o nome da unidade.',true);if(currentUnits().some(u=>clean(u)===clean(label)))return showToast('Esta unidade já está cadastrada.',true);state.units=[...currentUnits(),label];audit('Cadastro de unidade',label);saveData();toast('Unidade cadastrada.');};
+      $('#unit-form').onsubmit=async e=>{
+         e.preventDefault();
+         const label=$('#unit-name').value.trim().replace(/\s+/g,' ').toUpperCase();
+         if(!label)return showToast('Informe o nome da unidade.',true);
+         if(currentUnits().some(u=>clean(u)===clean(label)))return showToast('Esta unidade já está cadastrada.',true);
+         if(onlineQueued||onlineSaving)return showToast('Já existe uma gravação em andamento. Confira o resultado antes de tentar novamente.',true);
+         if(!onlineSession||onlineSession.role!=='CONTROLADORIA'||!onlineWritable)
+           return showToast('Cadastro não autorizado. Confirme o acesso à Controladoria e à produção.',true);
+         const requestId=typeof crypto!=='undefined'&&typeof crypto.randomUUID==='function'
+           ?crypto.randomUUID():'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return(c==='x'?r:(r&0x3|0x8)).toString(16);});
+         const payload=JSON.stringify({requestId,version:onlineVersion,name:label});
+         let saved=false;
+         onlineSaving=true;lockOnline(true);
+         showSaveFeedback('Cadastrando unidade no Neon…',false,40000);
+         try{
+           const controller=new AbortController();
+           const timeout=setTimeout(()=>controller.abort(),30000);
+           try{
+             const reply=await api('/api/unit-register',{method:'POST',body:payload,signal:controller.signal});
+             saved=reply?.ok===true&&reply.requestId===requestId;
+             if(!saved)throw Error('O banco não confirmou o cadastro da unidade.');
+           }catch(error){
+             // Resposta perdida não significa falha do commit: conferir pelo
+             // mesmo requestId e nunca criar uma operação duplicada.
+             if(error?.name==='AbortError'||!error?.status||error.status>=500){
+               for(let attempt=0;attempt<3&&!saved;attempt++){
+                 if(attempt)await new Promise(resolve=>setTimeout(resolve,500*attempt));
+                 try{
+                   const check=await api('/api/save-status?requestId='+encodeURIComponent(requestId));
+                   if(check?.confirmed===true&&check.requestId===requestId)saved=true;
+                 }catch(checkError){
+                   if(checkError?.status===401||checkError?.status===403)throw checkError;
+                 }
+               }
+             }
+             if(!saved)throw error;
+           }finally{clearTimeout(timeout);}
+           const fresh=await restoreOnlineSession();
+           applyOnline(fresh);
+           renderSettings();
+           showSaveFeedback('Unidade cadastrada e confirmada no banco.');
+           showToast('Unidade cadastrada com sucesso.');
+         }catch(error){
+           const message=saved
+             ?'A unidade foi SALVA no banco, mas a atualização da tela falhou. Atualize com Ctrl + F5. Não cadastre novamente.'
+             :String(error?.message||'Não foi possível cadastrar a unidade. Confira a conexão e tente novamente.');
+           if(saved)onlineWritable=false;
+           showSaveFeedback(message,true,45000);showToast(message,true);
+         }finally{onlineSaving=false;lockOnline(false);}
+       };
       const formSubmit=workForm.onsubmit;
       workForm.onsubmit=e=>{const selected=unit.value;if(!selected){e.preventDefault();return showToast('Cadastre e selecione uma unidade.',true);}formSubmit(e);};
       $$('[data-edit-obra]').forEach(b=>{const previous=b.onclick;b.onclick=()=>{previous();if(!currentUnits().includes(unit.value)){unit.innerHTML+=options([unit.value]);}};});
