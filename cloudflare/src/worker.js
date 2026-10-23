@@ -112,6 +112,49 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
     const applied=await sql`SELECT aproar_web_apply(${body.version},${body.requestId},${session.user},${digest},${JSON.stringify(operations)}::jsonb) AS result`;
     return json({ok:true,version:applied[0].result.version});
    }
+   // Cadastro enxuto de unidade: não retransmite convocações e apontamentos.
+   if(path==='/api/unit-register'&&request.method==='POST'){
+    if(session.role!=='CONTROLADORIA')return json({error:'Somente a Controladoria pode cadastrar unidades.'},403);
+    if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);
+    if(!writes(env))return json({error:'Gravação não autorizada neste ambiente.'},403);
+    const body=await bodyJSON(request);
+    if(!body||typeof body!=='object'||Array.isArray(body)
+       ||typeof body.name!=='string'||typeof body.version!=='string'
+       ||!/^[a-f0-9-]{36}$/i.test(body.requestId||''))
+      return json({error:'Dados do cadastro de unidade inválidos.'},400);
+    const name=body.name.trim().replace(/\s+/g,' ').toUpperCase();
+    if(!name||name.length>200||/[<>]/.test(name))
+      return json({error:'Informe um nome de unidade válido, com até 200 caracteres.'},400);
+    const digest=await sha(JSON.stringify(body));
+    const previous=await sql`SELECT actor,payload_hash FROM aproar_web_requests WHERE id=${body.requestId}`;
+    if(previous.length){
+      if(previous[0].actor!==session.user||previous[0].payload_hash!==digest)
+        return json({error:'Identificador de requisição reutilizado.'},409);
+      return json({ok:true,requestId:body.requestId,replayed:true});
+    }
+    const [settings,works]=await Promise.all([
+      sql`SELECT data FROM aproar_web_settings WHERE id=1`,
+      sql`SELECT DISTINCT unidade FROM obras`
+    ]);
+    if(!settings.length)return json({error:'Configuração de unidades indisponível no banco.'},503);
+    const config=settings[0]?.data||{};
+    const configured=Array.isArray(config.units)?config.units:[];
+    const normalize=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().trim();
+    if([...configured,...works.map(x=>x.unidade)].some(u=>normalize(u)===normalize(name)))
+      return json({error:'Esta unidade já está cadastrada.'},409);
+    if(configured.length>=500)return json({error:'Limite de unidades cadastradas atingido.'},400);
+    // Links antigos importados em obras permanecem intocados, fora da lista de novas unidades.
+    const updated={...config,units:[...configured,name]};
+    const operations=[
+      {table:'aproar_web_settings',action:'update',id:'1',data:{data:updated}},
+      {table:'auditoria',action:'insert',id:'audit:'+crypto.randomUUID(),data:{
+        entidade:'aproar-web',entidade_id:null,acao:'CADASTRAR_UNIDADE',usuario:session.user,
+        ocorrido_em:new Date().toISOString(),contexto:{nome:name}
+      }}
+    ];
+    await sql`SELECT aproar_web_apply(${body.version},${body.requestId},${session.user},${digest},${JSON.stringify(operations)}::jsonb)`;
+    return json({ok:true,requestId:body.requestId,name});
+   }
    if(path==='/api/save'&&request.method==='POST'){
     if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);if(!writes(env))return json({error:'Gravação desativada ou sem autorização específica para este ambiente.'},403);
     const compactAck=request.headers.get('x-aproar-save-ack')==='1';

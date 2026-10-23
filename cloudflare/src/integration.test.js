@@ -571,3 +571,32 @@ test('Financeiro precisa confirmar valores iguais por uma rota explícita, sem a
   assert.equal(db.raw.apontamentos[0].custo_pago_definido_financeiro,true);
  }finally{await pg.close();}
 });
+
+test('Cadastro especifico grava unidade sem reenviar obras e preserva nomes legados com links',async()=>{
+ const {pg,sql}=await fixture();
+ try{
+  const legacy='LINK PARA ACESSO AO DRIVE: '+('REFERENCIA ANTIGA '.repeat(15));
+  await pg.query('INSERT INTO obras(unidade,nome) VALUES($1,$2)',[legacy,'Projeto antigo']);
+  const before=await readDatabase(sql),config=before.raw.settings[0]?.data||{};
+  const requestId=crypto.randomUUID(),hash='unidade-teste';
+  const ops=[
+   {table:'aproar_web_settings',action:'update',id:'1',data:{data:{...config,units:[...(config.units||[]),'NOVA UNIDADE QA']}}},
+   {table:'auditoria',action:'insert',id:'audit:'+crypto.randomUUID(),data:{
+    entidade:'aproar-web',entidade_id:null,acao:'CADASTRAR_UNIDADE',
+    usuario:admin.user,ocorrido_em:now,contexto:{nome:'NOVA UNIDADE QA'}
+   }}
+  ];
+  assert.deepEqual(ops.map(o=>o.table),['aproar_web_settings','auditoria']);
+  await sql`SELECT aproar_web_apply(${before.version},${requestId},${admin.user},${hash},${JSON.stringify(ops)}::jsonb)`;
+  let after=await readDatabase(sql);
+  assert(after.state.units.includes('NOVA UNIDADE QA'));
+  assert(after.state.units.includes(legacy),'A unidade legada derivada da obra segue presente');
+  assert.equal(after.raw.obras.length,before.raw.obras.length,'Não recriar nem alterar obras para cadastrar unidade');
+  assert(!after.raw.settings[0].data.units.includes(legacy),'Não persistir link como nova unidade');
+  assert.equal(after.raw.settings[0].data.units.filter(x=>x==='NOVA UNIDADE QA').length,1);
+  assert.equal((await pg.query('SELECT count(*)::int AS n FROM aproar_web_requests WHERE id=$1',[requestId])).rows[0].n,1);
+  await sql`SELECT aproar_web_apply(${before.version},${requestId},${admin.user},${hash},${JSON.stringify(ops)}::jsonb)`;
+  after=await readDatabase(sql);
+  assert.equal(after.raw.settings[0].data.units.filter(x=>x==='NOVA UNIDADE QA').length,1,'Não duplicar após resposta de rede perdida');
+ }finally{await pg.close();}
+});

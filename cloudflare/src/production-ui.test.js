@@ -321,3 +321,35 @@ test('Login do supervisor exige chave individual; visualizar permanece sem senha
  assert.ok(chooser.includes("$('#login-password').required=passwordRequired"),'Campo de senha deve ser obrigatório');
  assert.ok(chooser.includes("classList.toggle('hidden',!passwordRequired)"),'Campo só fica oculto para Visualizar');
 });
+
+test('Cadastro de unidade tem rota restrita, enxuta, atomica e retorno confirmado',()=>{
+ const worker=fs.readFileSync(new URL('./worker.js',import.meta.url),'utf8');
+ const ui=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
+ const start=worker.indexOf("if(path==='/api/unit-register'&&request.method==='POST')");
+ const end=worker.indexOf("if(path==='/api/save'&&request.method==='POST')",start);
+ assert(start>=0&&end>start,'A rota independente precisa estar declarada');
+ const route=worker.slice(start,end);
+ assert.match(route,/session\.role!=='CONTROLADORIA'/);
+ assert.match(route,/!sameOrigin\(request\)/);
+ assert.match(route,/!writes\(env\)/);
+ assert.match(route,/typeof body\.name!=='string'/);
+ assert.match(route,/name\.length>200/);
+ assert.match(route,/SELECT DISTINCT unidade FROM obras/);
+ assert.match(route,/Esta unidade já está cadastrada/);
+ assert.match(route,/data:\{data:updated\}/);
+ assert.match(route,/aproar_web_apply/);
+ assert.match(route,/requestId:body\.requestId/);
+ assert.doesNotMatch(route,/readDatabase\(sql/);
+ assert.doesNotMatch(route,/buildOperations\(db/);
+ const a=ui.indexOf("$('#unit-form').onsubmit=async e=>{");
+ const b=ui.indexOf("const formSubmit=workForm.onsubmit",a);
+ assert(a>=0&&b>a);
+ const submit=ui.slice(a,b);
+ assert.match(submit,/api\('\/api\/unit-register'/);
+ assert.match(submit,/api\('\/api\/save-status\?requestId='/);
+ assert.match(submit,/restoreOnlineSession\(\)/);
+ assert.match(submit,/applyOnline\(fresh\)/);
+ assert.match(submit,/showSaveFeedback\('Unidade cadastrada e confirmada no banco/);
+ assert.doesNotMatch(submit,/saveData\(/);
+ assert.doesNotMatch(submit,/state\.units=\[\.\.\.currentUnits/);
+});
