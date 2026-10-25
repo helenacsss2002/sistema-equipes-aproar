@@ -51,7 +51,7 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
    const sql=neon(env.DATABASE_URL);
    if(path==='/api/trello/lists'&&request.method==='GET'){
     if(session.role!=='CONTROLADORIA')return json({error:'Somente a Controladoria pode consultar as listas do Trello.'},403);
-    const board=await consultarTrello();
+    const board=await consultarTrello(fetch,{key:env.TRELLO_API_KEY,token:env.TRELLO_API_TOKEN});
     return json({lists:board.lists,cards:board.cards.map(c=>({id:c.id,idList:c.idList,name:c.name,unidade:unidadeCard(c)}))});
    }
    if(path==='/api/trello/sync'&&request.method==='POST'){
@@ -61,7 +61,7 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
     const payload=await bodyJSON(request);
     if(!payload||typeof payload!=='object'||Object.keys(payload).some(x=>!['listId','cardId'].includes(x)))return json({error:'Solicitação de sincronização inválida.'},400);
     for(const field of ['listId','cardId'])if(payload[field]!=null&&(typeof payload[field]!=='string'||payload[field].length>128))return json({error:'Identificador do Trello inválido.'},400);
-    const result=await sincronizarTrello(sql,{listId:payload.listId,cardId:payload.cardId});
+    const result=await sincronizarTrello(sql,{listId:payload.listId,cardId:payload.cardId},fetch,{key:env.TRELLO_API_KEY,token:env.TRELLO_API_TOKEN});
     return json({ok:true,...result});
    }
    // Avoid retrieving multi-year audit logs for users who do not view them.
@@ -212,7 +212,7 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
   if(env.TRELLO_AUTO_SYNC_ENABLED!=='true'||!writes(env))return;
   ctx.waitUntil((async()=>{try{const sql=neon(env.DATABASE_URL);const r=await sql`SELECT sincronizado_obras_em,ultima_tentativa_obras_em FROM trello_snapshot WHERE snapshot_id=1`;const last=r[0]?.sincronizado_obras_em||r[0]?.ultima_tentativa_obras_em;
    if(last&&Date.now()-new Date(last).getTime()<11.5*60*60*1000)return;
-   await sincronizarTrello(sql);
+   await sincronizarTrello(sql,{},fetch,{key:env.TRELLO_API_KEY,token:env.TRELLO_API_TOKEN});
   }catch(e){console.error('Falha na sincronização Trello:',String(e?.message||e));}})());
  }
 };
