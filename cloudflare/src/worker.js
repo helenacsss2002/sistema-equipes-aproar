@@ -11,10 +11,25 @@ const common={'cache-control':'no-store','x-content-type-options':'nosniff','ref
 const json=(data,status=200,extra={})=>new Response(JSON.stringify(data),{status,headers:{...common,'content-type':'application/json; charset=utf-8',...extra}});
 const sha=async v=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(v)))].map(x=>x.toString(16).padStart(2,'0')).join('');
 const failedLogins=new Map();
+// Cadastros independentes: obtenha a versao no servidor, sem depender da tela.
+// Em caso de edicao simultanea, reavalie os dados e tente novamente apenas
+// a transacao atomica/idempotente (mesmo requestId, nunca dupla inclusao).
+async function applyCatalogRegistration(sql,requestId,actor,digest,operationsForCurrentState){
+ for(let attempt=0;attempt<3;attempt++){
+  const current=await sql`SELECT aproar_web_fingerprint() AS version`;
+  const operations=await operationsForCurrentState();
+  try{
+   const applied=await sql`SELECT aproar_web_apply(${current[0].version},${requestId},${actor},${digest},${JSON.stringify(operations)}::jsonb) AS result`;
+   return applied[0].result;
+  }catch(error){
+   if(!String(error?.message||'').includes('APROAR_STALE')||attempt===2)throw error;
+  }
+ }
+}
 function limit(request){const ip=request.headers.get('cf-connecting-ip')||'unknown',time=Date.now(),entry=failedLogins.get(ip);if(entry&&entry.until>time&&entry.n>=10)return false;if(!entry||entry.until<time)failedLogins.set(ip,{n:0,until:time+60000});failedLogins.get(ip).n++;if(failedLogins.size>5000)failedLogins.clear();return true;}
 async function bodyJSON(request){if(Number(request.headers.get('content-length')||0)>8e6)throw Object.assign(Error('Dados muito grandes. Divida a operação.'),{status:413});const text=await request.text();if(text.length>8e6)throw Object.assign(Error('Dados muito grandes.'),{status:413});try{return JSON.parse(text);}catch{throw Object.assign(Error('Requisição inválida.'),{status:400});}}
 function summary(db,session,env){return {state:visibleState(db,session),version:db.version,session:{role:session.role,user:session.user},supervisors,writesEnabled:writes(env),stage:stage(env)};}
-export default {async fetch(request,env){const url=new URL(request.url),path=url.pathname;let loginStage='request';
+export default {async fetch(request,env){const url=new URL(request.url),path=url.pathname;let loginStage='request',session=null;
  try{
   if(path==='/api/health'&&request.method==='GET')return json({application:'APROAR',stage:stage(env),databaseConfigured:Boolean(env.DATABASE_URL),writesEnabled:writes(env)});
   if(path==='/api/login'&&request.method==='POST'){loginStage='check-origin';if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);loginStage='rate-limit';if(!limit(request))return json({error:'Muitas tentativas. Aguarde um minuto.'},429);loginStage='parse-request';const body=await bodyJSON(request);let authSql=null;if(body.role==='SUPERVISOR'){loginStage='check-database-config';if(!env.DATABASE_URL)return json({error:'Banco não configurado para validar a chave do supervisor.'},503);loginStage='create-database-client';authSql=neon(env.DATABASE_URL);}loginStage='authenticate';const result=await login(body,env,authSql);loginStage='format-response';return json({session:result.session},200,{'set-cookie':result.cookie});}
@@ -30,7 +45,7 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
    return json({connected:true,schemaCompatible:!missing.length,missingColumns:missing,writesEnabled:writes(env)});
   }
   if(path.startsWith('/api/')){
-   const session=await identity(request,env);
+   session=await identity(request,env);
    if(!session)return json({error:'Faça login para acessar a plataforma.'},401);
    if(path==='/api/homologacao/diagnostico'&&request.method==='GET'){
     if(session.role!=='CONTROLADORIA')return json({error:'Diagnóstico restrito à Controladoria.'},403);
@@ -132,28 +147,71 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
         return json({error:'Identificador de requisição reutilizado.'},409);
       return json({ok:true,requestId:body.requestId,replayed:true});
     }
-    const [settings,works]=await Promise.all([
-      sql`SELECT data FROM aproar_web_settings WHERE id=1`,
-      sql`SELECT DISTINCT unidade FROM obras`
-    ]);
-    if(!settings.length)return json({error:'Configuração de unidades indisponível no banco.'},503);
-    const config=settings[0]?.data||{};
-    const configured=Array.isArray(config.units)?config.units:[];
-    const normalize=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().trim();
-    if([...configured,...works.map(x=>x.unidade)].some(u=>normalize(u)===normalize(name)))
-      return json({error:'Esta unidade já está cadastrada.'},409);
-    if(configured.length>=500)return json({error:'Limite de unidades cadastradas atingido.'},400);
-    // Links antigos importados em obras permanecem intocados, fora da lista de novas unidades.
-    const updated={...config,units:[...configured,name]};
-    const operations=[
-      {table:'aproar_web_settings',action:'update',id:'1',data:{data:updated}},
-      {table:'auditoria',action:'insert',id:'audit:'+crypto.randomUUID(),data:{
-        entidade:'aproar-web',entidade_id:null,acao:'CADASTRAR_UNIDADE',usuario:session.user,
-        ocorrido_em:new Date().toISOString(),contexto:{nome:name}
-      }}
-    ];
-    await sql`SELECT aproar_web_apply(${body.version},${body.requestId},${session.user},${digest},${JSON.stringify(operations)}::jsonb)`;
-    return json({ok:true,requestId:body.requestId,name});
+    const result=await applyCatalogRegistration(sql,body.requestId,session.user,digest,async()=>{
+     const [settings,works]=await Promise.all([
+       sql`SELECT data FROM aproar_web_settings WHERE id=1`,
+       sql`SELECT DISTINCT unidade FROM obras`
+     ]);
+     if(!settings.length)throw Object.assign(Error('Configuração de unidades indisponível no banco.'),{status:503});
+     const config=settings[0]?.data||{};
+     const configured=Array.isArray(config.units)?config.units:[];
+     const normalize=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().trim();
+     if([...configured,...works.map(x=>x.unidade)].some(u=>normalize(u)===normalize(name)))
+       throw Object.assign(Error('Esta unidade já está cadastrada.'),{status:409});
+     if(configured.length>=500)throw Object.assign(Error('Limite de unidades cadastradas atingido.'),{status:400});
+     // Preserva todas as outras configurações; não reenvia apontamentos.
+     return [
+       {table:'aproar_web_settings',action:'update',id:'1',data:{data:{...config,units:[...configured,name]}}},
+       {table:'auditoria',action:'insert',id:'audit:'+body.requestId,data:{
+         entidade:'aproar-web',entidade_id:null,acao:'CADASTRAR_UNIDADE',usuario:session.user,
+         ocorrido_em:new Date().toISOString(),contexto:{nome:name}
+       }}
+     ];
+    });
+    return json({ok:true,requestId:body.requestId,name,version:result.version});
+   }
+   // Cadastro específico de obra: evita enviar todas as equipes e apontamentos no POST.
+   if(path==='/api/work-register'&&request.method==='POST'){
+    if(session.role!=='CONTROLADORIA')return json({error:'Somente a Controladoria pode cadastrar obras.'},403);
+    if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);
+    if(!writes(env))return json({error:'Gravação não autorizada neste ambiente.'},403);
+    const body=await bodyJSON(request);
+    if(!body||typeof body!=='object'||Array.isArray(body)
+      ||typeof body.name!=='string'||typeof body.unit!=='string'
+      ||!/^[a-f0-9-]{36}$/i.test(body.requestId||''))
+      return json({error:'Dados do cadastro de obra inválidos.'},400);
+    const name=body.name.trim().replace(/\s+/g,' ');
+    const unit=body.unit.trim().replace(/\s+/g,' ').toUpperCase();
+    if(!name||name.length>220||/[<>]/.test(name)||!unit||unit.length>200||/[<>]/.test(unit))
+      return json({error:'Informe obra e unidade válidas (até 220 e 200 caracteres).'},400);
+    const digest=await sha(JSON.stringify(body));
+    const key='work:'+body.requestId;
+    const previous=await sql`SELECT actor,payload_hash,result FROM aproar_web_requests WHERE id=${body.requestId}`;
+    if(previous.length){
+      if(previous[0].actor!==session.user||previous[0].payload_hash!==digest)
+        return json({error:'Identificador de requisição reutilizado.'},409);
+      return json({ok:true,requestId:body.requestId,replayed:true,
+        obraId:previous[0].result?.ids?.[key],version:previous[0].result?.version});
+    }
+    const result=await applyCatalogRegistration(sql,body.requestId,session.user,digest,async()=>{
+      const [matches,settings,units]=await Promise.all([
+        sql`SELECT id,unidade FROM obras WHERE upper(trim(nome))=upper(trim(${name})) LIMIT 1`,
+        sql`SELECT data FROM aproar_web_settings WHERE id=1`,
+        sql`SELECT DISTINCT unidade FROM obras`
+      ]);
+      if(matches.length)throw Object.assign(Error('Já existe uma obra ou serviço com esse nome na unidade '+matches[0].unidade+'.'),{status:409});
+      const configured=Array.isArray(settings[0]?.data?.units)?settings[0].data.units:[];
+      if(![...configured,...units.map(x=>x.unidade)].includes(unit))
+        throw Object.assign(Error('Unidade não cadastrada. Cadastre a unidade antes da obra.'),{status:400});
+      return [
+        {table:'obras',action:'insert',id:key,data:{nome:name,unidade:unit,trello_unidade_manual:true}},
+        {table:'auditoria',action:'insert',id:'audit:'+body.requestId,data:{
+          entidade:'aproar-web',entidade_id:null,acao:'CADASTRAR_OBRA',usuario:session.user,
+          ocorrido_em:new Date().toISOString(),contexto:{nome:name,unidade:unit}
+        }}
+      ];
+    });
+    return json({ok:true,requestId:body.requestId,obraId:result.ids?.[key],version:result.version});
    }
    if(path==='/api/save'&&request.method==='POST'){
     if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);if(!writes(env))return json({error:'Gravação desativada ou sem autorização específica para este ambiente.'},403);

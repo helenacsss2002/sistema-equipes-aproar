@@ -336,8 +336,9 @@ test('Cadastro de unidade tem rota restrita, enxuta, atomica e retorno confirmad
  assert.match(route,/name\.length>200/);
  assert.match(route,/SELECT DISTINCT unidade FROM obras/);
  assert.match(route,/Esta unidade já está cadastrada/);
- assert.match(route,/data:\{data:updated\}/);
- assert.match(route,/aproar_web_apply/);
+ assert.match(route,/data:\{data:\{\.\.\.config,units:/);
+ assert.match(route,/applyCatalogRegistration/);
+  assert.match(worker,/aproar_web_apply/);
  assert.match(route,/requestId:body\.requestId/);
  assert.doesNotMatch(route,/readDatabase\(sql/);
  assert.doesNotMatch(route,/buildOperations\(db/);

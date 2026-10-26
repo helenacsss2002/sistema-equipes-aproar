@@ -1506,7 +1506,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
     const body=$('#settings-body');
     if(settingsTab==='Obras'){
       body.innerHTML=`<form id="obra-form" class="card card-pad"><h3>Cadastrar obra</h3><div class="form-grid">${field('Nome da obra','<input class="control" id="obra-nome" required>')}${field('Unidade','<input class="control" id="obra-unidade" required>')}</div><div class="form-actions"><button class="btn btn-primary">Cadastrar obra</button></div></form><div id="obra-list" class="section">${table(['Selecionar','Obra','Unidade','Ação'],OBRAS.map(o=>[`<input type="checkbox" class="obra-bulk-checkbox" value="${escapeHtml(o.id)}" aria-label="Selecionar obra ${escapeHtml(o.nome)}" ${obraTemVinculos(o)?'disabled title="Obra com registros vinculados"':''}>`,escapeHtml(o.nome),escapeHtml(o.unidade),`<button class="link-btn" data-edit-obra="${o.id}">Editar</button>`]))}</div>`;
-      let editing=null;$$('[data-edit-obra]').forEach(b=>b.onclick=()=>{editing=obraById(b.dataset.editObra);$('#obra-nome').value=editing.nome;$('#obra-unidade').value=editing.unidade;});$('#obra-form').onsubmit=e=>{e.preventDefault();const nome=$('#obra-nome').value.trim(),unidade=$('#obra-unidade').value.trim().toUpperCase();if(OBRAS.some(o=>o.id!==editing?.id&&o.nome.toUpperCase()===nome.toUpperCase()&&o.unidade===unidade))return toast('Obra já cadastrada nesta unidade.',true);if(editing){Object.assign(editing,{nome,unidade});state.convocacoes.filter(c=>c.obraId===editing.id).forEach(c=>c.unidade=unidade);}else OBRAS.push({id:uid('obra'),nome,unidade});audit('Cadastro / edição de obra');saveData();renderSettings();};
+      let editing=null;$$('[data-edit-obra]').forEach(b=>b.onclick=()=>{editing=obraById(b.dataset.editObra);$('#obra-form').dataset.editingObra=editing.id;$('#obra-nome').value=editing.nome;$('#obra-unidade').value=editing.unidade;});$('#obra-form').onsubmit=e=>{e.preventDefault();const nome=$('#obra-nome').value.trim(),unidade=$('#obra-unidade').value.trim().toUpperCase();if(OBRAS.some(o=>o.id!==editing?.id&&o.nome.toUpperCase()===nome.toUpperCase()&&o.unidade===unidade))return toast('Obra já cadastrada nesta unidade.',true);if(editing){Object.assign(editing,{nome,unidade});state.convocacoes.filter(c=>c.obraId===editing.id).forEach(c=>c.unidade=unidade);}else OBRAS.push({id:uid('obra'),nome,unidade});audit('Cadastro / edição de obra');saveData();renderSettings();};
     } else if(settingsTab==='Colaboradores'){
       body.innerHTML=`<form id="colab-form" class="card card-pad"><h3>Cadastrar / editar colaborador</h3><div class="form-grid">${field('Nome completo','<input class="control" id="colab-nome" required>')}${field('Função','<input class="control" id="colab-funcao" required>')}${field('Custo diário com encargos (R$)','<input class="control" id="colab-custo" type="number" min="0" step="0.01" value="180" required>')}${field('Moradia','<input class="control" id="colab-moradia">')}${field('Categoria','<select class="control" id="colab-categoria"><option>Profissional</option><option>Ajudante</option></select>')}${field('Avulso','<select class="control" id="colab-avulso"><option>Não</option><option>Sim</option></select>')}</div><div class="form-actions"><button class="btn btn-primary">Salvar colaborador</button></div></form><div class="section"><input class="control" id="colab-search" placeholder="Buscar nome, função ou moradia"></div><div class="section" id="colab-table"></div>`;
       let editing=null;const refresh=()=>{$('#colab-table').innerHTML=table(['Nome','Função','Moradia','Custo diário','Categoria','Avulso','Ação'],COLABORADORES.filter(c=>(c.nome+' '+c.funcao+' '+(c.moradia||'')).toLowerCase().includes($('#colab-search').value.toLowerCase())).map(c=>[escapeHtml(c.nome),escapeHtml(c.funcao),escapeHtml(c.moradia||'—'),money(c.custo||180),escapeHtml(c.categoria||'Profissional'),escapeHtml(c.avulso||'Não'),`<button class="link-btn" data-edit-colab="${c.id}">Editar</button>`]));$$('[data-edit-colab]').forEach(b=>b.onclick=()=>{editing=colaboradorById(b.dataset.editColab);for(const [k,id] of [['nome','nome'],['funcao','funcao'],['custo','custo'],['moradia','moradia'],['categoria','categoria'],['avulso','avulso']])$('#colab-'+id).value=editing[k]??(k==='custo'?180:k==='categoria'?'Profissional':k==='avulso'?'Não':'');});};$('#colab-search').oninput=refresh;refresh();$('#colab-form').onsubmit=e=>{e.preventDefault();const data={nome:$('#colab-nome').value.trim(),funcao:$('#colab-funcao').value.trim(),custo:Number($('#colab-custo').value),moradia:$('#colab-moradia').value.trim(),categoria:$('#colab-categoria').value,avulso:$('#colab-avulso').value};if(editing)Object.assign(editing,data);else COLABORADORES.push({id:uid('c'),...data});audit('Cadastro / edição de colaborador');saveData();renderSettings();};
@@ -1963,7 +1963,56 @@ function renderEquipeDia(){
          }finally{onlineSaving=false;lockOnline(false);}
        };
       const formSubmit=workForm.onsubmit;
-      workForm.onsubmit=e=>{const selected=unit.value;if(!selected){e.preventDefault();return showToast('Cadastre e selecione uma unidade.',true);}formSubmit(e);};
+      // Inclusao de obra nao retransmite convocacoes e apontamentos.
+      // Edicoes existentes mantem as validacoes de vinculos.
+      workForm.onsubmit=async e=>{
+        e.preventDefault();
+        const selected=unit.value,workName=name.value.trim().replace(/\s+/g,' ');
+        if(!selected||!workName)return showToast('Informe a obra e selecione uma unidade cadastrada.',true);
+        if(workForm.dataset.editingObra)return formSubmit(e);
+        if(OBRAS.some(o=>clean(o.nome)===clean(workName)))
+          return showToast('Esta obra já está cadastrada. Confira a lista antes de repetir.',true);
+        if(onlineQueued||onlineSaving)return showToast('Uma gravação está em andamento. Confira o resultado antes de tentar novamente.',true);
+        if(!onlineSession||onlineSession.role!=='CONTROLADORIA'||!onlineWritable)
+          return showToast('Cadastro não autorizado. Entre com acesso da Controladoria.',true);
+        const requestId=crypto.randomUUID(),payload=JSON.stringify({requestId,name:workName,unit:selected});
+        let saved=false;
+        onlineSaving=true;lockOnline(true);
+        showSaveFeedback('Cadastrando obra no Neon…',false,40000);
+        try{
+          const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),30000);
+          try{
+            try{
+              const reply=await api('/api/work-register',{method:'POST',body:payload,signal:controller.signal});
+              saved=reply?.ok===true&&reply.requestId===requestId;
+              if(!saved)throw Error('O banco não confirmou o cadastro da obra.');
+            }catch(error){
+              if(error?.name==='AbortError'||!error?.status||error.status>=500){
+                for(let attempt=0;attempt<3&&!saved;attempt++){
+                  if(attempt)await new Promise(resolve=>setTimeout(resolve,500*attempt));
+                  try{
+                    const status=await api('/api/save-status?requestId='+encodeURIComponent(requestId));
+                    if(status?.confirmed===true&&status.requestId===requestId)saved=true;
+                  }catch(checkError){
+                    if(checkError?.status===401||checkError?.status===403)throw checkError;
+                  }
+                }
+              }
+              if(!saved)throw error;
+            }
+          }finally{clearTimeout(timeout);}
+          applyOnline(await restoreOnlineSession());
+          renderSettings();
+          showSaveFeedback('Obra cadastrada e confirmada no banco.');
+          showToast('Obra cadastrada com sucesso.');
+        }catch(error){
+          const message=saved
+            ?'A obra foi SALVA no banco, mas a tela não foi atualizada. Use Ctrl + F5 para consultar; não cadastre novamente.'
+            :String(error?.message||'Não foi possível cadastrar a obra. Confira a conexão.');
+          if(saved)onlineWritable=false;
+          showSaveFeedback(message,true,45000);showToast(message,true);
+        }finally{onlineSaving=false;lockOnline(false);}
+      };
       $$('[data-edit-obra]').forEach(b=>{const previous=b.onclick;b.onclick=()=>{previous();if(!currentUnits().includes(unit.value)){unit.innerHTML+=options([unit.value]);}};});
       refreshUnits();
       $('#obra-list').insertAdjacentHTML('afterbegin','<div class="form-actions" style="justify-content:flex-start;align-items:center;flex-wrap:wrap;margin-bottom:12px"><button id="obra-selecionar-disponiveis" type="button" class="btn btn-secondary">Selecionar disponíveis</button><button id="obra-limpar-selecao" type="button" class="btn btn-secondary">Limpar seleção</button><button id="obra-excluir-selecionadas" type="button" class="btn btn-secondary" disabled>Excluir selecionadas (0)</button></div>');
