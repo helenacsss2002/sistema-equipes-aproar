@@ -155,7 +155,7 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
      if(!settings.length)throw Object.assign(Error('Configuração de unidades indisponível no banco.'),{status:503});
      const config=settings[0]?.data||{};
      const configured=Array.isArray(config.units)?config.units:[];
-     const normalize=value=>String(value||'').normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').toUpperCase().trim();
+     const normalize=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().trim();
      if([...configured,...works.map(x=>x.unidade)].some(u=>normalize(u)===normalize(name)))
        throw Object.assign(Error('Esta unidade já está cadastrada.'),{status:409});
      if(configured.length>=500)throw Object.assign(Error('Limite de unidades cadastradas atingido.'),{status:400});
