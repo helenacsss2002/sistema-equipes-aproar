@@ -1688,6 +1688,7 @@ function renderEquipeDia(){
      if(onlineQueued||onlineSaving)return showToast('Existe uma gravação em andamento.',true);
      const label=colaboradorById(id)?.nome||'colaborador';
      if(!window.confirm('Retirar '+label+' desta equipe? Esta ação só é permitida sem apontamento confirmado e não apaga o cadastro do colaborador.'))return;
+     snapshotDayDraft();
      const requestId=crypto.randomUUID();
      onlineSaving=true;lockOnline(true);
      let saved=false;
@@ -1704,7 +1705,8 @@ function renderEquipeDia(){
          if(!saved)throw err;
        }
        applyOnline(await restoreOnlineSession());
-       dayUnsavedDrafts.delete(dayKey);
+       // Mantém os dados digitados nas outras fichas, retirando só esta inclusão.
+       dayUnsavedDrafts.get(dayKey)?.items.delete(id);
        onlineSaving=false;render();
        showToast('Inclusão retirada da equipe. Os demais colaboradores foram preservados.');
      }catch(error){
