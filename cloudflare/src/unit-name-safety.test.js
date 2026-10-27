@@ -47,8 +47,8 @@ test('Trello nao reintroduz a unidade com link nem sobrescreve escolha manual',(
   assert.equal(rejected.updates.length,0);
   assert.equal(rejected.skipped.length,1);
   const corrected=planejar([{...base[0],unidade:'NÃO IDENTIFICADA'}],cards);
-  assert.equal(corrected.updates.length,1);
-  assert.equal(corrected.updates[0].unit,'NÃO IDENTIFICADA');
+  assert.equal(corrected.updates.length,0);
+  assert.equal(corrected.unchanged.length,1,'A escolha manual permanece protegida');
 });
 
 test('Migração protege os tres cadastros e audita antes/depois sem apagar nenhuma obra',()=>{
