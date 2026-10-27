@@ -7,6 +7,7 @@ import {validateComplementConfirmation,buildComplementConfirmationOperations} fr
 import {login,identity,sameOrigin,equalSecret,logoutCookie} from './auth.js';
 import {writes,writeControls,stage,permittedProductionDeletion} from './environment.js';
 import {consultarTrello,sincronizarTrello,unidadeCard} from './trello.js';
+import {isSafeUnitName} from './unit-label.js';
 const common={'cache-control':'no-store','x-content-type-options':'nosniff','referrer-policy':'same-origin'};
 const json=(data,status=200,extra={})=>new Response(JSON.stringify(data),{status,headers:{...common,'content-type':'application/json; charset=utf-8',...extra}});
 const sha=async v=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(v)))].map(x=>x.toString(16).padStart(2,'0')).join('');
@@ -138,8 +139,8 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
        ||!/^[a-f0-9-]{36}$/i.test(body.requestId||''))
       return json({error:'Dados do cadastro de unidade inválidos.'},400);
     const name=body.name.trim().replace(/\s+/g,' ').toUpperCase();
-    if(!name||name.length>200||/[<>]/.test(name))
-      return json({error:'Informe um nome de unidade válido, com até 200 caracteres.'},400);
+    if(!name||name.length>200||/[<>]/.test(name)||!isSafeUnitName(name))
+      return json({error:'Informe um nome de unidade válido (até 80 caracteres, sem links ou URLs).'},400);
     const digest=await sha(JSON.stringify(body));
     const previous=await sql`SELECT actor,payload_hash FROM aproar_web_requests WHERE id=${body.requestId}`;
     if(previous.length){
@@ -182,7 +183,7 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
       return json({error:'Dados do cadastro de obra inválidos.'},400);
     const name=body.name.trim().replace(/\s+/g,' ');
     const unit=body.unit.trim().replace(/\s+/g,' ').toUpperCase();
-    if(!name||name.length>220||/[<>]/.test(name)||!unit||unit.length>200||/[<>]/.test(unit))
+    if(!name||name.length>220||/[<>]/.test(name)||!unit||unit.length>200||/[<>]/.test(unit)||!isSafeUnitName(unit))
       return json({error:'Informe obra e unidade válidas (até 220 e 200 caracteres).'},400);
     const digest=await sha(JSON.stringify(body));
     const key='work:'+body.requestId;

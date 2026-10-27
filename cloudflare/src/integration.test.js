@@ -183,7 +183,7 @@ test('Controladoria exclui unidade sem obras e bloqueia unidade em uso',async()=
   assert(!db.state.units.includes('UNIDADE TEMPORARIA'));
   assert(db.state.units.includes('FIEC'));
   next=structuredClone(db.state);next.units=next.units.filter(u=>u!=='FIEC');
-  assert.throws(()=>buildOperations(db,next,admin,now),/Cadastro de unidades inválido/);
+  assert.throws(()=>buildOperations(db,next,admin,now),/Cadastro de unidades inválido|Unidade possui obras ou histórico vinculado/);
   assert.throws(()=>buildOperations(db,next,actor,now),/Sem permissão para alterar configurações/);
  }finally{await pg.close();}
 });
@@ -222,7 +222,7 @@ test('Obra com unidade legada longa nao bloqueia cadastro ou exclusao seguros de
   assert(legacyUnit.length>200);
   await pg.query('INSERT INTO obras(unidade,nome) VALUES($1,$2)',[legacyUnit,'Obra legada importada']);
   let db=await readDatabase(sql);
-  assert(db.state.units.includes(legacyUnit),'O nome de unidade legado permanece visivel');
+  assert(!db.state.units.includes(legacyUnit),'A lista de unidades não pode exibir texto legado com link');
   let next=structuredClone(db.state);
   next.units.push('SÃO GONÇALO');
   db=(await save(sql,next,admin)).after;
@@ -252,7 +252,7 @@ test('Obra com unidade legada longa nao bloqueia cadastro ou exclusao seguros de
   next.units.push('X'.repeat(201));
   assert.throws(()=>buildOperations(db,next,admin,now),/Cadastro de unidades inválido/);
   next=structuredClone(db.state);
-  next.units=next.units.map(u=>u===legacyUnit?'Y'.repeat(230):u);
+  next.units.push('Y'.repeat(230));
   assert.throws(()=>buildOperations(db,next,admin,now),/Cadastro de unidades inválido/);
  }finally{await pg.close();}
 });
@@ -590,7 +590,7 @@ test('Cadastro especifico grava unidade sem reenviar obras e preserva nomes lega
   await sql`SELECT aproar_web_apply(${before.version},${requestId},${admin.user},${hash},${JSON.stringify(ops)}::jsonb)`;
   let after=await readDatabase(sql);
   assert(after.state.units.includes('NOVA UNIDADE QA'));
-  assert(after.state.units.includes(legacy),'A unidade legada derivada da obra segue presente');
+  assert(!after.state.units.includes(legacy),'O seletor de unidades não pode ser contaminado por links de obras');
   assert.equal(after.raw.obras.length,before.raw.obras.length,'Não recriar nem alterar obras para cadastrar unidade');
   assert(!after.raw.settings[0].data.units.includes(legacy),'Não persistir link como nova unidade');
   assert.equal(after.raw.settings[0].data.units.filter(x=>x==='NOVA UNIDADE QA').length,1);

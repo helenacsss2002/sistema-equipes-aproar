@@ -49,6 +49,10 @@ p { color: var(--muted); }
 .field-label { display: block; font-size: 12px; font-weight: 800; color: #43536b; margin: 15px 0 7px; }
 .control { width: 100%; border: 1px solid #d8e0ea; background: white; border-radius: 4px; padding: 11px 12px; color: var(--text); outline: none; }
 .control:focus { border-color: #86abff; box-shadow: 0 0 0 3px rgba(37,99,235,.12); }
+/* Selectores de unidades nunca podem alargar o painel ou a pagina. */
+.control, select.control { box-sizing:border-box; max-width:100%; min-width:0; }
+.form-grid > *, .reference-filters > * { min-width:0; max-width:100%; }
+
 textarea.control { min-height: 88px; resize: vertical; }
 .btn { border: 0; border-radius: 4px; padding: 10px 14px; font-weight: 800; transition: .15s ease; }
 .btn:hover { transform: translateY(-1px); }
