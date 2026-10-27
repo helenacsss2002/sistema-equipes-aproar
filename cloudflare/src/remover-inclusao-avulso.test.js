@@ -14,7 +14,7 @@ test('O apontamento mostra X tanto para inclusao pendente quanto para inclusao s
  const src=app.slice(start,end);
  assert.match(src,/for\(const \[id,entry\] of people\)/);
  assert.match(src,/dayPendingAdds\.has\(id\)/);
- assert.match(src,/!\/\^\\d\+\$\/\.test\(String\(c\.id\)\)/);
+  assert(src.includes("if(!/^\\d+$/.test(String(c.id))"));
  assert.match(src,/apForConv\(c\.id\)\?\.itens/);
  assert.match(src,/button\.className='day-remove-pending day-remove-saved'/);
  assert.match(src,/dayPendingAdds\.set\(id/);
