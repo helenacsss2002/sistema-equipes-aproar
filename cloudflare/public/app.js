@@ -613,6 +613,68 @@
     retroUnsavedAvulsos.clear();
   }
   let adminApDate='',adminApSup='',adminApUnit='';
+  // Formulários de colaboradores diferentes: nunca descarte alterações não salvas
+  // dos colegas ao remover uma inclusão sem apontamento.
+  const adminApDrafts=new Map();
+  function captureAdminApDrafts(){
+    $$('#ap-equipe form[data-admin-conv]').forEach(form=>{
+      const ids=[...form.querySelectorAll('.person-card')].map(row=>row.dataset.person);
+      if(!ids.length)return;
+      try{adminApDrafts.set(String(form.dataset.adminConv),new Map(readPersonRows(ids,form).map(item=>[String(item.colaboradorId),item])));}
+      catch(error){console.warn('APROAR: não foi possível preservar rascunho do apontamento',String(error?.message||error).slice(0,120));}
+    });
+  }
+  async function removeUnpointedAdminConvocation(convocationId,personId){
+    if(onlineQueued||onlineSaving)return showToast('Outra gravação está em andamento. Confira o resultado antes de remover.',true);
+    if(!onlineWritable||onlineSession?.role!=='CONTROLADORIA')return showToast('Remoção exclusiva da Controladoria com gravação autorizada.',true);
+    const conv=state.convocacoes.find(c=>String(c.id)===String(convocationId));
+    const name=colaboradorById(personId)?.nome||'este colaborador';
+    if(!conv||!conv.colaboradores.some(id=>String(id)===String(personId)))
+      return showToast('Inclusão não encontrada. Atualize a página.',true);
+    if(apForConv(convocationId)?.itens.some(i=>String(i.colaboradorId)===String(personId)))
+      return showToast('Este colaborador já tem apontamento. Não é possível removê-lo por aqui.',true);
+    if(!window.confirm('Remover somente '+name+' da convocação de '+formatDate(conv.dataServico)+'?\\n\\nO cadastro do colaborador e seus outros apontamentos não serão excluídos.'))return;
+    captureAdminApDrafts();
+    const requestId=crypto.randomUUID(),payload=JSON.stringify({requestId,convocacaoId:String(convocationId),colaboradorId:String(personId)});
+    let saved=false;
+    onlineSaving=true;lockOnline(true);
+    showSaveFeedback('Removendo somente a inclusão sem apontamento…',false,40000);
+    try{
+      const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),30000);
+      try{
+        try{
+          const response=await api('/api/convocation-remove',{method:'POST',body:payload,signal:controller.signal});
+          saved=response?.ok===true&&response.requestId===requestId;
+          if(!saved)throw Error('O banco não confirmou a remoção.');
+        }catch(error){
+          const code=Number(error?.status||0);
+          if(error?.name==='AbortError'||!code||code>=500){
+            for(let attempt=0;attempt<3&&!saved;attempt++){
+              if(attempt)await new Promise(resolve=>setTimeout(resolve,500*attempt));
+              try{
+                const status=await api('/api/save-status?requestId='+encodeURIComponent(requestId));
+                if(status?.confirmed===true&&status.requestId===requestId)saved=true;
+              }catch(checkError){
+                if(checkError?.status===401||checkError?.status===403)throw checkError;
+              }
+            }
+          }
+          if(!saved)throw error;
+        }
+      }finally{clearTimeout(timeout);}
+      applyOnline(await restoreOnlineSession());
+      adminApDrafts.delete(String(convocationId));
+      onlineSaving=false;render();
+      showSaveFeedback('Inclusão removida e confirmada no banco. Histórico preservado.');
+      showToast('Colaborador removido apenas dessa convocação, sem alterar seu cadastro ou histórico.');
+    }catch(error){
+      const msg=saved
+        ?'A inclusão foi removida no banco, mas a tela não atualizou. Use Ctrl + F5 e não repita a remoção.'
+        :String(error?.message||'Não foi possível confirmar a remoção. Atualize e confira antes de tentar novamente.');
+      if(saved)onlineWritable=false;
+      showSaveFeedback(msg,true,45000);showToast(msg,true);
+    }finally{onlineSaving=false;lockOnline(false);}
+  }
   function renderApontamentoNormal(){
     if(perfilAtual==='SUPERVISOR')return renderEquipeDia();
     const body=$('#apontamento-body');adminApDate||=isoToday();
@@ -620,7 +682,20 @@
     const candidates=()=>state.convocacoes.filter(c=>c.dataServico===adminApDate);
     const refreshSupervisors=()=>{adminApDate=$('#ap-data').value;const sups=[...new Set(candidates().map(c=>c.supervisor))].sort((a,b)=>a==='PAULO'?-1:b==='PAULO'?1:a.localeCompare(b,'pt-BR'));if(!sups.includes(adminApSup))adminApSup=sups[0]||'';$('#ap-supervisor').innerHTML=sups.length?options(sups):'<option value="">Nenhum supervisor com convocação</option>';$('#ap-supervisor').value=adminApSup;refreshUnits();};
     const refreshUnits=()=>{adminApSup=$('#ap-supervisor').value;const units=[...new Set(candidates().filter(c=>c.supervisor===adminApSup).map(c=>c.unidade))].sort();if(!units.includes(adminApUnit))adminApUnit=units[0]||'';$('#ap-unit').innerHTML=units.length?options(units):'<option value="">Nenhuma unidade convocada</option>';$('#ap-unit').value=adminApUnit;refreshTeam();};
-    const refreshTeam=()=>{adminApUnit=$('#ap-unit').value;const convs=candidates().filter(c=>c.supervisor===adminApSup&&c.unidade===adminApUnit);$('#ap-equipe').innerHTML=convs.length?convs.map((conv,index)=>{const ap=apForConv(conv.id);return `<section class="section"><div class="section-title"><div><h3>${escapeHtml(conv.unidade)} · ${escapeHtml(conv.turno)}</h3><p>${escapeHtml(conv.supervisor)} · ${conv.colaboradores.length} colaborador(es)</p></div>${badgeForStatus(statusConv(conv))}</div><form id="admin-ap-form-${index}"><div class="person-search-wrap"><input class="control admin-person-search" type="search" autocomplete="off" placeholder="Buscar na equipe..." aria-label="Buscar colaborador na equipe"></div>${alphabeticalPersonIds(conv.colaboradores).map(cid=>personRow(cid,ap?.itens.find(i=>i.colaboradorId===cid),conv.unidade,conv.obraId,conv.dataServico,conv.supervisor)).join('')}<details class="section"><summary>Incluir colaborador que não estava na convocação</summary><select class="control" id="admin-ap-add-${index}"><option value="">Selecione</option>${options(alphabeticalPeople(COLABORADORES.filter(c=>!c.inativo&&!conv.colaboradores.includes(c.id))))}</select><button class="btn btn-secondary section" id="admin-ap-include-${index}" type="button">Incluir na equipe</button></details><div class="form-actions"><button class="btn btn-primary">${ap?'Atualizar':'Salvar'} apontamento · ${escapeHtml(conv.turno)}</button></div></form></section>`;}).join(''):'<div class="empty">Nenhuma convocação nesta data para o supervisor selecionado. Use o retroativo para um serviço sem convocação prévia.</div>';bindServiceRows();convs.forEach((conv,index)=>{const form=$('#admin-ap-form-'+index);bindPersonSearch(form.querySelector('.admin-person-search'),()=>[...form.querySelectorAll('.person-card')]);form.noValidate=true;form.onsubmit=e=>{e.preventDefault();const itens=readPersonRows(conv.colaboradores,form);if(!validateExtraAmounts(itens,form))return;if(!validServices(itens,conv.unidade))return;if(!applyInlineExtras(itens,conv.dataServico,conv.supervisor))return;const ap=apForConv(conv.id);if(ap){ap.itens=itens;ap.atualizadoEm=now().toISOString();}else state.apontamentos.push({id:uid('ap'),convocacaoId:conv.id,supervisor:conv.supervisor,executor:'CONTROLADORIA',dataServico:conv.dataServico,apontadoEm:now().toISOString(),retroativo:false,itens});audit('Apontamento administrativo',conv.supervisor+' · '+conv.unidade);if(!saveData())return;toast('Apontamento salvo.');refreshTeam();};$('#admin-ap-include-'+index).onclick=()=>{const id=$('#admin-ap-add-'+index).value;if(!id)return;if(blocked(id,conv.dataServico)||state.convocacoes.some(c=>c.id!==conv.id&&c.dataServico===conv.dataServico&&c.colaboradores.includes(id)&&overlaps(c.turno,conv.turno)))return toast('Colaborador indisponível ou já convocado neste turno.',true);conv.colaboradores.push(id);audit('Inclusão na equipe',conv.id);saveData();refreshTeam();};});};
+    const refreshTeam=()=>{adminApUnit=$('#ap-unit').value;const convs=candidates().filter(c=>c.supervisor===adminApSup&&c.unidade===adminApUnit);$('#ap-equipe').innerHTML=convs.length?convs.map((conv,index)=>{const ap=apForConv(conv.id);return `<section class="section"><div class="section-title"><div><h3>${escapeHtml(conv.unidade)} · ${escapeHtml(conv.turno)}</h3><p>${escapeHtml(conv.supervisor)} · ${conv.colaboradores.length} colaborador(es)</p></div>${badgeForStatus(statusConv(conv))}</div><form id="admin-ap-form-${index}" data-admin-conv="${escapeHtml(conv.id)}"><div class="person-search-wrap"><input class="control admin-person-search" type="search" autocomplete="off" placeholder="Buscar na equipe..." aria-label="Buscar colaborador na equipe"></div>${alphabeticalPersonIds(conv.colaboradores).map(cid=>{
+      const apontado=ap?.itens.some(i=>String(i.colaboradorId)===String(cid));
+      const item=adminApDrafts.get(String(conv.id))?.get(String(cid))||ap?.itens.find(i=>String(i.colaboradorId)===String(cid));
+      return `<div class="admin-person-entry">
+        ${personRow(cid,item,conv.unidade,conv.obraId,conv.dataServico,conv.supervisor)}
+        ${!apontado?`<button type="button" class="admin-remove-unpointed" data-admin-remove-conv="${escapeHtml(conv.id)}" data-admin-remove-person="${escapeHtml(cid)}"
+            aria-label="Remover da convocação: ${escapeHtml(colaboradorById(cid)?.nome||cid)}"
+            title="Remover somente esta inclusão ainda sem apontamento">×</button>`:''}
+      </div>`;
+    }).join('')}<details class="section"><summary>Incluir colaborador que não estava na convocação</summary><select class="control" id="admin-ap-add-${index}"><option value="">Selecione</option>${options(alphabeticalPeople(COLABORADORES.filter(c=>!c.inativo&&!conv.colaboradores.includes(c.id))))}</select><button class="btn btn-secondary section" id="admin-ap-include-${index}" type="button">Incluir na equipe</button></details><div class="form-actions"><button class="btn btn-primary">${ap?'Atualizar':'Salvar'} apontamento · ${escapeHtml(conv.turno)}</button></div></form></section>`;}).join(''):'<div class="empty">Nenhuma convocação nesta data para o supervisor selecionado. Use o retroativo para um serviço sem convocação prévia.</div>';bindServiceRows();convs.forEach((conv,index)=>{const form=$('#admin-ap-form-'+index);bindPersonSearch(form.querySelector('.admin-person-search'),()=>[...form.querySelectorAll('.person-card')]);form.noValidate=true;form.onsubmit=e=>{e.preventDefault();const itens=readPersonRows(conv.colaboradores,form);if(!validateExtraAmounts(itens,form))return;if(!validServices(itens,conv.unidade))return;if(!applyInlineExtras(itens,conv.dataServico,conv.supervisor))return;const ap=apForConv(conv.id);if(ap){ap.itens=itens;ap.atualizadoEm=now().toISOString();}else state.apontamentos.push({id:uid('ap'),convocacaoId:conv.id,supervisor:conv.supervisor,executor:'CONTROLADORIA',dataServico:conv.dataServico,apontadoEm:now().toISOString(),retroativo:false,itens});audit('Apontamento administrativo',conv.supervisor+' · '+conv.unidade);if(!saveData())return;toast('Apontamento salvo.');refreshTeam();};form.querySelectorAll('[data-admin-remove-conv]').forEach(button=>{
+      button.onclick=()=>removeUnpointedAdminConvocation(button.dataset.adminRemoveConv,button.dataset.adminRemovePerson);
+    });
+    $('#admin-ap-include-'+index).onclick=()=>{
+      captureAdminApDrafts();const id=$('#admin-ap-add-'+index).value;if(!id)return;if(blocked(id,conv.dataServico)||state.convocacoes.some(c=>c.id!==conv.id&&c.dataServico===conv.dataServico&&c.colaboradores.includes(id)&&overlaps(c.turno,conv.turno)))return toast('Colaborador indisponível ou já convocado neste turno.',true);conv.colaboradores.push(id);audit('Inclusão na equipe',conv.id);saveData();refreshTeam();};});};
     $('#ap-data').onchange=refreshSupervisors;$('#ap-supervisor').onchange=refreshUnits;$('#ap-unit').onchange=refreshTeam;refreshSupervisors();
   }
 
