@@ -1671,7 +1671,7 @@ function renderEquipeDia(){
  for(const [id,entry] of people){
    if(dayPendingAdds.has(id))continue;
    const c=entry.conv;
-   if(!/^\\d+$/.test(String(c.id))||apForConv(c.id)?.itens?.some(i=>String(i.colaboradorId)===String(id)))continue;
+   if(!/^\d+$/.test(String(c.id))||apForConv(c.id)?.itens?.some(i=>String(i.colaboradorId)===String(id)))continue;
    if(perfilAtual==='SUPERVISOR'&&(c.supervisor!==supervisorAtual||c.executor!==supervisorAtual))continue;
    const card=[...body.querySelectorAll('#day-form .person-card')].find(el=>el.dataset.person===String(id));
    if(!card)continue;
