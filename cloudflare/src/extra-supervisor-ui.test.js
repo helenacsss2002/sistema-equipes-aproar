@@ -60,7 +60,7 @@ function setup(){
  };
  ctx.globalThis=ctx;
  vm.createContext(ctx);
- vm.runInContext(block('  function bindServiceRows(){','  function readPersonRows(')+block('  function readPersonRows(','  function applyInlineExtras(')+'\nglobalThis.bind=bindServiceRows;globalThis.read=readPersonRows;',ctx);
+ vm.runInContext(block('  function bindExtraWorkSearch(card){','  function bindServiceRows(){')+block('  function bindServiceRows(){','  function readPersonRows(')+block('  function readPersonRows(','  function applyInlineExtras(')+'\nglobalThis.bind=bindServiceRows;globalThis.read=readPersonRows;',ctx);
  return {ctx,inputs,card,toggled};
 }
 test('Valor disponível entra no total com Extra = Não e categoria selecionada',()=>{

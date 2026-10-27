@@ -25,6 +25,7 @@ function renderPerson(extra=null){
     field:(title,input)=>'<label>'+title+input+'</label>',
     allocationRow:()=>'<div class="allocation-row"></div>',
     extraWorkOptions:id=>'<option value="'+id+'">Unidade teste</option>',
+    extraWorkSearchMarkup:id=>'<input class="row-extra-work-search"><select class="row-extra-work" hidden><option value="'+id+'">Unidade teste</option></select>',
     presence:status=>status?.startsWith('Presente')
   };
   ctx.globalThis=ctx;
