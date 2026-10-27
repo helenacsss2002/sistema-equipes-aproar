@@ -1,3 +1,4 @@
+import {isSafeUnitName} from './unit-label.js';
 const URL_TRELLO='https://trello.com/b/TX8hGvmI.json';
 const norm=x=>String(x||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().trim().replace(/\s+/g,' ');
 const UNITS=[
@@ -68,6 +69,7 @@ export function planejar(works,cards){
  const updates=[],inserts=[],skipped=[],unchanged=[];
  for(const card of cards){
   const name=card.name.trim(),unit=unidadeCard(card);
+  if(!isSafeUnitName(unit)){skipped.push({nome:name,motivo:'Unidade inválida retornada pelo Trello'});continue;}
   let item=works.find(w=>w.trello_card_id===card.id);
   if(!item){
    let matches=works.filter(w=>!w.trello_card_id&&norm(w.nome)===norm(name)&&norm(w.unidade)===norm(unit));
@@ -81,6 +83,7 @@ export function planejar(works,cards){
   }
   if(item){
    const target=item.trello_unidade_manual?item.unidade:unit;
+   if(!isSafeUnitName(target)){skipped.push({nome:name,motivo:'Unidade vinculada inválida; conferir cadastro'});continue;}
    if(item.nome===name&&norm(item.unidade)===norm(target)&&item.trello_card_id===card.id&&item.trello_list_id===card.idList){unchanged.push(card);continue;}
    updates.push({card,id:String(item.id),unit:target});Object.assign(item,{nome:name,unidade:target,trello_card_id:card.id,trello_list_id:card.idList});
   }else{
