@@ -88,7 +88,7 @@ test('Transação confirma somente um participante; outras convocações, colabo
   await pg.query('SELECT aproar_web_apply($1,$2,$3,$4,$5::jsonb)',params);
   const counts=(await pg.query("SELECT (SELECT count(*)::int FROM colaboradores) colaboradores,(SELECT count(*)::int FROM convocacoes) convocacoes,(SELECT count(*)::int FROM apontamentos) apontamentos,(SELECT count(*)::int FROM auditoria WHERE acao='REMOVER_INCLUSAO_SEM_APONTAMENTO') auditorias")).rows[0];
   assert.deepEqual(counts,{colaboradores:2,convocacoes:1,apontamentos:1,auditorias:1});
-  assert.equal((await pg.query('SELECT colaborador_id FROM convocacoes')).rows[0].colaborador_id,'2');
+  assert.equal(String((await pg.query('SELECT colaborador_id FROM convocacoes')).rows[0].colaborador_id),'2');
   assert.equal((await pg.query('SELECT colaborador_id FROM apontamentos')).rows[0].colaborador_id,'2');
  }finally{await pg.close();}
 });
