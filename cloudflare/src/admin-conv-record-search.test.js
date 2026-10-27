@@ -19,7 +19,7 @@ test('Correcao administrativa pesquisa colaborador e mantem indice da convocacao
  assert.match(block,/wireLiveSuggestions\(searchInput,\(\)=>rows\.map/);
  assert.match(block,/searchText:\[x\.p\?\.funcao\|\|''\,x\.c\.dataServico,x\.c\.id\]/);
  assert.match(block,/select\.value='';\$\('#ae-record-selected'\)\.textContent=/);
- assert.match(block,/const selected=\$\('#ae-record'\)\.value,x=selected===''?\s*null:rows\[Number\(selected\)\]/);
+ assert(block.includes("const selected=$('#ae-record').value,x=selected===''?null:rows[Number(selected)]"),'Entrada não pode confirmar o primeiro registro sem seleção');
  assert.match(block,/syncRecordSearch\(choice\.id\)/);
  assert.match(block,/syncRecordSearch\(rows\.length\?0:''\)/);
  assert.match(block,/\$\('#ae-date'\)\.onchange=refresh/);
