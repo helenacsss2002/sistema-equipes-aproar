@@ -260,6 +260,42 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
     });
     return json({ok:true,requestId:body.requestId});
    }
+   // Remocao pontual de inclusao equivocada, exclusivamente sem apontamento.
+   // Preserva colaborador no cadastro e impede remocao de historico confirmado.
+   if(path==='/api/unpointed-convocation-remove'&&request.method==='POST'){
+    if(!['SUPERVISOR','CONTROLADORIA'].includes(session.role))return json({error:'Acesso não autorizado.'},403);
+    if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);
+    if(!writes(env))return json({error:'Gravação indisponível neste ambiente.'},403);
+    const body=await bodyJSON(request),id=String(body?.convocationId||'');
+    if(!/^[0-9]+$/.test(id)||!/^[a-f0-9-]{36}$/i.test(body?.requestId||''))return json({error:'Identificador de inclusão inválido.'},400);
+    const digest=await sha(JSON.stringify(body));
+    const previous=await sql`SELECT actor,payload_hash FROM aproar_web_requests WHERE id=${body.requestId}`;
+    if(previous.length){
+      if(previous[0].actor!==session.user||previous[0].payload_hash!==digest)return json({error:'Identificador reutilizado.'},409);
+      return json({ok:true,requestId:body.requestId,replayed:true});
+    }
+    const rows=await sql`SELECT c.id,c.engenheiro,c.criado_por,c.data,c.obra_id,
+       EXISTS(SELECT 1 FROM apontamentos a WHERE a.convocacao_id=c.id::text) AS apontado,
+       EXISTS(SELECT 1 FROM servicos_apontamento s WHERE s.convocacao_id=c.id::text) AS servicos,
+       EXISTS(SELECT 1 FROM conflitos_convocacao k WHERE k.convocacao_existente_id=c.id::text) AS conflito
+       FROM convocacoes c WHERE c.id=${id}::bigint`;
+    const conv=rows[0];
+    if(!conv)return json({error:'Inclusão não encontrada. Atualize o apontamento.'},404);
+    if(session.role==='SUPERVISOR'&&(conv.engenheiro!==session.user||conv.criado_por!==session.user))
+      return json({error:'Só é possível retirar inclusões feitas por você na sua própria equipe.'},403);
+    if(conv.apontado||conv.servicos||conv.conflito)
+      return json({error:'Este colaborador já possui apontamento ou histórico vinculado. A exclusão automática está bloqueada; solicite conferência à Controladoria.'},409);
+    const version=await sql`SELECT aproar_web_fingerprint() AS version`;
+    const ops=[
+      {table:'convocacoes',action:'delete',id},
+      {table:'auditoria',action:'insert',id:'audit:'+body.requestId,
+       data:{entidade:'aproar-web',entidade_id:id,acao:'REMOVER_INCLUSAO_SEM_APONTAMENTO',usuario:session.user,
+         ocorrido_em:new Date().toISOString(),contexto:{convocacaoId:id}}}
+    ];
+    // Verificacao dentro da mesma transacao via fingerprint; concorrencia falha fechada.
+    await sql`SELECT aproar_web_apply(${version[0].version},${body.requestId},${session.user},${digest},${JSON.stringify(ops)}::jsonb)`;
+    return json({ok:true,requestId:body.requestId});
+   }
    if(path==='/api/save'&&request.method==='POST'){
     if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);if(!writes(env))return json({error:'Gravação desativada ou sem autorização específica para este ambiente.'},403);
     const compactAck=request.headers.get('x-aproar-save-ack')==='1';

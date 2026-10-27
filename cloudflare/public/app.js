@@ -1666,6 +1666,56 @@ function renderEquipeDia(){
  <div id="day-extra-origin" class="notice info section">Escolha o funcionário. O serviço registrado para ele neste dia será sugerido automaticamente, mas pode ser trocado.</div></details>
  <div class="form-actions"><button class="btn btn-primary">Salvar apontamento do dia</button></div></form>`;
  bindServiceRows();bindPersonSearch($('#day-person-search'),()=>$$('#day-form .person-card'));
+ // X para inclusões já gravadas, desde que não exista apontamento ou
+ // histórico associado. O servidor valida novamente antes de excluir.
+ for(const [id,entry] of people){
+   if(dayPendingAdds.has(id))continue;
+   const c=entry.conv;
+   if(!/^\d+$/.test(String(c.id))||apForConv(c.id)?.itens?.some(i=>String(i.colaboradorId)===String(id)))continue;
+   if(perfilAtual==='SUPERVISOR'&&(c.supervisor!==supervisorAtual||c.executor!==supervisorAtual))continue;
+   const card=[...body.querySelectorAll('#day-form .person-card')].find(el=>el.dataset.person===String(id));
+   if(!card)continue;
+   card.style.position='relative';card.style.paddingTop='42px';
+   const button=document.createElement('button');
+   button.type='button';button.className='day-remove-pending day-remove-saved';
+   button.textContent='×';
+   button.title='Retirar inclusão sem apontamento';
+   button.setAttribute('aria-label','Retirar '+(colaboradorById(id)?.nome||'colaborador')+' desta equipe');
+   Object.assign(button.style,{position:'absolute',top:'8px',right:'9px',width:'30px',height:'30px',
+     background:'#fff3f3',border:'1px solid #d9b0b0',borderRadius:'6px',
+     color:'#9c2929',fontSize:'21px',fontWeight:'700',cursor:'pointer',zIndex:'2'});
+   button.onclick=async()=>{
+     if(onlineQueued||onlineSaving)return showToast('Existe uma gravação em andamento.',true);
+     const label=colaboradorById(id)?.nome||'colaborador';
+     if(!window.confirm('Retirar '+label+' desta equipe? Esta ação só é permitida sem apontamento confirmado e não apaga o cadastro do colaborador.'))return;
+     snapshotDayDraft();
+     const requestId=crypto.randomUUID();
+     onlineSaving=true;lockOnline(true);
+     let saved=false;
+     try{
+       try{
+         const result=await api('/api/unpointed-convocation-remove',{method:'POST',
+           body:JSON.stringify({convocationId:String(c.id),requestId})});
+         saved=result?.ok===true&&result.requestId===requestId;
+       }catch(err){
+         if(!err?.status||err.status>=500){
+           try{const check=await api('/api/save-status?requestId='+encodeURIComponent(requestId));
+             saved=check?.confirmed===true&&check.requestId===requestId;}catch{}
+         }
+         if(!saved)throw err;
+       }
+       applyOnline(await restoreOnlineSession());
+       // Mantém os dados digitados nas outras fichas, retirando só esta inclusão.
+       dayUnsavedDrafts.get(dayKey)?.items.delete(id);
+       onlineSaving=false;render();
+       showToast('Inclusão retirada da equipe. Os demais colaboradores foram preservados.');
+     }catch(error){
+       if(saved){onlineWritable=false;showToast('Remoção confirmada no banco, mas a tela não atualizou. Use Ctrl + F5; não repita.',true);}
+       else showToast(String(error.message||'Falha ao retirar inclusão. Confira o histórico antes de repetir.'),true);
+     }finally{onlineSaving=false;lockOnline(false);}
+   };
+   card.appendChild(button);
+ }
  // X apenas nas fichas de pessoas incluídas agora e ainda não salvas.
  for(const [id,pending] of dayPendingAdds){
    if(pending.dayKey!==dayKey)continue;
