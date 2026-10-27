@@ -43,6 +43,7 @@ test('Apontamento retroativo preserva busca e selecionados e mostra fichas em or
 test('Listas de convocados e correção administrativa são ordenadas sem alterar os IDs do banco',()=>{
  assert.match(source,/existing\.flatMap\(c=>c\.colaboradores\.map\(id=>\(\{c,id\}\)\)\)\.sort/);
  assert.match(source,/rows=operationalRows\(state\.convocacoes\.filter\(c=>c\.dataServico===adminEditDate\)\)\.sort/);
- assert.match(source,/alphabeticalPersonIds\(conv\.colaboradores\)\.map\(cid=>personRow/);
+ assert.match(source,/alphabeticalPersonIds\(conv\.colaboradores\)\.map\(cid=>\{/);
+  assert.match(source,/personRow\(cid,item,conv\.unidade/);
  assert.match(source,/const selected=new Set\(\)/);
 });

@@ -1,5 +1,5 @@
 import { neon } from '@neondatabase/serverless';
-import {mapNeonData} from './neon-adapter.js';
+import {mapNeonData,metadata} from './neon-adapter.js';
 import {readDatabase,visibleState,supervisors} from './data.js';
 import {buildOperations} from './operations.js';
 import {validateFinancialPayload,buildFinancialOperations} from './financial-adjust.js';
@@ -212,6 +212,53 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
       ];
     });
     return json({ok:true,requestId:body.requestId,obraId:result.ids?.[key],version:result.version});
+   }
+   // Remocao pontual e auditada de uma inclusao sem apontamento.
+   // Nao retransmite equipes, nao remove o cadastro do colaborador e nao apaga historico.
+   if(path==='/api/convocation-remove'&&request.method==='POST'){
+    if(session.role!=='CONTROLADORIA')return json({error:'Somente a Controladoria pode remover uma inclusão de convocação.'},403);
+    if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);
+    if(!writes(env))return json({error:'Gravação não autorizada neste ambiente.'},403);
+    const body=await bodyJSON(request);
+    if(!body||typeof body!=='object'||Array.isArray(body)
+       ||Object.keys(body).some(k=>!['requestId','convocacaoId','colaboradorId'].includes(k))
+       ||!/^[a-f0-9-]{36}$/i.test(body.requestId||'')
+       ||!/^[0-9]+$/.test(String(body.convocacaoId||''))
+       ||!/^[0-9]+$/.test(String(body.colaboradorId||'')))
+      return json({error:'Identificação da inclusão a remover inválida.'},400);
+    const digest=await sha(JSON.stringify(body));
+    const previous=await sql`SELECT actor,payload_hash,result FROM aproar_web_requests WHERE id=${body.requestId}`;
+    if(previous.length){
+      if(previous[0].actor!==session.user||previous[0].payload_hash!==digest)
+        return json({error:'Identificador de requisição reutilizado.'},409);
+      return json({ok:true,requestId:body.requestId,replayed:true});
+    }
+    await applyCatalogRegistration(sql,body.requestId,session.user,digest,async()=>{
+      const rows=await sql`
+        SELECT c.id::text AS id,c.colaborador_id::text AS colaborador_id,
+               c.observacao,c.custos_separados,
+               EXISTS(SELECT 1 FROM apontamentos a WHERE a.convocacao_id=c.id::text) AS has_point,
+               EXISTS(SELECT 1 FROM servicos_apontamento s WHERE s.convocacao_id=c.id::text) AS has_services,
+               EXISTS(SELECT 1 FROM conflitos_convocacao f WHERE f.convocacao_existente_id=c.id::text) AS has_conflict
+        FROM convocacoes c WHERE c.id::text=${String(body.convocacaoId)} LIMIT 1`;
+      const current=rows[0];
+      if(!current)return Promise.reject(Object.assign(Error('Inclusão não encontrada. Atualize a página e confira a equipe.'),{status:409}));
+      if(current.colaborador_id!==String(body.colaboradorId))
+        throw Object.assign(Error('A inclusão selecionada não corresponde ao colaborador. Atualize a página.'),{status:409});
+      const meta=metadata(current.observacao).meta;
+      if(current.has_point||current.has_services||current.has_conflict||current.custos_separados===true||meta.apontado_em)
+        throw Object.assign(Error('Este colaborador já possui apontamento ou histórico vinculado. A remoção automática foi bloqueada.'),{status:409});
+      return [
+        {table:'convocacoes',action:'delete',id:String(body.convocacaoId)},
+        {table:'auditoria',action:'insert',id:'audit:'+body.requestId,data:{
+          entidade:'convocacoes',entidade_id:String(body.convocacaoId),
+          acao:'REMOVER_INCLUSAO_SEM_APONTAMENTO',usuario:session.user,
+          ocorrido_em:new Date().toISOString(),
+          contexto:{colaboradorId:String(body.colaboradorId),motivo:'Inclusão acidental corrigida na Controladoria'}
+        }}
+      ];
+    });
+    return json({ok:true,requestId:body.requestId});
    }
    if(path==='/api/save'&&request.method==='POST'){
     if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);if(!writes(env))return json({error:'Gravação desativada ou sem autorização específica para este ambiente.'},403);

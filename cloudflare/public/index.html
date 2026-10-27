@@ -625,6 +625,19 @@ input.control[type="search"], input.control.service-work, #r-obra-combo {text-ov
 
 /* Conferência visual do apontamento: categoria, valores e total do dia. */
 .person-card .row-extra-panel {padding:14px;border:1px solid #dce6f1;border-radius:12px;background:rgba(238,244,251,.65);}
+/* Controladoria: remover somente uma inclusão ainda sem apontamento. */
+#ap-equipe .admin-person-entry {position:relative;min-width:0;}
+#ap-equipe .admin-person-entry .person-name {padding-right:58px;}
+#ap-equipe .admin-remove-unpointed {
+  position:absolute;top:10px;right:10px;z-index:3;
+  width:36px;height:36px;border:1px solid #dba6a6;border-radius:8px;
+  background:#fff0f0;color:#a32525;font-size:25px;font-weight:700;
+  line-height:1;cursor:pointer;
+}
+#ap-equipe .admin-remove-unpointed:hover,#ap-equipe .admin-remove-unpointed:focus-visible {
+  background:#ffdddd;border-color:#af4747;outline-offset:2px;
+}
+
 .person-card .row-extra-value {font-weight:700;background:#f4f7fb;color:#173b64;}
 .person-card .row-total-summary {display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px;background:#eaf1fa;border:1px solid #bfd2ed;border-radius:12px;padding:14px 16px;margin-top:18px;}
 .person-card .row-total-summary span {font-weight:700;font-size:13px;letter-spacing:.04em;color:#254c7a;}
