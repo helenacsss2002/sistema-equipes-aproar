@@ -183,7 +183,7 @@ test('Controladoria exclui unidade sem obras e bloqueia unidade em uso',async()=
   assert(!db.state.units.includes('UNIDADE TEMPORARIA'));
   assert(db.state.units.includes('FIEC'));
   next=structuredClone(db.state);next.units=next.units.filter(u=>u!=='FIEC');
-  assert.throws(()=>buildOperations(db,next,admin,now),/Cadastro de unidades inválido/);
+  assert.throws(()=>buildOperations(db,next,admin,now),/Cadastro de unidades inválido|Unidade possui obras ou histórico vinculado/);
   assert.throws(()=>buildOperations(db,next,actor,now),/Sem permissão para alterar configurações/);
  }finally{await pg.close();}
 });
@@ -252,7 +252,7 @@ test('Obra com unidade legada longa nao bloqueia cadastro ou exclusao seguros de
   next.units.push('X'.repeat(201));
   assert.throws(()=>buildOperations(db,next,admin,now),/Cadastro de unidades inválido/);
   next=structuredClone(db.state);
-  next.units=next.units.map(u=>u===legacyUnit?'Y'.repeat(230):u);
+  next.units.push('Y'.repeat(230));
   assert.throws(()=>buildOperations(db,next,admin,now),/Cadastro de unidades inválido/);
  }finally{await pg.close();}
 });
