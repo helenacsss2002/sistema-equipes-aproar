@@ -535,6 +535,13 @@ input.control[type="search"], input.control.service-work, #r-obra-combo {text-ov
 .live-search-option {display:block;width:100%;border:0;border-radius:5px;background:#fff;color:#163457;font:inherit;font-size:13px;text-align:left;overflow-wrap:anywhere;padding:9px 11px;cursor:pointer;}
 .live-search-option:hover,.live-search-option.active,.live-search-option:focus-visible {background:#eaf2ff;color:#124c9a;}
 .live-search-hint,.live-search-empty {padding:8px 11px;font-size:12px;color:#607793;}
+/* Apontamento: código completo da obra da extra, inclusive números no final. */
+.extra-work-search-wrap { min-width:0; width:100%; position:relative; }
+.extra-work-search-wrap .row-extra-work-search {width:100%; min-width:0; text-overflow:clip;}
+.extra-work-search-wrap .live-search-suggestions {width:100%;max-width:100%;max-height:300px;overflow-x:hidden;}
+.extra-work-search-wrap .live-search-option {white-space:normal;line-height:1.45;overflow-wrap:anywhere;word-break:break-word;}
+.extra-work-full-label {font-size:12px;line-height:1.5;color:#365b85;white-space:normal;overflow-wrap:anywhere;word-break:break-word;padding:7px 2px 0;}
+
 
 /* Pesquisa de obras apenas nos filtros de relatórios. */
 #r-obra-search { margin-bottom: 8px; }
