@@ -1845,10 +1845,13 @@ function renderEquipeDia(){
  const pendingDayKey=portalDate+'|'+supervisorAtual;
  const storageKey=draftKey('normal',supervisorAtual,portalDate,portalUnit);
  const savedLocal=readStoredDraft(storageKey);
+ // A memória temporária não pode reaproveitar fichas de outra unidade no mesmo dia.
+ if(dayUnsavedDrafts.has(pendingDayKey)&&dayUnsavedDrafts.get(pendingDayKey)?.unit!==portalUnit)
+   dayUnsavedDrafts.delete(pendingDayKey);
  const loadLocalDayDraft=stored=>{
    if(!stored||!Array.isArray(stored.items))return;
    const items=new Map(stored.items.filter(i=>i&&typeof i.colaboradorId==='string').map(i=>[i.colaboradorId,i]));
-   dayUnsavedDrafts.set(pendingDayKey,{items,extra:stored.extra||{}});
+   dayUnsavedDrafts.set(pendingDayKey,{items,extra:stored.extra||{},unit:portalUnit});
    for(const x of stored.pending||[]){
      if(!x||x.dayKey!==pendingDayKey||x.selectedUnit!==portalUnit||!x.id)continue;
      if(onlineConfirmed?.convocacoes?.some(c=>c.colaboradores?.includes(x.id)))continue;
@@ -1874,7 +1877,7 @@ function renderEquipeDia(){
      obs:$('#day-extra-obs')?.value||'',search:$('#day-person-search')?.value||'',
      newName:$('#day-avulso-nome')?.value||'',newFuncao:$('#day-avulso-funcao')?.value||'',
      newPerson:$('#day-add-person')?.value||''};
-   const draft={items:new Map(items.map(item=>[item.colaboradorId,item])),extra};
+   const draft={items:new Map(items.map(item=>[item.colaboradorId,item])),extra,unit:portalUnit};
    dayUnsavedDrafts.set(dayKey,draft);
    persistDayDraftFromMemory();
  };
