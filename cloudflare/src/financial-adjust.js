@@ -1,4 +1,5 @@
 import {metadata} from './neon-adapter.js';
+import {financialHistoryEvents} from './financial-history.js';
 import {hasValidComplementApproval,clearObsoleteApproval} from './financial-approval.js';
 
 const moneyFields=['financeiro','noturno','acordo','ajudaCusto'];
@@ -39,6 +40,13 @@ export function buildFinancialOperations(changes,rows,actor,timestamp=new Date()
     const financial={custo_pago:entry.financeiro,valor_acordo:entry.acordo,valor_adicional_noturno:entry.noturno,custo_pago_definido_financeiro:true,custos_separados:true,migracao_sebrae_noturno_v2:true};
     const nextMeta={...clearObsoleteApproval(meta,entry.financeiro,entry.acordo),custo_pago:entry.financeiro,valor_acordo:entry.acordo,valor_adicional_noturno:entry.noturno,valor_ajuda_custo:entry.ajudaCusto,custos_separados:true};
     ops.push({table:'apontamentos',action:'update',id:String(record.apontamento_id),data:{...financial,atualizado_em:timestamp}});
+    ops.push(...financialHistoryEvents({
+      convocationId:entry.convocacaoId,colaboradorId:record.colaborador_id,
+      dataServico:record.data_servico,supervisor:record.supervisor_responsavel,
+      actor,role:'FINANCEIRO',source:'Ajuste financeiro',timestamp,
+      previous:{valor_acordo:record.acordo_atual,valor_adicional_noturno:record.noturno_atual},
+      next:{valor_acordo:entry.acordo,valor_adicional_noturno:entry.noturno}
+    }));
     ops.push({table:'convocacoes',action:'update',id:entry.convocacaoId,data:{...financial,observacao:text+' ||APROAR_META|| '+JSON.stringify(nextMeta)}});
   }
   ops.push({table:'auditoria',action:'insert',id:'audit:'+crypto.randomUUID(),data:{entidade:'aproar-web',entidade_id:null,acao:'SALVAR',usuario:actor,ocorrido_em:timestamp,contexto:{perfil:'FINANCEIRO',operacoes:ops.map(op=>({tabela:op.table,acao:op.action,id:op.id}))}}});
