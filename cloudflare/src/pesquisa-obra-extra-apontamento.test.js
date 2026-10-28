@@ -28,6 +28,7 @@ function makeInput(){
   removeAttribute(){},
   focus(){},
   fire(type,evt={}){for(const fn of listeners[type]||[])fn(evt);}
+  dispatchEvent(evt){this.fire(evt.type,evt);return true;},
  };
  return input;
 }
@@ -57,7 +58,7 @@ function setup(){
   '.row-extra-work':select,
   '.extra-work-full-label':full
  })[q]||null};
- const ctx={...simpleContext(),document:{createElement:()=>menu}};
+ const ctx={...simpleContext(),Event:class Event{constructor(type,options){this.type=type;this.bubbles=options?.bubbles;}},document:{createElement:()=>menu}};
  vm.createContext(ctx);
  const begin=app.indexOf('  function wireLiveSuggestions('),end=app.indexOf('  function bindServiceRows(){',begin);
  assert(begin>=0&&end>begin);
