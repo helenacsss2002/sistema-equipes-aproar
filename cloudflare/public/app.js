@@ -555,6 +555,35 @@
     if (apontamentoTab === 'normal') renderApontamentoNormal(); else renderApontamentoRetroativo();
   }
 
+  // Rascunho durável no navegador. Cada gravação é síncrona (sem debounce):
+  // continua após F5 ou reinício do computador, sem criar apontamento no Neon.
+  // Isolado por perfil/supervisor/data/unidade e expira em 45 dias.
+  const DRAFT_PREFIX='aproar:apontamento:rascunho:v1:';
+  const draftKey=(kind,supervisor,date='',unit='')=>DRAFT_PREFIX+[kind,supervisor,date,unit].map(encodeURIComponent).join(':');
+  const readStoredDraft=key=>{
+    try{
+      const raw=localStorage.getItem(key);if(!raw)return null;
+      const draft=JSON.parse(raw);
+      if(!draft||draft.v!==1||!Number.isFinite(draft.savedAt)||Date.now()-draft.savedAt>45*86400000){
+        localStorage.removeItem(key);return null;
+      }
+      return draft;
+    }catch(error){console.warn('Rascunho local não pôde ser lido',String(error?.message||error));return null;}
+  };
+  let storageWarned=false;
+  const storeDraft=(key,data)=>{
+    try{localStorage.setItem(key,JSON.stringify({v:1,savedAt:Date.now(),version:onlineVersion,...data}));return true;}
+    catch(error){
+      if(!storageWarned){storageWarned=true;showToast('O navegador não permitiu guardar o rascunho. Confira o espaço disponível; o preenchimento pode ser perdido em caso de reinício.',true);}
+      return false;
+    }
+  };
+  const clearStoredDraft=key=>{try{localStorage.removeItem(key);}catch{}};
+  const clearSupervisorDrafts=supervisor=>{
+    try{const partial=DRAFT_PREFIX;for(let i=localStorage.length-1;i>=0;i--){const key=localStorage.key(i);
+      if(key?.startsWith(partial)&&[key.split(':')[4],key.split(':')[5]].includes(encodeURIComponent(supervisor)))localStorage.removeItem(key);
+    }}catch{}
+  };
   // Dados ainda não gravados: mantidos ao incluir colaborador ou avulso.
   const dayUnsavedDrafts=new Map();
   // Pessoas adicionadas no apontamento normal são salvas junto com o apontamento.
@@ -833,13 +862,13 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
     });
     wireLiveSuggestions(input,()=>OBRAS.filter(o=>o&&o.id).map(o=>({
       id:String(o.id),label:o.unidade+' · '+o.nome,searchText:String(o.id)
-    })),choice=>setSelected(choice.id));
+    })),choice=>{setSelected(choice.id);input.dispatchEvent(new Event('change',{bubbles:true}));});
     const current=select.value;
     setSelected(current);
   }
   function bindServiceRows(){
     $$('.person-card .service-work').forEach(input=>{
-      wireLiveSuggestions(input,()=>OBRAS.filter(o=>o.unidade===input.closest('.person-card')?.dataset.unit).map(o=>({label:o.nome,id:o.id})));
+      wireLiveSuggestions(input,()=>OBRAS.filter(o=>o.unidade===input.closest('.person-card')?.dataset.unit).map(o=>({label:o.nome,id:o.id})),()=>input.dispatchEvent(new Event('change',{bubbles:true})));
     });
     $$('.person-card').forEach(card=>{
       bindExtraWorkSearch(card);
@@ -867,10 +896,10 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       field('.add-service').onclick=()=>{
         field('.additional-services').insertAdjacentHTML('beforeend',allocationRow(card.dataset.unit,{},card.querySelectorAll('.allocation-row').length));
         const added=card.querySelector('.additional-services .allocation-row:last-child .service-work');
-        wireLiveSuggestions(added,()=>OBRAS.filter(o=>o.unidade===card.dataset.unit).map(o=>({label:o.nome,id:o.id})));
-        countServices();
+        wireLiveSuggestions(added,()=>OBRAS.filter(o=>o.unidade===card.dataset.unit).map(o=>({label:o.nome,id:o.id})),()=>added.dispatchEvent(new Event('change',{bubbles:true})));
+        countServices();card.dispatchEvent(new Event('change',{bubbles:true}));
       };
-      field('.remove-last-service').onclick=()=>{field('.additional-services .allocation-row:last-child')?.remove();countServices();};
+      field('.remove-last-service').onclick=()=>{field('.additional-services .allocation-row:last-child')?.remove();countServices();card.dispatchEvent(new Event('change',{bubbles:true}));};
       status.onchange=()=>{
         if(night&&!night.disabled){
           if(!presence(status.value))night.value='0';
@@ -1001,11 +1030,48 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
     list.insertAdjacentElement('afterend',avulsoPanel);
     bindPersonSearch($('#retro-person-search'),()=>$$('.retro-person-list .check-card'));
     let retroDrafts=new Map();
+    const retroKey=draftKey('retroativo',$('#retro-sup')?.value||supervisorAtual);
+    const persistedRetro=perfilAtual==='SUPERVISOR'?readStoredDraft(retroKey):null;
+    const storeRetroDraft=()=>{
+      if(perfilAtual!=='SUPERVISOR')return true;
+      const selected=$$('input[name="retro-colab"]:checked').map(x=>x.value);
+      const current=$$('#retro-rows [data-person]').map(x=>x.dataset.person);
+      for(const item of readPersonRows(current))retroDrafts.set(item.colaboradorId,item);
+      const okay=storeDraft(retroKey,{
+        supervisor:$('#retro-sup')?.value||supervisorAtual,date:$('#retro-data').value,
+        unit:unidade.value,turn:$('#retro-turno').value,selected,items:[...retroDrafts.values()],
+        avulsos:[...retroUnsavedAvulsos.values()],
+        search:$('#retro-person-search')?.value||'',
+        avulsoName:$('#retro-avulso-name')?.value||'',
+        avulsoFuncao:$('#retro-avulso-funcao')?.value||''
+      });
+      if(okay&&perfilAtual==='SUPERVISOR')storeDraft(draftKey('last',supervisorAtual),{tab:'retroativo',date:$('#retro-data').value,unit:unidade.value});
+      return okay;
+    };
+    const recoverRetroDraft=stored=>{
+      if(!stored||stored.supervisor!==($('#retro-sup')?.value||supervisorAtual))return;
+      if(stored.date&&stored.date<=isoToday()){$('#retro-data').value=stored.date;retroDateSelected=stored.date;}
+      if([...unidade.options].some(o=>o.value===stored.unit))unidade.value=stored.unit;
+      if([...$('#retro-turno').options].some(o=>o.value===stored.turn))$('#retro-turno').value=stored.turn;
+      for(const person of stored.avulsos||[]){
+        if(!person||!person.id||!person.nome)continue;
+        if(!COLABORADORES.some(c=>String(c.id)===String(person.id)))COLABORADORES.push(person);
+        retroUnsavedAvulsos.set(person.id,person);
+      }
+      list.innerHTML=alphabeticalPeople(COLABORADORES.filter(c=>!c.inativo))
+        .map(c=>'<label class="check-card"><input type="checkbox" name="retro-colab" value="'+escapeHtml(c.id)+'" '+((stored.selected||[]).includes(c.id)?'checked':'')+'><span><strong>'+escapeHtml(c.nome)+'</strong><small>'+escapeHtml(c.funcao)+'</small></span></label>').join('');
+      retroDrafts=new Map((stored.items||[]).filter(x=>x&&typeof x.colaboradorId==='string').map(x=>[x.colaboradorId,x]));
+      connectRetroChoices();refreshRows(true);
+      $('#retro-person-search').value=stored.search||'';
+      $('#retro-person-search').dispatchEvent(new Event('input',{bubbles:true}));
+      $('#retro-avulso-name').value=stored.avulsoName||'';
+      $('#retro-avulso-funcao').value=stored.avulsoFuncao||'';
+    };
     if(perfilAtual==='SUPERVISOR'){
       const pending=new Map();for(const c of state.convocacoes.filter(c=>c.supervisor===supervisorAtual&&c.dataServico<=isoToday()&&!completeConv(c))){const done=new Set(apForConv(c.id)?.itens.map(i=>i.colaboradorId)||[]),ids=c.colaboradores.filter(id=>!done.has(id));if(!ids.length)continue;const key=c.dataServico+'|'+c.unidade+'|'+c.turno;if(!pending.has(key))pending.set(key,{date:c.dataServico,unit:c.unidade,turn:c.turno,ids:new Set()});ids.forEach(id=>pending.get(key).ids.add(id));}
       const groups=[...pending.values()].sort((a,b)=>a.date.localeCompare(b.date)||a.unit.localeCompare(b.unit,'pt-BR')||a.turn.localeCompare(b.turn,'pt-BR'));
       let date='';$('#retro-pending-list').innerHTML=groups.length?groups.map((g,index)=>{const title=date!==g.date?'<h4 class="retro-pending-date">'+formatDate(g.date)+'</h4>':'';date=g.date;return title+`<button type="button" class="retro-pending-item" data-retro-pending="${index}"><span><strong>${escapeHtml(g.unit)}</strong><small>${escapeHtml(g.turn)} · ${g.ids.size} colaborador(es) sem apontamento</small></span><span class="retro-pending-action">Regularizar →</span></button>`;}).join(''):'<div class="notice success">Nenhum apontamento pendente até hoje.</div>';
-      $$('[data-retro-pending]').forEach(button=>button.onclick=()=>{const g=groups[Number(button.dataset.retroPending)];retroDateSelected=g.date;portalDate=g.date;portalUnit=g.unit;$('#retro-data').value=g.date;unidade.value=g.unit;$('#retro-turno').value=g.turn;retroDrafts.clear();$$('input[name="retro-colab"]').forEach(input=>input.checked=g.ids.has(input.value));refreshRows(true);syncRetroHeader();if($('#portal-unit'))$('#portal-unit').value=g.unit;$$('[data-retro-pending]').forEach(b=>b.classList.toggle('active',b===button));});
+      $$('[data-retro-pending]').forEach(button=>button.onclick=()=>{const g=groups[Number(button.dataset.retroPending)];retroDateSelected=g.date;portalDate=g.date;portalUnit=g.unit;$('#retro-data').value=g.date;unidade.value=g.unit;$('#retro-turno').value=g.turn;retroDrafts.clear();$$('input[name="retro-colab"]').forEach(input=>input.checked=g.ids.has(input.value));refreshRows(true);syncRetroHeader();if($('#portal-unit'))$('#portal-unit').value=g.unit;$$('[data-retro-pending]').forEach(b=>b.classList.toggle('active',b===button));storeRetroDraft();});
     }
     $('#retro-data').onchange=()=>{retroDateSelected=$('#retro-data').value;if(perfilAtual==='SUPERVISOR'&&retroDateSelected){portalDate=retroDateSelected;syncRetroHeader();}};
     unidade.onchange=()=>{retroDrafts.clear();refreshRows(true);};
@@ -1038,9 +1104,28 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       connectRetroChoices();
       refreshRows();
       $('#retro-avulso-name').value='';$('#retro-avulso-funcao').value='';
+      storeRetroDraft();
       toast('Avulso incluído. Os dados já preenchidos foram mantidos; confira a diária e o serviço.');
     };
 
+    if(persistedRetro?.supervisor===($('#retro-sup')?.value||supervisorAtual)){
+      if(persistedRetro.version===onlineVersion){
+        recoverRetroDraft(persistedRetro);
+        const notice=document.createElement('div');notice.className='notice success section';
+        notice.textContent='Rascunho retroativo recuperado automaticamente deste navegador. Confira antes de confirmar o salvamento.';
+        $('#form-retro').prepend(notice);
+      }else{
+        const notice=document.createElement('div');notice.className='notice warning section';
+        notice.innerHTML='Existe um rascunho retroativo salvo no navegador, porém o banco foi atualizado desde então. <button class="btn btn-secondary" type="button" id="recover-retro-draft">Recuperar para conferência</button>';
+        $('#form-retro').prepend(notice);
+        $('#recover-retro-draft').onclick=()=>{
+          if(!window.confirm('Os dados atuais do servidor podem ser diferentes. Deseja recuperar o rascunho local para revisar?'))return;
+          recoverRetroDraft(persistedRetro);notice.remove();
+        };
+      }
+    }
+    $('#form-retro').addEventListener('input',storeRetroDraft);
+    $('#form-retro').addEventListener('change',storeRetroDraft);
     $('#form-retro').noValidate=true;
     $('#form-retro').onsubmit = (e) => {
       e.preventDefault();
@@ -1058,7 +1143,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       for(const id of ids){const c=matching.find(c=>c.colaboradores.includes(id));if(c){if(!batches.has(c.id))batches.set(c.id,{conv:c,items:[]});batches.get(c.id).items.push(itens.find(i=>i.colaboradorId===id));}else newIds.push(id);}
       if(newIds.length){const conv={id:uid('cv'),supervisor:responsavel,dataServico,unidade:unidade.value,obraId:obraRef?.id||'',turno:$('#retro-turno').value,colaboradores:newIds,criadoEm:now().toISOString(),origem:'retroativo'};state.convocacoes.push(conv);batches.set(conv.id,{conv,items:itens.filter(i=>newIds.includes(i.colaboradorId))});}
       for(const {conv,items} of batches.values()){const selected=new Set(items.map(i=>i.colaboradorId));let ap=apForConv(conv.id);if(ap){ap.itens=[...ap.itens.filter(i=>!selected.has(i.colaboradorId)),...items];ap.atualizadoEm=now().toISOString();ap.retroativo=true;}else state.apontamentos.push({executor:supervisorAtual||perfilLabel(perfilAtual),id:uid('ap'),convocacaoId:conv.id,supervisor:conv.supervisor,dataServico,apontadoEm:now().toISOString(),retroativo:true,itens:items});}
-      audit('Apontamento retroativo',dataServico);const savedMessage=[...batches.values()].every(({conv})=>completeConv(conv))?'Apontamento retroativo salvo. Equipe regularizada.':'Apontamento salvo. Há colaboradores convocados que continuam pendentes.';if(!saveData(()=>{retroUnsavedAvulsos.clear();setView('pendencias');}))return;toast(savedMessage);
+      audit('Apontamento retroativo',dataServico);const savedMessage=[...batches.values()].every(({conv})=>completeConv(conv))?'Apontamento retroativo salvo. Equipe regularizada.':'Apontamento salvo. Há colaboradores convocados que continuam pendentes.';if(!saveData(()=>{clearStoredDraft(retroKey);if(perfilAtual==='SUPERVISOR')clearStoredDraft(draftKey('last',supervisorAtual));retroUnsavedAvulsos.clear();setView('pendencias');}))return;toast(savedMessage);
       }catch(error){
         console.error('APROAR retroactive form submit failure',String(error?.message||error).slice(0,240));
         showToast('Não foi possível preparar o apontamento retroativo. Confira os campos e tente novamente.',true);showSaveFeedback('Não foi possível preparar o apontamento retroativo. Confira os campos e tente novamente.',true);
@@ -1758,10 +1843,28 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
 
 function renderEquipeDia(){
  const pendingDayKey=portalDate+'|'+supervisorAtual;
+ const storageKey=draftKey('normal',supervisorAtual,portalDate,portalUnit);
+ const savedLocal=readStoredDraft(storageKey);
+ // A memória temporária não pode reaproveitar fichas de outra unidade no mesmo dia.
+ if(dayUnsavedDrafts.has(pendingDayKey)&&dayUnsavedDrafts.get(pendingDayKey)?.unit!==portalUnit)
+   dayUnsavedDrafts.delete(pendingDayKey);
+ const loadLocalDayDraft=stored=>{
+   if(!stored||!Array.isArray(stored.items))return;
+   const items=new Map(stored.items.filter(i=>i&&typeof i.colaboradorId==='string').map(i=>[i.colaboradorId,i]));
+   dayUnsavedDrafts.set(pendingDayKey,{items,extra:stored.extra||{},unit:portalUnit});
+   for(const x of stored.pending||[]){
+     if(!x||x.dayKey!==pendingDayKey||x.selectedUnit!==portalUnit||!x.id)continue;
+     if(onlineConfirmed?.convocacoes?.some(c=>c.colaboradores?.includes(x.id)))continue;
+     dayPendingAdds.set(x.id,x);
+   }
+   restoreDayPendingAdds();
+ };
  if([...dayPendingAdds.values()].some(x=>x.dayKey!==pendingDayKey||x.selectedUnit!==portalUnit)){
    discardDayPendingAdds();
-   showToast('Inclusões não salvas da outra data foram descartadas. Confira o novo apontamento.',true);
+   showToast('Inclusões não salvas da outra data foram descartadas. O rascunho anterior continua disponível neste navegador.',true);
  }
+ const recoverSameVersion=Boolean(savedLocal&&savedLocal.version===onlineVersion);
+ if(recoverSameVersion&&!dayUnsavedDrafts.has(pendingDayKey))loadLocalDayDraft(savedLocal);
  const body=$('#apontamento-body'),convs=convocacoesSupervisor().filter(c=>c.dataServico===portalDate&&(portalUnit==='Todas'||c.unidade===portalUnit));
  const dayKey=portalDate+'|'+supervisorAtual,dayDraft=dayUnsavedDrafts.get(dayKey);
  const people=new Map();for(const c of convs)for(const id of c.colaboradores)
@@ -1771,8 +1874,21 @@ function renderEquipeDia(){
    const items=ids.length?readPersonRows(ids,$('#day-form')):[];
    const extra={person:$('#day-extra-person')?.value||'',kind:$('#day-extra-kind')?.value||'Não',
      amount:$('#day-extra-amount')?.value||'',work:$('#day-extra-work')?.value||'',
-     obs:$('#day-extra-obs')?.value||'',search:$('#day-person-search')?.value||''};
-   dayUnsavedDrafts.set(dayKey,{items:new Map(items.map(item=>[item.colaboradorId,item])),extra});
+     obs:$('#day-extra-obs')?.value||'',search:$('#day-person-search')?.value||'',
+     newName:$('#day-avulso-nome')?.value||'',newFuncao:$('#day-avulso-funcao')?.value||'',
+     newPerson:$('#day-add-person')?.value||''};
+   const draft={items:new Map(items.map(item=>[item.colaboradorId,item])),extra,unit:portalUnit};
+   dayUnsavedDrafts.set(dayKey,draft);
+   persistDayDraftFromMemory();
+ };
+ const persistDayDraftFromMemory=()=>{
+   const draft=dayUnsavedDrafts.get(dayKey);if(!draft)return false;
+   const okay=storeDraft(storageKey,{items:[...draft.items.values()],extra:draft.extra,
+     pending:[...dayPendingAdds.values()].filter(x=>x.dayKey===dayKey&&x.selectedUnit===portalUnit)});
+   if(okay&&supervisorAtual)storeDraft(draftKey('last',supervisorAtual),{tab:'normal',date:portalDate,unit:portalUnit});
+   const indicator=$('#day-draft-status');
+   if(indicator)indicator.textContent=okay?'Rascunho armazenado neste navegador · '+formatDateTime(new Date().toISOString()):'Não foi possível armazenar o rascunho neste navegador';
+   return okay;
  };
  const extraTypes=['Meia diária','Diária','Uma e meia diária','Duas diárias'];
  body.innerHTML=`<h3>Equipe do dia</h3><p style="font-size:12px">Preencha o apontamento normal. Se houver extra, selecione a categoria diretamente na ficha do funcionário.</p>
@@ -1784,8 +1900,25 @@ function renderEquipeDia(){
  <div class="form-grid">${field('Funcionário',`<select class="control" id="day-extra-person"><option value="">Selecione qualquer funcionário</option>${options(COLABORADORES.filter(c=>!c.inativo&&!people.has(c.id)).slice().sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR')))}</select>`)}${field('Extra',`<select class="control" id="day-extra-kind">${EXTRA_OPTIONS.map(x=>`<option ${x==='Não'?'selected':''}>${x}</option>`).join('')}</select>`)}</div>
  <div id="day-extra-fields" class="form-grid">${field('Valor da Extra (R$)',`<input class="control" id="day-extra-amount" type="number" min="0.01" step="0.01" placeholder="Digite o valor" required>`)}${field('Obra / Serviço e unidade da extra',`<select class="control" id="day-extra-work">${extraWorkOptions('')}</select>`)}${field('Observação da extra','<input class="control" id="day-extra-obs" maxlength="2000" placeholder="Opcional">')}</div>
  <div id="day-extra-origin" class="notice info section">Escolha o funcionário. O serviço registrado para ele neste dia será sugerido automaticamente, mas pode ser trocado.</div></details>
- <div class="form-actions"><button class="btn btn-primary">Salvar apontamento do dia</button></div></form>`;
+ <div class="form-actions"><button class="btn btn-primary">Salvar apontamento do dia</button></div><div class="notice info" id="day-draft-status">O rascunho é armazenado automaticamente a cada alteração neste navegador. Não substitui a confirmação do apontamento.</div></form>`;
  bindServiceRows();bindPersonSearch($('#day-person-search'),()=>$$('#day-form .person-card'));
+ // Cada tecla ou mudança grava instantaneamente no disco do navegador.
+ const dayCapture=event=>{
+   if(event.target?.closest('#day-form')||event.target?.id==='day-avulso-nome'||event.target?.id==='day-avulso-funcao'||event.target?.id==='day-add-person')
+     snapshotDayDraft();
+ };
+ body.addEventListener('input',dayCapture);
+ body.addEventListener('change',dayCapture);
+ if(savedLocal&&savedLocal.version!==onlineVersion&&!dayUnsavedDrafts.has(dayKey)){
+   const notice=document.createElement('div');notice.className='notice warning section';
+   notice.innerHTML='Há um rascunho local desta equipe, mas o banco foi atualizado desde então. Confira o histórico antes de recuperar. <button type="button" class="btn btn-secondary" id="recover-day-draft">Recuperar rascunho para conferência</button>';
+   body.prepend(notice);
+   $('#recover-day-draft').onclick=()=>{
+     if(!window.confirm('Recuperar os campos não salvos? Os valores existentes no banco podem ser diferentes. Confira antes de salvar.'))return;
+     loadLocalDayDraft(savedLocal);render();
+   };
+ }
+ if(recoverSameVersion)body.insertAdjacentHTML('afterbegin','<div class="notice success section">Rascunho local disponível. Os campos não confirmados foram restaurados. Confira e salve quando concluir.</div>');
  // X para inclusões já gravadas, desde que não exista apontamento ou
  // histórico associado. O servidor valida novamente antes de excluir.
  for(const [id,entry] of people){
@@ -1827,6 +1960,7 @@ function renderEquipeDia(){
        applyOnline(await restoreOnlineSession());
        // Mantém os dados digitados nas outras fichas, retirando só esta inclusão.
        dayUnsavedDrafts.get(dayKey)?.items.delete(id);
+       persistDayDraftFromMemory();
        onlineSaving=false;render();
        showToast('Inclusão retirada da equipe. Os demais colaboradores foram preservados.');
      }catch(error){
@@ -1858,6 +1992,7 @@ function renderEquipeDia(){
      if(onlineQueued||onlineSaving)return toast('Aguarde a conclusão do salvamento.',true);
      snapshotDayDraft();
      if(!removePendingDayAdd(id,dayKey))return toast('Não foi possível remover a inclusão pendente.',true);
+     persistDayDraftFromMemory();
      render();
      showToast('Colaborador retirado do formulário. Os outros preenchimentos foram mantidos.');
    };
@@ -1882,10 +2017,13 @@ function renderEquipeDia(){
    $('#day-extra-amount').value=draft.amount;$('#day-extra-obs').value=draft.obs;
    if([...$('#day-extra-work').options].some(o=>o.value===draft.work))$('#day-extra-work').value=draft.work;
    $('#day-person-search').value=draft.search;
+   if($('#day-avulso-nome'))$('#day-avulso-nome').value=draft.newName||'';
+   if($('#day-avulso-funcao'))$('#day-avulso-funcao').value=draft.newFuncao||'';
+   if($('#day-add-person')&&[...$('#day-add-person').options].some(o=>o.value===draft.newPerson))$('#day-add-person').value=draft.newPerson;
    $('#day-person-search').dispatchEvent(new Event('input',{bubbles:true}));
    refreshExternalFields();
  }
- $('#day-all-present').onclick=()=>{if(!people.size)return toast('Adicione pessoas à equipe.',true);const items=readPersonRows([...people.keys()]);if(items.some(i=>i.servicos.some(s=>!s.obraId)))return toast('Selecione primeiro os serviços de todos os colaboradores.',true);$$('#day-form .row-status').forEach(x=>{x.value='Presente (Integral)';x.onchange?.();});};
+ $('#day-all-present').onclick=()=>{if(!people.size)return toast('Adicione pessoas à equipe.',true);const items=readPersonRows([...people.keys()]);if(items.some(i=>i.servicos.some(s=>!s.obraId)))return toast('Selecione primeiro os serviços de todos os colaboradores.',true);$$('#day-form .row-status').forEach(x=>{x.value='Presente (Integral)';x.onchange?.();});snapshotDayDraft();};
  $('#day-add-button').onclick=()=>{
    if(onlineQueued||onlineSaving)return toast('Aguarde o salvamento atual.',true);
    const unit=portalUnit==='Todas'?(convs[0]?.unidade||adminUnits()[0]):portalUnit;
@@ -1911,6 +2049,7 @@ function renderEquipeDia(){
      tipoDiariaAvulso:staff?'Diária':null,
      servicos:[{obraId:preferredWork,periodo:'Integral'}]
    });
+   persistDayDraftFromMemory();
    render();
    showToast('Colaborador incluído no formulário, ainda não salvo. Confira os dados e clique em “Salvar apontamento do dia”.');
  };
@@ -1930,6 +2069,8 @@ function renderEquipeDia(){
     for(const c of convs){const selected=items.filter(i=>c.colaboradores.includes(i.colaboradorId));if(!selected.length)continue;let ap=apForConv(c.id);if(ap){ap.itens=[...ap.itens.filter(i=>!selected.some(x=>x.colaboradorId===i.colaboradorId)),...selected];ap.atualizadoEm=now().toISOString();}else state.apontamentos.push({executor:supervisorAtual||perfilLabel(perfilAtual),id:uid('ap'),convocacaoId:c.id,supervisor:c.supervisor,dataServico:c.dataServico,apontadoEm:now().toISOString(),retroativo:false,itens:selected});}
     audit('Apontamento da equipe',portalDate);if(!saveData(()=>{
       dayUnsavedDrafts.delete(dayKey);
+      clearStoredDraft(storageKey);
+      if(supervisorAtual)clearStoredDraft(draftKey('last',supervisorAtual));
       dayPendingAdds.clear();
       render();
     }))return;toast('Apontamento do dia e extras salvos.');
@@ -2656,11 +2797,20 @@ function renderEquipeDia(){
     }finally{onlineSaving=false;lockOnline(false);}
   }
   function resetData(){toast('Restauração automática desativada na versão conectada.',true);}
-  async function logout(){chooseLogin('CONTROLADORIA');if(onlineSaving||onlineQueued)return;try{await api('/api/logout',{method:'POST',body:'{}'});}catch(e){return showToast(e.message,true);}perfilAtual='';supervisorAtual='';onlineSession=null;onlineConfirmed=null;state=seedData();OBRAS.length=0;COLABORADORES.length=0;render();}
+  async function logout(){chooseLogin('CONTROLADORIA');if(onlineSaving||onlineQueued)return;try{await api('/api/logout',{method:'POST',body:'{}'});}catch(e){return showToast(e.message,true);}if(supervisorAtual)clearSupervisorDrafts(supervisorAtual);perfilAtual='';supervisorAtual='';onlineSession=null;onlineConfirmed=null;state=seedData();OBRAS.length=0;COLABORADORES.length=0;render();}
   const renderLocal=render;
   render=function(){renderLocal();if(!perfilAtual)return;const selector=$('#portal-sup');if(onlineSession?.role==='SUPERVISOR'&&selector){selector.value=onlineSession.user;selector.disabled=true;}const old=$('#live-status');if(old)old.remove();const status=document.createElement('div');status.id='live-status';status.className='notice '+(onlineWritable?'info':'warning');status.innerHTML=`<strong>${onlineStage==='producao'?'Produção':'Homologação'} · ${onlineWritable?'dados conectados ao Neon':'somente leitura'}</strong> <span>${onlineStage==='producao'?'Dados oficiais da APROAR.':'Ambiente de testes.'}</span> <button type="button" class="link-btn" id="sync-online">Atualizar dados</button>`;$('#main-content').prepend(status);$('#sync-online').onclick=async()=>{if(onlineSaving||onlineQueued)return;lockOnline(true);try{applyOnline(await api('/api/bootstrap'));render();showToast('Dados atualizados.');}catch(e){showToast(e.message,true);}finally{lockOnline(false);}};};
   function chooseLogin(role){loginRole=role;const shortcut=['SUPERVISOR','VISUALIZAR'].includes(role);$('#login-access-wrap').classList.toggle('hidden',shortcut);$('#login-shortcut-mode').classList.toggle('hidden',!shortcut);$('#login-shortcut-label').textContent=role==='SUPERVISOR'?'Portal do Supervisor':'Somente visualizar';if(!shortcut)$('#login-access').value=role;$('#login-supervisor-wrap').classList.toggle('hidden',role!=='SUPERVISOR');const passwordRequired=role!=='VISUALIZAR';$('#login-password').required=passwordRequired;$('#login-password').closest('.password-wrap').classList.toggle('hidden',!passwordRequired);document.querySelector('label[for="login-password"]').classList.toggle('hidden',!passwordRequired);$('#login-error').textContent='';$('#login-password').value='';$(role==='SUPERVISOR'?'#login-supervisor':role==='VISUALIZAR'?'#login-button':'#login-password').focus();}
-  function enterConnectedSession(result){applyOnline(result);financeReleaseRequests=[];if(perfilAtual==='SUPERVISOR')api('/api/financial-release').then(x=>{financeReleaseRequests=x.requests||[];if(viewAtual==='apontamento')render();}).catch(()=>{});viewAtual=perfilAtual==='SUPERVISOR'?'apontamento':perfilAtual==='VISUALIZAR'?'dashboard':'inicio';portalUnit=state.convocacoes.find(c=>c.supervisor===supervisorAtual&&c.dataServico===portalDate)?.unidade||OBRAS[0]?.unidade||'Todas';render();}
+  function enterConnectedSession(result){applyOnline(result);financeReleaseRequests=[];if(perfilAtual==='SUPERVISOR')api('/api/financial-release').then(x=>{financeReleaseRequests=x.requests||[];if(viewAtual==='apontamento')render();}).catch(()=>{});viewAtual=perfilAtual==='SUPERVISOR'?'apontamento':perfilAtual==='VISUALIZAR'?'dashboard':'inicio';portalUnit=state.convocacoes.find(c=>c.supervisor===supervisorAtual&&c.dataServico===portalDate)?.unidade||OBRAS[0]?.unidade||'Todas';
+    if(perfilAtual==='SUPERVISOR'){
+      const last=readStoredDraft(draftKey('last',supervisorAtual));
+      if(last&&last.date&&/^\d{4}-\d{2}-\d{2}$/.test(last.date)&&last.date<=isoToday()&&['normal','retroativo'].includes(last.tab)){
+        portalDate=last.date;apontamentoTab=last.tab;
+        if(last.tab==='retroativo')retroDateSelected=last.date;
+        if(last.unit==='Todas'||adminUnits().includes(last.unit))portalUnit=last.unit;
+      }
+    }
+    render();}
   async function initOnline(){
     init();$('#reset-demo').classList.add('hidden');$('#login-access').onchange=()=>chooseLogin($('#login-access').value);$('#enter-supervisor').onclick=()=>chooseLogin('SUPERVISOR');$('#enter-viewer').onclick=()=>chooseLogin('VISUALIZAR');$('#login-back').onclick=()=>chooseLogin($('#login-access').value);
     $('#login-form').onsubmit=async e=>{e.preventDefault();const button=$('#login-button');button.disabled=true;$('#login-error').textContent='';try{await api('/api/login',{method:'POST',body:JSON.stringify({role:loginRole,supervisor:$('#login-supervisor').value,password:$('#login-password').value})});$('#login-password').value='';enterConnectedSession(await api('/api/bootstrap'));}catch(err){$('#login-error').textContent=err.message;}finally{button.disabled=false;}};

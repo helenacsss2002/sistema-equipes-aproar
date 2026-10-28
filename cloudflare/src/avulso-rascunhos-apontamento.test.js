@@ -24,7 +24,7 @@ test('Retroativo adiciona avulso sem apagar fichas e mantém busca, seleção e 
  assert.match(retro,/if\(!reset\)readPersonRows\(current\)\.forEach\(i=>retroDrafts\.set\(i\.colaboradorId,i\)\)/);
  assert.match(retro,/retroDrafts\.get\(id\)\|\|previousItem\(id\)/);
  assert.match(retro,/personRow\(id,/);
- assert.match(retro,/if\(!saveData\(\(\)=>\{retroUnsavedAvulsos\.clear\(\);setView\('pendencias'\);\}\)\)return/);
+ assert.match(retro,/if\(!saveData\(\(\)=>\{clearStoredDraft\(retroKey\);if\(perfilAtual==='SUPERVISOR'\)clearStoredDraft\(draftKey\('last',supervisorAtual\)\);retroUnsavedAvulsos\.clear\(\);setView\('pendencias'\);\}\)\)return/);
 });
 test('Inserir avulso no apontamento normal salva um rascunho de cada colaborador antes de redesenhar a tela',()=>{
  const add=section(" $('#day-add-button').onclick=()=>{"," $('#day-form').noValidate=true;");
