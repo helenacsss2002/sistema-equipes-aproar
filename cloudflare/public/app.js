@@ -555,6 +555,35 @@
     if (apontamentoTab === 'normal') renderApontamentoNormal(); else renderApontamentoRetroativo();
   }
 
+  // Rascunho durável no navegador. Cada gravação é síncrona (sem debounce):
+  // continua após F5 ou reinício do computador, sem criar apontamento no Neon.
+  // Isolado por perfil/supervisor/data/unidade e expira em 45 dias.
+  const DRAFT_PREFIX='aproar:apontamento:rascunho:v1:';
+  const draftKey=(kind,supervisor,date='',unit='')=>DRAFT_PREFIX+[kind,supervisor,date,unit].map(encodeURIComponent).join(':');
+  const readStoredDraft=key=>{
+    try{
+      const raw=localStorage.getItem(key);if(!raw)return null;
+      const draft=JSON.parse(raw);
+      if(!draft||draft.v!==1||!Number.isFinite(draft.savedAt)||Date.now()-draft.savedAt>45*86400000){
+        localStorage.removeItem(key);return null;
+      }
+      return draft;
+    }catch(error){console.warn('Rascunho local não pôde ser lido',String(error?.message||error));return null;}
+  };
+  let storageWarned=false;
+  const storeDraft=(key,data)=>{
+    try{localStorage.setItem(key,JSON.stringify({v:1,savedAt:Date.now(),version:onlineVersion,...data}));return true;}
+    catch(error){
+      if(!storageWarned){storageWarned=true;showToast('O navegador não permitiu guardar o rascunho. Confira o espaço disponível; o preenchimento pode ser perdido em caso de reinício.',true);}
+      return false;
+    }
+  };
+  const clearStoredDraft=key=>{try{localStorage.removeItem(key);}catch{}};
+  const clearSupervisorDrafts=supervisor=>{
+    try{const partial=DRAFT_PREFIX;for(let i=localStorage.length-1;i>=0;i--){const key=localStorage.key(i);
+      if(key?.startsWith(partial)&&[key.split(':')[4],key.split(':')[5]].includes(encodeURIComponent(supervisor)))localStorage.removeItem(key);
+    }}catch{}
+  };
   // Dados ainda não gravados: mantidos ao incluir colaborador ou avulso.
   const dayUnsavedDrafts=new Map();
   // Pessoas adicionadas no apontamento normal são salvas junto com o apontamento.
@@ -1758,6 +1787,21 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
 
 function renderEquipeDia(){
  const pendingDayKey=portalDate+'|'+supervisorAtual;
+ const storageKey=draftKey('normal',supervisorAtual,portalDate,portalUnit);
+ const savedLocal=readStoredDraft(storageKey);
+ const loadLocalDayDraft=stored=>{
+   if(!stored||!Array.isArray(stored.items))return;
+   const items=new Map(stored.items.filter(i=>i&&typeof i.colaboradorId==='string').map(i=>[i.colaboradorId,i]));
+   dayUnsavedDrafts.set(pendingDayKey,{items,extra:stored.extra||{}});
+   for(const x of stored.pending||[]){
+     if(!x||x.dayKey!==pendingDayKey||x.selectedUnit!==portalUnit||!x.id)continue;
+     if(onlineConfirmed?.convocacoes?.some(c=>c.colaboradores?.includes(x.id)))continue;
+     dayPendingAdds.set(x.id,x);
+   }
+   restoreDayPendingAdds();
+ };
+ const recoverSameVersion=Boolean(savedLocal&&savedLocal.version===onlineVersion);
+ if(recoverSameVersion&&!dayUnsavedDrafts.has(pendingDayKey))loadLocalDayDraft(savedLocal);
  if([...dayPendingAdds.values()].some(x=>x.dayKey!==pendingDayKey||x.selectedUnit!==portalUnit)){
    discardDayPendingAdds();
    showToast('Inclusões não salvas da outra data foram descartadas. Confira o novo apontamento.',true);
@@ -1772,7 +1816,10 @@ function renderEquipeDia(){
    const extra={person:$('#day-extra-person')?.value||'',kind:$('#day-extra-kind')?.value||'Não',
      amount:$('#day-extra-amount')?.value||'',work:$('#day-extra-work')?.value||'',
      obs:$('#day-extra-obs')?.value||'',search:$('#day-person-search')?.value||''};
-   dayUnsavedDrafts.set(dayKey,{items:new Map(items.map(item=>[item.colaboradorId,item])),extra});
+   const draft={items:new Map(items.map(item=>[item.colaboradorId,item])),extra};
+   dayUnsavedDrafts.set(dayKey,draft);
+   storeDraft(storageKey,{items:[...draft.items.values()],extra,
+     pending:[...dayPendingAdds.values()].filter(x=>x.dayKey===dayKey&&x.selectedUnit===portalUnit)});
  };
  const extraTypes=['Meia diária','Diária','Uma e meia diária','Duas diárias'];
  body.innerHTML=`<h3>Equipe do dia</h3><p style="font-size:12px">Preencha o apontamento normal. Se houver extra, selecione a categoria diretamente na ficha do funcionário.</p>
@@ -1786,6 +1833,23 @@ function renderEquipeDia(){
  <div id="day-extra-origin" class="notice info section">Escolha o funcionário. O serviço registrado para ele neste dia será sugerido automaticamente, mas pode ser trocado.</div></details>
  <div class="form-actions"><button class="btn btn-primary">Salvar apontamento do dia</button></div></form>`;
  bindServiceRows();bindPersonSearch($('#day-person-search'),()=>$$('#day-form .person-card'));
+ // Cada tecla ou mudança grava instantaneamente no disco do navegador.
+ const dayCapture=event=>{
+   if(event.target?.closest('#day-form')||event.target?.id==='day-avulso-nome'||event.target?.id==='day-avulso-funcao'||event.target?.id==='day-add-person')
+     snapshotDayDraft();
+ };
+ body.addEventListener('input',dayCapture);
+ body.addEventListener('change',dayCapture);
+ if(savedLocal&&savedLocal.version!==onlineVersion&&!dayUnsavedDrafts.has(dayKey)){
+   const notice=document.createElement('div');notice.className='notice warning section';
+   notice.innerHTML='Há um rascunho local desta equipe, mas o banco foi atualizado desde então. Confira o histórico antes de recuperar. <button type="button" class="btn btn-secondary" id="recover-day-draft">Recuperar rascunho para conferência</button>';
+   body.prepend(notice);
+   $('#recover-day-draft').onclick=()=>{
+     if(!window.confirm('Recuperar os campos não salvos? Os valores existentes no banco podem ser diferentes. Confira antes de salvar.'))return;
+     loadLocalDayDraft(savedLocal);render();
+   };
+ }
+ if(recoverSameVersion)body.insertAdjacentHTML('afterbegin','<div class="notice success section">Rascunho local disponível. Os campos não confirmados foram restaurados. Confira e salve quando concluir.</div>');
  // X para inclusões já gravadas, desde que não exista apontamento ou
  // histórico associado. O servidor valida novamente antes de excluir.
  for(const [id,entry] of people){
@@ -1930,6 +1994,7 @@ function renderEquipeDia(){
     for(const c of convs){const selected=items.filter(i=>c.colaboradores.includes(i.colaboradorId));if(!selected.length)continue;let ap=apForConv(c.id);if(ap){ap.itens=[...ap.itens.filter(i=>!selected.some(x=>x.colaboradorId===i.colaboradorId)),...selected];ap.atualizadoEm=now().toISOString();}else state.apontamentos.push({executor:supervisorAtual||perfilLabel(perfilAtual),id:uid('ap'),convocacaoId:c.id,supervisor:c.supervisor,dataServico:c.dataServico,apontadoEm:now().toISOString(),retroativo:false,itens:selected});}
     audit('Apontamento da equipe',portalDate);if(!saveData(()=>{
       dayUnsavedDrafts.delete(dayKey);
+      clearStoredDraft(storageKey);
       dayPendingAdds.clear();
       render();
     }))return;toast('Apontamento do dia e extras salvos.');
