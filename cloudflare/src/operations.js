@@ -54,8 +54,8 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
  for(const {key,c,pid,old,changed} of records.values()){
   const raw=old?rawConvs.get(old.id):null,oldPoint=oldApByConv.get(String(old?.id))?.itens.find(i=>i.colaboradorId===pid),ap=pointed.get(key),pointChanged=ap&&(changed||!same(apView(oldPoint),apView(ap.i)));
   if(oldPoint&&!ap){if(!own(session,c))fail('Sem permissão para remover apontamento.',403);const row=rawAps.get(key);if(row)add('apontamentos','delete',row.id);for(const s of (rawServicesByConv.get(key)||[]))add('servicos_apontamento','delete',s.id);const {text,meta}=metadata(raw.observacao);delete meta.apontado_em;delete meta.apontado_por;delete meta.apontamento_atrasado;delete meta.valor_ajuda_custo;add('convocacoes','update',key,{status:'Presente (Integral)',valor_extra:0,custo_pago:0,valor_acordo:0,valor_adicional_noturno:0,custos_separados:false,observacao:text+(Object.keys(meta).length?' ||APROAR_META|| '+JSON.stringify(meta):'')});}
+  let releaseGrant=null;
   if(pointChanged){
-   let releaseGrant=null;
    if(session.role==='SUPERVISOR'){
     const fields=changedFinancialFields(oldPoint,ap.i);
     releaseGrant=requireApprovedRelease(db.releaseEvents,{supervisor:session.user,colaboradorId:pid,dataServico:c.dataServico,fields},timestamp,releaseUses);
