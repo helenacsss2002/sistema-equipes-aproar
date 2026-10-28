@@ -1,4 +1,5 @@
 import {metadata} from './neon-adapter.js';
+import {financialHistoryEvents} from './financial-history.js';
 import {hasValidComplementApproval,clearObsoleteApproval} from './financial-approval.js';
 import {supervisors,visibleState} from './data.js';
 const numericId=v=>/^\d+$/.test(String(v));
@@ -79,6 +80,11 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
   const oldRow=rawAps.get(key),pointTime=oldRow?.apontado_em||metadata(raw?.observacao).meta.apontado_em||timestamp,executor=oldRow?.apontado_por||metadata(raw?.observacao).meta.apontado_por||session.user;
   const values={status:i.status,valor_extra:extra,observacao:String(i.observacao||''),tipo_diaria:i.extra==='Valor específico'?(oldPoint?.tipoDiariaOriginal||'Não'):i.extra,custo_pago:money(finance),custo_pago_definido_financeiro:financialAdjusted,valor_acordo:money(bonus),valor_adicional_noturno:money(night),custo_encargos_base:money(Number(p.custo)*weight+extra),custos_separados:true,migracao_sebrae_noturno_v2:true};
   add('apontamentos',oldRow?'update':'insert',oldRow?.id||'ap:'+key,{...values,convocacao_id:key,data_servico:c.dataServico,colaborador_id:pid,engenheiro:c.supervisor,apontado_em:pointTime,apontado_por:executor,retroativo:Boolean(oldRow?.retroativo||ap.a.retroativo),atualizado_em:timestamp});
+  ops.push(...financialHistoryEvents({
+    convocationId:key,colaboradorId:pid,dataServico:c.dataServico,
+    supervisor:c.supervisor,actor:session.user,role:session.role,source:'Apontamento',
+    timestamp,previous:oldRow,next:values
+  }));
   const oldMeta=clearObsoleteApproval(metadata(raw?.observacao).meta,finance,bonus),first=ss[0],meta={...oldMeta,valor_extra_disponivel:money(Number(i.valorExtraDisponivel??0)),apontado_em:pointTime,apontado_por:executor,custos_separados:true,custo_pago:money(finance),valor_acordo:money(bonus),valor_adicional_noturno:money(night),valor_ajuda_custo:money(ajudaCusto),servico_a_definir:!first,tipo_diaria_avulso:p.avulso==='Sim'?(i.tipoDiariaAvulso||'Diária'):null,periodo_principal:first?.periodo||c.turno,servicos_adicionais:ss.slice(1).map(s=>({servico:works.get(s.obraId)?.nome,obra_id:s.obraId,periodo:s.periodo}))};
   add('convocacoes','update',key,{...values,obra_id:first?.obraId||work,observacao:'Turno: '+c.turno+(i.observacao?' | Obs: '+i.observacao:'')+' ||APROAR_META|| '+JSON.stringify(meta)});
   if(!same(normServices(oldPoint),ss)){
@@ -135,6 +141,11 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
    else add('convocacoes','insert',convKey,{...convData,criado_em:timestamp,criado_por:session.user});
    const pointData={convocacao_id:convKey,data_servico:serviceDate,colaborador_id:personId,engenheiro:supervisor,status:'Extra',valor_extra:amount,observacao:obs,tipo_diaria:kind,custo_pago:0,custo_pago_definido_financeiro:false,valor_acordo:0,valor_adicional_noturno:0,custo_encargos_base:amount,custos_separados:true,migracao_sebrae_noturno_v2:true,apontado_em:created,apontado_por:creator,retroativo:serviceDate<isoToday(timestamp),atualizado_em:timestamp};
    add('apontamentos',rawPoint?'update':'insert',rawPoint?.id||'extra-ap:'+id,pointData);
+   ops.push(...financialHistoryEvents({
+     convocationId:convKey,colaboradorId:personId,dataServico:serviceDate,
+     supervisor,actor:session.user,role:session.role,source:'Extra independente',
+     timestamp,previous:rawPoint,next:pointData
+   }));
    if(!old||String(old.obraId)!==String(work.id)||(rawServicesByConv.get(id)||[]).length===0){
     if(old)for(const service of (rawServicesByConv.get(id)||[]))add('servicos_apontamento','delete',service.id);
     add('servicos_apontamento','insert','extra-service:'+id,{convocacao_id:convKey,obra_id:String(work.id),obra_nome_snapshot:work.nome,unidade_snapshot:work.unidade,periodo:'Integral',principal:true,criado_em:timestamp,atualizado_em:timestamp});

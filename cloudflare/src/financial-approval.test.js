@@ -79,11 +79,11 @@ test('Confirmar valores iguais grava um evento auditável e permite atualizaçã
   next.apontamentos[0].itens[0].acordo=100;
   assert.doesNotThrow(()=>buildOperations(db,next,{role:'FINANCEIRO',user:'FINANCEIRO'},time),'Mudança que desfaz a igualdade é permitida e revoga aprovação');
   const finOps=buildFinancialOperations([{convocacaoId:'1',financeiro:90,acordo:90,noturno:0,ajudaCusto:11}],
-   [{convocacao_id:'1',apontamento_id:'1',status:'Presente (Integral)',noturno_atual:0,has_sebrae:true,observacao:check.observacao}],
+   [{convocacao_id:'1',apontamento_id:'1',colaborador_id:'1',data_servico:'2026-10-13',supervisor_responsavel:'SOARES',status:'Presente (Integral)',acordo_atual:90,noturno_atual:0,has_sebrae:true,observacao:check.observacao}],
    'FINANCEIRO');
   assert.equal(finOps.length,3);
   assert.throws(()=>buildFinancialOperations([{convocacaoId:'1',financeiro:100,acordo:100,noturno:0,ajudaCusto:11}],
-   [{convocacao_id:'1',apontamento_id:'1',status:'Presente (Integral)',noturno_atual:0,has_sebrae:true,observacao:check.observacao}],
+   [{convocacao_id:'1',apontamento_id:'1',colaborador_id:'1',data_servico:'2026-10-13',supervisor_responsavel:'SOARES',status:'Presente (Integral)',acordo_atual:90,noturno_atual:0,has_sebrae:true,observacao:check.observacao}],
    'FINANCEIRO'),/confirmação explícita/);
   await pg.query('SELECT aproar_web_apply($1,$2,$3,$4,$5::jsonb)',params);
   const audits=(await pg.query("SELECT acao,usuario,contexto FROM auditoria WHERE acao='CONFIRMAR_COMPLEMENTO_DUPLICADO'")).rows;

@@ -184,7 +184,7 @@
     const item=(view,label,icon,group='')=>({view,label,icon,group});
     if(perfilAtual==='CONTROLADORIA') return [item('inicio','Início','⌂'),item('convocacao','Convocação','▤','OPERAÇÃO'),item('conflitos','Conflitos','!'),item('apontamento','Apontamento','✓'),item('whatsapp','WhatsApp','◌'),item('disponibilidade','Disponibilidade','♙'),item('indisponibilidade','Indisponibilidade','⊘'),item('dashboard','Dashboard','▦','ANÁLISE E FECHAMENTO'),item('relatorios','Relatórios','▥'),item('indicadores','Indicadores','↗'),item('configuracoes','Configurações','⚙','SISTEMA')];
     if(perfilAtual==='VISUALIZAR') return [item('dashboard','Dashboard','▦'),item('relatorios','Relatórios','▥'),item('indicadores','Indicadores','↗')];
-    if(perfilAtual==='FINANCEIRO') return [item('inicio','Início','⌂'),item('financeiro','Pagamentos','$'),item('ausencias','Faltas / Atestados','⊘'),item('relatorios','Relatório','▥')];
+    if(perfilAtual==='FINANCEIRO') return [item('inicio','Início','⌂'),item('financeiro','Pagamentos','$'),item('historico-financeiro','Histórico de registros','▤'),item('ausencias','Faltas / Atestados','⊘'),item('relatorios','Relatório','▥')];
     return [item('inicio','Início','⌂'),item('convocacao','Convocação','▤'),item('apontamento','Apontamento','✓'),item('disponibilidade','Disponibilidade','♙'),item('pendencias','Pendências','!')];
   }
 
@@ -239,6 +239,7 @@
       indicadores:'Indicadores',
       relatorios:'Relatórios',
       financeiro:'Fechamento financeiro',
+      'historico-financeiro':'Histórico de registros',
       extras:'Lançamento de extras',
     };
     $('#topbar-title').textContent = navConfig().find(x=>x.view===viewAtual)?.label || map[viewAtual] || 'APROAR';
@@ -1561,6 +1562,48 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
   }
   let selectedCycle='0';
   function cycleControl(){return `<div class="card card-pad section">${field('Ciclo de pagamento',`<select class="control" id="financial-cycle">${Array.from({length:26},(_,index)=>{const c=financialCycle(isoToday(),-index);return `<option value="${-index}" ${String(-index)===selectedCycle?'selected':''}>${formatDate(c.inicio)} a ${formatDate(c.fim)} · pagamento ${formatDate(c.pagamento)}</option>`;}).join('')}<option value="custom" ${selectedCycle==='custom'?'selected':''}>Período personalizado</option></select>`)}<p id="cycle-caption" style="font-size:12px"></p></div>`;}
+  function renderFinancialHistory(){
+    const today=isoToday(),first=today.slice(0,8)+'01';
+    $('#main-content').innerHTML=head('Histórico de registros financeiros','Confira inclusões e alterações de extras, bonificações e adicional noturno. Horários de Fortaleza.')
+      +'<div class="card card-pad"><div class="form-grid">'
+      +field('Data inicial do serviço','<input class="control" type="date" id="fh-start" value="'+first+'">')
+      +field('Data final do serviço','<input class="control" type="date" id="fh-end" value="'+today+'">')
+      +field('Tipo','<select class="control" id="fh-type"><option value="">Todos</option><option>Extra</option><option>Bonificação / acordo</option><option>Adicional noturno</option></select>')
+      +field('Buscar colaborador ou responsável','<input class="control" id="fh-search" type="search" autocomplete="off" placeholder="Digite o nome...">')
+      +'</div><div class="form-actions"><button type="button" class="btn btn-primary" id="fh-load">Consultar histórico</button></div></div>'
+      +'<div id="fh-results" class="section"></div>';
+    let data=null;
+    const stamp=t=>t?new Date(t).toLocaleString('pt-BR',{timeZone:'America/Fortaleza',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}):'Não disponível';
+    const show=()=>{
+      if(!data)return;
+      const kind=$('#fh-type').value,query=clean($('#fh-search').value);
+      const rows=[...data.eventos.map(x=>({...x,confirmado:true})),...data.anteriores.map(x=>({...x,confirmado:false}))]
+        .filter(x=>(!kind||x.tipo===kind)&&(!query||clean([x.colaborador,x.usuario,x.supervisor].join(' ')).includes(query)))
+        .sort((a,b)=>b.data_servico.localeCompare(a.data_servico)||(b.registrado_em||'').localeCompare(a.registrado_em||''));
+      $('#fh-results').innerHTML='<div class="card card-pad"><h3>Registros encontrados: '+rows.length+'</h3>'
+        +'<p>Para lançamentos anteriores à trilha individual, o valor atual fica visível, mas a data, a hora e o autor específicos não são comprováveis.</p>'
+        +(data.limiteAtingido?'<div class="notice warning">O período contém mais registros que o limite da consulta. Reduza o intervalo de datas.</div>':'')
+        +table(['Data do serviço','Colaborador','Tipo','Movimentação','Valor anterior','Valor registrado','Quem lançou','Supervisor da equipe','Data e hora do lançamento','Confiabilidade'],
+          rows.map(x=>[
+            escapeHtml(formatDate(x.data_servico)),escapeHtml(x.colaborador||'Não identificado'),escapeHtml(x.tipo||''),
+            escapeHtml(x.confirmado?(x.operacao||'Alteração'):'Valor anterior à trilha'),
+            x.confirmado?money(Number(x.valor_anterior)||0):'Não disponível',
+            money(Number(x.valor_novo)||0),
+            escapeHtml(x.confirmado?x.usuario||'Não identificado':'Não comprovado para este valor'),
+            escapeHtml(x.supervisor||'Não identificado'),
+            escapeHtml(x.confirmado?stamp(x.registrado_em):'Não disponível'),
+            x.confirmado?'Evento auditado':'Legado — sem trilha individual'
+          ]))+'</div>';
+    };
+    const load=async()=>{
+      const inicio=$('#fh-start').value,fim=$('#fh-end').value;
+      if(!inicio||!fim||inicio>fim)return showToast('Informe um período válido.',true);
+      $('#fh-results').innerHTML='<div class="notice info">Consultando histórico no Neon…</div>';
+      try{data=await api('/api/financial-history?inicio='+encodeURIComponent(inicio)+'&fim='+encodeURIComponent(fim));show();}
+      catch(error){data=null;$('#fh-results').innerHTML='<div class="notice warning">'+escapeHtml(error?.message||'Erro ao consultar histórico.')+'</div>';}
+    };
+    $('#fh-search').oninput=show;$('#fh-type').onchange=show;$('#fh-load').onclick=load;load();
+  }
   function renderPayments(){
     if(selectedCycle!=='custom'){const cycle=financialCycle(isoToday(),Number(selectedCycle));reportFilters.inicio=cycle.inicio;reportFilters.fim=cycle.fim;}
     $('#main-content').innerHTML=head('Pagamentos','Ciclo de terça a segunda, com pagamento na terça seguinte.')+cycleControl()+filterControls('combined')+'<div class="section" id="pay-body"></div>'+exportButtons()+financialSummaryButtons();
@@ -2330,7 +2373,7 @@ function renderEquipeDia(){
   function parseCSV(text){text=text.replace(/^\uFEFF/,'');const delim=(text.split(/\r?\n/)[0].match(/;/g)||[]).length>=(text.split(/\r?\n/)[0].match(/,/g)||[]).length?';':',';const rows=[];let row=[],value='',quoted=false;for(let i=0;i<text.length;i++){const c=text[i];if(c==='"'){if(quoted&&text[i+1]==='"'){value+='"';i++;}else quoted=!quoted;}else if(c===delim&&!quoted){row.push(value);value='';}else if((c==='\n'||c==='\r')&&!quoted){if(c==='\r'&&text[i+1]==='\n')i++;row.push(value);if(row.some(v=>v.trim()))rows.push(row);row=[];value='';}else value+=c;}row.push(value);if(row.some(v=>v.trim()))rows.push(row);return rows;}
   function renderImportSettings(){const body=$('#settings-body');body.innerHTML=`<h3>Importar planilha de colaboradores</h3><p>Adicione novos colaboradores ou atualize cadastros pelo nome. Nenhum colaborador ausente da planilha será excluído.</p><input class="control" id="import-file" type="file" accept=".xlsx,.csv"><p>XLSX ou CSV. A primeira aba deve conter nome, função e custo diário.</p><div id="import-mapping" class="section"></div><div id="import-preview" class="section"></div><div class="form-actions"><button class="btn btn-secondary" id="import-template">Baixar modelo Excel</button><button class="btn btn-primary" id="import-save" disabled>Importar prévia</button></div>`;let matrix=[],rows=[];$('#import-template').onclick=()=>exportWorkbook([{name:'Colaboradores',rows:[['Nome','Função','Custo diário','Moradia','Categoria','Avulso'],['Exemplo fictício','Pedreiro',241.74,'Fortaleza','Profissional','Não']]}],'modelo_colaboradores');const preview=()=>{const map=Object.fromEntries(['nome','funcao','custo','moradia','categoria','avulso'].map(k=>[k,Number($('#map-'+k).value)]));rows=matrix.slice(1).filter(r=>r.some(v=>String(v||'').trim())).map(r=>{const x=Object.fromEntries(Object.entries(map).map(([k,j])=>[k,j>=0?String(r[j]??'').trim():'']));let cost=x.custo.replace(/R\$\s*/g,'');if(cost.includes(','))cost=cost.replaceAll('.','').replace(',','.');x.custo=Number(cost);return x;});const invalid=rows.filter(x=>!x.nome||!x.funcao||!Number.isFinite(x.custo)||x.custo<=0);$('#import-preview').innerHTML=`<div class="notice ${invalid.length?'warning':'info'}">${rows.length} linha(s). ${invalid.length} linha(s) inválida(s). Preencha nome, função e um custo diário positivo para importar.</div>`+table(['Nome','Função','Custo','Moradia','Ação'],rows.map(x=>[escapeHtml(x.nome),escapeHtml(x.funcao),money(x.custo),escapeHtml(x.moradia),COLABORADORES.some(c=>clean(c.nome)===clean(x.nome))?'Atualizar':'Adicionar']));$('#import-save').disabled=!rows.length||Boolean(invalid.length)||map.nome<0||map.funcao<0||map.custo<0;};$('#import-file').onchange=async()=>{const f=$('#import-file').files[0];if(!f)return;try{matrix=f.name.toLowerCase().endsWith('.xlsx')?await xlsxRows(f):parseCSV(await f.text());if(matrix.length<2)throw Error('A planilha precisa de cabeçalho e dados.');const headers=matrix[0];const hints={nome:/NOME|COLABORADOR|FUNCIONARIO/,funcao:/FUNCAO|CARGO/,custo:/CUSTO|DIARIA|VALOR/,moradia:/MORADIA|RESIDENCIA/,categoria:/CATEGORIA/,avulso:/AVULSO/};$('#import-mapping').innerHTML='<h3>Conferir colunas</h3><div class="form-grid">'+Object.keys(hints).map(k=>field(k==='funcao'?'Função':readableName(k),`<select class="control" id="map-${k}"><option value="-1">Não usar</option>${headers.map((v,i)=>`<option value="${i}">${escapeHtml(v)}</option>`).join('')}</select>`)).join('')+'</div>';Object.keys(hints).forEach(k=>{$('#map-'+k).value=String(headers.findIndex(v=>hints[k].test(clean(v))));$('#map-'+k).onchange=preview;});preview();}catch(e){rows=[];$('#import-save').disabled=true;$('#import-preview').innerHTML='<div class="notice warning">'+escapeHtml(e.message)+'</div>';}};$('#import-save').onclick=()=>{if($('#import-save').disabled)return;let added=0,updated=0;for(const x of rows){const c=COLABORADORES.find(c=>clean(c.nome)===clean(x.nome));const data={nome:x.nome,funcao:x.funcao,custo:x.custo,...(x.moradia?{moradia:x.moradia}:{}),...(x.categoria?{categoria:x.categoria}:{}),...(x.avulso?{avulso:x.avulso}:{})};if(c){Object.assign(c,data);updated++;}else{COLABORADORES.push({id:uid('c'),...data});added++;}}audit('Importação de colaboradores',added+' novos / '+updated+' atualizados');saveData();toast(added+' adicionados e '+updated+' atualizados.');renderSettings();};}
 
-  const extendedRenderers={convocacao:renderConvCompleta,apontamento:renderApCompleto,extras:renderExtras,disponibilidade:renderDisponibilidade,indisponibilidade:renderIndisponibilidade,conflitos:renderConflitos,whatsapp:renderWhatsApp,dashboard:renderDashboard,relatorios:renderReports,financeiro:renderPayments,ausencias:renderAbsences,configuracoes:renderSettings,indicadores:renderIndicators};
+  const extendedRenderers={convocacao:renderConvCompleta,apontamento:renderApCompleto,extras:renderExtras,disponibilidade:renderDisponibilidade,indisponibilidade:renderIndisponibilidade,conflitos:renderConflitos,whatsapp:renderWhatsApp,dashboard:renderDashboard,relatorios:renderReports,financeiro:renderPayments,'historico-financeiro':renderFinancialHistory,ausencias:renderAbsences,configuracoes:renderSettings,indicadores:renderIndicators};
   
   let onlineVersion='',onlineSession=null,onlineWritable=false,onlineStage='homologacao',onlineConfirmed=null,onlineQueued=false,onlineSaving=false,onlineMessage='';
   const copy=v=>JSON.parse(JSON.stringify(v));
