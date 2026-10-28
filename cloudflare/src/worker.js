@@ -83,6 +83,57 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
    // Avoid retrieving multi-year audit logs for users who do not view them.
    const readOptions=session.role==='FINANCEIRO'?{includeAudit:false}:session.role==='SUPERVISOR'?{auditUser:session.user}:{};
    if(path==='/api/bootstrap'&&request.method==='GET')return json(summary(await readDatabase(sql,readOptions),session,env));
+   // Histórico individual, somente leitura e restrito ao perfil Financeiro.
+   // Os eventos precisos são auditados na mesma transação da alteração financeira.
+   // Antes da implantação, mostramos apenas o valor legado (não inventamos autor/hora).
+   if(path==='/api/financial-history'&&request.method==='GET'){
+    if(session.role!=='FINANCEIRO')return json({error:'Histórico restrito ao Financeiro.'},403);
+    const inicio=url.searchParams.get('inicio')||'',fim=url.searchParams.get('fim')||'';
+    const validDate=value=>/^\\d{4}-\\d{2}-\\d{2}$/.test(value)&&!Number.isNaN(Date.parse(value+'T12:00:00Z'));
+    if(!validDate(inicio)||!validDate(fim)||inicio>fim)return json({error:'Informe um período válido.'},400);
+    const logs=await sql`
+     SELECT au.id::text AS id,au.contexto->>'dataServico' AS data_servico,
+       co.nome AS colaborador,au.contexto->>'tipo' AS tipo,
+       au.contexto->>'operacao' AS operacao,
+       au.contexto->>'valorAnterior' AS valor_anterior,
+       au.contexto->>'valorNovo' AS valor_novo,
+       au.contexto->>'supervisorResponsavel' AS supervisor,
+       au.usuario AS usuario,au.ocorrido_em AS registrado_em,
+       au.contexto->>'origem' AS origem,
+       au.contexto->>'convocacaoId' AS convocacao_id
+     FROM auditoria au
+     LEFT JOIN colaboradores co ON co.id::text=au.contexto->>'colaboradorId'
+     WHERE au.acao='LANCAMENTO_FINANCEIRO_ITEM'
+       AND au.contexto->>'dataServico'>=${inicio}
+       AND au.contexto->>'dataServico'<=${fim}
+     ORDER BY au.id DESC LIMIT 501`;
+    const older=await sql`
+     SELECT a.id::text AS id,a.data_servico::text AS data_servico,
+       co.nome AS colaborador,category.tipo,
+       category.valor::text AS valor_novo,
+       a.engenheiro AS supervisor,
+       a.apontado_por AS usuario_apontamento
+     FROM apontamentos a
+     JOIN colaboradores co ON co.id::text=a.colaborador_id
+     CROSS JOIN LATERAL (
+       VALUES ('Extra'::text,COALESCE(a.valor_extra,0)),
+         ('Bonificação / acordo'::text,COALESCE(a.valor_acordo,0)),
+         ('Adicional noturno'::text,COALESCE(a.valor_adicional_noturno,0))
+     ) AS category(tipo,valor)
+     WHERE a.data_servico>=${inicio}::date AND a.data_servico<=${fim}::date
+       AND category.valor>0
+       AND NOT EXISTS(
+         SELECT 1 FROM auditoria au WHERE au.acao='LANCAMENTO_FINANCEIRO_ITEM'
+          AND au.contexto->>'tipo'=category.tipo
+          AND au.contexto->>'colaboradorId'=a.colaborador_id
+          AND au.contexto->>'dataServico'=a.data_servico::text
+          AND (au.contexto->>'convocacaoId'=a.convocacao_id
+               OR au.contexto->>'supervisorResponsavel'=a.engenheiro)
+       )
+     ORDER BY a.data_servico DESC,a.id DESC LIMIT 501`;
+    return json({ok:true,eventos:logs.slice(0,500),anteriores:older.slice(0,500),
+      limiteAtingido:logs.length>500||older.length>500});
+   }
    // Read-only acknowledgement: disambiguates a write whose HTTP response was lost.
    // Confirm only operations belonging to this authenticated user, never infer from a global version.
    if(path==='/api/save-status'&&request.method==='GET'){
@@ -115,7 +166,8 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
     const ids=body.changes.map(change=>change.convocacaoId).join(',');
     // Read only the attendance rows being adjusted. No full-state parse or serialization.
     const rows=await sql`SELECT c.id::text AS convocacao_id,c.observacao,a.id::text AS apontamento_id,a.status,
-      a.valor_adicional_noturno AS noturno_atual,
+      c.colaborador_id::text AS colaborador_id,c.data::text AS data_servico,c.engenheiro AS supervisor_responsavel,
+      a.valor_acordo AS acordo_atual,a.valor_adicional_noturno AS noturno_atual,
       (coalesce(upper(o.unidade),'')='SEBRAE' OR EXISTS(
         SELECT 1 FROM servicos_apontamento s JOIN obras so ON so.id::text=s.obra_id
         WHERE s.convocacao_id=a.convocacao_id AND upper(so.unidade)='SEBRAE'
