@@ -60,5 +60,5 @@ test('Retroativo guarda os campos, seleção e avulsos sem apagar os demais',()=
 test('Logout remove cache da conta; o apontamento só apaga rascunho após sucesso',()=>{
  assert(app.includes('if(supervisorAtual)clearSupervisorDrafts(supervisorAtual)'));
  assert(app.includes('dayUnsavedDrafts.delete(dayKey);\n      clearStoredDraft(storageKey);'));
- assert(app.includes("clearStoredDraft(retroKey);retroUnsavedAvulsos.clear();"));
+ assert(app.includes("clearStoredDraft(retroKey);if(perfilAtual==='SUPERVISOR')clearStoredDraft(draftKey('last',supervisorAtual));retroUnsavedAvulsos.clear();"));
 });
