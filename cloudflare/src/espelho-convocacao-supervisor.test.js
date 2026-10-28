@@ -6,7 +6,7 @@ import vm from 'node:vm';
 const source=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
 const markupStart=source.indexOf('  function convocationReviewMarkup(');
 const markupEnd=source.indexOf('  function renderUnitConvocacao(){',markupStart);
-const handlerStart=source.indexOf("    const form=$('#unit-conv-form'),reviewBox=$('#unit-conv-review')");
+const handlerStart=source.indexOf('    const leaveReview=()=>{',source.indexOf('  function renderUnitConvocacao(){'));
 const handlerEnd=source.indexOf('\n  }\n\n  function operationalRows(',handlerStart);
 assert(markupStart>=0&&markupEnd>markupStart,'Espelho da convocação ausente');
 assert(handlerStart>=0&&handlerEnd>handlerStart,'Confirmação definitiva ausente');
@@ -44,11 +44,14 @@ function setup(){
   toast:(msg,error=false)=>messages.push({msg,error}),
   now:()=>new Date('2026-10-20T13:00:00Z'),uid:()=> 'cv_test',
   audit:(...args)=>auditTrail.push(args),
-  saveData:()=>{saved.push(true);return true;}
+  saveData:(onSuccess)=>{saved.push(true);if(typeof onSuccess==='function')onSuccess();return true;},
+  readStoredDraft:()=>null,clearStoredDraft:()=>{},convLastKey:()=> 'conv-last',
+  render:()=>{}
+
  };
  vm.createContext(ctx);
  vm.runInContext(source.slice(markupStart,markupEnd),ctx);
- vm.runInContext(source.slice(handlerStart,handlerEnd)+'\nglobalThis.getReviewDraft=()=>reviewDraft;',ctx);
+ vm.runInContext("const form=$('#unit-conv-form'),reviewBox=$('#unit-conv-review'),noConvBox=$('#unit-no-conv-box');let reviewDraft=null;const activeConvKey='conv-draft';const storeConvDraft=()=>{};"+source.slice(handlerStart,handlerEnd)+'\nglobalThis.getReviewDraft=()=>reviewDraft;',ctx);
  return {ctx,fields,select,saved,messages,auditTrail};
 }
 function review(set){
