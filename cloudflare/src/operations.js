@@ -55,10 +55,11 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
   const raw=old?rawConvs.get(old.id):null,oldPoint=oldApByConv.get(String(old?.id))?.itens.find(i=>i.colaboradorId===pid),ap=pointed.get(key),pointChanged=ap&&(changed||!same(apView(oldPoint),apView(ap.i)));
   if(oldPoint&&!ap){if(!own(session,c))fail('Sem permissão para remover apontamento.',403);const row=rawAps.get(key);if(row)add('apontamentos','delete',row.id);for(const s of (rawServicesByConv.get(key)||[]))add('servicos_apontamento','delete',s.id);const {text,meta}=metadata(raw.observacao);delete meta.apontado_em;delete meta.apontado_por;delete meta.apontamento_atrasado;delete meta.valor_ajuda_custo;add('convocacoes','update',key,{status:'Presente (Integral)',valor_extra:0,custo_pago:0,valor_acordo:0,valor_adicional_noturno:0,custos_separados:false,observacao:text+(Object.keys(meta).length?' ||APROAR_META|| '+JSON.stringify(meta):'')});}
   if(pointChanged){
+   let releaseGrant=null;
    if(session.role==='SUPERVISOR'){
     const fields=changedFinancialFields(oldPoint,ap.i);
-    const grant=requireApprovedRelease(db.releaseEvents,{supervisor:session.user,colaboradorId:pid,dataServico:c.dataServico,fields},timestamp,releaseUses);
-    if(grant)ops.push(grant);
+    releaseGrant=requireApprovedRelease(db.releaseEvents,{supervisor:session.user,colaboradorId:pid,dataServico:c.dataServico,fields},timestamp,releaseUses);
+    if(releaseGrant)ops.push(releaseGrant);
    }
    if(session.role==='FINANCEIRO'){if(!oldPoint)fail('Financeiro não cria apontamentos.',403);const ignore=(i)=>{const x=apView(i);delete x.financeiro;delete x.noturno;delete x.acordo;delete x.ajudaCusto;return x;};if(!same(ignore(oldPoint),ignore(ap.i)))fail('Financeiro só altera pagamentos, adicionais, acordos e passagens/ajuda de custo.',403);}else if(!own(session,c))fail('Você só pode apontar sua própria equipe.',403);
    if(c.dataServico>isoToday(timestamp))fail('Apontamento não aceita data futura.');if(!['Presente (Integral)','Presente (Só Manhã)','Presente (Só Tarde)','Saída Antecipada','Falta','Atestado'].includes(ap.i.status))fail('Status inválido.');if(!['Valor específico',...Object.keys({'Não':0,'Meia diária':.5,'Diária':1,'Uma e meia diária':1.5,'Duas diárias':2})].includes(ap.i.extra))fail('Extra inválido.');
@@ -74,7 +75,7 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
    const data={obra_id:work,colaborador_id:pid,data:c.dataServico,engenheiro:c.supervisor,turno:c.turno,observacao:'Turno: '+c.turno+' ||APROAR_META|| '+JSON.stringify(meta)};if(!raw)Object.assign(data,{status:'Presente (Integral)',valor_extra:0,criado_em:timestamp,criado_por:session.user});add('convocacoes',raw?'update':'insert',key,data);
   }
   if(!pointChanged)continue;
-  const i={...ap.i};if(pendingAvulsoInvalid(i,staff.get(pid)))fail('Escolha um tipo válido de diária para o avulso.');if(session.role==='SUPERVISOR'&&oldPoint?.financeAdjusted){for(const k of ['financeiro','noturno','acordo','ajudaCusto'])i[k]=oldPoint[k];}const p=staff.get(pid),isPresent=present(i.status),ss=normServices(i).filter(s=>s.obraId),hasSebrae=ss.some(s=>clean(works.get(s.obraId)?.unidade)==='SEBRAE'),financialAdjusted=session.role==='FINANCEIRO'||oldPoint?.financeAdjusted===true;
+  const i={...ap.i};if(pendingAvulsoInvalid(i,staff.get(pid)))fail('Escolha um tipo válido de diária para o avulso.');if(session.role==='SUPERVISOR'&&oldPoint?.financeAdjusted){const authorized=releaseGrant?.data?.contexto?.fields||[];const labels={financeiro:'Complemento financeiro',noturno:'Adicional noturno',acordo:'Bonificação',ajudaCusto:'Passagem / ajuda de custo'};for(const k of ['financeiro','noturno','acordo','ajudaCusto'])if(!authorized.includes(labels[k]))i[k]=oldPoint[k];}const p=staff.get(pid),isPresent=present(i.status),ss=normServices(i).filter(s=>s.obraId),hasSebrae=ss.some(s=>clean(works.get(s.obraId)?.unidade)==='SEBRAE'),financialAdjusted=session.role==='FINANCEIRO'||oldPoint?.financeAdjusted===true;
   const extra=isPresent?(i.extra==='Valor específico'?Number(oldPoint.valorExtraOriginal):money(Number(p.custo)*mult(i.extra))):0;
   const night=isPresent&&hasSebrae?Number(i.noturno??0):0,finance=isPresent?Number(i.financeiro):0,bonus=isPresent?Number(i.acordo):0,ajudaCusto=isPresent?Number(i.ajudaCusto||0):0;
   // Avoid recording the same unapproved payment as both complementary finance and
