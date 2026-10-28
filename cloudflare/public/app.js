@@ -1036,7 +1036,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       const selected=$$('input[name="retro-colab"]:checked').map(x=>x.value);
       const current=$$('#retro-rows [data-person]').map(x=>x.dataset.person);
       for(const item of readPersonRows(current))retroDrafts.set(item.colaboradorId,item);
-      return storeDraft(retroKey,{
+      const okay=storeDraft(retroKey,{
         supervisor:$('#retro-sup')?.value||supervisorAtual,date:$('#retro-data').value,
         unit:unidade.value,turn:$('#retro-turno').value,selected,items:[...retroDrafts.values()],
         avulsos:[...retroUnsavedAvulsos.values()],
@@ -1044,6 +1044,8 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
         avulsoName:$('#retro-avulso-name')?.value||'',
         avulsoFuncao:$('#retro-avulso-funcao')?.value||''
       });
+      if(okay&&perfilAtual==='SUPERVISOR')storeDraft(draftKey('last',supervisorAtual),{tab:'retroativo',date:$('#retro-data').value,unit:unidade.value});
+      return okay;
     };
     const recoverRetroDraft=stored=>{
       if(!stored||stored.supervisor!==($('#retro-sup')?.value||supervisorAtual))return;
@@ -1879,6 +1881,7 @@ function renderEquipeDia(){
    const draft=dayUnsavedDrafts.get(dayKey);if(!draft)return false;
    const okay=storeDraft(storageKey,{items:[...draft.items.values()],extra:draft.extra,
      pending:[...dayPendingAdds.values()].filter(x=>x.dayKey===dayKey&&x.selectedUnit===portalUnit)});
+   if(okay&&supervisorAtual)storeDraft(draftKey('last',supervisorAtual),{tab:'normal',date:portalDate,unit:portalUnit});
    const indicator=$('#day-draft-status');
    if(indicator)indicator.textContent=okay?'Rascunho armazenado neste navegador · '+formatDateTime(new Date().toISOString()):'Não foi possível armazenar o rascunho neste navegador';
    return okay;
@@ -2793,7 +2796,16 @@ function renderEquipeDia(){
   const renderLocal=render;
   render=function(){renderLocal();if(!perfilAtual)return;const selector=$('#portal-sup');if(onlineSession?.role==='SUPERVISOR'&&selector){selector.value=onlineSession.user;selector.disabled=true;}const old=$('#live-status');if(old)old.remove();const status=document.createElement('div');status.id='live-status';status.className='notice '+(onlineWritable?'info':'warning');status.innerHTML=`<strong>${onlineStage==='producao'?'Produção':'Homologação'} · ${onlineWritable?'dados conectados ao Neon':'somente leitura'}</strong> <span>${onlineStage==='producao'?'Dados oficiais da APROAR.':'Ambiente de testes.'}</span> <button type="button" class="link-btn" id="sync-online">Atualizar dados</button>`;$('#main-content').prepend(status);$('#sync-online').onclick=async()=>{if(onlineSaving||onlineQueued)return;lockOnline(true);try{applyOnline(await api('/api/bootstrap'));render();showToast('Dados atualizados.');}catch(e){showToast(e.message,true);}finally{lockOnline(false);}};};
   function chooseLogin(role){loginRole=role;const shortcut=['SUPERVISOR','VISUALIZAR'].includes(role);$('#login-access-wrap').classList.toggle('hidden',shortcut);$('#login-shortcut-mode').classList.toggle('hidden',!shortcut);$('#login-shortcut-label').textContent=role==='SUPERVISOR'?'Portal do Supervisor':'Somente visualizar';if(!shortcut)$('#login-access').value=role;$('#login-supervisor-wrap').classList.toggle('hidden',role!=='SUPERVISOR');const passwordRequired=role!=='VISUALIZAR';$('#login-password').required=passwordRequired;$('#login-password').closest('.password-wrap').classList.toggle('hidden',!passwordRequired);document.querySelector('label[for="login-password"]').classList.toggle('hidden',!passwordRequired);$('#login-error').textContent='';$('#login-password').value='';$(role==='SUPERVISOR'?'#login-supervisor':role==='VISUALIZAR'?'#login-button':'#login-password').focus();}
-  function enterConnectedSession(result){applyOnline(result);financeReleaseRequests=[];if(perfilAtual==='SUPERVISOR')api('/api/financial-release').then(x=>{financeReleaseRequests=x.requests||[];if(viewAtual==='apontamento')render();}).catch(()=>{});viewAtual=perfilAtual==='SUPERVISOR'?'apontamento':perfilAtual==='VISUALIZAR'?'dashboard':'inicio';portalUnit=state.convocacoes.find(c=>c.supervisor===supervisorAtual&&c.dataServico===portalDate)?.unidade||OBRAS[0]?.unidade||'Todas';render();}
+  function enterConnectedSession(result){applyOnline(result);financeReleaseRequests=[];if(perfilAtual==='SUPERVISOR')api('/api/financial-release').then(x=>{financeReleaseRequests=x.requests||[];if(viewAtual==='apontamento')render();}).catch(()=>{});viewAtual=perfilAtual==='SUPERVISOR'?'apontamento':perfilAtual==='VISUALIZAR'?'dashboard':'inicio';portalUnit=state.convocacoes.find(c=>c.supervisor===supervisorAtual&&c.dataServico===portalDate)?.unidade||OBRAS[0]?.unidade||'Todas';
+    if(perfilAtual==='SUPERVISOR'){
+      const last=readStoredDraft(draftKey('last',supervisorAtual));
+      if(last&&last.date&&/^\d{4}-\d{2}-\d{2}$/.test(last.date)&&last.date<=isoToday()&&['normal','retroativo'].includes(last.tab)){
+        portalDate=last.date;apontamentoTab=last.tab;
+        if(last.tab==='retroativo')retroDateSelected=last.date;
+        if(last.unit==='Todas'||adminUnits().includes(last.unit))portalUnit=last.unit;
+      }
+    }
+    render();}
   async function initOnline(){
     init();$('#reset-demo').classList.add('hidden');$('#login-access').onchange=()=>chooseLogin($('#login-access').value);$('#enter-supervisor').onclick=()=>chooseLogin('SUPERVISOR');$('#enter-viewer').onclick=()=>chooseLogin('VISUALIZAR');$('#login-back').onclick=()=>chooseLogin($('#login-access').value);
     $('#login-form').onsubmit=async e=>{e.preventDefault();const button=$('#login-button');button.disabled=true;$('#login-error').textContent='';try{await api('/api/login',{method:'POST',body:JSON.stringify({role:loginRole,supervisor:$('#login-supervisor').value,password:$('#login-password').value})});$('#login-password').value='';enterConnectedSession(await api('/api/bootstrap'));}catch(err){$('#login-error').textContent=err.message;}finally{button.disabled=false;}};
