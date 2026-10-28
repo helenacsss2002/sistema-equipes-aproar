@@ -89,7 +89,7 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
    if(path==='/api/financial-history'&&request.method==='GET'){
     if(session.role!=='FINANCEIRO')return json({error:'Histórico restrito ao Financeiro.'},403);
     const inicio=url.searchParams.get('inicio')||'',fim=url.searchParams.get('fim')||'';
-    const validDate=value=>/^\\d{4}-\\d{2}-\\d{2}$/.test(value)&&!Number.isNaN(Date.parse(value+'T12:00:00Z'));
+    const validDate=value=>/^\d{4}-\d{2}-\d{2}$/.test(value)&&!Number.isNaN(Date.parse(value+'T12:00:00Z'));
     if(!validDate(inicio)||!validDate(fim)||inicio>fim)return json({error:'Informe um período válido.'},400);
     const logs=await sql`
      SELECT au.id::text AS id,au.contexto->>'dataServico' AS data_servico,
