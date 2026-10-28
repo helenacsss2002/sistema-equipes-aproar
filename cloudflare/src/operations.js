@@ -1,5 +1,6 @@
 import {metadata} from './neon-adapter.js';
 import {financialHistoryEvents} from './financial-history.js';
+import {requireApprovedRelease,changedFinancialFields} from './financial-release.js';
 import {hasValidComplementApproval,clearObsoleteApproval} from './financial-approval.js';
 import {supervisors,visibleState} from './data.js';
 const numericId=v=>/^\d+$/.test(String(v));
@@ -24,7 +25,7 @@ const isoToday=t=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/Fortaleza',
 const own=(s,c)=>s.role==='CONTROLADORIA'||s.role==='SUPERVISOR'&&c.supervisor===s.user;
 export function buildOperations(db,next,session,timestamp=new Date().toISOString()){
  if(session.role==='VISUALIZAR')fail('Este perfil permite somente visualização.',403);
- const base=visibleState(db,session),ops=[];const add=(table,action,id,data)=>ops.push({table,action,id:String(id),...(data?{data}: {})});
+ const base=visibleState(db,session),ops=[],releaseUses=new Set();const add=(table,action,id,data)=>ops.push({table,action,id:String(id),...(data?{data}: {})});
  for(const key of ['colaboradores','obras','convocacoes','apontamentos','indisponibilidades','conflitosTentados'])if(!Array.isArray(next[key]))fail('Dados incompletos. Atualize a página.');
  const staff=new Map(next.colaboradores.map(p=>[String(p.id),p])),oldStaff=new Map(base.colaboradores.map(p=>[p.id,p])),works=new Map(next.obras.map(o=>[String(o.id),o]));
  if(staff.size!==next.colaboradores.length||works.size!==next.obras.length)fail('Há identificadores repetidos.');
@@ -53,7 +54,14 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
  for(const {key,c,pid,old,changed} of records.values()){
   const raw=old?rawConvs.get(old.id):null,oldPoint=oldApByConv.get(String(old?.id))?.itens.find(i=>i.colaboradorId===pid),ap=pointed.get(key),pointChanged=ap&&(changed||!same(apView(oldPoint),apView(ap.i)));
   if(oldPoint&&!ap){if(!own(session,c))fail('Sem permissão para remover apontamento.',403);const row=rawAps.get(key);if(row)add('apontamentos','delete',row.id);for(const s of (rawServicesByConv.get(key)||[]))add('servicos_apontamento','delete',s.id);const {text,meta}=metadata(raw.observacao);delete meta.apontado_em;delete meta.apontado_por;delete meta.apontamento_atrasado;delete meta.valor_ajuda_custo;add('convocacoes','update',key,{status:'Presente (Integral)',valor_extra:0,custo_pago:0,valor_acordo:0,valor_adicional_noturno:0,custos_separados:false,observacao:text+(Object.keys(meta).length?' ||APROAR_META|| '+JSON.stringify(meta):'')});}
-  if(pointChanged){if(session.role==='FINANCEIRO'){if(!oldPoint)fail('Financeiro não cria apontamentos.',403);const ignore=(i)=>{const x=apView(i);delete x.financeiro;delete x.noturno;delete x.acordo;delete x.ajudaCusto;return x;};if(!same(ignore(oldPoint),ignore(ap.i)))fail('Financeiro só altera pagamentos, adicionais, acordos e passagens/ajuda de custo.',403);}else if(!own(session,c))fail('Você só pode apontar sua própria equipe.',403);
+  let releaseGrant=null;
+  if(pointChanged){
+   if(session.role==='SUPERVISOR'){
+    const fields=changedFinancialFields(oldPoint,ap.i);
+    releaseGrant=requireApprovedRelease(db.releaseEvents,{supervisor:session.user,colaboradorId:pid,dataServico:c.dataServico,fields},timestamp,releaseUses);
+    if(releaseGrant)ops.push(releaseGrant);
+   }
+   if(session.role==='FINANCEIRO'){if(!oldPoint)fail('Financeiro não cria apontamentos.',403);const ignore=(i)=>{const x=apView(i);delete x.financeiro;delete x.noturno;delete x.acordo;delete x.ajudaCusto;return x;};if(!same(ignore(oldPoint),ignore(ap.i)))fail('Financeiro só altera pagamentos, adicionais, acordos e passagens/ajuda de custo.',403);}else if(!own(session,c))fail('Você só pode apontar sua própria equipe.',403);
    if(c.dataServico>isoToday(timestamp))fail('Apontamento não aceita data futura.');if(!['Presente (Integral)','Presente (Só Manhã)','Presente (Só Tarde)','Saída Antecipada','Falta','Atestado'].includes(ap.i.status))fail('Status inválido.');if(!['Valor específico',...Object.keys({'Não':0,'Meia diária':.5,'Diária':1,'Uma e meia diária':1.5,'Duas diárias':2})].includes(ap.i.extra))fail('Extra inválido.');
    for(const k of ['financeiro','noturno','acordo','ajudaCusto'])if(!finite(ap.i[k]??0))fail('Valor financeiro inválido.');if(!finite(ap.i.valorExtraDisponivel??0))fail('Valor da extra disponível inválido.');if(oldPoint&&Number(ap.i.ajudaCusto??0)!==Number(oldPoint.ajudaCusto??0)&&session.role!=='FINANCEIRO'&&(session.role!=='SUPERVISOR'||oldPoint.financeAdjusted))fail('Somente o Financeiro pode alterar passagens/ajuda de custo após o ajuste financeiro.',403);
    const ss=normServices(ap.i);if(present(ap.i.status)&&(!ss.length||ss.some(s=>!works.has(s.obraId)||works.get(s.obraId).unidade!==c.unidade)))fail('Defina os serviços do colaborador na unidade convocada.');for(const s of ss){if(!s.obraId)continue;period(s.periodo);}if(new Set(ss.map(s=>s.obraId+'|'+s.periodo)).size!==ss.length)fail('Serviço repetido no mesmo período.');
@@ -67,7 +75,7 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
    const data={obra_id:work,colaborador_id:pid,data:c.dataServico,engenheiro:c.supervisor,turno:c.turno,observacao:'Turno: '+c.turno+' ||APROAR_META|| '+JSON.stringify(meta)};if(!raw)Object.assign(data,{status:'Presente (Integral)',valor_extra:0,criado_em:timestamp,criado_por:session.user});add('convocacoes',raw?'update':'insert',key,data);
   }
   if(!pointChanged)continue;
-  const i={...ap.i};if(pendingAvulsoInvalid(i,staff.get(pid)))fail('Escolha um tipo válido de diária para o avulso.');if(session.role==='SUPERVISOR'&&oldPoint?.financeAdjusted){for(const k of ['financeiro','noturno','acordo','ajudaCusto'])i[k]=oldPoint[k];}const p=staff.get(pid),isPresent=present(i.status),ss=normServices(i).filter(s=>s.obraId),hasSebrae=ss.some(s=>clean(works.get(s.obraId)?.unidade)==='SEBRAE'),financialAdjusted=session.role==='FINANCEIRO'||oldPoint?.financeAdjusted===true;
+  const i={...ap.i};if(pendingAvulsoInvalid(i,staff.get(pid)))fail('Escolha um tipo válido de diária para o avulso.');if(session.role==='SUPERVISOR'&&oldPoint?.financeAdjusted){const authorized=releaseGrant?.data?.contexto?.fields||[];const labels={financeiro:'Complemento financeiro',noturno:'Adicional noturno',acordo:'Bonificação',ajudaCusto:'Passagem / ajuda de custo'};for(const k of ['financeiro','noturno','acordo','ajudaCusto'])if(!authorized.includes(labels[k]))i[k]=oldPoint[k];}const p=staff.get(pid),isPresent=present(i.status),ss=normServices(i).filter(s=>s.obraId),hasSebrae=ss.some(s=>clean(works.get(s.obraId)?.unidade)==='SEBRAE'),financialAdjusted=session.role==='FINANCEIRO'||oldPoint?.financeAdjusted===true;
   const extra=isPresent?(i.extra==='Valor específico'?Number(oldPoint.valorExtraOriginal):money(Number(p.custo)*mult(i.extra))):0;
   const night=isPresent&&hasSebrae?Number(i.noturno??0):0,finance=isPresent?Number(i.financeiro):0,bonus=isPresent?Number(i.acordo):0,ajudaCusto=isPresent?Number(i.ajudaCusto||0):0;
   // Avoid recording the same unapproved payment as both complementary finance and
@@ -132,6 +140,10 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
    const unchanged=old&&old.supervisor===supervisor&&old.dataServico===serviceDate&&String(old.colaboradorId)===personId&&String(old.obraId)===String(work.id)&&old.extra===kind&&String(old.observacao||'')===obs&&money(Number(old.valorExtraOriginal)||0)===amount;
    // Legacy records, including zero-valued extras, must remain readable and must not block unrelated saves.
    if(unchanged)continue;
+   if(session.role==='SUPERVISOR'){
+    const grant=requireApprovedRelease(db.releaseEvents,{supervisor:session.user,colaboradorId:personId,dataServico:serviceDate,fields:['Extra']},timestamp,releaseUses);
+    if(grant)ops.push(grant);
+   }
    if(!finite(x.valorExtraOriginal)||amount<=0)fail('Informe o Valor da Extra em reais; o valor não é pré-definido.');
    const created=old?.criadoEm||oldMeta.extra_lancado_em||timestamp,creator=old?.executor||oldMeta.extra_lancado_por||session.user;
    const meta={...oldMeta,extra_avulsa:true,extra_obra_id:String(work.id),extra_unidade:work.unidade,extra_dia_obra_id:dayWorkId,extra_observacao:obs,extra_lancado_em:created,extra_lancado_por:creator,apontado_em:created,apontado_por:creator,custos_separados:true,servico_a_definir:false};
@@ -154,6 +166,10 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
   for(const old of base.extras||[]){
    if(incomingIds.has(String(old.id)))continue;
    if(!own(session,{supervisor:old.supervisor}))fail('Sem permissão para excluir esta extra.',403);
+   if(session.role==='SUPERVISOR'){
+    const grant=requireApprovedRelease(db.releaseEvents,{supervisor:session.user,colaboradorId:old.colaboradorId,dataServico:old.dataServico,fields:['Extra']},timestamp,releaseUses);
+    if(grant)ops.push(grant);
+   }
    for(const service of (rawServicesByConv.get(String(old.id))||[]))add('servicos_apontamento','delete',service.id);
    const row=rawAps.get(String(old.id));if(row)add('apontamentos','delete',row.id);
    add('convocacoes','delete',old.id);

@@ -182,10 +182,10 @@
 
   function navConfig() {
     const item=(view,label,icon,group='')=>({view,label,icon,group});
-    if(perfilAtual==='CONTROLADORIA') return [item('inicio','Início','⌂'),item('convocacao','Convocação','▤','OPERAÇÃO'),item('conflitos','Conflitos','!'),item('apontamento','Apontamento','✓'),item('whatsapp','WhatsApp','◌'),item('disponibilidade','Disponibilidade','♙'),item('indisponibilidade','Indisponibilidade','⊘'),item('dashboard','Dashboard','▦','ANÁLISE E FECHAMENTO'),item('relatorios','Relatórios','▥'),item('indicadores','Indicadores','↗'),item('configuracoes','Configurações','⚙','SISTEMA')];
+    if(perfilAtual==='CONTROLADORIA') return [item('inicio','Início','⌂'),item('convocacao','Convocação','▤','OPERAÇÃO'),item('liberacoes-financeiras','Autorizações financeiras','◌'),item('conflitos','Conflitos','!'),item('apontamento','Apontamento','✓'),item('whatsapp','WhatsApp','◌'),item('disponibilidade','Disponibilidade','♙'),item('indisponibilidade','Indisponibilidade','⊘'),item('dashboard','Dashboard','▦','ANÁLISE E FECHAMENTO'),item('relatorios','Relatórios','▥'),item('indicadores','Indicadores','↗'),item('configuracoes','Configurações','⚙','SISTEMA')];
     if(perfilAtual==='VISUALIZAR') return [item('dashboard','Dashboard','▦'),item('relatorios','Relatórios','▥'),item('indicadores','Indicadores','↗')];
-    if(perfilAtual==='FINANCEIRO') return [item('inicio','Início','⌂'),item('financeiro','Pagamentos','$'),item('historico-financeiro','Histórico de registros','▤'),item('ausencias','Faltas / Atestados','⊘'),item('relatorios','Relatório','▥')];
-    return [item('inicio','Início','⌂'),item('convocacao','Convocação','▤'),item('apontamento','Apontamento','✓'),item('disponibilidade','Disponibilidade','♙'),item('pendencias','Pendências','!')];
+    if(perfilAtual==='FINANCEIRO') return [item('inicio','Início','⌂'),item('financeiro','Pagamentos','$'),item('liberacoes-financeiras','Autorizações financeiras','◌'),item('historico-financeiro','Histórico de registros','▤'),item('ausencias','Faltas / Atestados','⊘'),item('relatorios','Relatório','▥')];
+    return [item('inicio','Início','⌂'),item('convocacao','Convocação','▤'),item('apontamento','Apontamento','✓'),item('liberacoes-financeiras','Solicitar liberação','◌'),item('disponibilidade','Disponibilidade','♙'),item('pendencias','Pendências','!')];
   }
 
   function sidebarIcon(view){
@@ -240,6 +240,7 @@
       relatorios:'Relatórios',
       financeiro:'Fechamento financeiro',
       'historico-financeiro':'Histórico de registros',
+      'liberacoes-financeiras':'Autorizações financeiras',
       extras:'Lançamento de extras',
     };
     $('#topbar-title').textContent = navConfig().find(x=>x.view===viewAtual)?.label || map[viewAtual] || 'APROAR';
@@ -738,12 +739,12 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
  return `<div class="person-row person-card" data-person="${cid}" data-unit="${escapeHtml(unit)}" data-extra-original="0" data-finance-adjusted="${item?.financeAdjusted?'true':'false'}" data-financeiro-original="${Number(item?.financeiro)||0}" data-ajuda-custo="${Number(item?.ajudaCusto)||0}"><div class="person-name">${escapeHtml(c?.nome||cid)}<br><small>${escapeHtml(c?.funcao||'')} · ${escapeHtml(unit)}</small></div>
  <div class="person-top">${field('Status',`<select class="control row-status">${STATUS_OPTIONS.map(x=>`<option ${x===(item?.status||'Presente (Integral)')?'selected':''}>${x}</option>`).join('')}</select>`)}</div>${c?.avulso==='Sim'?`<div class="form-grid section">${field('Diárias trabalhadas · avulso (custo da Controladoria)',`<select class="control row-avulso-diaria">${AVULSO_DIARIA_OPTIONS.map(x=>`<option value="${x}" ${x===(item?.tipoDiariaAvulso||'Diária')?'selected':''}>${x}</option>`).join('')}</select>`)}</div>`:''}
  <div class="person-services"><div class="allocations principal-service">${allocationRow(unit,services[0],0)}</div>
- <div class="form-grid">${field('Houve extra?',`<select class="control row-extra" aria-label="Houve extra?">${APONTAMENTO_EXTRA_OPTIONS.map(([value,label])=>`<option value="${value}" ${extraValue===value?'selected':''}>${label}</option>`).join('')}${extraEnabled&&!APONTAMENTO_EXTRA_OPTIONS.some(([value])=>value===extraValue)?`<option value="${escapeHtml(extraValue)}" selected>${escapeHtml(extraValue)} (registro anterior)</option>`:''}</select>`)}${field('Valor da Extra Disponível (R$)',`<input class="control row-extra-value" type="number" min="0" step="0.01" value="${extraAmount?extraAmount.toFixed(2):''}"  title="Pode preencher mesmo com Houve extra? = Não. Obrigatório apenas quando houver extra." aria-label="Valor da Extra Disponível">`)}${Number(item?.financeiro)>0?field('Valor complementar já registrado (R$)',`<input class="control row-financeiro-historico" type="number" readonly value="${Number(item.financeiro).toFixed(2)}" title="Lançamento anterior preservado, sem edição pelo supervisor">`):''}${field('Acordos / Bonificações (R$)',`<input class="control row-acordo" type="number" min="0" step="0.01" value="${item?.acordo||0}">`)}${perfilAtual==='SUPERVISOR'?field('Passagens/Ajuda de custo (R$)',`<input class="control row-ajuda-custo" type="number" min="0" step="0.01" list="passagens-ajuda-valores" value="${Number(item?.ajudaCusto)||0}" ${item?.financeAdjusted?'readonly title="Valor confirmado pelo Financeiro"':''}>`):''}</div>
+ <div class="form-grid">${field('Houve extra?',`<select class="control row-extra" aria-label="Houve extra?">${APONTAMENTO_EXTRA_OPTIONS.map(([value,label])=>`<option value="${value}" ${extraValue===value?'selected':''}>${label}</option>`).join('')}${extraEnabled&&!APONTAMENTO_EXTRA_OPTIONS.some(([value])=>value===extraValue)?`<option value="${escapeHtml(extraValue)}" selected>${escapeHtml(extraValue)} (registro anterior)</option>`:''}</select>`)}${field('Valor da Extra Disponível (R$)',`<input class="control row-extra-value" type="number" min="0" step="0.01" value="${extraAmount?extraAmount.toFixed(2):''}"  title="Pode preencher mesmo com Houve extra? = Não. Obrigatório apenas quando houver extra." aria-label="Valor da Extra Disponível">`)}${Number(item?.financeiro)>0?field('Valor complementar já registrado (R$)',`<input class="control row-financeiro-historico" type="number" readonly value="${Number(item.financeiro).toFixed(2)}" title="Lançamento anterior preservado, sem edição pelo supervisor">`):''}${field('Acordos / Bonificações (R$)',`<input class="control row-acordo" type="number" min="0" step="0.01" value="${item?.acordo||0}">`)}${perfilAtual==='SUPERVISOR'?field('Passagens/Ajuda de custo (R$)',`<input class="control row-ajuda-custo" type="number" min="0" step="0.01" list="passagens-ajuda-valores" value="${Number(item?.ajudaCusto)||0}" ${item?.financeAdjusted&&!isApprovedFinancial(serviceDate,cid,'Passagem / ajuda de custo')?'readonly title="Valor confirmado pelo Financeiro"':''}>`):''}</div>
  <div class="row-extra-panel section ${extraEnabled?'':'hidden'}"><div class="notice info">Informe o valor da extra realizado pelo colaborador. A categoria identifica o tipo de extra, mas não define o valor. O registro é separado da presença normal.</div><div class="form-grid">
  ${field('Obra / Serviço da extra',extraWorkSearchMarkup(workId))}
  ${field('Observação da extra',`<input class="control row-extra-obs" maxlength="2000" value="${escapeHtml(extraObservation)}" placeholder="Opcional">`)}
  </div></div>
- <div class="form-grid section">${field('Adicional noturno (SEBRAE)',`<select class="control row-noturno" ${unit==='SEBRAE'&&!item?.financeAdjusted?'':'disabled'}><option value="0" ${nightValue===0?'selected':''}>Sem adicional (R$ 0,00)</option><option value="50" ${nightValue===50?'selected':''}>R$ 50,00</option><option value="90" ${nightValue===90?'selected':''}>R$ 90,00</option>${![0,50,90].includes(nightValue)?`<option value="${nightValue}" selected>R$ ${nightValue.toFixed(2)} (valor já registrado)</option>`:''}</select>`)}</div>
+ <div class="form-grid section">${field('Adicional noturno (SEBRAE)',`<select class="control row-noturno" ${unit==='SEBRAE'&&(!item?.financeAdjusted||isApprovedFinancial(serviceDate,cid,'Adicional noturno'))?'':'disabled'}><option value="0" ${nightValue===0?'selected':''}>Sem adicional (R$ 0,00)</option><option value="50" ${nightValue===50?'selected':''}>R$ 50,00</option><option value="90" ${nightValue===90?'selected':''}>R$ 90,00</option>${![0,50,90].includes(nightValue)?`<option value="${nightValue}" selected>R$ ${nightValue.toFixed(2)} (valor já registrado)</option>`:''}</select>`)}</div>
  <div class="row-total-summary" role="status"><span>TOTAL A PAGAR AO COLABORADOR</span><strong class="row-total">${roundMoney(Number(item?.financeiro||0)+extraAmount+nightValue+Number(item?.acordo||0)+Number(item?.ajudaCusto||0)).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</strong><small>Valor da extra + adicional noturno + acordos + passagens/ajuda de custo${Number(item?.financeiro)>0?' + valor complementar já registrado':''}. Total calculado automaticamente, não editável.</small></div>
  <details class="more-services"><summary>Mais opções</summary>${field('Observação / justificativa do acordo (obrigatória se houver bonificação)',`<input class="control row-obs" maxlength="2000" value="${escapeHtml(item?.observacao||'')}" placeholder="Descreva o motivo do acordo ou bonificação">`)}<div class="additional-services">${services.slice(1).map((x,i)=>allocationRow(unit,x,i+1)).join('')}</div><div class="inline-actions section"><button type="button" class="btn btn-primary add-service">+ Adicionar serviço</button><button type="button" class="btn btn-secondary remove-last-service">− Remover último</button><span class="service-count">${Math.max(0,services.length-1)} serviço(s) adicional(is)</span></div></details></div></div>`;
 }
@@ -1561,6 +1562,8 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
     };bindFilters(refresh);refresh();bindExports();
   }
   let selectedCycle='0';
+  let financeReleaseRequests=[];
+  const isApprovedFinancial=(date,id,type)=>financeReleaseRequests.some(x=>x.status==='Autorizada'&&x.supervisor===supervisorAtual&&String(x.colaboradorId)===String(id)&&x.dataServico===date&&x.fields.includes(type));
   function cycleControl(){return `<div class="card card-pad section">${field('Ciclo de pagamento',`<select class="control" id="financial-cycle">${Array.from({length:26},(_,index)=>{const c=financialCycle(isoToday(),-index);return `<option value="${-index}" ${String(-index)===selectedCycle?'selected':''}>${formatDate(c.inicio)} a ${formatDate(c.fim)} · pagamento ${formatDate(c.pagamento)}</option>`;}).join('')}<option value="custom" ${selectedCycle==='custom'?'selected':''}>Período personalizado</option></select>`)}<p id="cycle-caption" style="font-size:12px"></p></div>`;}
   function renderFinancialHistory(){
     const today=isoToday(),first=today.slice(0,8)+'01';
@@ -1603,6 +1606,78 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       catch(error){data=null;$('#fh-results').innerHTML='<div class="notice warning">'+escapeHtml(error?.message||'Erro ao consultar histórico.')+'</div>';}
     };
     $('#fh-search').oninput=show;$('#fh-type').onchange=show;$('#fh-load').onclick=load;load();
+  }
+
+  function renderFinancialReleases(){
+    const supervisor=perfilAtual==='SUPERVISOR',canApprove=['CONTROLADORIA','FINANCEIRO'].includes(perfilAtual);
+    if(!supervisor&&!canApprove)return setView('inicio');
+    const today=isoToday();
+    $('#main-content').innerHTML=head(supervisor?'Solicitar liberação financeira':'Autorizações financeiras',
+      'Após as 10h da terça-feira de pagamento, apenas uma autorização da Controladoria ou do Financeiro permite alterar extras, bonificações, passagens, adicional noturno ou complemento.')
+      +(supervisor?'<div class="card card-pad"><h3>Solicitar preenchimento após o prazo</h3>'
+        +'<p>Indique o colaborador, a data do serviço, as colunas a liberar e o motivo. A liberação é válida para um único salvamento.</p>'
+        +'<form id="fr-form"><div class="form-grid">'
+        +field('Data do serviço','<input class="control" type="date" id="fr-date" value="'+today+'" required>')
+        +field('Colaborador','<select class="control" id="fr-person" required></select>')
+        +'</div><p id="fr-deadline" class="help-text"></p><strong>Colunas a liberar</strong><div id="fr-fields" class="section">'
+        +['Extra','Bonificação','Adicional noturno','Passagem / ajuda de custo','Complemento financeiro'].map((x,i)=>'<label style="display:inline-flex;align-items:center;gap:6px;margin:8px 18px 8px 0"><input type="checkbox" class="fr-field" value="'+escapeHtml(x)+'">'+escapeHtml(x)+'</label>').join('')
+        +'</div>'+field('Motivo','<textarea class="control" id="fr-reason" rows="3" minlength="10" maxlength="600" placeholder="Descreva a necessidade do lançamento..." required></textarea>')
+        +'<div class="form-actions"><button class="btn btn-primary" type="submit">Solicitar autorização</button></div></form></div>':'')
+      +'<div class="section" id="fr-list"><div class="notice info">Carregando solicitações...</div></div>';
+    const showDate=()=>{
+      const date=$('#fr-date')?.value;
+      if(!date)return;
+      const cycle=financialCycle(date),deadline=cycle.pagamento+'T10:00:00-03:00';
+      $('#fr-deadline').textContent='Ciclo de '+formatDate(cycle.inicio)+' a '+formatDate(cycle.fim)+
+        ' · pagamento '+formatDate(cycle.pagamento)+' · prazo até 10h (Fortaleza).'+
+        (now()>new Date(deadline)?' Prazo encerrado; solicite autorização.':' O prazo ainda está aberto.');
+      const ids=[...new Set(state.convocacoes.filter(c=>c.supervisor===supervisorAtual&&c.dataServico===date).flatMap(c=>c.colaboradores||[]))];
+      const select=$('#fr-person'),current=select.value;
+      select.innerHTML='<option value="">Selecione o colaborador</option>'+
+        alphabeticalPeople(COLABORADORES.filter(p=>ids.includes(p.id))).map(p=>'<option value="'+escapeHtml(p.id)+'">'+escapeHtml(p.nome)+'</option>').join('');
+      if(ids.includes(current))select.value=current;
+    };
+    if(supervisor){$('#fr-date').onchange=showDate;showDate();}
+    const fmtTime=t=>t?new Date(t).toLocaleString('pt-BR',{timeZone:'America/Fortaleza',dateStyle:'short',timeStyle:'medium'}):'—';
+    const load=async()=>{
+      try{
+        const response=await api('/api/financial-release');
+        financeReleaseRequests=response.requests||[];
+        const items=financeReleaseRequests.slice().sort((a,b)=>(b.createdAt||'').localeCompare(a.createdAt||''));
+        const cards=items.map(item=>{
+          const act=canApprove&&item.status==='Pendente'?'<div class="inline-actions"><button class="btn btn-primary fr-decision" data-id="'+escapeHtml(item.id)+'" data-action="approve">Autorizar</button><button class="btn btn-secondary fr-decision" data-id="'+escapeHtml(item.id)+'" data-action="deny">Negar</button></div>':'';
+          return '<div class="card card-pad section"><strong>'+escapeHtml(item.colaborador||'')+' · '+escapeHtml(formatDate(item.dataServico))+'</strong>'+
+           '<p><strong>Supervisor:</strong> '+escapeHtml(item.supervisor)+' · <strong>Situação:</strong> '+escapeHtml(item.status)+
+           ' · <strong>Solicitado:</strong> '+escapeHtml(fmtTime(item.createdAt))+'</p>'+
+           '<p><strong>Campos:</strong> '+escapeHtml((item.fields||[]).join(', '))+'</p>'+
+           '<p><strong>Motivo:</strong> '+escapeHtml(item.reason||'')+'</p>'+
+           (item.approvedBy?'<p><strong>Autorizado por:</strong> '+escapeHtml(item.approvedBy)+' em '+escapeHtml(fmtTime(item.approvedAt))+'</p>':'')+
+           (item.usedAt?'<p><strong>Utilizado:</strong> '+escapeHtml(fmtTime(item.usedAt))+'</p>':'')+act+'</div>';
+        }).join('');
+        $('#fr-list').innerHTML='<h3>Solicitações ('+items.length+')</h3>'+(cards||'<div class="empty">Nenhuma solicitação registrada.</div>');
+        $$('.fr-decision').forEach(btn=>btn.onclick=async()=>{
+          const approval=btn.dataset.action==='approve';
+          if(!window.confirm((approval?'Autorizar':'Negar')+' a solicitação?'))return;
+          const reason=approval?'':(window.prompt('Motivo da negativa:')||'');
+          if(!approval&&reason.length<10)return showToast('Informe o motivo da negativa.',true);
+          btn.disabled=true;
+          try{await api('/api/financial-release/decide',{method:'POST',body:JSON.stringify({requestId:crypto.randomUUID(),releaseId:btn.dataset.id,decision:btn.dataset.action,reason})});
+            showToast(approval?'Liberação autorizada.':'Solicitação negada.');await load();
+          }catch(e){showToast(e.message,true);btn.disabled=false;}
+        });
+      }catch(e){$('#fr-list').innerHTML='<div class="notice warning">'+escapeHtml(e.message)+'</div>';}
+    };
+    if(supervisor)$('#fr-form').onsubmit=async e=>{
+      e.preventDefault();
+      const date=$('#fr-date').value,id=$('#fr-person').value,fields=$$('.fr-field:checked').map(x=>x.value),reason=$('#fr-reason').value.trim();
+      if(!id||!fields.length)return showToast('Selecione colaborador e colunas para liberação.',true);
+      const button=$('#fr-form button[type=submit]');button.disabled=true;
+      try{
+        await api('/api/financial-release/request',{method:'POST',body:JSON.stringify({requestId:crypto.randomUUID(),colaboradorId:id,dataServico:date,fields,reason})});
+        showToast('Solicitação enviada. Aguarde a autorização.');$('#fr-reason').value='';await load();
+      }catch(err){showToast(err.message,true);}finally{button.disabled=false;}
+    };
+    load();
   }
   function renderPayments(){
     if(selectedCycle!=='custom'){const cycle=financialCycle(isoToday(),Number(selectedCycle));reportFilters.inicio=cycle.inicio;reportFilters.fim=cycle.fim;}
@@ -2373,7 +2448,7 @@ function renderEquipeDia(){
   function parseCSV(text){text=text.replace(/^\uFEFF/,'');const delim=(text.split(/\r?\n/)[0].match(/;/g)||[]).length>=(text.split(/\r?\n/)[0].match(/,/g)||[]).length?';':',';const rows=[];let row=[],value='',quoted=false;for(let i=0;i<text.length;i++){const c=text[i];if(c==='"'){if(quoted&&text[i+1]==='"'){value+='"';i++;}else quoted=!quoted;}else if(c===delim&&!quoted){row.push(value);value='';}else if((c==='\n'||c==='\r')&&!quoted){if(c==='\r'&&text[i+1]==='\n')i++;row.push(value);if(row.some(v=>v.trim()))rows.push(row);row=[];value='';}else value+=c;}row.push(value);if(row.some(v=>v.trim()))rows.push(row);return rows;}
   function renderImportSettings(){const body=$('#settings-body');body.innerHTML=`<h3>Importar planilha de colaboradores</h3><p>Adicione novos colaboradores ou atualize cadastros pelo nome. Nenhum colaborador ausente da planilha será excluído.</p><input class="control" id="import-file" type="file" accept=".xlsx,.csv"><p>XLSX ou CSV. A primeira aba deve conter nome, função e custo diário.</p><div id="import-mapping" class="section"></div><div id="import-preview" class="section"></div><div class="form-actions"><button class="btn btn-secondary" id="import-template">Baixar modelo Excel</button><button class="btn btn-primary" id="import-save" disabled>Importar prévia</button></div>`;let matrix=[],rows=[];$('#import-template').onclick=()=>exportWorkbook([{name:'Colaboradores',rows:[['Nome','Função','Custo diário','Moradia','Categoria','Avulso'],['Exemplo fictício','Pedreiro',241.74,'Fortaleza','Profissional','Não']]}],'modelo_colaboradores');const preview=()=>{const map=Object.fromEntries(['nome','funcao','custo','moradia','categoria','avulso'].map(k=>[k,Number($('#map-'+k).value)]));rows=matrix.slice(1).filter(r=>r.some(v=>String(v||'').trim())).map(r=>{const x=Object.fromEntries(Object.entries(map).map(([k,j])=>[k,j>=0?String(r[j]??'').trim():'']));let cost=x.custo.replace(/R\$\s*/g,'');if(cost.includes(','))cost=cost.replaceAll('.','').replace(',','.');x.custo=Number(cost);return x;});const invalid=rows.filter(x=>!x.nome||!x.funcao||!Number.isFinite(x.custo)||x.custo<=0);$('#import-preview').innerHTML=`<div class="notice ${invalid.length?'warning':'info'}">${rows.length} linha(s). ${invalid.length} linha(s) inválida(s). Preencha nome, função e um custo diário positivo para importar.</div>`+table(['Nome','Função','Custo','Moradia','Ação'],rows.map(x=>[escapeHtml(x.nome),escapeHtml(x.funcao),money(x.custo),escapeHtml(x.moradia),COLABORADORES.some(c=>clean(c.nome)===clean(x.nome))?'Atualizar':'Adicionar']));$('#import-save').disabled=!rows.length||Boolean(invalid.length)||map.nome<0||map.funcao<0||map.custo<0;};$('#import-file').onchange=async()=>{const f=$('#import-file').files[0];if(!f)return;try{matrix=f.name.toLowerCase().endsWith('.xlsx')?await xlsxRows(f):parseCSV(await f.text());if(matrix.length<2)throw Error('A planilha precisa de cabeçalho e dados.');const headers=matrix[0];const hints={nome:/NOME|COLABORADOR|FUNCIONARIO/,funcao:/FUNCAO|CARGO/,custo:/CUSTO|DIARIA|VALOR/,moradia:/MORADIA|RESIDENCIA/,categoria:/CATEGORIA/,avulso:/AVULSO/};$('#import-mapping').innerHTML='<h3>Conferir colunas</h3><div class="form-grid">'+Object.keys(hints).map(k=>field(k==='funcao'?'Função':readableName(k),`<select class="control" id="map-${k}"><option value="-1">Não usar</option>${headers.map((v,i)=>`<option value="${i}">${escapeHtml(v)}</option>`).join('')}</select>`)).join('')+'</div>';Object.keys(hints).forEach(k=>{$('#map-'+k).value=String(headers.findIndex(v=>hints[k].test(clean(v))));$('#map-'+k).onchange=preview;});preview();}catch(e){rows=[];$('#import-save').disabled=true;$('#import-preview').innerHTML='<div class="notice warning">'+escapeHtml(e.message)+'</div>';}};$('#import-save').onclick=()=>{if($('#import-save').disabled)return;let added=0,updated=0;for(const x of rows){const c=COLABORADORES.find(c=>clean(c.nome)===clean(x.nome));const data={nome:x.nome,funcao:x.funcao,custo:x.custo,...(x.moradia?{moradia:x.moradia}:{}),...(x.categoria?{categoria:x.categoria}:{}),...(x.avulso?{avulso:x.avulso}:{})};if(c){Object.assign(c,data);updated++;}else{COLABORADORES.push({id:uid('c'),...data});added++;}}audit('Importação de colaboradores',added+' novos / '+updated+' atualizados');saveData();toast(added+' adicionados e '+updated+' atualizados.');renderSettings();};}
 
-  const extendedRenderers={convocacao:renderConvCompleta,apontamento:renderApCompleto,extras:renderExtras,disponibilidade:renderDisponibilidade,indisponibilidade:renderIndisponibilidade,conflitos:renderConflitos,whatsapp:renderWhatsApp,dashboard:renderDashboard,relatorios:renderReports,financeiro:renderPayments,'historico-financeiro':renderFinancialHistory,ausencias:renderAbsences,configuracoes:renderSettings,indicadores:renderIndicators};
+  const extendedRenderers={convocacao:renderConvCompleta,apontamento:renderApCompleto,extras:renderExtras,disponibilidade:renderDisponibilidade,indisponibilidade:renderIndisponibilidade,conflitos:renderConflitos,whatsapp:renderWhatsApp,dashboard:renderDashboard,relatorios:renderReports,financeiro:renderPayments,'liberacoes-financeiras':renderFinancialReleases,'historico-financeiro':renderFinancialHistory,ausencias:renderAbsences,configuracoes:renderSettings,indicadores:renderIndicators};
   
   let onlineVersion='',onlineSession=null,onlineWritable=false,onlineStage='homologacao',onlineConfirmed=null,onlineQueued=false,onlineSaving=false,onlineMessage='';
   const copy=v=>JSON.parse(JSON.stringify(v));
@@ -2583,7 +2658,7 @@ function renderEquipeDia(){
   const renderLocal=render;
   render=function(){renderLocal();if(!perfilAtual)return;const selector=$('#portal-sup');if(onlineSession?.role==='SUPERVISOR'&&selector){selector.value=onlineSession.user;selector.disabled=true;}const old=$('#live-status');if(old)old.remove();const status=document.createElement('div');status.id='live-status';status.className='notice '+(onlineWritable?'info':'warning');status.innerHTML=`<strong>${onlineStage==='producao'?'Produção':'Homologação'} · ${onlineWritable?'dados conectados ao Neon':'somente leitura'}</strong> <span>${onlineStage==='producao'?'Dados oficiais da APROAR.':'Ambiente de testes.'}</span> <button type="button" class="link-btn" id="sync-online">Atualizar dados</button>`;$('#main-content').prepend(status);$('#sync-online').onclick=async()=>{if(onlineSaving||onlineQueued)return;lockOnline(true);try{applyOnline(await api('/api/bootstrap'));render();showToast('Dados atualizados.');}catch(e){showToast(e.message,true);}finally{lockOnline(false);}};};
   function chooseLogin(role){loginRole=role;const shortcut=['SUPERVISOR','VISUALIZAR'].includes(role);$('#login-access-wrap').classList.toggle('hidden',shortcut);$('#login-shortcut-mode').classList.toggle('hidden',!shortcut);$('#login-shortcut-label').textContent=role==='SUPERVISOR'?'Portal do Supervisor':'Somente visualizar';if(!shortcut)$('#login-access').value=role;$('#login-supervisor-wrap').classList.toggle('hidden',role!=='SUPERVISOR');const passwordRequired=role!=='VISUALIZAR';$('#login-password').required=passwordRequired;$('#login-password').closest('.password-wrap').classList.toggle('hidden',!passwordRequired);document.querySelector('label[for="login-password"]').classList.toggle('hidden',!passwordRequired);$('#login-error').textContent='';$('#login-password').value='';$(role==='SUPERVISOR'?'#login-supervisor':role==='VISUALIZAR'?'#login-button':'#login-password').focus();}
-  function enterConnectedSession(result){applyOnline(result);viewAtual=perfilAtual==='SUPERVISOR'?'apontamento':perfilAtual==='VISUALIZAR'?'dashboard':'inicio';portalUnit=state.convocacoes.find(c=>c.supervisor===supervisorAtual&&c.dataServico===portalDate)?.unidade||OBRAS[0]?.unidade||'Todas';render();}
+  function enterConnectedSession(result){applyOnline(result);financeReleaseRequests=[];if(perfilAtual==='SUPERVISOR')api('/api/financial-release').then(x=>{financeReleaseRequests=x.requests||[];if(viewAtual==='apontamento')render();}).catch(()=>{});viewAtual=perfilAtual==='SUPERVISOR'?'apontamento':perfilAtual==='VISUALIZAR'?'dashboard':'inicio';portalUnit=state.convocacoes.find(c=>c.supervisor===supervisorAtual&&c.dataServico===portalDate)?.unidade||OBRAS[0]?.unidade||'Todas';render();}
   async function initOnline(){
     init();$('#reset-demo').classList.add('hidden');$('#login-access').onchange=()=>chooseLogin($('#login-access').value);$('#enter-supervisor').onclick=()=>chooseLogin('SUPERVISOR');$('#enter-viewer').onclick=()=>chooseLogin('VISUALIZAR');$('#login-back').onclick=()=>chooseLogin($('#login-access').value);
     $('#login-form').onsubmit=async e=>{e.preventDefault();const button=$('#login-button');button.disabled=true;$('#login-error').textContent='';try{await api('/api/login',{method:'POST',body:JSON.stringify({role:loginRole,supervisor:$('#login-supervisor').value,password:$('#login-password').value})});$('#login-password').value='';enterConnectedSession(await api('/api/bootstrap'));}catch(err){$('#login-error').textContent=err.message;}finally{button.disabled=false;}};
