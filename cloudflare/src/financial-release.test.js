@@ -45,7 +45,8 @@ test('Autorização do Financeiro libera apenas o colaborador/data/campos solici
 });
 test('Solicitação negada ou consumida não pode mais ser utilizada',()=>{
  for(const action of ['LIBERACAO_FINANCEIRA_NEGADA','LIBERACAO_FINANCEIRA_UTILIZADA']){
-  const e=action==='LIBERACAO_FINANCEIRA_NEGADA'?[events[0],{acao:action,usuario:'FINANCEIRO',ocorrido_em:'2026-10-27T13:00:25Z',contexto:{requestId}}}]:[...events,{acao:action,usuario:'VICTOR',ocorrido_em:'2026-10-27T13:00:25Z',contexto:{requestId}}];
+  const event={acao:action,usuario:'FINANCEIRO',ocorrido_em:'2026-10-27T13:00:25Z',contexto:{requestId}};
+  const e=action==='LIBERACAO_FINANCEIRA_NEGADA'?[events[0],event]:[...events,event];
   const state=releaseState(e)[0];
   assert.notEqual(state.status,'Autorizada');
   assert.throws(()=>requireApprovedRelease(e,{supervisor:'VICTOR',colaboradorId:'71',dataServico:'2026-10-26',fields:['Extra']},timestamp),/Solicite liberação/);
