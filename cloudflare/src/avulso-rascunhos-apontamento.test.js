@@ -70,7 +70,7 @@ test('Avulso segue na gravação do apontamento e na apropriação operacional e
 });
 test('Abandonar o retroativo descarta avulsos provisórios e falha de gravação conserva os rascunhos',()=>{
  assert.match(js,/function discardRetroUnsavedAvulsos\(\)/);
- assert.match(js,/if\(view!=='apontamento'\)\{/);
+ assert.match(js,/if\(view!=='apontamento'&&\!\(perfilAtual==='SUPERVISOR'&&view==='liberacoes-financeiras'\)\)\{/);
  assert.match(js,/discardRetroUnsavedAvulsos\(\)/);
  assert.match(js,/discardDayPendingAdds\(\)/);
  assert.match(js,/restoreDayPendingAdds\(\)/);
