@@ -157,7 +157,9 @@
       const responsibleUnits=assigned.length?assigned:historical;
       for(let d=dateLocal(start);d<=dateLocal(end);d.setDate(d.getDate()+1)){
         const date=calendarISO(d);
-        if(state.convocacoes.some(c=>c.supervisor===supervisor&&c.dataServico===date&&(c.executor||c.supervisor)===supervisor))continue;
+        // A convocação existe para o supervisor mesmo quando cadastrada pela Controladoria.
+        // O indicador de ausência mede se há convocação, não quem clicou em salvar.
+        if(state.convocacoes.some(c=>c.supervisor===supervisor&&c.dataServico===date))continue;
         const confirmed=(state.semConvocacoesUnidade||[]).filter(x=>x.supervisor===supervisor&&x.dataServico===date);
         const justified=responsibleUnits.length?responsibleUnits.every(unit=>temConfirmacaoSemConvocacao(supervisor,unit,date)):confirmed.length>0;
         if(!justified)out.push({supervisor,dataServico:date});
