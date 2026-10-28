@@ -27,7 +27,7 @@ function makeInput(){
   setAttribute(k,v){this.attrs[k]=v;},
   removeAttribute(){},
   focus(){},
-  fire(type,evt={}){for(const fn of listeners[type]||[])fn(evt);}
+  fire(type,evt={}){for(const fn of listeners[type]||[])fn(evt);},
   dispatchEvent(evt){this.fire(evt.type,evt);return true;},
  };
  return input;
