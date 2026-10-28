@@ -620,6 +620,15 @@ input.control[type="search"], input.control.service-work, #r-obra-combo {text-ov
 }
 
 
+/* Quarta aba efetiva do Portal: pedido de autorização financeira.
+   No celular, duas linhas com botões legíveis em vez de quatro botões estreitos. */
+.supervisor-layout .portal-tabs { grid-template-columns:repeat(4,minmax(0,1fr)); }
+.supervisor-layout .portal-tabs .tab-btn { min-width:0; white-space:normal; overflow-wrap:anywhere; }
+@media(max-width:600px) {
+  .supervisor-layout .portal-tabs {grid-template-columns:repeat(2,minmax(0,1fr));}
+  .supervisor-layout .portal-tabs .tab-btn {min-height:42px;}
+}
+
 /* Portal: Convocação utiliza apenas Supervisor e Unidade no filtro superior. */
 .portal-filters.portal-filters-convocacao { grid-template-columns: repeat(2,minmax(0,1fr)); }
 /* Apontamentos: pesquisa por nome ou número sem substituir o seletor de obras. */
