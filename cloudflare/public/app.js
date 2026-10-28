@@ -184,7 +184,2418 @@
     const item=(view,label,icon,group='')=>({view,label,icon,group});
     if(perfilAtual==='CONTROLADORIA') return [item('inicio','Início','⌂'),item('convocacao','Convocação','▤','OPERAÇÃO'),item('conflitos','Conflitos','!'),item('apontamento','Apontamento','✓'),item('whatsapp','WhatsApp','◌'),item('disponibilidade','Disponibilidade','♙'),item('indisponibilidade','Indisponibilidade','⊘'),item('dashboard','Dashboard','▦','ANÁLISE E FECHAMENTO'),item('relatorios','Relatórios','▥'),item('indicadores','Indicadores','↗'),item('configuracoes','Configurações','⚙','SISTEMA')];
     if(perfilAtual==='VISUALIZAR') return [item('dashboard','Dashboard','▦'),item('relatorios','Relatórios','▥'),item('indicadores','Indicadores','↗')];
-    if(perfilAtual==='FINANCEIRO') return [item('inicio','Início','⌂'),item('financeiro','Pagamentos','$'),item('ausencias','Faltas / Atestados','⊘'),item('relatorios','Relatório','▥')];
+    if(perfilAtual==='FINANCEIRO') return [item('inicio','Início','⌂'),item('financeiro','Pagamentos',','Faltas / Atestados','⊘'),item('relatorios','Relatório','▥')];
+    return [item('inicio','Início','⌂'),item('convocacao','Convocação','▤'),item('apontamento','Apontamento','✓'),item('disponibilidade','Disponibilidade','♙'),item('pendencias','Pendências','!')];
+  }
+
+  function sidebarIcon(view){
+    const shapes={
+      inicio:'<path d="m3 10 9-7 9 7"/><path d="M5 9v12h5v-7h4v7h5V9"/>',
+      convocacao:'<path d="M6 3h8l4 4v14H6z"/><path d="M14 3v5h4M9 12h6M9 16h6"/>',
+      conflitos:'<path d="m12 3 10 18H2L12 3Z"/><path d="M12 9v5"/><path d="M12 17h.01"/>',
+      apontamento:'<rect x="4" y="4" width="16" height="16" rx="2"/><path d="m8 12 3 3 5-6"/>',
+      whatsapp:'<path d="M4 4h16v13H9l-5 4V4Z"/><path d="M8 8h8M8 12h5"/>',
+      extras:'<path d="M12 4v16M4 12h16"/>',
+      disponibilidade:'<circle cx="9" cy="7" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M16 4a3 3 0 0 1 0 6M18 14a5 5 0 0 1 3 4v3"/>',
+      indisponibilidade:'<circle cx="12" cy="12" r="9"/><path d="m6 6 12 12"/>',
+      dashboard:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
+      relatorios:'<path d="M3 21h18M6 18v-7M12 18V4M18 18v-11"/>',
+      indicadores:'<path d="m3 17 6-6 4 4 8-10M16 5h5v5"/>',
+      configuracoes:'<path d="m12 2 8.7 5v10L12 22l-8.7-5V7L12 2Z"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1"/>',
+      financeiro:'<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/>',
+      ausencias:'<circle cx="12" cy="12" r="9"/><path d="m6 6 12 12"/>',
+      pendencias:'<circle cx="12" cy="12" r="9"/><path d="M12 7v6l4 2"/>'
+    };
+    return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${shapes[view]||shapes.convocacao}</svg>`;
+  }
+
+  function renderNav() {
+    const nav = $('#side-nav');
+    nav.innerHTML = navConfig().map(item => `${item.group ? `<div class="side-group">${item.group}</div>` : ''}
+      <button data-view="${item.view}" class="nav-item ${item.view === viewAtual ? 'active' : ''}">
+        <span class="nav-icon">${sidebarIcon(item.view)}</span> ${item.label}
+      </button>
+    `).join('');
+  }
+
+  function setView(view) {
+    const permitidas = navConfig().map(x => x.view);
+    const previousView=viewAtual;
+    if(view!=='apontamento'){
+      if(dayPendingAdds.size){
+        discardDayPendingAdds();
+        showToast('A inclusão não salva de colaboradores foi descartada ao sair do apontamento.',true);
+      }
+      discardRetroUnsavedAvulsos();
+    }
+    viewAtual = permitidas.includes(view) ? view : 'inicio';
+    if(perfilAtual==='CONTROLADORIA'&&viewAtual==='convocacao'&&previousView!=='convocacao')adminConvDate=tomorrowISO();
+    renderNav();
+    const map = {
+      inicio:'Início',
+      convocacao:'Convocação',
+      apontamento:'Apontamento',
+      pendencias:'Pendências',
+      indicadores:'Indicadores',
+      relatorios:'Relatórios',
+      financeiro:'Fechamento financeiro',
+      'historico-financeiro':'Histórico de registros',
+      extras:'Lançamento de extras',
+    };
+    $('#topbar-title').textContent = navConfig().find(x=>x.view===viewAtual)?.label || map[viewAtual] || 'APROAR';
+    $('.sidebar').classList.remove('open');
+    render();
+  }
+
+  function render() {
+    if (!perfilAtual) return showLogin();
+    if (perfilAtual === 'SUPERVISOR' && !supervisorAtual) return showLogin();
+
+    showApp();
+    if(perfilAtual==='VISUALIZAR'){const pages={dashboard:renderDashboard,relatorios:renderReports,indicadores:renderIndicators};return (pages[viewAtual]||renderDashboard)();}
+
+    if (perfilAtual === 'CONTROLADORIA') {
+      const renderers = { inicio: renderControladoriaInicio, indicadores: renderControladoriaIndicadores, relatorios: renderRelatoriosBase };
+      return (extendedRenderers[viewAtual] || renderers[viewAtual] || renderControladoriaInicio)();
+    }
+
+    if (perfilAtual === 'FINANCEIRO') {
+      const renderers = { inicio: renderFinanceiroInicio, financeiro: renderFinanceiroFechamento, relatorios: renderRelatoriosBase };
+      return (extendedRenderers[viewAtual] || renderers[viewAtual] || renderFinanceiroInicio)();
+    }
+
+    const renderers = { inicio: renderInicio, convocacao: renderConvocacao, apontamento: renderApontamento, pendencias: renderPendencias };
+    (extendedRenderers[viewAtual] || renderers[viewAtual] || renderInicio)();
+    renderSupervisorHeader();
+  }
+
+  function showLogin() {
+    $('#login-view').classList.remove('hidden');
+    $('#app-view').classList.add('hidden');
+    syncLoginProfileUI();
+  }
+
+  function showApp() {
+    $('#login-view').classList.add('hidden');
+    $('#app-view').classList.remove('hidden');
+
+    $('#app-view').classList.toggle('supervisor-layout',perfilAtual==='SUPERVISOR');
+    $('#reset-demo').classList.toggle('hidden',perfilAtual==='VISUALIZAR');
+    const label = perfilLabel(perfilAtual);
+    const nomeUsuario = perfilAtual === 'SUPERVISOR' ? supervisorAtual : label.toUpperCase();
+    const avatar = perfilAtual === 'SUPERVISOR' ? supervisorAtual.charAt(0) : (perfilAtual === 'CONTROLADORIA' ? 'C' : 'F');
+
+    $('#sidebar-user').textContent = nomeUsuario;
+    if(perfilAtual==='CONTROLADORIA')$('#sidebar-avatar').innerHTML='<svg viewBox="0 0 32 32" width="27" height="27" role="img" aria-label="Capacete branco de supervisor"><path d="M6 23v-4a10 10 0 0 1 20 0v4" fill="#f8fafc" stroke="#d4deea" stroke-width="1.2"/><path d="M13 22V9a3 3 0 0 1 6 0v13" fill="#ffffff" stroke="#d4deea" stroke-width="1.2"/><path d="M8 18v5M24 18v5" stroke="#c0cddd" stroke-width="1.3"/><rect x="3" y="22" width="26" height="5" rx="2" fill="#ffffff" stroke="#d4deea" stroke-width="1.2"/></svg>';else if(perfilAtual==='FINANCEIRO')$('#sidebar-avatar').innerHTML='<svg viewBox="0 0 32 32" width="28" height="28" role="img" aria-label="Cédulas e moedas do Financeiro"><rect x="6" y="4" width="23" height="18" rx="3" fill="#a9d8be" stroke="#e8f9ee" stroke-width="1.1"/><rect x="3" y="8" width="24" height="17" rx="3" fill="#f0fff5" stroke="#8bcaa8" stroke-width="1.2"/><path d="M6 13a3 3 0 0 0 3-3M21 10a3 3 0 0 0 3 3M6 20a3 3 0 0 1 3 3M21 23a3 3 0 0 1 3-3" fill="none" stroke="#84bd9d" stroke-width="1"/><circle cx="15" cy="16.5" r="5.4" fill="#d1f5df" stroke="#7ab68f" stroke-width="1"/><text x="15" y="20" font-family="Arial,sans-serif" font-size="10" font-weight="bold" text-anchor="middle" fill="#1d7451">$</text><circle cx="24.5" cy="24" r="5.2" fill="#f7d879" stroke="#e8ba4e" stroke-width="1.1"/><path d="M24.5 21.6v4.7M22.5 22.5h4" stroke="#af8136" stroke-width="1" stroke-linecap="round"/></svg>';else $('#sidebar-avatar').textContent = avatar;
+    $('#sidebar-role').textContent = label;
+    $('#topbar-eyebrow').textContent = label.toUpperCase();
+    $('#today-chip').textContent = new Intl.DateTimeFormat('pt-BR', { dateStyle:'full' }).format(now());
+
+    renderNav();
+  }
+
+  function allApontamentosPendentes() {
+    return state.convocacoes.filter(c => !completeConv(c) && now() >= deadlineApontamento(c.dataServico));
+  }
+
+  function allServicosPrevistosSemConvocacao(){return diasSemConvocacao();}
+
+  function renderControladoriaInicioBase() {
+    const diasConv = new Set(state.convocacoes.map(c => `${c.supervisor}|${c.dataServico}`)).size;
+    const pend = allApontamentosPendentes();
+    const previstos = allServicosPrevistosSemConvocacao();
+    const regularizadosAtraso = state.apontamentos.filter(apontamentoAtrasado);
+
+    $('#main-content').innerHTML = `
+      <div class="page-head">
+        <div>
+          <div class="eyebrow">CONTROLADORIA</div>
+          <h2>Visão geral operacional</h2>
+          <p>Esta área fica separada do portal dos supervisores e resume os dados operacionais da APROAR.</p>
+        </div>
+        <span class="role-badge">Perfil administrativo</span>
+      </div>
+
+      <div class="grid grid-4">
+        ${metric('DIAS COM CONVOCAÇÃO', diasConv, '1 supervisor + 1 data = 1 convocação')}
+        ${metric('APONTAMENTOS SALVOS', state.apontamentos.length, 'registros efetivamente apontados')}
+        ${metric('APONTAMENTOS PENDENTES', pend.length, 'convocação existente e prazo vencido')}
+        ${metric('CONVOCAÇÕES NÃO FEITAS', previstos.length, 'dias sem convocação por supervisor')}
+      </div>
+
+      <div class="section grid grid-2">
+        <div class="card card-pad">
+          <div class="section-title"><div><h3>O que a Controladoria acompanha</h3><p>Estrutura inicial desta área.</p></div></div>
+          <div class="placeholder-list">
+            <div class="placeholder-item"><div><strong>Indicadores por supervisor</strong><br><small>Convocações, atrasos, apontamentos e pendências.</small></div><button class="link-btn" data-admin-go="indicadores">Abrir</button></div>
+            <div class="placeholder-item"><div><strong>Relatórios operacionais</strong><br><small>Base para PDF, Excel e consolidação por período.</small></div><button class="link-btn" data-admin-go="relatorios">Abrir</button></div>
+          </div>
+        </div>
+        <div class="card card-pad">
+          <div class="section-title"><div><h3>Regra de leitura</h3><p>Pendência atual não é igual a atraso histórico.</p></div></div>
+          <div class="notice info"><strong>${regularizadosAtraso.length}</strong> apontamento(s) estão regularizados com atraso no conjunto fictício. Eles permanecem no histórico, mas não devem continuar como pendência.</div>
+          <div class="notice success" style="margin-top:10px">Apontamento retroativo resolve a pendência da data e preserva a informação de que o lançamento foi realizado depois.</div>
+        </div>
+      </div>
+    `;
+    $$('[data-admin-go]').forEach(b => b.onclick = () => setView(b.dataset.adminGo));
+  }
+
+  function renderControladoriaIndicadores() {
+    const linhas = SUPERVISORES.map(s => {
+      const convs = state.convocacoes.filter(c => c.supervisor === s&&(c.executor||c.supervisor)===s);
+      const diasConv = new Set(convs.map(c => c.dataServico)).size;
+      const atrasadas = new Set(convs.filter(convocacaoAtrasada).map(c => c.dataServico)).size;
+      const aps = state.apontamentos.filter(a => a.supervisor === s&&(a.executor||a.supervisor)===s);
+      const diasAp = new Set(aps.map(a => a.dataServico)).size;
+      const apAtr = new Set(aps.filter(apontamentoAtrasado).map(a => a.dataServico)).size;
+      const noPrazo = diasConv ? Math.max(0, ((diasConv - atrasadas) / diasConv * 100)) : null;
+      return { s, diasConv, atrasadas, noPrazo, diasAp, apAtr };
+    });
+
+    $('#main-content').innerHTML = `
+      <div class="page-head"><div><div class="eyebrow">CONTROLADORIA</div><h2>Indicadores</h2><p>Resumo com a mesma unidade de contagem que estamos usando: supervisor + data de serviço.</p></div></div>
+      <div class="card card-pad">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Supervisor</th><th>Convocações</th><th>Atrasadas</th><th>No prazo</th><th>Apontamentos</th><th>Apt. atrasados</th></tr></thead>
+            <tbody>${linhas.map(x => `<tr><td><strong>${x.s}</strong></td><td>${x.diasConv}</td><td>${x.atrasadas}</td><td>${x.noPrazo === null ? '-' : x.noPrazo.toFixed(1)+'%'}</td><td>${x.diasAp}</td><td>${x.apAtr}</td></tr>`).join('')}</tbody>
+          </table>
+        </div>
+      </div>
+      <div class="section notice info">A tabela é propositalmente simples nesta fase. Vamos refinar as regras de datas, pendências e início histórico antes de transformar isso no relatório definitivo.</div>
+    `;
+  }
+
+  function renderFinanceiroInicio() {
+    const itens = state.apontamentos.flatMap(a => a.itens || []);
+    const presentes = itens.filter(i => String(i.status || '').startsWith('Presente')).length;
+    const faltas = itens.filter(i => i.status === 'Falta').length;
+    const extras = itens.filter(i => i.extra && i.extra !== 'Não').length + (state.extras||[]).length;
+
+    $('#main-content').innerHTML = `
+      <div class="page-head">
+        <div>
+          <div class="eyebrow">FINANCEIRO</div>
+          <h2>Visão financeira</h2>
+          <p>Área separada do apontamento operacional. Nesta fase, usa os apontamentos fictícios já confirmados.</p>
+        </div>
+        <span class="role-badge">Perfil financeiro</span>
+      </div>
+      <div class="grid grid-4">
+        ${metric('APONTAMENTOS', state.apontamentos.length, 'lançamentos salvos')}
+        ${metric('PRESENÇAS', presentes, 'itens apontados como presença')}
+        ${metric('FALTAS', faltas, 'itens apontados como falta')}
+        ${metric('EXTRAS', extras, 'itens com Extra diferente de “Não”')}
+      </div>
+      <div class="section card card-pad">
+        <div class="section-title"><div><h3>Próximas regras</h3><p>O financeiro não altera a lógica operacional de convocação.</p></div></div>
+        <div class="notice info">Nesta primeira versão, o Financeiro só lê apontamentos efetivamente salvos. Convocação sem apontamento não entra como presença nem como lançamento financeiro.</div>
+      </div>
+    `;
+  }
+
+  function renderFinanceiroFechamento() {
+    const linhas = [
+      ...state.apontamentos.slice().sort((a,b) => b.dataServico.localeCompare(a.dataServico)).flatMap(a => (a.itens || []).map(i => ({
+        data: a.dataServico, supervisor: a.supervisor, colaborador: colaboradorById(i.colaboradorId)?.nome || i.colaboradorId,
+        status: i.status, extra: i.extra || 'Não', retroativo: a.retroativo,
+      }))),
+      ...(state.extras||[]).map(x=>({data:x.dataServico,supervisor:x.supervisor,colaborador:colaboradorById(x.colaboradorId)?.nome||x.colaboradorId,status:'Extra independente · '+(obraById(x.obraId)?.unidade||x.unidade)+' · '+(obraById(x.obraId)?.nome||''),extra:x.extra,retroativo:x.dataServico<isoToday()})),
+    ].sort((a,b)=>b.data.localeCompare(a.data));
+
+    $('#main-content').innerHTML = `
+      <div class="page-head"><div><div class="eyebrow">FINANCEIRO</div><h2>Fechamento</h2><p>Somente apontamentos realmente salvos entram nesta base de apontamentos.</p></div></div>
+      <div class="card card-pad">
+        ${linhas.length ? `<div class="table-wrap"><table><thead><tr><th>Data</th><th>Supervisor</th><th>Colaborador</th><th>Status</th><th>Extra</th><th>Origem</th></tr></thead><tbody>${linhas.map(x=>`<tr><td>${formatDate(x.data)}</td><td>${x.supervisor}</td><td>${escapeHtml(x.colaborador)}</td><td>${escapeHtml(x.status)}</td><td>${escapeHtml(x.extra)}</td><td>${x.retroativo ? 'Retroativo' : 'Normal'}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">Sem apontamentos para fechamento.</div>'}
+      </div>
+    `;
+  }
+
+  function renderRelatoriosBase() {
+    $('#main-content').innerHTML = `
+      <div class="page-head"><div><div class="eyebrow">${perfilLabel(perfilAtual).toUpperCase()}</div><h2>Relatórios</h2><p>Estrutura reservada para os relatórios da próxima etapa.</p></div></div>
+      <div class="card card-pad">
+        <div class="notice info">Vamos montar esta área depois que as regras operacionais de convocação, apontamento, retroativo, pendência e atraso estiverem fechadas. Assim os relatórios nascem usando a mesma fonte de verdade.</div>
+      </div>
+    `;
+  }
+
+  function renderInicio() {
+    const convs = convocacoesSupervisor();
+    const aps = apontamentosSupervisor();
+    const pend = pendenciasApontamento();
+    const atrasadas = regularizacoesAtrasadas();
+    const convAtrasadas = new Set(convs.filter(convocacaoAtrasada).map(c=>c.dataServico)).size;
+    const proximas = convs.filter(c => dateLocal(c.dataServico) >= dateLocal(isoToday())).sort((a,b)=>a.dataServico.localeCompare(b.dataServico)).slice(0,5);
+
+    $('#main-content').innerHTML = `
+      <div class="page-head">
+        <div>
+          <div class="eyebrow">VISÃO DO SUPERVISOR</div>
+          <h2>Olá, ${supervisorAtual}</h2>
+          <p>Convocação planeja o serviço. Apontamento confirma o que realmente aconteceu.</p>
+        </div>
+        <div class="inline-actions">
+          <button class="btn btn-primary" id="quick-conv">Nova convocação</button>
+          <button class="btn btn-secondary" id="quick-ap">Fazer apontamento</button>
+        </div>
+      </div>
+
+      <div class="grid grid-4">
+        ${metric('DIAS COM CONVOCAÇÃO', new Set(convs.map(c=>c.dataServico)).size, `${convs.length} registro(s) de equipe`)}
+        ${metric('APONTAMENTOS', aps.length, 'salvos pelo supervisor')}
+        ${metric('PENDÊNCIAS', pend.length, 'convocações sem apontamento vencido')}
+        ${metric('REGULARIZADOS COM ATRASO', atrasadas.length, `${convAtrasadas} convocação(ões) criada(s) fora do prazo`)}
+      </div>
+
+      <div class="section grid grid-2">
+        <div class="card card-pad">
+          <div class="section-title"><div><h3>Próximos serviços</h3><p>Convocações já registradas.</p></div></div>
+          ${proximas.length ? tableProximas(proximas) : '<div class="empty">Nenhuma convocação futura cadastrada.</div>'}
+        </div>
+        <div class="card card-pad">
+          <div class="section-title"><div><h3>Regra principal</h3><p>Como o protótipo trata pendência e atraso.</p></div></div>
+          <div class="notice info"><strong>Pendência</strong> é algo ainda não resolvido. Quando você faz um apontamento retroativo, a pendência desaparece. Se o lançamento aconteceu depois do prazo, o sistema mantém apenas o histórico de <strong>regularizado com atraso</strong>.</div>
+          <div class="notice success" style="margin-top:10px"><strong>Fim de semana:</strong> serviço de sábado ou domingo pode ser apontado até segunda-feira às 09:30 sem atraso.</div>
+        </div>
+      </div>
+    `;
+    $('#quick-conv').onclick = () => setView('convocacao');
+    $('#quick-ap').onclick = () => setView('apontamento');
+  }
+
+  function metric(label, value, note) {
+    label = label.charAt(0).toLocaleUpperCase("pt-BR") + label.slice(1).toLocaleLowerCase("pt-BR");
+    return `<div class="card metric"><div class="metric-label">${label}</div><div class="metric-value">${value}</div><div class="metric-note">${note}</div></div>`;
+  }
+
+  function tableProximas(items) {
+    return `<div class="table-wrap"><table><thead><tr><th>Data</th><th>Unidade</th><th>Serviço</th><th>Situação</th></tr></thead><tbody>${items.map(c => {
+      const obra = obraById(c.obraId);
+      return `<tr><td>${formatDate(c.dataServico)}</td><td>${c.unidade}</td><td>${obra?.nome || '-'}</td><td>${badgeForStatus(statusConv(c))}</td></tr>`;
+    }).join('')}</tbody></table></div>`;
+  }
+
+  function renderConvocacao() {
+    const unidades = adminUnits();
+    $('#main-content').innerHTML = `
+      <div class="page-head"><div><div class="eyebrow">PLANEJAMENTO</div><h2>Nova convocação</h2><p>Cadastre a equipe para a data real do serviço.</p></div></div>
+      <div class="grid grid-2">
+        <div class="card card-pad">
+          <form id="form-convocacao">
+            <div class="form-grid">
+              ${perfilAtual==='CONTROLADORIA' ? `<div class="full"><label class="field-label">Supervisor responsável</label><select class="control" id="conv-supervisor">${SUPERVISORES.map(x=>`<option>${x}</option>`).join('')}</select></div>` : ''}<div><label class="field-label">Data do serviço</label><input class="control" type="date" id="conv-data" value="${perfilAtual==='SUPERVISOR'?portalDate:isoToday()}" required></div>
+              <div><label class="field-label">Turno</label><select class="control" id="conv-turno"><option>Integral</option><option>Manhã</option><option>Tarde</option><option>Noite</option><option>Outro</option></select></div>
+              <div><label class="field-label">Unidade</label><select class="control" id="conv-unidade">${unidades.map(u=>`<option>${u}</option>`).join('')}</select></div>
+              <div><label class="field-label">Obra / Serviço</label><select class="control" id="conv-obra"></select></div>
+              <div class="full"><label class="field-label">Equipe</label><div class="checkbox-grid">${alphabeticalPeople(COLABORADORES.filter(c=>!c.inativo)).map(c=>`<label class="check-card"><input type="checkbox" name="conv-colab" value="${c.id}"><span><strong>${c.nome}</strong><br><small>${c.funcao}</small></span></label>`).join('')}</div></div>
+            </div>
+            <details class="section"><summary>Incluir colaborador avulso</summary><div class="form-grid">${field('Nome do avulso','<input class="control" id="avulso-nome">')}${field('Categoria do avulso',avulsoFuncaoSelect('avulso-funcao'))}</div></details>
+            <div class="form-actions"><button class="btn btn-primary" type="submit">Salvar convocação</button></div>
+          </form>
+        </div>
+        <div class="card card-pad">
+          <div class="section-title"><div><h3>Como o prazo é calculado</h3><p>Regra de demonstração desta versão.</p></div></div>
+          <div class="notice info">Para serviços de segunda a sexta, a convocação é considerada no prazo quando registrada antes das <strong>16:00 para o próximo dia útil</strong>. Serviços e lançamentos em sábado ou domingo não geram atraso automático de convocação.</div>
+          <div class="notice warning" style="margin-top:10px">A data escolhida é a <strong>data do serviço</strong>. Se você registra no dia 18 uma equipe que trabalhará no dia 19, o serviço fica associado a 19/09.</div>
+        </div>
+      </div>
+    `;
+
+    const unidade = $('#conv-unidade');
+    const obra = $('#conv-obra');
+    const refreshObras = () => {
+      const opts = OBRAS.filter(o=>o.unidade===unidade.value);
+      obra.innerHTML = opts.map(o=>`<option value="${o.id}">${o.nome}</option>`).join('');
+    };
+    unidade.onchange = refreshObras;
+    refreshObras();
+
+    $('#form-convocacao').onsubmit = (e) => {
+      e.preventDefault();
+      const colaboradores = $$('input[name="conv-colab"]:checked').map(x=>x.value);
+      if (!colaboradores.length && !$('#avulso-nome')?.value.trim()) return toast('Selecione pelo menos um colaborador.', true);
+      const avulso=$('#avulso-nome')?.value.trim();
+      if(avulso){const funcao=$('#avulso-funcao').value;if(!funcao)return toast('Selecione Profissional ou Servente para o avulso.',true);const id=uid('c');COLABORADORES.push({id,nome:avulso,...avulsoData(funcao)});colaboradores.push(id);}
+      const obraRef = obraById(obra.value);
+      const conv = {
+        id: uid('cv'), supervisor: $('#conv-supervisor')?.value || supervisorAtual, dataServico: $('#conv-data').value,
+        unidade: obraRef?.unidade || unidade.value, obraId: obra.value, turno: $('#conv-turno').value,
+        colaboradores, criadoEm: now().toISOString(), origem: 'normal'
+      };
+      const bloqueio=colaboradores.find(id=>blocked(id,conv.dataServico)||state.convocacoes.some(c=>c.dataServico===conv.dataServico&&c.colaboradores.includes(id)&&overlaps(c.turno,conv.turno)));
+      if(bloqueio) return toast('Colaborador indisponível ou já convocado neste turno: '+colaboradorById(bloqueio)?.nome,true);
+      conv.executor=supervisorAtual||perfilLabel(perfilAtual);state.convocacoes.push(conv); audit('Nova convocação',conv.id); saveData();
+      toast(convocacaoAtrasada(conv) ? 'Convocação salva e registrada como fora do prazo.' : 'Convocação salva com sucesso.');
+      setView('inicio');
+    };
+  }
+
+  function renderApontamento() {
+    $('#main-content').innerHTML = `
+      <div class="page-head">
+        <div><div class="eyebrow">EXECUÇÃO</div><h2>Apontamento</h2><p>Confirme a equipe convocada ou regularize um serviço antigo.</p></div>
+        <div class="tabs"><button class="tab-btn ${apontamentoTab==='normal'?'active':''}" data-tab="normal">Normal</button><button class="tab-btn ${apontamentoTab==='retroativo'?'active':''}" data-tab="retroativo">Retroativo</button></div>
+      </div>
+      <div id="apontamento-body"></div>
+      ${perfilAtual==='SUPERVISOR'?'<datalist id="passagens-ajuda-valores"><option value="11" label="Fortaleza - R$ 11,00"></option><option value="10" label="Caucaia - R$ 10,00"></option><option value="12" label="Maracanaú - R$ 12,00"></option><option value="25" label="Horizonte - R$ 25,00"></option></datalist>':''}
+    `;
+    $$('.tab-btn').forEach(b => b.onclick = () => {
+      if(b.dataset.tab!=='retroativo')discardRetroUnsavedAvulsos();
+      if(b.dataset.tab==='retroativo'&&dayPendingAdds.size){
+        discardDayPendingAdds();
+        showToast('As inclusões ainda não salvas foram descartadas ao mudar de aba.',true);
+      }
+      apontamentoTab = b.dataset.tab; render();
+    });
+    if (apontamentoTab === 'normal') renderApontamentoNormal(); else renderApontamentoRetroativo();
+  }
+
+  // Dados ainda não gravados: mantidos ao incluir colaborador ou avulso.
+  const dayUnsavedDrafts=new Map();
+  // Pessoas adicionadas no apontamento normal são salvas junto com o apontamento.
+  const dayPendingAdds=new Map();
+  function discardDayPendingAdds(){
+    if(!dayPendingAdds.size)return;
+    dayPendingAdds.clear();
+    dayUnsavedDrafts.clear();
+    if(onlineConfirmed){
+      state=copy(onlineConfirmed);
+      OBRAS.splice(0,OBRAS.length,...state.obras);
+      COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);
+    }
+  }
+  function restoreDayPendingAdds(){
+    for(const {id,staff,unit,dayKey,convId} of dayPendingAdds.values()){
+      if(staff&&!COLABORADORES.some(c=>String(c.id)===String(id)))COLABORADORES.push(staff);
+      const [day,supervisor]=dayKey.split('|');
+      let conv=state.convocacoes.find(c=>String(c.id)===String(convId))
+        ||state.convocacoes.find(c=>c.dataServico===day&&c.supervisor===supervisor&&c.unidade===unit&&c.turno==='Integral');
+      if(!conv){
+        conv={id:convId,supervisor,dataServico:day,unidade:unit,obraId:'',turno:'Integral',colaboradores:[],criadoEm:now().toISOString(),origem:'inclusao_apontamento'};
+        state.convocacoes.push(conv);
+      }
+      if(!conv.colaboradores.includes(id))conv.colaboradores.push(id);
+    }
+    state.colaboradores=COLABORADORES;
+  }
+
+  // Remoção local somente de inclusões ainda não confirmadas pelo banco.
+  function removePendingDayAdd(id,dayKey){
+    const pending=dayPendingAdds.get(id);
+    if(!pending||pending.dayKey!==dayKey)return false;
+    const conv=state.convocacoes.find(c=>String(c.id)===String(pending.convId));
+    const persisted=conv&&onlineConfirmed?.convocacoes?.some(c=>String(c.id)===String(conv.id));
+    if(conv){
+      const remaining=conv.colaboradores.filter(personId=>String(personId)!==String(id));
+      if(persisted&&!remaining.length)return false;
+      conv.colaboradores=remaining;
+      if(!remaining.length&&!persisted)
+        state.convocacoes=state.convocacoes.filter(c=>String(c.id)!==String(conv.id));
+    }
+    dayPendingAdds.delete(id);
+    const draft=dayUnsavedDrafts.get(dayKey);
+    draft?.items?.delete(id);
+    if(draft?.extra?.person===id)draft.extra.person='';
+    if(pending.staff&&!onlineConfirmed?.colaboradores?.some(c=>String(c.id)===String(id))
+      &&!state.convocacoes.some(c=>c.colaboradores?.some(personId=>String(personId)===String(id)))
+      &&!state.apontamentos.some(a=>a.itens?.some(i=>String(i.colaboradorId)===String(id)))){
+      const index=COLABORADORES.findIndex(c=>String(c.id)===String(id));
+      if(index>=0)COLABORADORES.splice(index,1);
+    }
+    state.colaboradores=COLABORADORES;
+    return true;
+  }
+  const retroUnsavedAvulsos=new Map();
+  function discardRetroUnsavedAvulsos(){
+    if(!retroUnsavedAvulsos.size)return;
+    for(let i=COLABORADORES.length-1;i>=0;i--)if(retroUnsavedAvulsos.has(COLABORADORES[i].id))COLABORADORES.splice(i,1);
+    retroUnsavedAvulsos.clear();
+  }
+  let adminApDate='',adminApSup='',adminApUnit='';
+  // Formulários de colaboradores diferentes: nunca descarte alterações não salvas
+  // dos colegas ao remover uma inclusão sem apontamento.
+  const adminApDrafts=new Map();
+  function captureAdminApDrafts(){
+    $$('#ap-equipe form[data-admin-conv]').forEach(form=>{
+      const ids=[...form.querySelectorAll('.person-card')].map(row=>row.dataset.person);
+      if(!ids.length)return;
+      try{adminApDrafts.set(String(form.dataset.adminConv),new Map(readPersonRows(ids,form).map(item=>[String(item.colaboradorId),item])));}
+      catch(error){console.warn('APROAR: não foi possível preservar rascunho do apontamento',String(error?.message||error).slice(0,120));}
+    });
+  }
+  async function removeUnpointedAdminConvocation(convocationId,personId){
+    if(onlineQueued||onlineSaving)return showToast('Outra gravação está em andamento. Confira o resultado antes de remover.',true);
+    if(!onlineWritable||onlineSession?.role!=='CONTROLADORIA')return showToast('Remoção exclusiva da Controladoria com gravação autorizada.',true);
+    const conv=state.convocacoes.find(c=>String(c.id)===String(convocationId));
+    const name=colaboradorById(personId)?.nome||'este colaborador';
+    if(!conv||!conv.colaboradores.some(id=>String(id)===String(personId)))
+      return showToast('Inclusão não encontrada. Atualize a página.',true);
+    if(apForConv(convocationId)?.itens.some(i=>String(i.colaboradorId)===String(personId)))
+      return showToast('Este colaborador já tem apontamento. Não é possível removê-lo por aqui.',true);
+    if(!window.confirm('Remover somente '+name+' da convocação de '+formatDate(conv.dataServico)+'?\\n\\nO cadastro do colaborador e seus outros apontamentos não serão excluídos.'))return;
+    captureAdminApDrafts();
+    const requestId=crypto.randomUUID(),payload=JSON.stringify({requestId,convocacaoId:String(convocationId),colaboradorId:String(personId)});
+    let saved=false;
+    onlineSaving=true;lockOnline(true);
+    showSaveFeedback('Removendo somente a inclusão sem apontamento…',false,40000);
+    try{
+      const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),30000);
+      try{
+        try{
+          const response=await api('/api/convocation-remove',{method:'POST',body:payload,signal:controller.signal});
+          saved=response?.ok===true&&response.requestId===requestId;
+          if(!saved)throw Error('O banco não confirmou a remoção.');
+        }catch(error){
+          const code=Number(error?.status||0);
+          if(error?.name==='AbortError'||!code||code>=500){
+            for(let attempt=0;attempt<3&&!saved;attempt++){
+              if(attempt)await new Promise(resolve=>setTimeout(resolve,500*attempt));
+              try{
+                const status=await api('/api/save-status?requestId='+encodeURIComponent(requestId));
+                if(status?.confirmed===true&&status.requestId===requestId)saved=true;
+              }catch(checkError){
+                if(checkError?.status===401||checkError?.status===403)throw checkError;
+              }
+            }
+          }
+          if(!saved)throw error;
+        }
+      }finally{clearTimeout(timeout);}
+      applyOnline(await restoreOnlineSession());
+      adminApDrafts.delete(String(convocationId));
+      onlineSaving=false;render();
+      showSaveFeedback('Inclusão removida e confirmada no banco. Histórico preservado.');
+      showToast('Colaborador removido apenas dessa convocação, sem alterar seu cadastro ou histórico.');
+    }catch(error){
+      const msg=saved
+        ?'A inclusão foi removida no banco, mas a tela não atualizou. Use Ctrl + F5 e não repita a remoção.'
+        :String(error?.message||'Não foi possível confirmar a remoção. Atualize e confira antes de tentar novamente.');
+      if(saved)onlineWritable=false;
+      showSaveFeedback(msg,true,45000);showToast(msg,true);
+    }finally{onlineSaving=false;lockOnline(false);}
+  }
+  function renderApontamentoNormal(){
+    if(perfilAtual==='SUPERVISOR')return renderEquipeDia();
+    const body=$('#apontamento-body');adminApDate||=isoToday();
+    body.innerHTML=`<div class="card card-pad"><div class="reference-filters">${field('Data do serviço',`<input id="ap-data" class="control" type="date" value="${adminApDate}">`)}${field('Supervisor','<select id="ap-supervisor" class="control"></select>')}${field('Unidade','<select id="ap-unit" class="control"></select>')}</div><div id="ap-equipe" class="section"></div></div>`;
+    const candidates=()=>state.convocacoes.filter(c=>c.dataServico===adminApDate);
+    const refreshSupervisors=()=>{adminApDate=$('#ap-data').value;const sups=[...new Set(candidates().map(c=>c.supervisor))].sort((a,b)=>a==='PAULO'?-1:b==='PAULO'?1:a.localeCompare(b,'pt-BR'));if(!sups.includes(adminApSup))adminApSup=sups[0]||'';$('#ap-supervisor').innerHTML=sups.length?options(sups):'<option value="">Nenhum supervisor com convocação</option>';$('#ap-supervisor').value=adminApSup;refreshUnits();};
+    const refreshUnits=()=>{adminApSup=$('#ap-supervisor').value;const units=[...new Set(candidates().filter(c=>c.supervisor===adminApSup).map(c=>c.unidade))].sort();if(!units.includes(adminApUnit))adminApUnit=units[0]||'';$('#ap-unit').innerHTML=units.length?options(units):'<option value="">Nenhuma unidade convocada</option>';$('#ap-unit').value=adminApUnit;refreshTeam();};
+    const refreshTeam=()=>{adminApUnit=$('#ap-unit').value;const convs=candidates().filter(c=>c.supervisor===adminApSup&&c.unidade===adminApUnit);$('#ap-equipe').innerHTML=convs.length?convs.map((conv,index)=>{const ap=apForConv(conv.id);return `<section class="section"><div class="section-title"><div><h3>${escapeHtml(conv.unidade)} · ${escapeHtml(conv.turno)}</h3><p>${escapeHtml(conv.supervisor)} · ${conv.colaboradores.length} colaborador(es)</p></div>${badgeForStatus(statusConv(conv))}</div><form id="admin-ap-form-${index}" data-admin-conv="${escapeHtml(conv.id)}"><div class="person-search-wrap"><input class="control admin-person-search" type="search" autocomplete="off" placeholder="Buscar na equipe..." aria-label="Buscar colaborador na equipe"></div>${alphabeticalPersonIds(conv.colaboradores).map(cid=>{
+      const apontado=ap?.itens.some(i=>String(i.colaboradorId)===String(cid));
+      const item=adminApDrafts.get(String(conv.id))?.get(String(cid))||ap?.itens.find(i=>String(i.colaboradorId)===String(cid));
+      return `<div class="admin-person-entry">
+        ${personRow(cid,item,conv.unidade,conv.obraId,conv.dataServico,conv.supervisor)}
+        ${!apontado?`<button type="button" class="admin-remove-unpointed" data-admin-remove-conv="${escapeHtml(conv.id)}" data-admin-remove-person="${escapeHtml(cid)}"
+            aria-label="Remover da convocação: ${escapeHtml(colaboradorById(cid)?.nome||cid)}"
+            title="Remover somente esta inclusão ainda sem apontamento">×</button>`:''}
+      </div>`;
+    }).join('')}<details class="section"><summary>Incluir colaborador que não estava na convocação</summary><select class="control" id="admin-ap-add-${index}"><option value="">Selecione</option>${options(alphabeticalPeople(COLABORADORES.filter(c=>!c.inativo&&!conv.colaboradores.includes(c.id))))}</select><button class="btn btn-secondary section" id="admin-ap-include-${index}" type="button">Incluir na equipe</button></details><div class="form-actions"><button class="btn btn-primary">${ap?'Atualizar':'Salvar'} apontamento · ${escapeHtml(conv.turno)}</button></div></form></section>`;}).join(''):'<div class="empty">Nenhuma convocação nesta data para o supervisor selecionado. Use o retroativo para um serviço sem convocação prévia.</div>';bindServiceRows();convs.forEach((conv,index)=>{const form=$('#admin-ap-form-'+index);bindPersonSearch(form.querySelector('.admin-person-search'),()=>[...form.querySelectorAll('.person-card')]);form.noValidate=true;form.onsubmit=e=>{e.preventDefault();const itens=readPersonRows(conv.colaboradores,form);if(!validateExtraAmounts(itens,form))return;if(!validServices(itens,conv.unidade))return;if(!applyInlineExtras(itens,conv.dataServico,conv.supervisor))return;const ap=apForConv(conv.id);if(ap){ap.itens=itens;ap.atualizadoEm=now().toISOString();}else state.apontamentos.push({id:uid('ap'),convocacaoId:conv.id,supervisor:conv.supervisor,executor:'CONTROLADORIA',dataServico:conv.dataServico,apontadoEm:now().toISOString(),retroativo:false,itens});audit('Apontamento administrativo',conv.supervisor+' · '+conv.unidade);if(!saveData())return;toast('Apontamento salvo.');refreshTeam();};form.querySelectorAll('[data-admin-remove-conv]').forEach(button=>{
+      button.onclick=()=>removeUnpointedAdminConvocation(button.dataset.adminRemoveConv,button.dataset.adminRemovePerson);
+    });
+    $('#admin-ap-include-'+index).onclick=()=>{
+      captureAdminApDrafts();const id=$('#admin-ap-add-'+index).value;if(!id)return;if(blocked(id,conv.dataServico)||state.convocacoes.some(c=>c.id!==conv.id&&c.dataServico===conv.dataServico&&c.colaboradores.includes(id)&&overlaps(c.turno,conv.turno)))return toast('Colaborador indisponível ou já convocado neste turno.',true);conv.colaboradores.push(id);audit('Inclusão na equipe',conv.id);saveData();refreshTeam();};});};
+    $('#ap-data').onchange=refreshSupervisors;$('#ap-supervisor').onchange=refreshUnits;$('#ap-unit').onchange=refreshTeam;refreshSupervisors();
+  }
+
+
+  let serviceListSeq=0;
+  function allocationRow(unit,service={},index=0){
+    const works=OBRAS.filter(o=>o.unidade===unit),listId='service-works-'+(++serviceListSeq);
+    return `<div class="allocation-row"><div>${field(index?'Obra / Serviço adicional '+index:'Obra / Serviço',`<input class="control service-work" list="${listId}" value="${escapeHtml(works.find(o=>o.id===service.obraId)?.nome||'')}" placeholder="Selecione ou digite para buscar a obra..." autocomplete="off"><datalist id="${listId}">${works.map(o=>`<option value="${escapeHtml(o.nome)}"></option>`).join('')}</datalist>`)}</div><div>${field('Período',`<select class="control service-period">${['Integral','Manhã','Tarde','Noite'].map(x=>`<option ${x===(service.periodo||'Integral')?'selected':''}>${x}</option>`).join('')}</select>`)}</div></div>`;
+  }
+  function itemServices(item,defaultObra){
+    if(item?.servicos?.length)return item.servicos;
+    const first=item?.obraId||defaultObra;
+    if(item?.segundaObraId)return [{obraId:first,periodo:item.periodo||'Manhã',percentual:50},{obraId:item.segundaObraId,periodo:item.segundoPeriodo||'Tarde',percentual:50}];
+    return [{obraId:item?first:'',periodo:item?.periodo||'Integral',percentual:100}];
+  }
+function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slice().sort((a,b)=>String(a.unidade).localeCompare(String(b.unidade),'pt-BR')||String(a.nome).localeCompare(String(b.nome),'pt-BR'));return works.length?works.map(o=>`<option value="${escapeHtml(o.id)}" ${String(o.id)===String(selected)?'selected':''}>${escapeHtml(o.unidade+' · '+o.nome)}</option>`).join(''):'<option value="">Nenhuma obra/serviço cadastrado</option>';}
+  // O <select> nativo abre uma lista larga que recorta o número do serviço.
+  // Mantemos o ID do serviço no select oculto para preservar as regras de apontamento.
+  function extraWorkSearchMarkup(selected=''){
+    const work=obraById(selected),label=work?work.unidade+' · '+work.nome:'';
+    return `<div class="extra-work-search-wrap">
+      <input class="control row-extra-work-search" type="search" autocomplete="off"
+        aria-label="Buscar serviço da extra por número ou nome" placeholder="Digite o número ou nome do serviço"
+        value="${escapeHtml(label)}" title="${escapeHtml(label)}">
+      <select class="row-extra-work" tabindex="-1" aria-hidden="true" hidden>${extraWorkOptions(selected)}</select>
+      <div class="extra-work-full-label" aria-live="polite">${label?escapeHtml(label):'Digite o número ou nome e selecione o serviço.'}</div>
+    </div>`;
+  }
+
+  function extraRecordFor(date,personId,supervisor){return (state.extras||[]).find(x=>String(x.dataServico)===String(date)&&String(x.colaboradorId)===String(personId)&&String(x.supervisor)===String(supervisor));}
+  function mainWorkForPersonOnDate(personId,date){const convs=state.convocacoes.filter(c=>String(c.dataServico)===String(date)&&(c.colaboradores||[]).some(id=>String(id)===String(personId)));const conv=convs.find(c=>apForConv(c.id)?.itens?.some(i=>String(i.colaboradorId)===String(personId)))||convs[0];const item=conv?apForConv(conv.id)?.itens?.find(i=>String(i.colaboradorId)===String(personId)):null;const workId=itemServices(item,conv?.obraId||'').find(x=>x.obraId)?.obraId||conv?.obraId||'';return {conv,item,workId,work:obraById(workId)};}
+  function personRow(cid,item=null,unit='',defaultObra='',serviceDate=portalDate,extraSupervisor=supervisorAtual){
+ const c=colaboradorById(cid),services=itemServices(item,defaultObra),existingExtra=extraRecordFor(serviceDate,cid,extraSupervisor),draft=item?.extraLancamento,legacyExtra=EXTRA_OPTIONS.includes(item?.extra)&&item.extra!=='Não';
+ const extraValue=draft&&typeof draft.enabled==='boolean'?(draft.enabled?draft.extra:'Não'):(existingExtra?.extra||(legacyExtra?item.extra:'Não')),extraEnabled=extraValue!=='Não',
+ extraCategory=EXTRA_OPTIONS.includes(extraValue)&&extraEnabled?extraValue:'Meia diária',
+ proposedWork=draft?.obraId||existingExtra?.obraId||services.find(x=>x.obraId)?.obraId||defaultObra||'',workId=OBRAS.some(o=>String(o.id)===String(proposedWork))?proposedWork:(OBRAS[0]?.id||''),extraObservation=draft?.observacao??existingExtra?.observacao??'',
+ savedExtraAmount=draft?.valorExtraOriginal??existingExtra?.valorExtraOriginal??item?.valorExtraDisponivel??item?.valorExtraOriginal??null,extraAmount=Number(savedExtraAmount)>0?roundMoney(Number(savedExtraAmount)):0,
+ nightValue=unit==='SEBRAE'&&presence(item?.status||'Presente (Integral)')?(item&&Number.isFinite(Number(item.noturno))?Number(item.noturno):90):0;
+ return `<div class="person-row person-card" data-person="${cid}" data-unit="${escapeHtml(unit)}" data-extra-original="0" data-finance-adjusted="${item?.financeAdjusted?'true':'false'}" data-financeiro-original="${Number(item?.financeiro)||0}" data-ajuda-custo="${Number(item?.ajudaCusto)||0}"><div class="person-name">${escapeHtml(c?.nome||cid)}<br><small>${escapeHtml(c?.funcao||'')} · ${escapeHtml(unit)}</small></div>
+ <div class="person-top">${field('Status',`<select class="control row-status">${STATUS_OPTIONS.map(x=>`<option ${x===(item?.status||'Presente (Integral)')?'selected':''}>${x}</option>`).join('')}</select>`)}</div>${c?.avulso==='Sim'?`<div class="form-grid section">${field('Diárias trabalhadas · avulso (custo da Controladoria)',`<select class="control row-avulso-diaria">${AVULSO_DIARIA_OPTIONS.map(x=>`<option value="${x}" ${x===(item?.tipoDiariaAvulso||'Diária')?'selected':''}>${x}</option>`).join('')}</select>`)}</div>`:''}
+ <div class="person-services"><div class="allocations principal-service">${allocationRow(unit,services[0],0)}</div>
+ <div class="form-grid">${field('Houve extra?',`<select class="control row-extra" aria-label="Houve extra?">${APONTAMENTO_EXTRA_OPTIONS.map(([value,label])=>`<option value="${value}" ${extraValue===value?'selected':''}>${label}</option>`).join('')}${extraEnabled&&!APONTAMENTO_EXTRA_OPTIONS.some(([value])=>value===extraValue)?`<option value="${escapeHtml(extraValue)}" selected>${escapeHtml(extraValue)} (registro anterior)</option>`:''}</select>`)}${field('Valor da Extra Disponível (R$)',`<input class="control row-extra-value" type="number" min="0" step="0.01" value="${extraAmount?extraAmount.toFixed(2):''}"  title="Pode preencher mesmo com Houve extra? = Não. Obrigatório apenas quando houver extra." aria-label="Valor da Extra Disponível">`)}${Number(item?.financeiro)>0?field('Valor complementar já registrado (R$)',`<input class="control row-financeiro-historico" type="number" readonly value="${Number(item.financeiro).toFixed(2)}" title="Lançamento anterior preservado, sem edição pelo supervisor">`):''}${field('Acordos / Bonificações (R$)',`<input class="control row-acordo" type="number" min="0" step="0.01" value="${item?.acordo||0}">`)}${perfilAtual==='SUPERVISOR'?field('Passagens/Ajuda de custo (R$)',`<input class="control row-ajuda-custo" type="number" min="0" step="0.01" list="passagens-ajuda-valores" value="${Number(item?.ajudaCusto)||0}" ${item?.financeAdjusted?'readonly title="Valor confirmado pelo Financeiro"':''}>`):''}</div>
+ <div class="row-extra-panel section ${extraEnabled?'':'hidden'}"><div class="notice info">Informe o valor da extra realizado pelo colaborador. A categoria identifica o tipo de extra, mas não define o valor. O registro é separado da presença normal.</div><div class="form-grid">
+ ${field('Obra / Serviço da extra',extraWorkSearchMarkup(workId))}
+ ${field('Observação da extra',`<input class="control row-extra-obs" maxlength="2000" value="${escapeHtml(extraObservation)}" placeholder="Opcional">`)}
+ </div></div>
+ <div class="form-grid section">${field('Adicional noturno (SEBRAE)',`<select class="control row-noturno" ${unit==='SEBRAE'&&!item?.financeAdjusted?'':'disabled'}><option value="0" ${nightValue===0?'selected':''}>Sem adicional (R$ 0,00)</option><option value="50" ${nightValue===50?'selected':''}>R$ 50,00</option><option value="90" ${nightValue===90?'selected':''}>R$ 90,00</option>${![0,50,90].includes(nightValue)?`<option value="${nightValue}" selected>R$ ${nightValue.toFixed(2)} (valor já registrado)</option>`:''}</select>`)}</div>
+ <div class="row-total-summary" role="status"><span>TOTAL A PAGAR AO COLABORADOR</span><strong class="row-total">${roundMoney(Number(item?.financeiro||0)+extraAmount+nightValue+Number(item?.acordo||0)+Number(item?.ajudaCusto||0)).toLocaleString('pt-BR',{style:'currency',currency:'BRL'})}</strong><small>Valor da extra + adicional noturno + acordos + passagens/ajuda de custo${Number(item?.financeiro)>0?' + valor complementar já registrado':''}. Total calculado automaticamente, não editável.</small></div>
+ <details class="more-services"><summary>Mais opções</summary>${field('Observação / justificativa do acordo (obrigatória se houver bonificação)',`<input class="control row-obs" maxlength="2000" value="${escapeHtml(item?.observacao||'')}" placeholder="Descreva o motivo do acordo ou bonificação">`)}<div class="additional-services">${services.slice(1).map((x,i)=>allocationRow(unit,x,i+1)).join('')}</div><div class="inline-actions section"><button type="button" class="btn btn-primary add-service">+ Adicionar serviço</button><button type="button" class="btn btn-secondary remove-last-service">− Remover último</button><span class="service-count">${Math.max(0,services.length-1)} serviço(s) adicional(is)</span></div></details></div></div>`;
+}
+  // Busca viva independente do datalist do navegador. Mantém o texto e o cursor
+  // enquanto a pessoa digita; somente uma escolha explícita preenche a opção.
+  function wireLiveSuggestions(input,candidates,onPick=()=>{}){
+    if(!input||input.dataset.liveSearch==='ready')return;
+    input.dataset.liveSearch='ready';
+    const host=input.parentElement;
+    if(!host)return;
+    host.classList.add('live-search-host');
+    const menu=document.createElement('div');
+    menu.className='live-search-suggestions';
+    menu.setAttribute('role','listbox');
+    menu.hidden=true;host.appendChild(menu);
+    input.setAttribute('aria-autocomplete','list');
+    input.setAttribute('aria-expanded','false');
+    // O datalist nativo pode cobrir o texto e ficar congelado em alguns navegadores.
+    // Mantemos suas opções no HTML para compatibilidade, mas usamos uma lista própria.
+    input.removeAttribute('list');
+    let visible=[],active=-1;
+    const close=()=>{menu.hidden=true;input.setAttribute('aria-expanded','false');active=-1;};
+    const pick=index=>{
+      const choice=visible[index];if(!choice)return;
+      input.value=choice.label;
+      close();onPick(choice);
+      input.focus();
+    };
+    const highlight=()=>{
+      menu.querySelectorAll('[data-live-choice]').forEach((node,index)=>{
+        node.classList.toggle('active',index===active);
+        node.setAttribute('aria-selected',String(index===active));
+      });
+    };
+    const update=()=>{
+      const typed=clean(input.value);
+      if(!typed){close();return;}
+      const all=candidates(),matches=all.filter(item=>clean(item.label+' '+(item.searchText||'')).includes(typed));
+      visible=matches.slice(0,12);active=-1;
+      menu.innerHTML=visible.length
+        ?visible.map((item,index)=>`<button type="button" class="live-search-option" role="option" aria-selected="false" data-live-choice="${index}">${escapeHtml(item.label)}</button>`).join('')
+         +`<div class="live-search-hint">${matches.length} resultado(s) · selecione uma opção</div>`
+        :'<div class="live-search-empty">Nenhum resultado. Continue digitando ou revise o termo.</div>';
+      menu.hidden=false;input.setAttribute('aria-expanded','true');
+      menu.querySelectorAll('[data-live-choice]').forEach(button=>{
+        button.addEventListener('mousedown',event=>event.preventDefault());
+        button.addEventListener('click',()=>pick(Number(button.dataset.liveChoice)));
+      });
+    };
+    input.addEventListener('input',update);
+    input.addEventListener('focus',update);
+    input.addEventListener('blur',close);
+    input.addEventListener('keydown',event=>{
+      if(event.key==='Escape'){close();return;}
+      if(!['ArrowDown','ArrowUp','Enter'].includes(event.key)||menu.hidden)return;
+      if(event.key==='Enter'&&active<0)return;
+      event.preventDefault();
+      if(event.key==='Enter'){pick(active);return;}
+      if(!visible.length)return;
+      active=event.key==='ArrowDown'?(active+1)%visible.length:(active+visible.length-1)%visible.length;
+      highlight();
+    });
+  }
+  // Campo pesquisável da extra: filtragem instantânea por código ou nome,
+  // resultado inteiro legível e ID real somente após escolha explícita.
+  function bindExtraWorkSearch(card){
+    const input=card.querySelector('.row-extra-work-search'),
+          select=card.querySelector('.row-extra-work'),
+          full=card.querySelector('.extra-work-full-label');
+    if(!input||!select||!full)return;
+    const setSelected=id=>{
+      select.value=String(id||'');
+      const work=obraById(select.value);
+      const label=work?work.unidade+' · '+work.nome:'';
+      input.value=label;
+      input.title=label;
+      full.textContent=label||'Selecione um serviço válido na lista antes de salvar.';
+    };
+    input.addEventListener('input',()=>{
+      // Uma digitação não confirma automaticamente a opção anterior.
+      select.value='';
+      input.title=input.value;
+      full.textContent='Selecione um resultado da lista para confirmar o serviço da extra.';
+    });
+    wireLiveSuggestions(input,()=>OBRAS.filter(o=>o&&o.id).map(o=>({
+      id:String(o.id),label:o.unidade+' · '+o.nome,searchText:String(o.id)
+    })),choice=>setSelected(choice.id));
+    const current=select.value;
+    setSelected(current);
+  }
+  function bindServiceRows(){
+    $$('.person-card .service-work').forEach(input=>{
+      wireLiveSuggestions(input,()=>OBRAS.filter(o=>o.unidade===input.closest('.person-card')?.dataset.unit).map(o=>({label:o.nome,id:o.id})));
+    });
+    $$('.person-card').forEach(card=>{
+      bindExtraWorkSearch(card);
+      const field=selector=>card.querySelector(selector),extraChoice=field('.row-extra'),
+            extraAmount=field('.row-extra-value'),
+            night=field('.row-noturno'),status=field('.row-status'),total=field('.row-total'),
+            panel=field('.row-extra-panel');
+      const moneyValue=selector=>Math.max(0,Number(field(selector)?.value)||0);
+      const updateTotal=()=>{
+        const active=(extraChoice?.value||'Não')!=='Não';
+        if(extraAmount){
+          extraAmount.type='number';
+          extraAmount.disabled=false;
+          extraAmount.readOnly=false;
+          extraAmount.required=active;
+          extraAmount.min=active?'0.01':'0';
+        }
+        const extra=moneyValue('.row-extra-value');
+        const ordinary=presence(status.value)?Math.max(0,Number(card.dataset.financeiroOriginal)||0)+moneyValue('.row-acordo')+moneyValue('.row-ajuda-custo')+moneyValue('.row-noturno'):0;
+        const sum=roundMoney(extra+ordinary);
+        if(total)total.textContent=sum.toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+        panel?.classList.toggle('hidden',!active);
+      };
+      const countServices=()=>{const counter=field('.service-count');if(counter)counter.textContent=card.querySelectorAll('.additional-services .allocation-row').length+' serviço(s) adicional(is)';};
+      field('.add-service').onclick=()=>{
+        field('.additional-services').insertAdjacentHTML('beforeend',allocationRow(card.dataset.unit,{},card.querySelectorAll('.allocation-row').length));
+        const added=card.querySelector('.additional-services .allocation-row:last-child .service-work');
+        wireLiveSuggestions(added,()=>OBRAS.filter(o=>o.unidade===card.dataset.unit).map(o=>({label:o.nome,id:o.id})));
+        countServices();
+      };
+      field('.remove-last-service').onclick=()=>{field('.additional-services .allocation-row:last-child')?.remove();countServices();};
+      status.onchange=()=>{
+        if(night&&!night.disabled){
+          if(!presence(status.value))night.value='0';
+        }
+        updateTotal();
+      };
+      if(extraChoice)extraChoice.onchange=updateTotal;
+      if(extraAmount){extraAmount.addEventListener('input',updateTotal);extraAmount.addEventListener('change',updateTotal);}
+      for(const selector of ['.row-acordo','.row-ajuda-custo','.row-noturno']){
+        const control=field(selector);if(control){control.addEventListener('input',updateTotal);control.addEventListener('change',updateTotal);}
+      }
+      updateTotal();
+    });
+  }
+  function validateAgreementObservations(items,scope=document){
+    if(perfilAtual!=='SUPERVISOR')return true;
+    for(const item of items){
+      if(!(Number(item.acordo)>0))continue;
+      const row=[...scope.querySelectorAll('.person-card')].find(el=>String(el.dataset.person)===String(item.colaboradorId));
+      const observation=row?.querySelector('.row-obs');
+      if(observation?.value.trim())continue;
+      const details=row?.querySelector('.more-services');if(details)details.open=true;
+      observation?.setCustomValidity('Descreva o acordo ou a bonificação para continuar.');
+      observation?.reportValidity();observation?.focus();
+      toast('Informe a observação descrevendo o acordo/bonificação para cada colaborador com valor preenchido.',true);
+      return false;
+    }
+    scope.querySelectorAll('.row-obs').forEach(input=>input.setCustomValidity(''));
+    return true;
+  }
+  function validateExtraAmounts(items,scope=document){
+    for(const item of items){
+      const extra=item?.extraLancamento||{};
+      if(String(extra.extra||'Não')==='Não')continue;
+      const amount=Number(extra.valorExtraOriginal);
+      if(!Number.isFinite(amount)||amount<=0||amount>10000000){
+        const row=[...scope.querySelectorAll('.person-card')].find(el=>String(el.dataset.person)===String(item.colaboradorId));
+        row?.querySelector('.more-services')?.setAttribute('open','');
+        row?.querySelector('.row-extra-value')?.focus();
+        toast('Informe um valor da extra maior que R$ 0,00 para cada colaborador cuja opção de extra seja diferente de “Não”.',true);
+        return false;
+      }
+    }
+    return true;
+  }
+  function readPersonRows(ids,scope=document){
+    return ids.map(cid=>{
+      const row=scope.querySelector(`[data-person="${cid}"]`),
+            servicos=[...row.querySelectorAll('.allocation-row')].map(r=>({
+              obraId:OBRAS.find(o=>o.unidade===row.dataset.unit&&clean(o.nome)===clean(r.querySelector('.service-work').value))?.id||'',
+              periodo:r.querySelector('.service-period').value
+            })),
+            category=row.querySelector('.row-extra')?.value||'Não',
+            enabled=category!=='Não';
+      return {
+        colaboradorId:cid,status:row.querySelector('.row-status').value,extra:'Não',tipoDiariaAvulso:row.querySelector('.row-avulso-diaria')?.value||null,
+        extraLancamento:{
+          enabled,extra:category,
+          valorExtraOriginal:Math.max(0,Number(row.querySelector('.row-extra-value')?.value)||0),
+          obraId:row.querySelector('.row-extra-work')?.value||'',
+          observacao:row.querySelector('.row-extra-obs')?.value.trim()||'',
+          dayWorkId:servicos.find(x=>x.obraId)?.obraId||''
+        },
+        valorExtraOriginal:0,valorExtraDisponivel:Math.max(0,Number(row.querySelector('.row-extra-value')?.value)||0),observacao:row.querySelector('.row-obs').value.trim(),servicos,
+        obraId:servicos[0]?.obraId||'',financeAdjusted:row.dataset.financeAdjusted==='true',
+        financeiro:Math.max(0,Number(row.dataset.financeiroOriginal)||0),
+        noturno:Number(row.querySelector('.row-noturno').value)||0,
+        acordo:Number(row.querySelector('.row-acordo').value)||0,
+        ajudaCusto:Number(row.querySelector('.row-ajuda-custo')?.value??row.dataset.ajudaCusto)||0
+      };
+    });
+  }
+  function applyInlineExtras(items,date,supervisor){const pending=items.map(item=>({item,extra:item.extraLancamento||{enabled:false}}));for(const p of pending){if(!p.extra.enabled)continue;if(!colaboradorById(p.item.colaboradorId)){toast('Selecione um funcionário válido para a extra.',true);return false;}if(!OBRAS.some(o=>String(o.id)===String(p.extra.obraId))){toast('Selecione a obra/unidade onde a extra foi realizada.',true);return false;}if(!['Meia diária','Diária','Uma e meia diária','Duas diárias'].includes(p.extra.extra)){toast('Selecione o tipo de extra.',true);return false;}if(date>isoToday()){toast('Extra não aceita data futura.',true);return false;}if(!Number.isFinite(Number(p.extra.valorExtraOriginal))||roundMoney(Number(p.extra.valorExtraOriginal))<=0||Number(p.extra.valorExtraOriginal)>10000000){toast('Digite um Valor da Extra maior que zero antes de salvar o apontamento.',true);return false;}}
+ let extras=[...(state.extras||[])];for(const p of pending){const personId=String(p.item.colaboradorId),owner=String(supervisor||supervisorAtual),matches=extras.filter(x=>String(x.dataServico)===String(date)&&String(x.colaboradorId)===personId&&String(x.supervisor)===owner);if(p.extra.enabled){const previous=matches[0],work=obraById(p.extra.obraId),kind=p.extra.extra,workDay=String(p.extra.dayWorkId||p.item.servicos?.find(x=>x.obraId)?.obraId||mainWorkForPersonOnDate(personId,date).workId||previous?.servicoDiaId||'');const record={...(previous||{}),id:previous?.id||uid('extra'),supervisor:owner,dataServico:date,unidade:work.unidade,obraId:String(work.id),colaboradorId:personId,extra:kind,valorExtraOriginal:roundMoney(Number(p.extra.valorExtraOriginal)),observacao:String(p.extra.observacao||'').trim().slice(0,2000),criadoEm:previous?.criadoEm||now().toISOString(),executor:previous?.executor||owner,servicoDiaId:workDay};extras=extras.filter(x=>!matches.includes(x));extras.push(record);}else{if(matches.length){toast('Uma extra já registrada não pode ser apagada junto com o apontamento. Solicite correção do registro histórico à Controladoria.',true);return false;}}delete p.item.extraLancamento;p.item.extra='Não';}state.extras=extras;return true;}
+    // Filtra apenas os cartões exibidos: seleção e alterações não são apagadas.
+  function bindPersonSearch(input, cards){
+    if(!input)return;
+    input.oninput=()=>{
+      const query=clean(input.value);
+      cards().forEach(card=>{card.style.display=!query||clean(card.textContent).includes(query)?'':'none';});
+    };
+    input.onkeydown=e=>{if(e.key==='Enter')e.preventDefault();};
+  }
+  function validServices(items,unit){
+    for(const i of items){if(!presence(i.status))continue;const ss=i.servicos;
+      if(!ss.length||ss.some(x=>!x.obraId||obraById(x.obraId)?.unidade!==unit)){toast('Escolha os serviços de cada colaborador dentro da unidade selecionada.',true);return false;}
+      if(new Set(ss.map(x=>x.obraId+'|'+x.periodo)).size!==ss.length){toast('Há um serviço repetido no mesmo período para o colaborador.',true);return false;}
+    }return true;
+  }
+
+  function renderApontamentoRetroativo() {
+    if(perfilAtual==='SUPERVISOR'&&retroDateSelected)portalDate=retroDateSelected;
+    const body = $('#apontamento-body');
+    const unidades = adminUnits();
+    body.innerHTML = `
+      <div class="grid grid-2">
+        <div class="card card-pad">
+          <form id="form-retro">
+          ${perfilAtual==='CONTROLADORIA'?`<label class="field-label">Supervisor responsável</label><select class="control" id="retro-sup">${options(RESPONSAVEIS_CONTROLADORIA)}</select>`:''}
+            <div class="form-grid">
+              <div><label class="field-label">Data do serviço</label><input id="retro-data" type="date" class="control" value="${retroDateSelected||portalDate}" max="${isoToday()}" required></div>
+              <div><label class="field-label">Turno</label><select id="retro-turno" class="control"><option>Integral</option><option>Manhã</option><option>Tarde</option><option>Noite</option><option>Outro</option></select></div>
+              <div><label class="field-label">Unidade</label><select id="retro-unidade" class="control">${unidades.map(u=>`<option>${u}</option>`).join('')}</select></div>
+              <div class="notice info">Selecione os serviços individualmente na ficha de cada colaborador.</div>
+              <div class="full"><label class="field-label">Colaboradores a apontar</label><p style="font-size:12px">Não selecionar alguém não registra falta. Para registrar falta, selecione a pessoa e escolha “Falta” no Status. Convocados sem apontamento permanecem pendentes.</p><div class="person-search-wrap"><input id="retro-person-search" class="control" type="search" autocomplete="off" placeholder="Buscar colaborador..." aria-label="Buscar colaboradores para apontamento"></div><div class="checkbox-grid retro-person-list">${alphabeticalPeople(COLABORADORES.filter(c=>!c.inativo)).map(c=>`<label class="check-card"><input type="checkbox" name="retro-colab" value="${c.id}"><span><strong>${c.nome}</strong><br><small>${c.funcao}</small></span></label>`).join('')}</div></div>
+              <div class="full" id="retro-rows"></div>
+            </div>
+            <div class="form-actions"><button class="btn btn-primary" type="submit">Salvar apontamento retroativo</button></div>
+          </form>
+        </div>
+        ${perfilAtual==='SUPERVISOR'?'<aside class="card card-pad"><div class="section-title"><div><h3>Datas com apontamento pendente</h3><p>Selecione uma equipe para regularizar.</p></div></div><div id="retro-pending-list" class="retro-pending-list"></div></aside>':`        <div class="card card-pad">
+          <div class="section-title"><div><h3>O que acontece ao salvar</h3><p>Regularização automática da data.</p></div></div>
+          <div class="notice success"><strong>Se não houver convocação:</strong> o sistema cria o registro daquela data e salva o apontamento ao mesmo tempo.</div>
+          <div class="notice info" style="margin-top:10px"><strong>Se já houver convocação pendente:</strong> ela é vinculada ao apontamento e deixa de ser pendência.</div>
+          <div class="notice warning" style="margin-top:10px"><strong>Histórico:</strong> se o prazo já venceu, o item fica como “Regularizado com atraso”, mas não permanece na lista de pendências.</div>
+        </div>`}
+
+      </div>`;
+
+    const unidade = $('#retro-unidade'), rows = $('#retro-rows');
+    const list=$('.retro-person-list');
+    const avulsoPanel=document.createElement('details');
+    avulsoPanel.className='section card card-pad';
+    avulsoPanel.innerHTML='<summary>Incluir colaborador avulso no retroativo</summary><div class="form-grid">'
+      +field('Nome do avulso','<input class="control" id="retro-avulso-name" maxlength="120" placeholder="Nome completo">')
+      +field('Categoria do avulso',avulsoFuncaoSelect('retro-avulso-funcao'))
+      +'</div><div class="form-actions"><button type="button" class="btn btn-secondary" id="retro-avulso-add">Adicionar avulso ao apontamento</button></div>';
+    list.insertAdjacentElement('afterend',avulsoPanel);
+    bindPersonSearch($('#retro-person-search'),()=>$$('.retro-person-list .check-card'));
+    let retroDrafts=new Map();
+    if(perfilAtual==='SUPERVISOR'){
+      const pending=new Map();for(const c of state.convocacoes.filter(c=>c.supervisor===supervisorAtual&&c.dataServico<=isoToday()&&!completeConv(c))){const done=new Set(apForConv(c.id)?.itens.map(i=>i.colaboradorId)||[]),ids=c.colaboradores.filter(id=>!done.has(id));if(!ids.length)continue;const key=c.dataServico+'|'+c.unidade+'|'+c.turno;if(!pending.has(key))pending.set(key,{date:c.dataServico,unit:c.unidade,turn:c.turno,ids:new Set()});ids.forEach(id=>pending.get(key).ids.add(id));}
+      const groups=[...pending.values()].sort((a,b)=>a.date.localeCompare(b.date)||a.unit.localeCompare(b.unit,'pt-BR')||a.turn.localeCompare(b.turn,'pt-BR'));
+      let date='';$('#retro-pending-list').innerHTML=groups.length?groups.map((g,index)=>{const title=date!==g.date?'<h4 class="retro-pending-date">'+formatDate(g.date)+'</h4>':'';date=g.date;return title+`<button type="button" class="retro-pending-item" data-retro-pending="${index}"><span><strong>${escapeHtml(g.unit)}</strong><small>${escapeHtml(g.turn)} · ${g.ids.size} colaborador(es) sem apontamento</small></span><span class="retro-pending-action">Regularizar →</span></button>`;}).join(''):'<div class="notice success">Nenhum apontamento pendente até hoje.</div>';
+      $$('[data-retro-pending]').forEach(button=>button.onclick=()=>{const g=groups[Number(button.dataset.retroPending)];retroDateSelected=g.date;portalDate=g.date;portalUnit=g.unit;$('#retro-data').value=g.date;unidade.value=g.unit;$('#retro-turno').value=g.turn;retroDrafts.clear();$$('input[name="retro-colab"]').forEach(input=>input.checked=g.ids.has(input.value));refreshRows(true);syncRetroHeader();if($('#portal-unit'))$('#portal-unit').value=g.unit;$$('[data-retro-pending]').forEach(b=>b.classList.toggle('active',b===button));});
+    }
+    $('#retro-data').onchange=()=>{retroDateSelected=$('#retro-data').value;if(perfilAtual==='SUPERVISOR'&&retroDateSelected){portalDate=retroDateSelected;syncRetroHeader();}};
+    unidade.onchange=()=>{retroDrafts.clear();refreshRows(true);};
+    if(perfilAtual==='SUPERVISOR'&&portalUnit!=='Todas')unidade.value=portalUnit;
+
+    function refreshRows(reset=false) {
+      const current=$$('#retro-rows [data-person]').map(x=>x.dataset.person);if(!reset)readPersonRows(current).forEach(i=>retroDrafts.set(i.colaboradorId,i));
+      const ids = alphabeticalPersonIds($$('input[name="retro-colab"]:checked').map(x=>x.value));
+      const retroDate=$('#retro-data').value,retroTurn=$('#retro-turno').value,retroSupervisor=$('#retro-sup')?.value||supervisorAtual;
+      const previousItem=id=>{
+        const conv=state.convocacoes.find(c=>c.dataServico===retroDate&&c.unidade===unidade.value&&c.turno===retroTurn&&c.supervisor===retroSupervisor&&c.colaboradores.includes(id));
+        return conv?apForConv(conv.id)?.itens.find(i=>i.colaboradorId===id):null;
+      };
+      rows.innerHTML = ids.length ? `<div class="section-title" style="margin-top:12px"><div><h3>Apontamento da equipe</h3><p>Defina status e a categoria da extra. O padrão é “Não”.</p></div></div>${ids.map(id=>personRow(id,retroDrafts.get(id)||previousItem(id),unidade.value,OBRAS.find(o=>o.unidade===unidade.value)?.id||'',retroDate,retroSupervisor)).join('')}` : '';
+      bindServiceRows();
+    }
+    const connectRetroChoices=()=>$$('input[name="retro-colab"]').forEach(x=>x.onchange=()=>refreshRows());
+    connectRetroChoices();
+    $('#retro-avulso-add').onclick=()=>{
+      const nome=$('#retro-avulso-name').value.trim(),funcao=$('#retro-avulso-funcao').value;
+      if(!nome)return toast('Informe o nome do colaborador avulso.',true);
+      if(!funcao)return toast('Selecione Profissional ou Servente para o avulso.',true);
+      if(!$('#retro-data').value||$('#retro-data').value>isoToday())return toast('Selecione uma data retroativa válida.',true);
+      // Guardar todos os campos atuais ANTES de atualizar a lista de seleção.
+      const checked=new Set($$('input[name="retro-colab"]:checked').map(x=>x.value));
+      const id=uid('c'),novo={id,nome,...avulsoData(funcao)};
+      COLABORADORES.push(novo);retroUnsavedAvulsos.set(id,novo);checked.add(id);
+      list.innerHTML=alphabeticalPeople(COLABORADORES.filter(c=>!c.inativo))
+        .map(c=>`<label class="check-card"><input type="checkbox" name="retro-colab" value="${escapeHtml(c.id)}" ${checked.has(c.id)?'checked':''}><span><strong>${escapeHtml(c.nome)}</strong><br><small>${escapeHtml(c.funcao)}</small></span></label>`).join('');
+      connectRetroChoices();
+      refreshRows();
+      $('#retro-avulso-name').value='';$('#retro-avulso-funcao').value='';
+      toast('Avulso incluído. Os dados já preenchidos foram mantidos; confira a diária e o serviço.');
+    };
+
+    $('#form-retro').noValidate=true;
+    $('#form-retro').onsubmit = (e) => {
+      e.preventDefault();
+      try{
+      const dataServico = $('#retro-data').value;
+      if (!dataServico) return toast('Escolha a data do serviço.', true);if(dataServico>isoToday())return toast('O apontamento retroativo não aceita data futura.',true);
+      const ids = alphabeticalPersonIds($$('input[name="retro-colab"]:checked').map(x=>x.value));
+      if (!ids.length) return toast('Selecione pelo menos um colaborador.', true);
+      const responsavel=$('#retro-sup')?.value||supervisorAtual;
+      const itens=readPersonRows(ids);if(!validateAgreementObservations(itens,$('#form-retro')))return;if(!validateExtraAmounts(itens,$('#form-retro')))return;if(!validServices(itens,unidade.value))return;
+      if(!applyInlineExtras(itens,dataServico,responsavel))return;
+      const obraRef=obraById(itens.find(i=>i.servicos[0]?.obraId)?.servicos[0]?.obraId)||OBRAS.find(o=>o.unidade===unidade.value);
+      const matching=state.convocacoes.filter(c=>c.supervisor===responsavel&&c.dataServico===dataServico&&c.unidade===unidade.value&&c.turno===$('#retro-turno').value);
+      const batches=new Map(),newIds=[];
+      for(const id of ids){const c=matching.find(c=>c.colaboradores.includes(id));if(c){if(!batches.has(c.id))batches.set(c.id,{conv:c,items:[]});batches.get(c.id).items.push(itens.find(i=>i.colaboradorId===id));}else newIds.push(id);}
+      if(newIds.length){const conv={id:uid('cv'),supervisor:responsavel,dataServico,unidade:unidade.value,obraId:obraRef?.id||'',turno:$('#retro-turno').value,colaboradores:newIds,criadoEm:now().toISOString(),origem:'retroativo'};state.convocacoes.push(conv);batches.set(conv.id,{conv,items:itens.filter(i=>newIds.includes(i.colaboradorId))});}
+      for(const {conv,items} of batches.values()){const selected=new Set(items.map(i=>i.colaboradorId));let ap=apForConv(conv.id);if(ap){ap.itens=[...ap.itens.filter(i=>!selected.has(i.colaboradorId)),...items];ap.atualizadoEm=now().toISOString();ap.retroativo=true;}else state.apontamentos.push({executor:supervisorAtual||perfilLabel(perfilAtual),id:uid('ap'),convocacaoId:conv.id,supervisor:conv.supervisor,dataServico,apontadoEm:now().toISOString(),retroativo:true,itens:items});}
+      audit('Apontamento retroativo',dataServico);const savedMessage=[...batches.values()].every(({conv})=>completeConv(conv))?'Apontamento retroativo salvo. Equipe regularizada.':'Apontamento salvo. Há colaboradores convocados que continuam pendentes.';if(!saveData(()=>{retroUnsavedAvulsos.clear();setView('pendencias');}))return;toast(savedMessage);
+      }catch(error){
+        console.error('APROAR retroactive form submit failure',String(error?.message||error).slice(0,240));
+        showToast('Não foi possível preparar o apontamento retroativo. Confira os campos e tente novamente.',true);showSaveFeedback('Não foi possível preparar o apontamento retroativo. Confira os campos e tente novamente.',true);
+      }
+    };
+  }
+
+
+  function renderExtras(){
+    const supervisorOnly=perfilAtual==='SUPERVISOR';
+    const eligibleUnits=adminUnits().filter(unit=>{
+      if(!supervisorOnly)return true;
+      const owner=state.unitOwners?.[unit];
+      return owner?owner===supervisorAtual:state.convocacoes.some(c=>c.supervisor===supervisorAtual&&c.unidade===unit);
+    });
+    const eligibleWorks=OBRAS.filter(o=>eligibleUnits.includes(o.unidade));
+    const startDate=portalDate>isoToday()?isoToday():(portalDate||isoToday());
+    const supField=supervisorOnly?'':field('Supervisor responsável pelo lançamento','<select class="control" id="extra-supervisor">'+options(SUPERVISORES)+'</select>');
+    const workOptions=eligibleWorks.map(o=>'<option value="'+escapeHtml(o.id)+'">'+escapeHtml(o.unidade+' · '+o.nome)+'</option>').join('');
+    $('#main-content').innerHTML=head('Lançamento de extras','Registre uma extra independente do apontamento normal, inclusive quando o colaborador já trabalhou integralmente em outra unidade')+
+      '<div class="card card-pad"><form id="extra-form"><div class="form-grid">'+
+      field('Data da extra','<input class="control" id="extra-date" type="date" value="'+escapeHtml(startDate)+'" max="'+isoToday()+'" required>')+
+      field('Colaborador','<select class="control" id="extra-person" required><option value="">Selecione o colaborador</option>'+options(COLABORADORES.filter(p=>!p.inativo).slice().sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR')))+'</select>')+
+      field('Serviço da extra','<select class="control" id="extra-work" required>'+workOptions+'</select>')+
+      field('Tipo de extra','<select class="control" id="extra-kind" required>'+['Meia diária','Diária','Uma e meia diária','Duas diárias'].map(x=>'<option '+(x==='Diária'?'selected':'')+'>'+x+'</option>').join('')+'</select>')+
+      field('Valor da Extra (R$)','<input class="control" id="extra-amount" type="number" min="0.01" step="0.01" placeholder="Digite o valor" required>')+supField+field('Observação (opcional)','<input class="control" id="extra-obs" maxlength="2000" placeholder="Descreva o serviço extra, se necessário">')+
+      '</div><div id="extra-day-service" class="notice info section">O serviço principal do dia será sugerido quando estiver dentro da unidade sob sua responsabilidade. Você pode escolher outro serviço da sua unidade para atribuir a extra.</div>'+
+      (eligibleWorks.length?'':'<div class="notice warning section">Nenhum serviço está vinculado à sua responsabilidade. A Controladoria precisa configurar o responsável da unidade antes do lançamento.</div>')+
+      (onlineWritable?'':'<div class="notice warning section">O ambiente está em modo somente leitura. A gravação será liberada quando a autorização de escrita do APROAR estiver ativa.</div>')+
+      '<div class="form-actions"><button class="btn btn-primary" type="submit" '+(eligibleWorks.length&&onlineWritable?'':'disabled')+'>Salvar extra</button></div></form></div>'+
+      '<div class="section card card-pad"><div class="section-title"><div><h3>Extras independentes registrados</h3><p>Cada lançamento pertence a um serviço e aparece separado da presença diária do colaborador.</p></div></div><div id="extra-records"></div></div>';
+    const updateSuggestion=()=>{
+      const date=$('#extra-date')?.value,personId=$('#extra-person')?.value;
+      const dayConv=state.convocacoes.find(c=>c.dataServico===date&&c.colaboradores.includes(personId)&&c.supervisor===supervisorAtual)||state.convocacoes.find(c=>c.dataServico===date&&c.colaboradores.includes(personId));
+      const dayWork=dayConv?.obraId?obraById(dayConv.obraId):null;
+      const current=$('#extra-work')?.value;
+      if(dayWork&&eligibleWorks.some(o=>String(o.id)===String(dayWork.id)))$('#extra-work').value=dayWork.id;
+      else if(!eligibleWorks.some(o=>String(o.id)===String(current)))$('#extra-work').value=eligibleWorks[0]?.id||'';
+      $('#extra-day-service').textContent=dayWork
+        ?'Serviço principal registrado no dia: '+dayWork.unidade+' · '+dayWork.nome+'. A extra será atribuída ao serviço selecionado abaixo.'
+        :'Não foi encontrado um serviço principal para este colaborador nesta data. Selecione o serviço em que a extra foi realizada.';
+    };
+    $('#extra-date').onchange=updateSuggestion;$('#extra-person').onchange=updateSuggestion;updateSuggestion();
+    $('#extra-form').onsubmit=e=>{
+      e.preventDefault();
+      const date=$('#extra-date').value,personId=$('#extra-person').value,work=obraById($('#extra-work').value),kind=$('#extra-kind').value;
+      const supervisor=supervisorOnly?supervisorAtual:$('#extra-supervisor').value;
+      if(!personId||!work)return toast('Selecione o colaborador e o serviço da extra.',true);
+      if(date>isoToday())return toast('Extra não aceita data futura.',true);
+      const amount=Number($('#extra-amount').value);if(!Number.isFinite(amount)||amount<=0||amount>10000000)return toast('Digite um Valor da Extra maior que zero.',true);
+      if((state.extras||[]).some(x=>x.dataServico===date&&String(x.colaboradorId)===String(personId)&&String(x.obraId)===String(work.id)))return toast('Já existe uma extra para este colaborador, data e serviço.',true);
+      state.extras ||= [];
+      state.extras.push({id:uid('extra'),supervisor,dataServico:date,unidade:work.unidade,obraId:work.id,colaboradorId:personId,extra:kind,valorExtraOriginal:roundMoney(amount),observacao:$('#extra-obs').value.trim(),criadoEm:now().toISOString()});
+      audit('Lançamento de extra independente',colaboradorById(personId)?.nome+' · '+date+' · '+work.unidade+' · '+work.nome);
+      saveData();
+    };
+    const rows=(state.extras||[]).slice().sort((a,b)=>b.dataServico.localeCompare(a.dataServico)||String(a.id).localeCompare(String(b.id)));
+    $('#extra-records').innerHTML=table(['Data','Supervisor','Colaborador','Unidade','Serviço','Tipo','Valor da Extra (R$)','Observação','Ação'],rows.map(x=>{
+      const person=colaboradorById(x.colaboradorId),work=obraById(x.obraId),value=Number(x.valorExtraOriginal)||0;
+      const action=onlineWritable&&onlineStage!=='producao'?'<button class="link-btn" data-extra-delete="'+escapeHtml(x.id)+'">Excluir</button>':'—';
+      return [formatDate(x.dataServico),escapeHtml(x.supervisor),escapeHtml(person?.nome||x.colaboradorId),escapeHtml(work?.unidade||x.unidade),escapeHtml(work?.nome||'Serviço removido'),escapeHtml(x.extra),money(value),escapeHtml(x.observacao||''),action];
+    }));
+    $$('[data-extra-delete]').forEach(button=>button.onclick=()=>{
+      const id=button.dataset.extraDelete,entry=(state.extras||[]).find(x=>String(x.id)===String(id));
+      if(!entry)return;
+      if(supervisorOnly&&entry.supervisor!==supervisorAtual)return toast('Você só pode excluir as extras que lançou.',true);
+      state.extras=state.extras.filter(x=>String(x.id)!==String(id));
+      audit('Exclusão de extra independente',id);saveData();
+    });
+  }
+
+  function renderPendencias() {
+    const pend = pendenciasApontamento();
+    const example=pend.find(c=>c.exemploRegularizacao);
+    const previstas = previstasSemConvocacao();
+    const reg = regularizacoesAtrasadas().sort((a,b)=>b.dataServico.localeCompare(a.dataServico));
+
+    $('#main-content').innerHTML = `
+      <div class="page-head"><div><div class="eyebrow">ACOMPANHAMENTO</div><h2>Pendências</h2><p>Pendência é algo ainda sem solução. Itens regularizados saem daqui e permanecem apenas no histórico.</p></div><button id="go-retro" class="btn btn-primary">Regularizar retroativamente</button></div>
+
+      ${example?`<div class="notice info section">Exemplo para testar: ${example.supervisor} · ${example.unidade} · ${formatDate(example.dataServico)}. Use “Regularizar” na linha abaixo e salve o apontamento.</div>`:''}
+      <div class="grid grid-3">
+        ${metric('APONTAMENTOS PENDENTES', pend.length, 'há convocação, mas não há apontamento salvo')}
+        ${metric('CONVOCAÇÕES NÃO FEITAS', previstas.length, 'dias sem convocação por supervisor')}
+        ${metric('REGULARIZADOS COM ATRASO', reg.length, 'histórico, não pendência')}
+      </div>
+
+      <div class="section card card-pad">
+        <div class="section-title"><div><h3>Apontamentos pendentes</h3><p>Só aparecem quando existe convocação e o prazo já venceu.</p></div></div>
+        ${pend.length ? `<div class="table-wrap"><table><thead><tr><th>Data</th><th>Unidade</th><th>Serviço</th><th>Prazo</th><th>Ação</th></tr></thead><tbody>${pend.map(c=>`<tr><td>${formatDate(c.dataServico)}</td><td>${c.unidade}</td><td>${obraById(c.obraId)?.nome || '-'}</td><td>${formatDateTime(deadlineApontamento(c.dataServico))}<br><small>${apForConv(c.id)?'Apontamento parcial':'Não apontado'}</small></td><td><button class="link-btn regularizar" data-date="${c.dataServico}" data-convocacao="${escapeHtml(c.id)}">Regularizar</button></td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">Nenhum apontamento pendente.</div>'}
+      </div>
+
+      <div class="section card card-pad">
+        <div class="section-title"><div><h3>Convocações não feitas</h3><p>Dias sem convocação registrada por supervisor. Felipe é considerado a partir de 28/09.</p></div></div>
+        ${table(['Supervisor','Quantidade','Dias sem convocação'],[...new Set(previstas.map(x=>x.supervisor))].map(s=>{const days=previstas.filter(x=>x.supervisor===s).map(x=>x.dataServico);return [s,days.length,days.map(formatDate).join(', ')];}))}
+      </div>
+
+      ${perfilAtual==='SUPERVISOR'?'':`      <div class="section card card-pad">
+        <div class="section-title"><div><h3>Histórico de regularizações com atraso</h3><p>Já foram resolvidas e não são mais pendências.</p></div></div>
+        ${reg.length ? `<div class="table-wrap"><table><thead><tr><th>Data do serviço</th><th>Registrado em</th><th>Origem</th><th>Status</th></tr></thead><tbody>${reg.map(a=>`<tr><td>${formatDate(a.dataServico)}</td><td>${formatDateTime(a.apontadoEm)}</td><td>${a.retroativo ? 'Retroativo' : 'Apontamento normal'}</td><td>${badgeForStatus('Regularizado com atraso')}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty">Nenhuma regularização atrasada neste conjunto de teste.</div>'}
+      </div>`}`;
+
+    $('#go-retro').onclick = () => { apontamentoTab = 'retroativo'; setView('apontamento'); };
+    $('.regularizar').forEach(b => b.onclick = () => {
+      const source=state.convocacoes.find(c=>String(c.id)===String(b.dataset.convocacao));
+      if(!source)return toast('Não foi possível localizar a convocação pendente. Atualize os dados e tente novamente.',true);
+      const done=new Set((apForConv(source.id)?.itens||[]).map(i=>String(i.colaboradorId)));
+      const missing=source.colaboradores.filter(id=>!done.has(String(id)));
+      apontamentoTab='retroativo';retroDateSelected=source.dataServico;portalDate=source.dataServico;portalUnit=source.unidade;
+      setView('apontamento');
+      setTimeout(()=>{
+        const date=$('#retro-data'),unit=$('#retro-unidade'),turn=$('#retro-turno'),supervisor=$('#retro-sup');
+        if(!date||!unit||!turn)return showToast('Não foi possível abrir o formulário retroativo. Entre novamente e tente de novo.',true);
+        if(supervisor)supervisor.value=source.supervisor;
+        date.value=source.dataServico;date.onchange?.();
+        if([...unit.options].some(option=>option.value===source.unidade))unit.value=source.unidade;
+        unit.onchange?.();turn.value=source.turno;
+        const checkboxes=$('input[name="retro-colab"]');
+        checkboxes.forEach(input=>input.checked=missing.some(id=>String(id)===String(input.value)));
+        checkboxes.find(input=>input.checked)?.onchange?.();
+        syncRetroHeader();
+      },0);
+    });
+  }
+
+  function escapeHtml(v) {
+    return String(v ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  }
+
+  function showToast(msg, error=false) {
+    const el = $('#toast');
+    el.textContent = msg;
+    el.style.background = error ? '#8f2d2d' : '#0f2c4d';
+    el.classList.add('show');
+    clearTimeout(toast._t);
+    toast._t = setTimeout(()=>el.classList.remove('show'), 2800);
+  }
+
+  let loginRole='CONTROLADORIA';
+  function syncLoginProfileUI(){ const role=loginRole,passwordRequired=role!=='VISUALIZAR';$('#login-supervisor-wrap').classList.toggle('hidden',role!=='SUPERVISOR');$('#login-password').required=passwordRequired;$('#login-password').closest('.password-wrap').classList.toggle('hidden',!passwordRequired);document.querySelector('label[for="login-password"]').classList.toggle('hidden',!passwordRequired);$('#login-error').textContent='';$('#login-password').value=''; }
+  function enterProfile(profile){
+    perfilAtual=profile;sessionStorage.setItem(PROFILE_KEY,profile);
+    if(profile==='SUPERVISOR'){supervisorAtual=SUPERVISORES.includes(supervisorAtual)?supervisorAtual:SUPERVISORES[0];sessionStorage.setItem(SESSION_KEY,supervisorAtual);viewAtual='apontamento';portalUnit=state.convocacoes.find(c=>c.supervisor===supervisorAtual&&c.dataServico===portalDate)?.unidade||OBRAS[0]?.unidade||'Todas';}
+    else{supervisorAtual='';sessionStorage.removeItem(SESSION_KEY);viewAtual=profile==='VISUALIZAR'?'dashboard':'inicio';}
+    render();
+  }
+  function init(){
+    $('#login-access').onchange=syncLoginProfileUI;
+    $('#show-password').onclick=()=>{const inp=$('#login-password');inp.type=inp.type==='password'?'text':'password';$('#show-password').setAttribute('aria-label',inp.type==='password'?'Mostrar senha':'Ocultar senha');};
+    $('#enter-supervisor').onclick=()=>enterProfile('SUPERVISOR');$('#enter-viewer').onclick=()=>enterProfile('VISUALIZAR');$('#logout-button').onclick=logout;
+    $('#reset-demo').onclick=()=>{if(perfilAtual!=='VISUALIZAR')resetData();};
+    $('#side-nav').onclick=e=>{const btn=e.target.closest('.nav-item');if(btn)setView(btn.dataset.view);};
+    $('#mobile-menu').onclick=()=>$('.sidebar').classList.toggle('open');
+    if(perfilAtual==='SUPERVISOR')viewAtual='apontamento';if(perfilAtual==='VISUALIZAR')viewAtual='dashboard';render();
+  }
+  function syncRetroHeader(){
+    const convs=convocacoesSupervisor().filter(c=>c.dataServico===portalDate&&(portalUnit==='Todas'||c.unidade===portalUnit));
+    const total=convs.reduce((v,c)=>v+c.colaboradores.length,0),pointed=convs.reduce((v,c)=>v+c.colaboradores.filter(id=>apForConv(c.id)?.itens.some(i=>i.colaboradorId===id)).length,0);
+    if($('#portal-date-label'))$('#portal-date-label').textContent=formatDate(portalDate);
+    if($('#portal-date'))$('#portal-date').value=portalDate;
+    if($('#portal-total'))$('#portal-total').textContent=total;
+    if($('#portal-pointed'))$('#portal-pointed').textContent=pointed;
+    if($('#portal-pending-total'))$('#portal-pending-total').textContent=Math.max(0,total-pointed);
+  }
+  function renderSupervisorHeader(){
+    const convs=convocacoesSupervisor().filter(c=>c.dataServico===portalDate&&(portalUnit==='Todas'||c.unidade===portalUnit));
+    const total=convs.reduce((v,c)=>v+c.colaboradores.length,0);const pointed=convs.reduce((v,c)=>v+c.colaboradores.filter(id=>apForConv(c.id)?.itens.some(i=>i.colaboradorId===id)).length,0);
+    const logo=$('.brand-lockup img').src;
+    $('#main-content').insertAdjacentHTML('afterbegin',`<div class="portal-hero"><img src="${logo}" alt="Logo da APROAR"><div class="portal-heading"><span>Portal do Supervisor</span><h1>Minha equipe</h1></div><div class="portal-hero-end"><div class="portal-date">Data<strong id="portal-date-label">${formatDate(portalDate)}</strong></div><div class="inline-actions"><button class="btn btn-outline" id="portal-logout">Sair</button></div></div></div>
+      <div class="portal-tabs">${[['apontamento','Apontamentos'],['convocacao','Convocação'],['disponibilidade','Disponibilidade']].map(([v,l])=>`<button class="tab-btn ${viewAtual===v?'active':''}" data-portal-view="${v}">${l}</button>`).join('')}</div>
+      <div class="portal-filters ${viewAtual==='convocacao'?'portal-filters-convocacao':''}">${field('SUPERVISOR',`<select id="portal-sup" class="control">${options(SUPERVISORES)}</select>`)}${field('Unidade',`<select id="portal-unit" class="control">${options(['Todas',...adminUnits()])}</select>`)}${viewAtual==='convocacao'?'':field('Data',`<input id="portal-date" class="control" type="date" value="${portalDate}">`)}</div>
+      <div class="grid grid-3 portal-metrics"><div class="portal-metric"><strong id="portal-total">${total}</strong><span>convocados</span></div><div class="portal-metric"><strong id="portal-pointed">${pointed}</strong><span>apontados</span></div><button class="portal-metric pending" id="portal-pending"><strong id="portal-pending-total">${Math.max(0,total-pointed)}</strong><span>pendentes do dia</span><small>Ver minhas pendências</small></button></div>`);
+    if(portalUnit!=='Todas'&&!adminUnits().includes(portalUnit))portalUnit='Todas';
+     $('#portal-sup').value=supervisorAtual;$('#portal-unit').value=portalUnit;
+    $('#portal-sup').onchange=()=>{supervisorAtual=$('#portal-sup').value;portalUnit=state.convocacoes.find(c=>c.supervisor===supervisorAtual&&c.dataServico===portalDate)?.unidade||portalUnit;sessionStorage.setItem(SESSION_KEY,supervisorAtual);render();};
+    $('#portal-unit').onchange=()=>{portalUnit=$('#portal-unit').value;render();};const portalDateInput=$('#portal-date');if(portalDateInput)portalDateInput.onchange=()=>{portalDate=portalDateInput.value;if(viewAtual==='apontamento'&&apontamentoTab==='retroativo'){retroDateSelected=portalDate;$('#retro-data').value=portalDate;syncRetroHeader();}else render();};
+    $('#portal-logout').onclick=logout;$('#portal-pending').onclick=()=>setView('pendencias');$$('[data-portal-view]').forEach(b=>b.onclick=()=>setView(b.dataset.portalView));
+    const unidade=$('#conv-unidade')||$('#disp-unit');if(unidade&&portalUnit!=='Todas'){unidade.value=portalUnit;unidade.onchange?.();}
+    const apDate=$('#ap-data');if(apDate)apDate.onchange=()=>{portalDate=apDate.value;render();};
+  }
+
+  function audit(action,ref='') {state.auditoria.push({data:now().toISOString(),usuario:supervisorAtual||perfilLabel(perfilAtual),action,ref});}
+  function head(title,desc){return `<div class="page-head"><div><div class="eyebrow">${perfilLabel(perfilAtual)}</div><h2>${title}</h2><p>${desc}</p></div></div>`;}
+  function table(headers,rows){
+    const align=headers.map((header,index)=>{const h=String(header).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+      if(/r\$|custo|financeiro|valor diario|valor diaria|impacto|noturno|periculosidade|bonifica|acordos/.test(h)||rows.some(r=>typeof r[index]==='string'&&/^R\$/.test(r[index].trim())))return 'align-money';
+      if(/nome|colaborador|supervisor|supervisor|responsave|unidade|obra|grupo|funcao|moradia|observa|referencia|detalhe|ocorrencia|destinatario|email|e-mail|dias sem/.test(h))return 'align-text';
+      if(/data|registrado|registro|situacao|status|turno|periodo|categoria|avulso|ativo|acao|selecion|posicao|quantidade|faltas|atestados|convocac|apontament|pendencia|ausencia|taxa|prazo|atrasad|extra|total/.test(h))return 'align-center';
+      return 'align-text';});
+    return rows.length?`<div class="table-wrap"><table><thead><tr>${headers.map((x,j)=>`<th class="${align[j]}">${escapeHtml(x)}</th>`).join('')}</tr></thead><tbody>${rows.map(r=>`<tr>${r.map((c,j)=>`<td class="${align[j]||'align-text'}">${c??'—'}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`:'<div class="empty">Nenhum registro para os filtros selecionados.</div>';
+  }
+  function options(list){return list.map(x=>`<option value="${escapeHtml(x.id??x)}">${escapeHtml(x.nome??x)}</option>`).join('');}
+  function field(label,input){return `<div><label class="field-label">${label}</label>${input}</div>`;}
+  function blocked(id,date){return state.indisponibilidades.some(x=>x.colaboradorId===id&&x.inicio<=date&&x.fim>=date);}
+  function overlaps(a,b){return a===b||a==='Outro'||b==='Outro'||(a==='Integral'&&['Manhã','Tarde'].includes(b))||(b==='Integral'&&['Manhã','Tarde'].includes(a));}
+  function localDownload(name,content,mime='text/plain'){downloadBlob(name,new Blob([content],{type:mime}));}
+  function exportTable(){
+    let rows,filename='aproar_relatorio.csv';
+    if(perfilAtual==='FINANCEIRO'&&viewAtual==='pagamentos'){
+      const details=financialEntries().filter(x=>presence(x.i.status)&&x.extra+x.finance+x.night+x.bonus+x.ajudaCusto>0.005);
+      if(!details.length)return showToast('Não há pagamentos neste período para exportar.',true);
+      const people=financialSummaryRows(details);
+      rows=[
+        ['APROAR | CONSOLIDADO FINANCEIRO POR COLABORADOR'],
+        ['Período',reportPeriod()],
+        ['Colaborador','Função','Supervisor(es)','Unidade(s)','Dias','Extra / Diária avulso (R$)','Valores complementares já registrados (R$)','Noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total (R$)'],
+        ...people.map(p=>[p.nome,p.funcao,p.supervisores,p.unidades,p.dias,p.extra,p.finance,p.night,p.bonus,p.ajudaCusto,p.total]),
+        [],['DETALHAMENTO POR DIA'],
+        ['Data','Supervisor','Unidade','Obra','Colaborador','Status','Extra / Diária avulso (R$)','Valores complementares já registrados (R$)','Noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total (R$)'],
+        ...details.sort((a,b)=>a.c.dataServico.localeCompare(b.c.dataServico)||(a.p?.nome||'').localeCompare(b.p?.nome||'','pt-BR',{sensitivity:'base'})).map(x=>[
+          formatDate(x.c.dataServico),x.c.supervisor,[...x.units].join(', '),[...x.works].map(financialWorkNumber).join(', '),
+          x.p?.nome||'',x.i.status,x.extra,x.finance,x.night,x.bonus,x.ajudaCusto,roundMoney(x.extra+x.finance+x.night+x.bonus+x.ajudaCusto)
+        ])
+      ];
+      filename='financeiro_pagamentos_'+reportFilters.inicio+'_a_'+reportFilters.fim+'.csv';
+    }else{
+      const t=$('#main-content table');if(!t)return showToast('Sem dados para exportar.',true);
+      rows=[...t.rows].map(r=>[...r.cells].map(c=>c.querySelector('input,select,textarea')?.value??c.innerText));
+    }
+    const csv=rows.map(r=>r.map(value=>'"'+String(value??'').replaceAll('"','""')+'"').join(';')).join('\r\n');
+    localDownload(filename,'\uFEFF'+csv,'text/csv;charset=utf-8');
+  }
+  function exportButtons(){return `<div class="inline-actions section"><button class="btn btn-secondary" id="export-csv">Exportar CSV</button><button class="btn btn-secondary" id="export-excel">Gerar Excel</button><button class="btn btn-primary" id="export-pdf">Gerar PDF</button></div>`;}
+  function bindExportAction(button,action){
+    if(!button)return;
+    button.onclick=async()=>{
+      if(button.disabled)return;
+      const original=button.textContent;
+      button.disabled=true;button.textContent='Gerando arquivo...';
+      try{await action();}
+      catch(error){console.error('Erro ao exportar relatório APROAR',error);showToast('Não foi possível gerar o relatório: '+(error?.message||'erro desconhecido'),true);}
+      finally{button.disabled=false;button.textContent=original;}
+    };
+  }
+  function bindExports(){
+    bindExportAction($('#export-csv'),exportTable);
+    bindExportAction($('#export-excel'),()=>['relatorios','pagamentos','financeiro'].includes(viewAtual)?exportReportsExcel():exportVisibleWorkbook('aproar_relatorio'));
+    bindExportAction($('#export-pdf'),()=>reportPDF(perfilAtual==='FINANCEIRO'?'financial':'control'));
+  }
+  function financialSummaryButtons(){return '<div class="inline-actions section"><button type="button" class="btn btn-secondary" id="export-fin-summary-excel">Consolidado por colaborador · Excel</button><button type="button" class="btn btn-secondary" id="export-fin-summary-pdf">Consolidado por colaborador · PDF</button></div>';}
+  function bindFinancialSummaryExports(){
+    bindExportAction($('#export-fin-summary-excel'),exportFinancialSummaryExcel);
+    bindExportAction($('#export-fin-summary-pdf'),()=>reportPDF('financial-consolidated'));
+  }
+  function renderConvCompletaBase(){
+    if(perfilAtual==='SUPERVISOR')return renderUnitConvocacao();
+    renderConvocacao();
+    if(perfilAtual!=='CONTROLADORIA')return;
+    const content=$('#main-content');content.insertAdjacentHTML('afterbegin','<div class="tabs" style="margin-bottom:20px"><button class="tab-btn active" id="new-conv">Nova convocação</button><button class="tab-btn" id="edit-conv">Correção / Exclusão administrativa</button></div>');
+    $('#new-conv').onclick=renderConvCompleta;
+    $('#edit-conv').onclick=()=>{content.innerHTML=head('Correção / Exclusão administrativa','Corrija a data, responsável, obra e turno de registros.')+table(['Selecionar','Data','Supervisor','Obra','Turno','Ação'],state.convocacoes.map(c=>[`<input type="checkbox" class="del-conv" value="${c.id}">`,formatDate(c.dataServico),c.supervisor,escapeHtml(obraById(c.obraId)?.nome),c.turno,`<button class="link-btn" data-edit="${c.id}">Editar</button>`]))+'<div class="form-actions"><button class="btn btn-secondary" id="back-conv">Nova convocação</button><button class="btn btn-primary" id="delete-convs">Excluir selecionadas</button></div><div id="edit-area"></div>';
+    $('#back-conv').onclick=renderConvCompleta;
+    $('#delete-convs').onclick=()=>{const ids=$$('.del-conv:checked').map(x=>x.value);if(!ids.length)return toast('Selecione os registros.',true);state.convocacoes=state.convocacoes.filter(c=>!ids.includes(c.id));state.apontamentos=state.apontamentos.filter(a=>!ids.includes(a.convocacaoId));audit('Exclusão de convocações',ids.join(', '));saveData();toast('Registros excluídos.');renderConvCompleta();};
+    $$('[data-edit]').forEach(b=>b.onclick=()=>{const c=state.convocacoes.find(c=>c.id===b.dataset.edit);$('#edit-area').innerHTML=`<form id="edit-form" class="card card-pad form-grid">${field('Data',`<input class="control" id="edit-date" type="date" value="${c.dataServico}" required>`)}${field('Supervisor',`<select class="control" id="edit-sup">${options(SUPERVISORES)}</select>`)}${field('Obra',`<select class="control" id="edit-obra">${options(OBRAS)}</select>`)}${field('Turno',`<select class="control" id="edit-turno">${options(['Integral','Manhã','Tarde','Noite'])}</select>`)}<button class="btn btn-primary">Salvar correção</button></form>`;$('#edit-sup').value=c.supervisor;$('#edit-obra').value=c.obraId;$('#edit-turno').value=c.turno;$('#edit-form').onsubmit=e=>{e.preventDefault();const date=$('#edit-date').value,turno=$('#edit-turno').value;if(c.colaboradores.some(id=>blocked(id,date)||state.convocacoes.some(o=>o.id!==c.id&&o.dataServico===date&&o.colaboradores.includes(id)&&overlaps(o.turno,turno))))return toast('A correção geraria conflito de equipe.',true);Object.assign(c,{dataServico:date,turno,supervisor:$('#edit-sup').value,obraId:$('#edit-obra').value,unidade:obraById($('#edit-obra').value).unidade});const ap=apForConv(c.id);if(ap)Object.assign(ap,{dataServico:date,supervisor:c.supervisor});c.corrigidoPor=perfilLabel(perfilAtual);audit('Correção administrativa',c.id);saveData();toast('Correção salva.');renderConvCompleta();};});};
+  }
+  function renderApCompleto(){renderApontamento();if(perfilAtual==='CONTROLADORIA')$('#main-content').insertAdjacentHTML('afterbegin','<div class="notice info" style="margin-bottom:16px">A Controladoria pode apontar equipes de todos os supervisores. O responsável do registro original é preservado.</div>');}
+  function renderDisponibilidade(){
+    $('#main-content').innerHTML=head('Disponibilidade da equipe','Consulte ocupação e bloqueios por data e turno.')+`<div class="card card-pad form-grid">${field('Data',`<input class="control" type="date" id="disp-data" value="${perfilAtual==='SUPERVISOR'?portalDate:isoToday()}">`)}${field('Turno',`<select class="control" id="disp-turno">${options(['Integral','Manhã','Tarde','Noite'])}</select>`)}</div><div class="section" id="disp-table"></div>`;
+    let selected='ocupados';
+    const refresh=()=>{
+      const d=$('#disp-data').value,t=$('#disp-turno').value,groups={ocupados:[],disponiveis:[],indisponiveis:[]};
+      for(const c of COLABORADORES.filter(c=>!c.inativo).sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR'))){
+        const conv=state.convocacoes.filter(x=>x.dataServico===d&&x.colaboradores.includes(c.id)&&overlaps(t,x.turno));
+        const blocks=state.indisponibilidades.filter(x=>x.colaboradorId===c.id&&x.inicio<=d&&x.fim>=d);
+        const group=blocks.length?'indisponiveis':conv.length?'ocupados':'disponiveis';
+        const allocation=conv.map(x=>escapeHtml(x.supervisor+' · '+x.unidade+' · '+x.turno)).join('<br>');
+        const reason=blocks.map(x=>escapeHtml(x.motivo)+(x.obs||x.observacao?' · '+escapeHtml(x.obs||x.observacao):'')).join('<br>');
+        groups[group].push([escapeHtml(c.nome),escapeHtml(c.funcao),group==='indisponiveis'?reason+(allocation?'<br><small>Convocação registrada: '+allocation+'</small>':''):group==='ocupados'?allocation:'Livre no turno selecionado']);
+      }
+      const labels={ocupados:'Ocupados',disponiveis:'Disponíveis',indisponiveis:'Indisponíveis'};
+      $('#disp-table').innerHTML='<div class="availability-tabs" role="tablist" aria-label="Situação da equipe">'+Object.keys(groups).map(k=>`<button type="button" role="tab" aria-selected="${selected===k}" class="availability-tab ${k} ${selected===k?'active':''}" data-availability="${k}">${labels[k]} <span>${groups[k].length}</span></button>`).join('')+'</div><div class="availability-panel" role="tabpanel">'+(groups[selected].length?table(['Colaborador','Função',selected==='indisponiveis'?'Motivo / observação':selected==='ocupados'?'Alocação':'Disponibilidade'],groups[selected]):'<div class="card empty">Nenhum colaborador nesta situação para a data e o turno selecionados.</div>')+'</div>';
+      $$('[data-availability]').forEach(btn=>btn.onclick=()=>{selected=btn.dataset.availability;refresh();});
+    };$('#disp-data').onchange=refresh;$('#disp-turno').onchange=refresh;refresh();
+  }
+  function renderIndisponibilidade(){
+    $('#main-content').innerHTML=head('Indisponibilidade','Férias, atestados e afastamentos bloqueiam novas convocações nas datas cadastradas.')+`<form id="ind-form" class="card card-pad"><div class="form-grid">${field('Colaborador',`<select class="control" id="ind-colab">${options(COLABORADORES.filter(c=>!c.inativo))}</select>`)}${field('Motivo',`<select class="control" id="ind-motivo">${options(['Férias','Atestado','Afastamento','Outro'])}</select>`)}${field('Início',`<input class="control" type="date" id="ind-ini" value="${perfilAtual==='SUPERVISOR'?portalDate:isoToday()}" required>`)}${field('Fim',`<input class="control" type="date" id="ind-fim" value="${perfilAtual==='SUPERVISOR'?portalDate:isoToday()}" required>`)}${field('Observação','<input class="control" id="ind-obs">')}</div><div class="form-actions"><button class="btn btn-primary">Registrar indisponibilidade</button></div></form><div class="section">${table(['Colaborador','Motivo','Início','Fim','Observação','Ação'],state.indisponibilidades.map(x=>[escapeHtml(colaboradorById(x.colaboradorId)?.nome),x.motivo,formatDate(x.inicio),formatDate(x.fim),escapeHtml(x.obs),`<button class="link-btn" data-remove-ind="${x.id}">Excluir</button>`]))}</div>`;
+    $('#ind-form').onsubmit=e=>{e.preventDefault();if($('#ind-fim').value<$('#ind-ini').value)return toast('O fim deve ser igual ou posterior ao início.',true);state.indisponibilidades.push({id:uid('ind'),colaboradorId:$('#ind-colab').value,motivo:$('#ind-motivo').value,inicio:$('#ind-ini').value,fim:$('#ind-fim').value,obs:$('#ind-obs').value});audit('Registro de indisponibilidade');saveData();renderIndisponibilidade();};$$('[data-remove-ind]').forEach(b=>b.onclick=()=>{state.indisponibilidades=state.indisponibilidades.filter(x=>x.id!==b.dataset.removeInd);audit('Exclusão de indisponibilidade');saveData();renderIndisponibilidade();});
+  }
+  function registerConvocationConflicts(ids,date,turno,unit,supervisor){
+    state.conflitosTentados??=[];
+    for(const id of ids){const existing=state.convocacoes.filter(c=>c.dataServico===date&&c.colaboradores.includes(id)&&c.unidade!==unit&&overlaps(c.turno,turno));
+      for(const c of existing)state.conflitosTentados.push({id:uid('conf'),data:now().toISOString(),dataServico:date,colaboradorId:id,colaboradorNome:colaboradorById(id)?.nome||id,supervisor,unidade:unit,turno,executor:perfilAtual==='SUPERVISOR'?supervisorAtual:'CONTROLADORIA',convocacaoExistenteId:c.id,supervisorExistente:c.supervisor,unidadeExistente:c.unidade,turnoExistente:c.turno,resolvido:false});
+    }saveData();
+  }
+  function convocationConflictRows(){return (state.conflitosTentados||[]).flatMap((x,index)=>{
+    if(x.supervisorExistente&&x.unidadeExistente)return [{...x,key:x.id||String(index)}];
+    // Recover old blocked attempts from their matching original convocation.
+    return state.convocacoes.filter(c=>c.dataServico===x.dataServico&&c.colaboradores.includes(x.colaboradorId)&&c.unidade!==x.unidade&&overlaps(c.turno,x.turno)).map(c=>({...x,key:String(index),colaboradorNome:colaboradorById(x.colaboradorId)?.nome,supervisorExistente:c.supervisor,unidadeExistente:c.unidade,turnoExistente:c.turno}));
+  });}
+  function renderConflitos(){const attempts=convocationConflictRows(),pending=attempts.filter(x=>!x.resolvido);
+    $('#main-content').innerHTML=head('Conflitos','Tentativas bloqueadas: um colaborador já convocado em outra unidade, na mesma data e em turno sobreposto.')+metric('Conflitos pendentes',pending.length,'tentativas que precisam de conferência')+`<div class="section">${table(['Data do serviço','Colaborador','Quem tentou convocar','Unidade solicitada','Turno solicitado','Já convocado por','Unidade original','Turno original','Tentativa registrada em','Situação','Ação'],attempts.slice().reverse().map(x=>[formatDate(x.dataServico),escapeHtml(x.colaboradorNome||colaboradorById(x.colaboradorId)?.nome),escapeHtml(x.supervisor),escapeHtml(x.unidade),escapeHtml(x.turno),escapeHtml(x.supervisorExistente),escapeHtml(x.unidadeExistente),escapeHtml(x.turnoExistente),formatDateTime(x.data),x.resolvido?'Conferido':'Pendente',x.resolvido?'—':`<button class="link-btn" data-resolve-conflict="${escapeHtml(x.key)}">Marcar como conferido</button>`]))}</div><div class="notice info section">A tentativa foi bloqueada: a convocação original permanece válida. Indisponibilidade cadastrada é acompanhada na aba Indisponibilidade. Turnos sem sobreposição não geram conflito.</div><div class="form-actions"><button class="btn btn-primary" id="conf-edit">Abrir convocações</button></div>`;
+    $('#conf-edit').onclick=()=>setView('convocacao');$$('[data-resolve-conflict]').forEach(b=>b.onclick=()=>{const x=(state.conflitosTentados||[]).find((x,index)=>(x.id||String(index))===b.dataset.resolveConflict);if(!x)return;x.resolvido=true;x.conferidoEm=now().toISOString();audit('Conflito conferido',x.colaboradorId);saveData();renderConflitos();});
+  }
+
+  function renderWhatsAppBase(){
+    $('#main-content').innerHTML=head('WhatsApp','Prepare e copie a relação de equipes. O envio é manual nesta demonstração.')+`<div class="card card-pad form-grid">${field('Data',`<input class="control" type="date" id="wp-data" value="${perfilAtual==='SUPERVISOR'?portalDate:isoToday()}">`)}${field('Funções','<label><input type="checkbox" id="wp-func" checked> Mostrar função entre parênteses</label>')}<div class="full"><textarea class="control" id="wp-text" style="min-height:240px" readonly></textarea></div><label><input type="checkbox" id="wp-pend"> Ainda existem demandas que serão enviadas por outros responsáveis</label></div><div class="form-actions"><button class="btn btn-primary" id="wp-copy">Copiar mensagem</button></div><div class="section" id="wp-missing"></div>`;
+    const update=()=>{const convs=state.convocacoes.filter(c=>c.dataServico===$('#wp-data').value);$('#wp-text').value='APROAR — Equipes de '+formatDate($('#wp-data').value)+'\n\n'+convs.map(c=>c.unidade+' · '+c.supervisor+' · '+c.turno+'\n'+c.colaboradores.map(id=>{const p=colaboradorById(id);return '• '+p?.nome+($('#wp-func').checked?' ('+p?.funcao+')':'');}).join('\n')).join('\n\n')+($('#wp-pend').checked?'\n\nOutras demandas serão enviadas posteriormente.':'');$('#wp-missing').innerHTML='<div class="notice info">Unidades sem convocação nesta data: '+escapeHtml([...new Set(OBRAS.map(o=>o.unidade))].filter(u=>!convs.some(c=>c.unidade===u)).join(', ')||'nenhuma')+'</div>';};['wp-data','wp-func','wp-pend'].forEach(id=>$('#'+id).onchange=update);$('#wp-copy').onclick=async()=>{try{await navigator.clipboard.writeText($('#wp-text').value);toast('Mensagem copiada.');}catch{$('#wp-text').select();toast('Selecione e copie com Ctrl+C.');}};update();
+  }
+  let reportFilters={inicio:'2026-09-01',fim:isoToday(),supervisor:'Todos',obra:'Todas'};
+  function filterControls(searchableWork=false){return `<div class="card card-pad form-grid">${field('Periodicidade',`<select class="control" id="r-period">${options(['Personalizado','Diário','Semanal','Mensal'])}</select>`)}${field('Supervisor',`<select class="control" id="r-sup">${options(['Todos',...SUPERVISORES])}</select>`)}${field('Início',`<input class="control" id="r-ini" type="date" value="${reportFilters.inicio}">`)}${field('Fim',`<input class="control" id="r-fim" type="date" value="${reportFilters.fim}">`)}${field('Obra / serviço',searchableWork==='combined'?`<input id="r-obra" type="hidden" value="${escapeHtml(reportFilters.obra)}"><input id="r-obra-combo" class="control" list="r-obra-choices" autocomplete="off" placeholder="Digite ou selecione uma obra..."><datalist id="r-obra-choices"><option value="Todas"></option>${OBRAS.map(o=>`<option value="${escapeHtml(o.nome+' | '+o.unidade)}"></option>`).join('')}</datalist>`:`${searchableWork?'<input class="control" id="r-obra-search" type="search" autocomplete="off" placeholder="Buscar número, nome ou unidade..." aria-label="Pesquisar obras e serviços">':''}<select class="control" id="r-obra"><option value="Todas">Todas</option>${options(OBRAS)}</select>`)}</div>`;}
+  function bindFilters(refresh){$('#r-sup').value=reportFilters.supervisor;$('#r-obra').value=reportFilters.obra;
+    // Combobox da Controladoria: um único campo visual (texto + lista).
+    // O filtro só muda quando a pessoa escolhe uma obra válida ou 'Todas'.
+    const workCombo=$('#r-obra-combo');
+    if(workCombo){
+      const selectedWork=OBRAS.find(o=>String(o.id)===String(reportFilters.obra));
+      const label=o=>o.nome+' | '+o.unidade;
+      workCombo.value=selectedWork?label(selectedWork):'Todas';
+      const choose=(allowCode=false)=>{
+        const raw=clean(workCombo.value);
+        const matched=OBRAS.find(o=>clean(label(o))===raw);
+        // A digitação de um número exato seleciona a obra somente se não houver ambiguidade.
+        // Durante a digitação não mudamos o filtro para uma correspondência parcial.
+        const byCode=allowCode===true&&!matched?OBRAS.filter(o=>
+          clean(financialWorkNumber(o.id))===raw||clean(o.nome)===raw
+        ):[];
+        const chosen=matched||(byCode.length===1?byCode[0]:null);
+        const id=raw==='TODAS'?'Todas':chosen?.id;
+        if(id===undefined)return false;
+        const source=$('#r-obra');
+        // Mantém o rótulo completo no mesmo campo, após informar somente o número.
+        if(chosen&&allowCode===true)workCombo.value=label(chosen);
+        if(source.value===String(id))return true;
+        source.value=String(id);
+        source.dispatchEvent(new Event('change',{bubbles:true}));
+        return true;
+      };
+      workCombo.oninput=choose;
+      workCombo.onchange=()=>choose(true);
+      workCombo.onblur=()=>{
+        if(choose(true))return;
+        const current=OBRAS.find(o=>String(o.id)===String($('#r-obra').value));
+        workCombo.value=current?label(current):'Todas';
+      };
+      workCombo.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();choose(true);}};
+    }
+    if(workCombo){
+      wireLiveSuggestions(workCombo,()=>[
+        {label:'Todas',id:'Todas'},
+        ...OBRAS.map(o=>({label:o.nome+' | '+o.unidade,id:String(o.id)}))
+      ],choice=>{if(choice.id!=='Todas'&&$('#r-obra').value===choice.id)return;workCombo.dispatchEvent(new Event('input',{bubbles:true}));});
+    }
+    const workSearch=$('#r-obra-search');
+    if(workSearch){
+      const select=$('#r-obra');
+      workSearch.oninput=()=>{
+        const query=clean(workSearch.value);
+        const matches=query?OBRAS.filter(o=>clean(o.nome+' '+o.unidade).includes(query)):OBRAS;
+        // Keep the active report filter even if the user types a different search.
+        // Only choosing an option in the select updates reportFilters.obra.
+        const current=OBRAS.find(o=>String(o.id)===reportFilters.obra);
+        const choices=current&&!matches.some(o=>String(o.id)===String(current.id))?[current,...matches]:matches;
+        select.innerHTML='<option value="Todas">Todas</option>'+options(choices)+(query&&!matches.length?'<option disabled>Nenhuma obra encontrada</option>':'');
+        select.value=reportFilters.obra;
+      };
+      workSearch.onkeydown=e=>{if(e.key==='Enter')e.preventDefault();};
+    }['r-sup','r-obra','r-ini','r-fim'].forEach(id=>$('#'+id).onchange=()=>{reportFilters={inicio:$('#r-ini').value,fim:$('#r-fim').value,supervisor:$('#r-sup').value,obra:$('#r-obra').value};refresh();});$('#r-period').onchange=()=>{let d=dateLocal(isoToday());const p=$('#r-period').value;if(p==='Semanal')d.setDate(d.getDate()-6);if(p==='Mensal')d.setDate(1);if(p!=='Personalizado'){reportFilters.inicio=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');reportFilters.fim=isoToday();$('#r-ini').value=reportFilters.inicio;$('#r-fim').value=reportFilters.fim;refresh();}};}
+  function filteredConvs(){return state.convocacoes.filter(c=>c.dataServico>=reportFilters.inicio&&c.dataServico<=reportFilters.fim&&(reportFilters.supervisor==='Todos'||c.supervisor===reportFilters.supervisor)&&(reportFilters.obra==='Todas'||c.obraId===reportFilters.obra||(apForConv(c.id)?.itens||[]).some(i=>serviceList(i,c).some(x=>x.obraId===reportFilters.obra))));}
+  const money=v=>Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});
+  const roundMoney=x=>Math.round((Number(x)||0)*100)/100;
+  const clean=x=>String(x||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().trim();
+  function presence(status){return ['Presente (Integral)','Presente (Só Manhã)','Presente (Só Tarde)','Saída Antecipada','Presente','Extra'].includes(status);}
+  function category(p){const cat=clean(p?.categoria||p?.categoria_diaria);if(/AJUD|SERVENT|AUX/.test(cat))return 'Ajudante';if(/PROF/.test(cat))return 'Profissional';if(/AJUDANTE|AUXILIAR|AUX[. ]|SERVENTE/.test(clean(p?.funcao)))return 'Ajudante';const ref=Number(p?.custo??p?.valor_diaria)||0;return ref>0&&ref<220?'Ajudante':'Profissional';}
+  // Avulso: valores integrais com encargos, exclusivos do custo da Controladoria.
+  // O Financeiro continua registrando o valor efetivamente pago em seus próprios campos.
+  function avulsoData(funcao){
+    if(!['Profissional','Servente'].includes(funcao))throw Error('Selecione Profissional ou Servente para o avulso.');
+    return {funcao,categoria:funcao==='Servente'?'Ajudante':'Profissional',custo:funcao==='Servente'?182.34:241.74,avulso:'Sim'};
+  }
+  function avulsoFuncaoSelect(id){
+    return `<select class="control" id="${id}"><option value="">Selecione a categoria</option><option value="Profissional">Profissional</option><option value="Servente">Servente</option></select>`;
+  }
+  function dayCost(p){const v=Number(p?.custo??p?.valor_diaria);return v>0?v:category(p)==='Ajudante'?182.34:241.74;}
+  function extraMultiplier(value){const v=clean(value);if(!v||['NAO','N','SEM EXTRA','SEM'].includes(v))return 0;if(/UMA E MEIA|1 E MEIA|1[.,]5/.test(v))return 1.5;if(/DUAS|2 DIARIA|2DIARIA/.test(v))return 2;if(v.includes('MEIA'))return .5;return 1;}
+  function defaultFinancial(p,extra){return roundMoney((category(p)==='Ajudante'?80:120)*extraMultiplier(extra));}
+  function dangerEligible(p){const f=clean(p?.funcao);return f==='ELETRICISTA'||(f.includes('ELETRICISTA')&&(f.includes('AUXILIAR')||/^AUX[. ]/.test(f)));}
+  function brazilParts(date=new Date()){return Object.fromEntries(new Intl.DateTimeFormat('en-CA',{timeZone:'America/Fortaleza',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hourCycle:'h23'}).formatToParts(date).filter(x=>x.type!=='literal').map(x=>[x.type,x.value]));}
+  function brazilDate(date=new Date()){const p=brazilParts(date);return p.year+'-'+p.month+'-'+p.day;}
+  function calendarISO(d){return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+  function brazilTime(date,hour,minute=0){return new Date(date+'T'+String(hour).padStart(2,'0')+':'+String(minute).padStart(2,'0')+':00-03:00');}
+  function completeConv(c){const ap=apForConv(c.id);return !!ap&&c.colaboradores.every(id=>ap.itens.some(i=>i.colaboradorId===id));}
+  function serviceList(i,c){const raw=i.servicos?.length?i.servicos:itemServices(i,c.obraId);const seen=new Set();return raw.filter(s=>{if(!s.obraId)return false;const key=s.obraId+'|'+(s.periodo||c.turno);if(seen.has(key))return false;seen.add(key);return true;}).map(s=>({...s,periodo:s.periodo||c.turno||'Integral'}));}
+  function hasSebrae(i,c){return clean(c.unidade)==='SEBRAE'||serviceList(i,c).some(s=>clean(obraById(s.obraId)?.unidade)==='SEBRAE');}
+  function nocturnal(i,c){if(!presence(i.status)||!hasSebrae(i,c))return 0;return roundMoney(Math.max(0,Number(i.noturno)||0));}
+  function periodBlocks(p){return p==='Manhã'?{M:.5}:p==='Tarde'?{T:.5}:p==='Noite'?{N:1}:{M:.5,T:.5};}
+  function presenceBlocks(i,c){if(!presence(i.status))return {};if(i.status==='Presente (Só Manhã)')return {M:.5};if(i.status==='Presente (Só Tarde)')return {T:.5};if(i.status==='Saída Antecipada')return c.turno==='Noite'?{N:.5}:c.turno==='Tarde'?{T:.5}:{M:.5};return periodBlocks(c.turno);}
+  function entries(){
+    const groups=new Map();for(const c of state.convocacoes){if(c.dataServico<reportFilters.inicio||c.dataServico>reportFilters.fim||(reportFilters.supervisor!=='Todos'&&c.supervisor!==reportFilters.supervisor))continue;for(const i of apForConv(c.id)?.itens||[]){const k=c.dataServico+'|'+i.colaboradorId;if(!groups.has(k))groups.set(k,[]);groups.get(k).push({c,i});}}
+    const out=[];
+    for(const regs of groups.values()){
+      const p=colaboradorById(regs[0].i.colaboradorId),services=new Map(),blocks={daily:{},extra:{},finance:{}},refs=regs.map(x=>x.i);
+      for(const {c,i} of regs){const ss=serviceList(i,c);if(!ss.length){if(!presence(i.status)){const fake={obraId:c.obraId||'',periodo:c.turno};ss.push(fake);}else continue;}
+        const isPresent=presence(i.status),serviceBlocks=[...new Set(ss.flatMap(s=>Object.keys(periodBlocks(s.periodo))))];
+        const financial=isPresent?Math.max(0,Number(i.financeiro)||0):0,extra=isPresent?(i.extra==='Valor específico'?Number(i.valorExtraOriginal)||0:roundMoney(dayCost(p)*extraMultiplier(i.extra))):0;
+        for(const b of serviceBlocks){blocks.finance[b]=Math.max(blocks.finance[b]||0,financial/serviceBlocks.length);blocks.extra[b]=Math.max(blocks.extra[b]||0,extra/serviceBlocks.length);}
+        const dailyBlocks=presenceBlocks(i,c),avulsoDiaria=p?.avulso==='Sim'&&AVULSO_DIARIA_OPTIONS.includes(i.tipoDiariaAvulso)?extraMultiplier(i.tipoDiariaAvulso):null;
+        const dailyWeights=Object.entries(dailyBlocks),weightSum=dailyWeights.reduce((sum,[,w])=>sum+w,0);
+        for(const [b,w] of dailyWeights)blocks.daily[b]=Math.max(blocks.daily[b]||0,roundMoney(dayCost(p)*(avulsoDiaria===null?w:avulsoDiaria*w/(weightSum||1))));
+        const sb=ss.filter(s=>clean(obraById(s.obraId)?.unidade||c.unidade)==='SEBRAE');
+        for(const s of ss){const key=s.obraId||'unassigned_'+c.unidade;let row=services.get(key);if(!row){row={c:{...c,obraId:s.obraId,unidade:obraById(s.obraId)?.unidade||c.unidade},i,p,refs,blocks:new Set(),periods:new Set(),supervisors:new Set(),statuses:new Set(),extras:new Set(),daily:0,extra:0,finance:0,night:0,bonus:0,ajudaCusto:0,danger:0,share:1};services.set(key,row);}Object.keys(periodBlocks(s.periodo)).forEach(b=>row.blocks.add(b));row.periods.add(s.periodo);row.supervisors.add(c.supervisor);row.statuses.add(i.status);row.extras.add(i.extra||'Não');if(sb.includes(s))row.night+=nocturnal(i,c)/sb.length;row.bonus+=(isPresent?Math.max(0,Number(i.acordo)||0):0)/ss.length;row.ajudaCusto+=(isPresent?Math.max(0,Number(i.ajudaCusto)||0):0)/ss.length;}
+      }
+      for(const b of new Set([...Object.keys(blocks.daily),...Object.keys(blocks.extra),...Object.keys(blocks.finance)])){let participants=[...services.values()].filter(x=>x.blocks.has(b));if(!participants.length)participants=[...services.values()];for(const row of participants)for(const field of ['daily','extra','finance'])row[field]+=(blocks[field][b]||0)/participants.length;}
+      for(const row of services.values()){row.daily=roundMoney(row.daily);row.extra=roundMoney(row.extra);row.finance=roundMoney(row.finance);row.night=roundMoney(row.night);row.bonus=roundMoney(row.bonus);row.ajudaCusto=roundMoney(row.ajudaCusto);if(dangerEligible(p))row.danger=roundMoney(row.daily*1.3)-row.daily+roundMoney(row.extra*1.3)-row.extra;row.danger=roundMoney(row.danger);row.service={obraId:row.c.obraId,periodo:[...row.periods].join(' + ')};row.c.supervisor=[...row.supervisors].join(' / ');row.displayStatus=[...row.statuses].join(' / ')+(p?.avulso==='Sim'&&AVULSO_DIARIA_OPTIONS.includes(row.i?.tipoDiariaAvulso)?' · '+row.i.tipoDiariaAvulso:'');row.displayExtra=[...row.extras].join(' / ');if(reportFilters.obra==='Todas'||row.c.obraId===reportFilters.obra)out.push(row);}
+    }
+    for(const x of state.extras||[]){
+      if(x.dataServico<reportFilters.inicio||x.dataServico>reportFilters.fim||(reportFilters.supervisor!=='Todos'&&x.supervisor!==reportFilters.supervisor))continue;
+      const p=colaboradorById(x.colaboradorId),work=obraById(x.obraId);
+      if(!p||!work||(reportFilters.obra!=='Todas'&&String(x.obraId)!==String(reportFilters.obra)))continue;
+      const amount=Number(x.valorExtraOriginal)||roundMoney(dayCost(p)*extraMultiplier(x.extra));
+      const serviceExtra=roundMoney(dayCost(p)*extraMultiplier(x.extra));
+      const c={id:'extra-'+x.id,dataServico:x.dataServico,supervisor:x.supervisor,unidade:work.unidade,obraId:work.id,turno:'Integral',extraAvulsa:true};
+      const i={colaboradorId:x.colaboradorId,status:'Extra independente',extra:x.extra,valorExtraOriginal:amount,financeiro:0,noturno:0,acordo:0,ajudaCusto:0,observacao:x.observacao||'',extraAvulsa:true};
+      out.push({c,i,p,refs:[],blocks:new Set(),periods:new Set(['Integral']),supervisors:new Set([x.supervisor]),statuses:new Set(['Extra independente']),extras:new Set([x.extra]),daily:0,extra:serviceExtra,finance:0,night:0,bonus:0,ajudaCusto:0,danger:dangerEligible(p)?roundMoney(serviceExtra*1.3)-serviceExtra:0,share:1,service:{obraId:work.id,periodo:'Extra'},units:new Set([work.unidade]),works:new Set([work.id]),displayStatus:'Extra independente',displayExtra:x.extra});
+    }
+    return out;
+  }
+  // O Financeiro considera o valor informado pelo supervisor, independentemente
+  // de "Houve extra?". O custo operacional continua com extras por categoria.
+  function financialEntries(){
+    const map=new Map();
+    for(const x of entries()){
+      const key=x.c.dataServico+'|'+x.i.colaboradorId+'|'+x.c.supervisor;
+      const valorExtraFinanceiro=x.c.extraAvulsa?roundMoney(Math.max(0,Number(x.i.valorExtraOriginal)||0)):0;
+      const diariaAvulso=x.p?.avulso==='Sim'&&presence(x.i.status)?roundMoney(x.daily):0;
+      if(!map.has(key)){
+        map.set(key,{...x,extra:valorExtraFinanceiro,extraServico:x.extra,diariaAvulso,
+          refs:[...x.refs],units:new Set([x.c.unidade]),works:new Set([x.c.obraId])});
+      }else{
+        const previous=map.get(key);
+        previous.extra+=valorExtraFinanceiro;previous.extraServico+=x.extra;previous.diariaAvulso+=diariaAvulso;
+        for(const k of ['daily','danger','night','bonus','finance','ajudaCusto'])previous[k]+=x[k];
+        previous.units.add(x.c.unidade);previous.works.add(x.c.obraId);
+        previous.refs=[...new Set([...previous.refs,...x.refs])];
+      }
+    }
+    // O valor disponível é o pagamento informado na presença normal e substitui,
+    // não soma novamente, um eventual registro de extra independente no mesmo dia.
+    const valoresDisponiveis=new Map();
+    for(const ap of state.apontamentos){
+      if(ap.dataServico<reportFilters.inicio||ap.dataServico>reportFilters.fim)continue;
+      if(reportFilters.supervisor!=='Todos'&&ap.supervisor!==reportFilters.supervisor)continue;
+      for(const i of ap.itens||[]){
+        if(!presence(i.status))continue;
+        const amount=roundMoney(Math.max(0,Number(i.valorExtraDisponivel)||0));
+        if(!amount)continue;
+        const key=ap.dataServico+'|'+i.colaboradorId+'|'+ap.supervisor;
+        valoresDisponiveis.set(key,roundMoney((valoresDisponiveis.get(key)||0)+amount));
+      }
+    }
+    for(const [key,entry] of map){
+      const available=valoresDisponiveis.get(key);
+      if(available>0)entry.extra=available;
+      else if(entry.extra<=0&&entry.extraServico>0)entry.extra=roundMoney(entry.extraServico);
+      entry.extra=roundMoney(entry.extra+entry.diariaAvulso);
+    }
+    return [...map.values()];
+  }
+  function financialSummaryRows(rows=financialEntries()){return globalThis.APROARFinanceConsolidado.summarize(rows);}
+  function adjustPayment(row,field,value){if(onlineSaving||onlineQueued)return showToast('Aguarde a gravação em andamento.',true);const data={financeiro:row.finance,noturno:row.night,acordo:row.bonus,ajudaCusto:row.ajudaCusto};data[field]=Math.max(0,Number(value)||0);for(const [index,i] of row.refs.entries()){i.financeiro=index===0?roundMoney(data.financeiro):0;i.noturno=index===0&&row.units.has('SEBRAE')?roundMoney(data.noturno):0;i.acordo=index===0?roundMoney(data.acordo):0;i.ajudaCusto=index===0?roundMoney(data.ajudaCusto):0;i.financeAdjusted=true;}saveFinancialUpdates(row.refs);}
+  function financialCycle(ref=isoToday(),offset=0){const d=dateLocal(ref),n=(d.getDay()-2+7)%7;d.setDate(d.getDate()-n+offset*7);const end=new Date(d);end.setDate(end.getDate()+6);const pay=new Date(end);pay.setDate(pay.getDate()+1);return {inicio:calendarISO(d),fim:calendarISO(end),pagamento:calendarISO(pay)};}
+  function reminder(c){const today=isoToday(),p=brazilParts(now()),hh=Number(p.hour)+Number(p.minute)/60;if(c.dataServico>today)return 'Ainda não iniciou';if(clean(c.unidade)==='SEBRAE')return c.dataServico===today?(hh<21?'Hoje · 21:00':'Lembrete de 21:00 já passou'):'Somente manual';if(c.dataServico===today)return hh<16?'Hoje · 16:00':'Próximo dia · 09:30';const d=dateLocal(c.dataServico);d.setDate(d.getDate()+1);return calendarISO(d)===today?(hh<9.5?'Hoje · 09:30':'Lembrete de 09:30 já passou'):'Somente manual';}
+
+  function personCount(e,test){return new Set(e.filter(test).map(x=>x.c.id+'|'+x.i.colaboradorId)).size;}
+  // Ajuste só visual: todas as colunas de Relatórios aparecem lado a lado.
+  // A rolagem é vertical dentro da tabela, sem reduzir os dados ou as exportações.
+  function configureReportTable(financial){
+    const wrap=$('#report-body .table-wrap');
+    if(!wrap)return;
+    wrap.classList.add('report-vertical-wrap');
+    const table=wrap.querySelector('table');
+    if(!table)return;
+    // Percentuais somam 100%; distribuem o espaço entre todas as 12/13 colunas.
+    const widths=financial
+      ? [7,7,7,13,13,6,8,7,5,5,8,7,7]
+      : [7,7,7,16,13,6,8,7,5,5.5,7.5,6,5];
+    const group=document.createElement('colgroup');
+    for(const width of widths){
+      const col=document.createElement('col');
+      col.style.width=width+'%';
+      group.appendChild(col);
+    }
+    table.prepend(group);
+  }
+  function renderReports(){
+    const financial=perfilAtual==='FINANCEIRO';if(financial&&selectedCycle!=='custom'){const cycle=financialCycle(isoToday(),Number(selectedCycle));reportFilters.inicio=cycle.inicio;reportFilters.fim=cycle.fim;}
+    $('#main-content').innerHTML=head('Relatórios','Dados por período, com consolidado e detalhamento por dia.')+(financial?cycleControl():'')+filterControls(financial?true:'combined')+'<div class="section report-toolbar"><div class="report-view" id="report-tabs"></div>'+exportButtons()+(financial?financialSummaryButtons():'')+'</div><div class="section" id="report-body"></div>';let day='Todos';
+    const refresh=()=>{const rows=(financial?financialEntries():entries()).filter(x=>!financial||(x.c.extraAvulsa||(presence(x.i.status)&&x.extra+x.finance+x.night+x.bonus+x.ajudaCusto>0.005))),dates=[...new Set(filteredConvs().map(c=>c.dataServico))].sort();if(!dates.includes(day))day='Todos';$('#report-tabs').innerHTML=field('Visualização',`<select id="report-day-select" class="control"><option value="Todos">Consolidado do período</option>${dates.map(d=>`<option value="${d}">${formatDate(d)}</option>`).join('')}</select>`);$('#report-day-select').value=day;const selected=rows.filter(x=>day==='Todos'||x.c.dataServico===day);const fin=perfilAtual==='FINANCEIRO';$('#report-body').innerHTML=table(['Data','Supervisor','Unidade','Obra','Colaborador','Período','Status',fin?'Extra / Diária avulso (R$)':'Custo normal',fin?'Valores complementares já registrados (R$)':'Extra','Adic. noturno','Acordos / Bonificações',...(fin?['Passagens/Ajuda de custo']:['Periculosidade 30%']),'Total'],selected.map(x=>[formatDate(x.c.dataServico),x.c.supervisor,escapeHtml(x.c.unidade),escapeHtml(fin?financialWorkNumber(x.c.obraId):obraById(x.c.obraId)?.nome),escapeHtml(x.p?.nome),escapeHtml(x.service.periodo),escapeHtml(x.displayStatus||x.i.status),money(fin?x.extra:x.daily),fin?money(x.finance):escapeHtml(x.displayExtra||x.i.extra),money(x.night),money(x.bonus),...(fin?[money(x.ajudaCusto)]:[money(x.danger)]),money(fin?x.extra+x.finance+x.night+x.bonus+x.ajudaCusto:x.daily+x.extra+x.danger+x.night+x.bonus)]))+`<div class="notice info section">Valores de demonstração. ${fin?'Financeiro sem adicional de periculosidade.':'Periculosidade de 30% para eletricista e auxiliar de eletricista, somente na Controladoria.'} Convocações sem apontamento ficam fora dos custos.</div>`;configureReportTable(fin);$('#report-day-select').onchange=()=>{day=$('#report-day-select').value;refresh();};};bindFilters(()=>{if(financial){selectedCycle='custom';$('#financial-cycle').value='custom';}refresh();});if(financial){$('#financial-cycle').onchange=()=>{selectedCycle=$('#financial-cycle').value;renderReports();};if(selectedCycle!=='custom')$('#cycle-caption').textContent='Pagamento em '+formatDate(financialCycle(isoToday(),Number(selectedCycle)).pagamento);}refresh();bindExports();if(financial)bindFinancialSummaryExports();
+  }
+  function renderDashboard(){
+    $('#main-content').innerHTML=head('Dashboard','Presença, faltas e custos confirmados por unidade e responsável.')+filterControls(true)+'<div class="section" id="dash-body"></div>';
+    const refresh=()=>{const e=entries();$('#dash-body').innerHTML=`<div class="grid grid-4">${metric('PRESENÇAS',personCount(e,x=>presence(x.i.status)),'apontadas')}${metric('FALTAS',personCount(e,x=>x.i.status==='Falta'),'registros')}${metric('ATESTADOS',personCount(e,x=>x.i.status==='Atestado'),'registros')}${metric('CUSTO TOTAL',money(e.reduce((v,x)=>v+x.daily+x.extra+x.danger+x.night+x.bonus,0)),'valores fictícios')}</div><div class="section grid grid-2 dashboard-breakdown">${['unidade','supervisor'].map(k=>'<div class="card card-pad"><h3>Por '+(k==='unidade'?'unidade':'supervisor')+'</h3>'+table(['Grupo','Custo'],[...new Set(e.map(x=>x.c[k]))].map(v=>[escapeHtml(v),money(e.filter(x=>x.c[k]===v).reduce((s,x)=>s+x.daily+x.extra+x.danger+x.night+x.bonus,0))]))+'</div>').join('')}</div>`;};bindFilters(refresh);refresh();
+  }
+  function renderIndicatorsBase(){
+    $('#main-content').innerHTML=head('Indicadores','Cada supervisor e data conta como uma convocação. Os apontamentos pendentes são conferidos por dia, inclusive quando parciais.')+filterControls()+'<div class="section" id="indicator-body"></div>'+exportButtons();
+    const refresh=()=>{
+      const sups=reportFilters.supervisor==='Todos'?SUPERVISORES:[reportFilters.supervisor];const inside=date=>date>=reportFilters.inicio&&date<=reportFilters.fim;
+      const cv=state.convocacoes.filter(c=>inside(c.dataServico)&&sups.includes(c.supervisor));const ap=state.apontamentos.filter(a=>inside(a.dataServico)&&sups.includes(a.supervisor));
+      const missing=diasSemConvocacao(sups,reportFilters.inicio,reportFilters.fim),countDays=rows=>new Set(rows.map(x=>x.dataServico)).size;
+      const summary=sups.map(s=>{const own=cv.filter(c=>c.supervisor===s&&(c.executor||c.supervisor)===s);const pointed=ap.filter(a=>a.supervisor===s&&(a.executor||a.supervisor)===s);const n=countDays(own),late=countDays(own.filter(convocacaoAtrasada));return [s,n,late,n?((n-late)/n*100).toFixed(1)+'%':'—',countDays(pointed),countDays(pointed.filter(apontamentoAtrasado))];});
+      const gaps=sups.map(s=>{const noCv=missing.filter(x=>x.supervisor===s).map(x=>x.dataServico);const noAp=[...new Set(cv.filter(c=>c.supervisor===s&&!completeConv(c)&&now()>=deadlineApontamento(c.dataServico)).map(c=>c.dataServico))].sort();return [s,noCv.length,noCv.map(formatDate).join(', ')||'Nenhum',noAp.length,noAp.map(formatDate).join(', ')||'Nenhum'];});
+      const events=[...cv.filter(convocacaoAtrasada).map(c=>[formatDate(c.dataServico),c.supervisor,'Convocação',formatDateTime(c.criadoEm)]),...ap.filter(apontamentoAtrasado).map(a=>[formatDate(a.dataServico),a.supervisor,'Apontamento',formatDateTime(a.apontadoEm)])];
+      $('#indicator-body').innerHTML='<div class="card card-pad"><h3>Cumprimento por supervisor</h3>'+table(['Supervisor','Convocações feitas','Conv. atrasadas','No prazo','Apontamentos feitos','Ap. atrasados'],summary)+'</div><div class="card card-pad section"><h3>Convocações e apontamentos não feitos</h3>'+table(['Supervisor','Conv. não feitas','Dias sem convocação','Ap. não feitos','Dias sem apontamento'],gaps)+'</div><div class="card card-pad section"><h3>Datas e ocorrências de atraso</h3>'+table(['Data do serviço','Supervisor','Tipo','Registro'],events)+'</div><div class="notice info section">Felipe é considerado a partir de 28/09/2026. Sábados e domingos aparecem na conferência de dias sem convocação, mas não geram atraso automático. Apontamento só é cobrado quando há convocação e o prazo de 09:30 do próximo dia útil venceu.</div>';
+    };bindFilters(refresh);refresh();bindExports();
+  }
+  let selectedCycle='0';
+  function cycleControl(){return `<div class="card card-pad section">${field('Ciclo de pagamento',`<select class="control" id="financial-cycle">${Array.from({length:26},(_,index)=>{const c=financialCycle(isoToday(),-index);return `<option value="${-index}" ${String(-index)===selectedCycle?'selected':''}>${formatDate(c.inicio)} a ${formatDate(c.fim)} · pagamento ${formatDate(c.pagamento)}</option>`;}).join('')}<option value="custom" ${selectedCycle==='custom'?'selected':''}>Período personalizado</option></select>`)}<p id="cycle-caption" style="font-size:12px"></p></div>`;}
+  function renderFinancialHistory(){
+    const today=isoToday(),first=today.slice(0,8)+'01';
+    $('#main-content').innerHTML=head('Histórico de registros financeiros','Confira inclusões e alterações de extras, bonificações e adicional noturno. Horários de Fortaleza.')
+      +'<div class="card card-pad"><div class="form-grid">'
+      +field('Data inicial do serviço','<input class="control" type="date" id="fh-start" value="'+first+'">')
+      +field('Data final do serviço','<input class="control" type="date" id="fh-end" value="'+today+'">')
+      +field('Tipo','<select class="control" id="fh-type"><option value="">Todos</option><option>Extra</option><option>Bonificação / acordo</option><option>Adicional noturno</option></select>')
+      +field('Buscar colaborador ou responsável','<input class="control" id="fh-search" type="search" autocomplete="off" placeholder="Digite o nome...">')
+      +'</div><div class="form-actions"><button type="button" class="btn btn-primary" id="fh-load">Consultar histórico</button></div></div>'
+      +'<div id="fh-results" class="section"></div>';
+    let data=null;
+    const stamp=t=>t?new Date(t).toLocaleString('pt-BR',{timeZone:'America/Fortaleza',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}):'Não disponível';
+    const show=()=>{
+      if(!data)return;
+      const kind=$('#fh-type').value,query=clean($('#fh-search').value);
+      const rows=[...data.eventos.map(x=>({...x,confirmado:true})),...data.anteriores.map(x=>({...x,confirmado:false}))]
+        .filter(x=>(!kind||x.tipo===kind)&&(!query||clean([x.colaborador,x.usuario,x.supervisor].join(' ')).includes(query)))
+        .sort((a,b)=>b.data_servico.localeCompare(a.data_servico)||(b.registrado_em||'').localeCompare(a.registrado_em||''));
+      $('#fh-results').innerHTML='<div class="card card-pad"><h3>Registros encontrados: '+rows.length+'</h3>'
+        +'<p>Para lançamentos anteriores à trilha individual, o valor atual fica visível, mas a data, a hora e o autor específicos não são comprováveis.</p>'
+        +(data.limiteAtingido?'<div class="notice warning">O período contém mais registros que o limite da consulta. Reduza o intervalo de datas.</div>':'')
+        +table(['Data do serviço','Colaborador','Tipo','Movimentação','Valor anterior','Valor registrado','Quem lançou','Supervisor da equipe','Data e hora do lançamento','Confiabilidade'],
+          rows.map(x=>[
+            escapeHtml(formatDate(x.data_servico)),escapeHtml(x.colaborador||'Não identificado'),escapeHtml(x.tipo||''),
+            escapeHtml(x.confirmado?(x.operacao||'Alteração'):'Valor anterior à trilha'),
+            x.confirmado?money(Number(x.valor_anterior)||0):'Não disponível',
+            money(Number(x.valor_novo)||0),
+            escapeHtml(x.confirmado?x.usuario||'Não identificado':'Não comprovado para este valor'),
+            escapeHtml(x.supervisor||'Não identificado'),
+            escapeHtml(x.confirmado?stamp(x.registrado_em):'Não disponível'),
+            x.confirmado?'Evento auditado':'Legado — sem trilha individual'
+          ]))+'</div>';
+    };
+    const load=async()=>{
+      const inicio=$('#fh-start').value,fim=$('#fh-end').value;
+      if(!inicio||!fim||inicio>fim)return showToast('Informe um período válido.',true);
+      $('#fh-results').innerHTML='<div class="notice info">Consultando histórico no Neon…</div>';
+      try{data=await api('/api/financial-history?inicio='+encodeURIComponent(inicio)+'&fim='+encodeURIComponent(fim));show();}
+      catch(error){data=null;$('#fh-results').innerHTML='<div class="notice warning">'+escapeHtml(error?.message||'Erro ao consultar histórico.')+'</div>';}
+    };
+    $('#fh-search').oninput=show;$('#fh-type').onchange=show;$('#fh-load').onclick=load;load();
+  }
+  function renderPayments(){
+    if(selectedCycle!=='custom'){const cycle=financialCycle(isoToday(),Number(selectedCycle));reportFilters.inicio=cycle.inicio;reportFilters.fim=cycle.fim;}
+    $('#main-content').innerHTML=head('Pagamentos','Ciclo de terça a segunda, com pagamento na terça seguinte.')+cycleControl()+filterControls('combined')+'<div class="section" id="pay-body"></div>'+exportButtons()+financialSummaryButtons();
+    const refresh=()=>{
+      const e=financialEntries().filter(x=>x.extra>0.005||x.finance>0.005||x.night>0.005||x.bonus>0.005||x.ajudaCusto>0.005)
+        .sort((a,b)=>a.c.dataServico.localeCompare(b.c.dataServico)||(a.p?.nome||'').localeCompare(b.p?.nome||'','pt-BR',{sensitivity:'base'})||(a.p?.id||'').localeCompare(b.p?.id||''));
+      const total=x=>x.extra+x.finance+x.night+x.bonus+x.ajudaCusto;
+      const predefinidos='<datalist id="passagens-ajuda-valores"><option value="11" label="Fortaleza - R$ 11,00"></option><option value="10" label="Caucaia - R$ 10,00"></option><option value="12" label="Maracanaú - R$ 12,00"></option><option value="25" label="Horizonte - R$ 25,00"></option></datalist>';
+      const fields=['noturno','acordo','ajudaCusto'];
+      const consolidated=financialSummaryRows(e);
+      $('#pay-body').innerHTML=metric('TOTAL A PAGAR',money(e.reduce((v,x)=>v+total(x),0)),'sem periculosidade')
+        +'<div class="section"><h3>Consolidado por colaborador · ordem alfabética</h3>'+table(['Colaborador','Extra / Diária avulso (R$)','Total a Pagar'],consolidated.map(x=>[escapeHtml(x.nome),money(x.extra),'<strong class="pay-total-display">'+money(x.total)+'</strong>']))+'</div>'
+        +'<section class="pay-detail-section" aria-labelledby="pay-detail-heading"><h3 id="pay-detail-heading">Detalhamento por dia</h3>'
+        +'<p class="help-text">Passagens/Ajuda de custo: Fortaleza R$ 11, Caucaia R$ 10, Maracanaú R$ 12 e Horizonte R$ 25. Selecione um valor sugerido ou digite outro. Sem lançamento, o valor é R$ 0.</p>'
+        +table(['Data','Colaborador','Status','Extra / Diária avulso (R$)','Valores complementares já registrados (R$)','Noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total a Pagar (R$)'],e.map((x,index)=>[formatDate(x.c.dataServico),escapeHtml(x.p?.nome),escapeHtml(x.i.status),money(x.extra),money(x.finance),...fields.map(k=>`<input aria-label="${k==='ajudaCusto'?'Passagens/Ajuda de custo':k}" class="control pay-input" type="number" min="0" step="0.01" ${k==='ajudaCusto'?'list="passagens-ajuda-valores"':''} data-index="${index}" data-field="${k}" value="${k==='noturno'?x.night:k==='acordo'?x.bonus:x.ajudaCusto}" ${(!x.refs?.length||(k==='noturno'&&!x.units.has('SEBRAE')))?'disabled':''}>`),'<strong class="pay-total-display">'+money(total(x))+'</strong>']))
+        +predefinidos+'</section>'
+        +'<section class="card card-pad section" id="financial-duplicate-review"><h3>Confirmação de valores complementares</h3>'
+        +'<p>Use apenas quando o complemento financeiro e o acordo/bonificação forem dois pagamentos distintos, ainda que tenham o mesmo valor. Informe o motivo; a confirmação fica registrada com data e responsável.</p>'
+        +e.map((x,index)=>{
+          if(!(x.bonus>0&&x.refs?.length===1&&presence(x.i.status)))return '';
+          const approval=x.i.confirmacaoComplemento;
+          const isApproved=approval&&approval.aprovadoPor==='FINANCEIRO'&&
+            roundMoney(Number(approval.financeiro))===roundMoney(x.finance)&&
+            roundMoney(Number(approval.acordo))===roundMoney(x.bonus)&&x.finance>0&&roundMoney(x.finance)===roundMoney(x.bonus);
+          if(isApproved)return `<div class="notice info section"><strong>${escapeHtml(x.p?.nome)} · ${formatDate(x.c.dataServico)}</strong> — Dois pagamentos distintos confirmados por ${escapeHtml(approval.aprovadoPor)} em ${escapeHtml(formatDateTime(approval.aprovadoEm))}. Justificativa: ${escapeHtml(approval.justificativa||'')}</div>`;
+          return `<div class="card card-pad section"><strong>${escapeHtml(x.p?.nome)} · ${formatDate(x.c.dataServico)} · ${escapeHtml(x.c.unidade)}</strong>
+            <p>Acordo/bonificação registrado: <strong>${money(x.bonus)}</strong>. O complemento só será aprovado se for um pagamento adicional e independente.</p>
+            <div class="form-grid">${field('Valor complementar distinto (R$)',`<input class="control" type="number" min="0.01" step="0.01" id="approve-finance-${index}" value="${x.finance>0?x.finance:''}" placeholder="Informe o valor a confirmar">`)}
+              ${field('Motivo de serem dois pagamentos distintos',`<textarea class="control" rows="2" id="approve-reason-${index}" placeholder="Explique o motivo para auditoria"></textarea>`)}</div>
+            <div class="form-actions"><button type="button" class="btn btn-secondary confirm-finance-duplicate" data-index="${index}">Confirmar valores complementares</button></div></div>`;
+        }).join('')+'</section>';
+      $$('.pay-input').forEach(inp=>inp.onchange=()=>{adjustPayment(e[Number(inp.dataset.index)],inp.dataset.field,inp.value);refresh();});
+      $$('.confirm-finance-duplicate').forEach(button=>button.onclick=()=>{
+        const index=Number(button.dataset.index),entry=e[index];
+        const amount=Number($('#approve-finance-'+index)?.value),reason=$('#approve-reason-'+index)?.value.trim()||'';
+        if(!Number.isFinite(amount)||amount<=0||roundMoney(amount)!==roundMoney(entry.bonus))
+          return showToast('O valor complementar deve ser igual ao acordo registrado para confirmar dois pagamentos de mesmo valor.',true);
+        if(reason.length<10||reason.length>400)
+          return showToast('Descreva o motivo de serem dois pagamentos distintos (10 a 400 caracteres).',true);
+        if(!window.confirm('Confirmar DOIS pagamentos distintos para '+entry.p?.nome+' em '+formatDate(entry.c.dataServico)+'? Complemento '+money(amount)+' mais acordo '+money(entry.bonus)+'. A aprovação ficará registrada em auditoria.'))return;
+        submitComplementConfirmation(entry,amount,reason);
+      });
+    };
+    bindFilters(()=>{selectedCycle='custom';$('#financial-cycle').value='custom';refresh();});
+    $('#financial-cycle').onchange=()=>{selectedCycle=$('#financial-cycle').value;renderPayments();};
+    if(selectedCycle!=='custom')$('#cycle-caption').textContent='Pagamento em '+formatDate(financialCycle(isoToday(),Number(selectedCycle)).pagamento);
+    refresh();bindExports();bindFinancialSummaryExports();
+  }
+  function absenceRecords(){const groups=new Map();for(const x of operationalRows(filteredConvs()).filter(x=>['Falta','Atestado'].includes(x.i?.status))){const key=[x.c.dataServico,x.i.colaboradorId,x.c.supervisor,x.i.status].join('|');if(!groups.has(key))groups.set(key,{...x,units:new Set(),notes:new Set()});const r=groups.get(key);r.units.add(x.c.unidade);if(x.i.observacao)r.notes.add(x.i.observacao);}return [...groups.values()].sort((a,b)=>a.c.dataServico.localeCompare(b.c.dataServico)||(a.p?.nome||'').localeCompare(b.p?.nome||'','pt-BR'));}
+  function absenceReportRows(){return absenceRecords().map(x=>[formatDate(x.c.dataServico),x.c.supervisor,x.p?.nome||'',x.p?.funcao||'',[...x.units].join(', '),x.i.status,[...x.notes].join(' · ')]);}
+  const absenceHeaders=['Data','Supervisor','Colaborador','Função','Unidade(s)','Status','Observação'];
+  function renderAbsences(){if(selectedCycle!=='custom'){const cycle=financialCycle(isoToday(),Number(selectedCycle));reportFilters.inicio=cycle.inicio;reportFilters.fim=cycle.fim;}$('#main-content').innerHTML=head('Faltas / Atestados','Ausências do ciclo de terça a segunda, separadas dos pagamentos de extras.')+cycleControl()+filterControls()+'<div class="section" id="abs-body"></div>'+exportButtons();const refresh=()=>$('#abs-body').innerHTML=table(absenceHeaders,absenceReportRows().map(r=>r.map(escapeHtml)));bindFilters(()=>{selectedCycle='custom';$('#financial-cycle').value='custom';refresh();});$('#financial-cycle').onchange=()=>{selectedCycle=$('#financial-cycle').value;renderAbsences();};if(selectedCycle!=='custom')$('#cycle-caption').textContent='Ciclo de terça a segunda · pagamento em '+formatDate(financialCycle(isoToday(),Number(selectedCycle)).pagamento);refresh();$('#export-csv').onclick=()=>{const csv=[absenceHeaders,...absenceReportRows()].map(r=>r.map(v=>'"'+String(v??'').replaceAll('"','""')+'"').join(';')).join('\r\n');localDownload('faltas_atestados_'+reportFilters.inicio+'_a_'+reportFilters.fim+'.csv','\uFEFF'+csv,'text/csv;charset=utf-8');};$('#export-excel').onclick=()=>exportWorkbook([{name:'Faltas e Atestados',headers:[3],titles:[0,1],freeze:4,merges:['A1:G1','A2:G2'],widths:[14,20,38,26,26,16,48],center:[0,5],rows:[['APROAR | FALTAS E ATESTADOS'],['Período: '+reportPeriod()],[],absenceHeaders,...absenceReportRows()]}],'faltas_atestados_'+reportFilters.inicio+'_a_'+reportFilters.fim);$('#export-pdf').onclick=()=>reportPDF('absences');}
+
+  let settingsTab='Obras';
+  function renderSettingsBase(){
+    const tabs=['Obras','Colaboradores','Importar Colaboradores','Cobranças Teams','Limpeza de Dados'];
+    $('#main-content').innerHTML=head('Configurações','Cadastros, sincronização, histórico e manutenção do sistema.')+`<div class="grid settings-diagnostics"><details class="card card-pad"><summary>Diagnóstico e saúde do sistema</summary><p>Diagnóstico operacional · ${state.convocacoes.length} convocações · ${state.apontamentos.length} apontamentos.</p><span class="badge info">Aguardando confirmação da conexão</span></details><details class="card card-pad"><summary>Histórico de auditoria</summary><div class="section">${table(['Data','Responsável','Ação','Referência'],state.auditoria.slice().reverse().map(x=>[formatDateTime(x.data),escapeHtml(x.usuario),escapeHtml(x.action),escapeHtml(x.ref)]))}</div></details></div><details class="card card-pad section"><summary>Sincronização com o Trello</summary><p>Lista principal: EM EXECUÇÃO • atualização a cada 12 horas no sistema original.</p><div class="form-grid">${field('Lista','<select class="control"><option>EM EXECUÇÃO</option><option>Busca manual</option></select>')}${field('Buscar card ou lista','<input class="control" placeholder="Nome do card ou lista">')}</div><div class="notice info section">Área de integração preservada. Esta versão HTML usa obras fictícias e não consulta o Trello.</div><details class="section"><summary>Diagnóstico técnico</summary><p>Conexão externa ainda não configurada nesta demonstração. Regras locais: SEBRAE R$ 90; valores Financeiro livres; custos por cadastro e categoria; Extra separado; periculosidade sobre dia e Extra; alocação por blocos de período; prazos no fuso de Fortaleza; pendências parciais; ciclo financeiro de terça a segunda.</p></details></details><div class="tabs section">${tabs.map(t=>`<button class="tab-btn ${t===settingsTab?'active':''}" data-settings="${t}">${t}</button>`).join('')}</div><div id="settings-body" class="section"></div>`;
+    $$('[data-settings]').forEach(b=>b.onclick=()=>{settingsTab=b.dataset.settings;renderSettings();});
+    const body=$('#settings-body');
+    if(settingsTab==='Obras'){
+      body.innerHTML=`<form id="obra-form" class="card card-pad"><h3>Cadastrar obra</h3><div class="form-grid">${field('Nome da obra','<input class="control" id="obra-nome" required>')}${field('Unidade','<input class="control" id="obra-unidade" required>')}</div><div class="form-actions"><button class="btn btn-primary">Cadastrar obra</button></div></form><div id="obra-list" class="section">${table(['Selecionar','Obra','Unidade','Ação'],OBRAS.map(o=>[`<input type="checkbox" class="obra-bulk-checkbox" value="${escapeHtml(o.id)}" aria-label="Selecionar obra ${escapeHtml(o.nome)}" ${obraTemVinculos(o)?'disabled title="Obra com registros vinculados"':''}>`,escapeHtml(o.nome),escapeHtml(o.unidade),`<button class="link-btn" data-edit-obra="${o.id}">Editar</button>`]))}</div>`;
+      let editing=null;$$('[data-edit-obra]').forEach(b=>b.onclick=()=>{editing=obraById(b.dataset.editObra);$('#obra-form').dataset.editingObra=editing.id;$('#obra-nome').value=editing.nome;$('#obra-unidade').value=editing.unidade;});$('#obra-form').onsubmit=e=>{e.preventDefault();const nome=$('#obra-nome').value.trim(),unidade=$('#obra-unidade').value.trim().toUpperCase();if(OBRAS.some(o=>o.id!==editing?.id&&o.nome.toUpperCase()===nome.toUpperCase()&&o.unidade===unidade))return toast('Obra já cadastrada nesta unidade.',true);if(editing){Object.assign(editing,{nome,unidade});state.convocacoes.filter(c=>c.obraId===editing.id).forEach(c=>c.unidade=unidade);}else OBRAS.push({id:uid('obra'),nome,unidade});audit('Cadastro / edição de obra');saveData();renderSettings();};
+    } else if(settingsTab==='Colaboradores'){
+      body.innerHTML=`<form id="colab-form" class="card card-pad"><h3>Cadastrar / editar colaborador</h3><div class="form-grid">${field('Nome completo','<input class="control" id="colab-nome" required>')}${field('Função','<input class="control" id="colab-funcao" required>')}${field('Custo diário com encargos (R$)','<input class="control" id="colab-custo" type="number" min="0" step="0.01" value="180" required>')}${field('Moradia','<input class="control" id="colab-moradia">')}${field('Categoria','<select class="control" id="colab-categoria"><option>Profissional</option><option>Ajudante</option></select>')}${field('Avulso','<select class="control" id="colab-avulso"><option>Não</option><option>Sim</option></select>')}</div><div class="form-actions"><button class="btn btn-primary">Salvar colaborador</button></div></form><div class="section"><input class="control" id="colab-search" placeholder="Buscar nome, função ou moradia"></div><div class="section" id="colab-table"></div>`;
+      let editing=null;const refresh=()=>{$('#colab-table').innerHTML=table(['Nome','Função','Moradia','Custo diário','Categoria','Avulso','Ação'],COLABORADORES.filter(c=>(c.nome+' '+c.funcao+' '+(c.moradia||'')).toLowerCase().includes($('#colab-search').value.toLowerCase())).map(c=>[escapeHtml(c.nome),escapeHtml(c.funcao),escapeHtml(c.moradia||'—'),money(c.custo||180),escapeHtml(c.categoria||'Profissional'),escapeHtml(c.avulso||'Não'),`<button class="link-btn" data-edit-colab="${c.id}">Editar</button>`]));$$('[data-edit-colab]').forEach(b=>b.onclick=()=>{editing=colaboradorById(b.dataset.editColab);for(const [k,id] of [['nome','nome'],['funcao','funcao'],['custo','custo'],['moradia','moradia'],['categoria','categoria'],['avulso','avulso']])$('#colab-'+id).value=editing[k]??(k==='custo'?180:k==='categoria'?'Profissional':k==='avulso'?'Não':'');});};$('#colab-search').oninput=refresh;refresh();$('#colab-form').onsubmit=e=>{e.preventDefault();const data={nome:$('#colab-nome').value.trim(),funcao:$('#colab-funcao').value.trim(),custo:Number($('#colab-custo').value),moradia:$('#colab-moradia').value.trim(),categoria:$('#colab-categoria').value,avulso:$('#colab-avulso').value};if(editing)Object.assign(editing,data);else COLABORADORES.push({id:uid('c'),...data});audit('Cadastro / edição de colaborador');saveData();renderSettings();};
+    } else if(settingsTab==='Importar Colaboradores'){
+      body.innerHTML=`<div class="card card-pad"><h3>Importar colaboradores</h3><p>CSV com separador ponto e vírgula. Colunas: nome;funcao;custo;moradia;categoria;avulso.</p><input class="control" type="file" id="import-file" accept=".csv"><div class="notice info section">A importação Excel e o mapeamento de colunas do sistema original estão previstos na estrutura. Neste HTML, a importação funcional usa CSV.</div><div id="import-preview" class="section"></div><div class="form-actions"><button class="btn btn-secondary" id="import-template">Baixar modelo CSV</button><button class="btn btn-primary" id="import-save" disabled>Importar prévia</button></div></div>`;
+      let rows=[];$('#import-template').onclick=()=>localDownload('modelo_colaboradores.csv','\uFEFFnome;funcao;custo;moradia;categoria;avulso\nExemplo fictício;Pedreiro;180;Fortaleza;Profissional;Não','text/csv;charset=utf-8');$('#import-file').onchange=async()=>{const f=$('#import-file').files[0];if(!f)return;const lines=(await f.text()).replace(/^\uFEFF/,'').trim().split(/\r?\n/);const cols=lines.shift().split(';').map(x=>x.trim().toLowerCase());if(!['nome','funcao','custo'].every(x=>cols.includes(x)))return toast('As colunas nome, funcao e custo são obrigatórias.',true);rows=lines.map(line=>{const values=line.split(';');return Object.fromEntries(cols.map((key,i)=>[key,values[i]?.trim()||'']));}).filter(x=>x.nome&&x.funcao&&Number.isFinite(Number(x.custo.replace(',','.'))));$('#import-preview').innerHTML=table(['Nome','Função','Custo'],rows.map(x=>[escapeHtml(x.nome),escapeHtml(x.funcao),escapeHtml(x.custo)]));$('#import-save').disabled=!rows.length;};$('#import-save').onclick=()=>{rows.forEach(x=>{const data={...x,custo:Number(x.custo.replace(',','.'))};const existing=COLABORADORES.find(c=>c.nome.toLowerCase()===x.nome.toLowerCase());if(existing)Object.assign(existing,data);else COLABORADORES.push({id:uid('c'),...data});});audit('Importação de colaboradores',String(rows.length));saveData();toast(rows.length+' colaboradores importados.');renderSettings();};
+    } else if(settingsTab==='Cobranças Teams'){
+      body.innerHTML=`<div class="card card-pad"><h3>Cobranças Teams</h3><div class="form-grid">${field('Supervisor',`<select class="control" id="teams-sup">${options(SUPERVISORES)}</select>`)}${field('Rotina','<label><input type="checkbox" id="teams-active"> Cobranças automáticas ativas (configuração demonstrativa)</label>')}</div><p>Prévia da cobrança</p><textarea class="control" id="teams-text" readonly></textarea><div class="notice info section">O envio automático ao Teams depende da integração. A prévia abaixo usa pendências reais desta demonstração.</div></div>`;const refresh=()=>{const s=$('#teams-sup').value,p=state.convocacoes.filter(c=>c.supervisor===s&&!completeConv(c)&&c.dataServico<=isoToday());$('#teams-text').value=s+', regularize os apontamentos pendentes no Portal do Supervisor. Datas: '+[...new Set(p.map(c=>c.dataServico))].map(formatDate).join(', ')+(p.length?'': 'nenhuma pendência.');body.querySelector('.notice').innerHTML='Prévia da rotina, sem envio nesta demonstração.'+table(['Data','Unidade','Situação','Próximo lembrete'],p.map(c=>[formatDate(c.dataServico),escapeHtml(c.unidade),!isWeekend(c.dataServico)&&now()>=deadlineApontamento(c.dataServico)?'ATRASADO':'PENDENTE',reminder(c)]));};$('#teams-sup').onchange=refresh;refresh();
+    } else {
+      body.innerHTML=`<div class="card card-pad"><h3>Limpeza de dados de homologação</h3><p>Excluir registros de uma data ou reiniciar os dados operacionais locais.</p>${field('Data','<input class="control" id="clean-date" type="date">')}<div class="form-actions"><button class="btn btn-secondary" id="clean-day">Excluir a data</button></div>${field('Confirmação','<input class="control" id="clean-confirm" placeholder="Digite LIMPAR DADOS">')}<div class="form-actions"><button class="btn btn-primary" id="clean-all">Limpar dados operacionais</button></div></div>`;$('#clean-day').onclick=()=>{const d=$('#clean-date').value;if(!d)return toast('Escolha uma data.',true);state.convocacoes=state.convocacoes.filter(c=>c.dataServico!==d);state.apontamentos=state.apontamentos.filter(a=>a.dataServico!==d);audit('Limpeza por data',d);saveData();toast('Registros da data excluídos.');};$('#clean-all').onclick=()=>{if($('#clean-confirm').value!=='LIMPAR DADOS')return toast('Digite LIMPAR DADOS para confirmar.',true);state.convocacoes=[];state.apontamentos=[];audit('Limpeza dos dados operacionais');saveData();toast('Dados operacionais fictícios excluídos.');renderSettings();};
+    }
+  }
+
+function renderEquipeDia(){
+ const pendingDayKey=portalDate+'|'+supervisorAtual;
+ if([...dayPendingAdds.values()].some(x=>x.dayKey!==pendingDayKey||x.selectedUnit!==portalUnit)){
+   discardDayPendingAdds();
+   showToast('Inclusões não salvas da outra data foram descartadas. Confira o novo apontamento.',true);
+ }
+ const body=$('#apontamento-body'),convs=convocacoesSupervisor().filter(c=>c.dataServico===portalDate&&(portalUnit==='Todas'||c.unidade===portalUnit));
+ const dayKey=portalDate+'|'+supervisorAtual,dayDraft=dayUnsavedDrafts.get(dayKey);
+ const people=new Map();for(const c of convs)for(const id of c.colaboradores)
+   if(!people.has(id))people.set(id,{conv:c,item:dayDraft?.items?.get(id)||apForConv(c.id)?.itens.find(i=>i.colaboradorId===id)});
+ const snapshotDayDraft=()=>{
+   const cards=$$('#day-form .person-card'),ids=cards.map(el=>el.dataset.person);
+   const items=ids.length?readPersonRows(ids,$('#day-form')):[];
+   const extra={person:$('#day-extra-person')?.value||'',kind:$('#day-extra-kind')?.value||'Não',
+     amount:$('#day-extra-amount')?.value||'',work:$('#day-extra-work')?.value||'',
+     obs:$('#day-extra-obs')?.value||'',search:$('#day-person-search')?.value||''};
+   dayUnsavedDrafts.set(dayKey,{items:new Map(items.map(item=>[item.colaboradorId,item])),extra});
+ };
+ const extraTypes=['Meia diária','Diária','Uma e meia diária','Duas diárias'];
+ body.innerHTML=`<h3>Equipe do dia</h3><p style="font-size:12px">Preencha o apontamento normal. Se houver extra, selecione a categoria diretamente na ficha do funcionário.</p>
+ <details class="card card-pad"><summary>Adicionar colaborador / avulso ao apontamento normal</summary><div class="form-grid">${field('Colaborador',`<select class="control" id="day-add-person"><option value="">Selecione</option>${options(COLABORADORES.filter(c=>!c.inativo&&!people.has(c.id)))}</select>`)}${field('Nome do avulso','<input class="control" id="day-avulso-nome">')}${field('Categoria do avulso',avulsoFuncaoSelect('day-avulso-funcao'))}</div><div class="form-actions"><button class="btn btn-secondary" type="button" id="day-add-button">Adicionar à equipe normal</button></div></details>
+ <p style="font-size:12px">Para marcar todos como presentes, defina primeiro a obra/serviço de todos os colaboradores exibidos.</p><button class="btn btn-primary" style="width:100%" id="day-all-present">Marcar todos como presentes</button>
+ <form id="day-form" class="section"><div class="person-search-wrap"><input id="day-person-search" class="control" type="search" autocomplete="off" placeholder="Buscar na equipe..." aria-label="Buscar colaborador na equipe"></div>
+ ${people.size?[...people].map(([id,x])=>personRow(id,x.item,x.conv.unidade,x.conv.obraId,portalDate,x.conv.supervisor)).join(''):'<div class="empty">Não há equipe convocada para esta unidade e data. Use Convocação ou adicione um colaborador acima.</div>'}
+ <details class="card card-pad section" id="day-extra-only"><summary>Adicionar outro funcionário como extra neste dia</summary><p style="font-size:12px">Este registro é somente da extra: não cria nem altera a presença normal do funcionário. A extra será exibida ao Financeiro e nos relatórios.</p>
+ <div class="form-grid">${field('Funcionário',`<select class="control" id="day-extra-person"><option value="">Selecione qualquer funcionário</option>${options(COLABORADORES.filter(c=>!c.inativo&&!people.has(c.id)).slice().sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR')))}</select>`)}${field('Extra',`<select class="control" id="day-extra-kind">${EXTRA_OPTIONS.map(x=>`<option ${x==='Não'?'selected':''}>${x}</option>`).join('')}</select>`)}</div>
+ <div id="day-extra-fields" class="form-grid">${field('Valor da Extra (R$)',`<input class="control" id="day-extra-amount" type="number" min="0.01" step="0.01" placeholder="Digite o valor" required>`)}${field('Obra / Serviço e unidade da extra',`<select class="control" id="day-extra-work">${extraWorkOptions('')}</select>`)}${field('Observação da extra','<input class="control" id="day-extra-obs" maxlength="2000" placeholder="Opcional">')}</div>
+ <div id="day-extra-origin" class="notice info section">Escolha o funcionário. O serviço registrado para ele neste dia será sugerido automaticamente, mas pode ser trocado.</div></details>
+ <div class="form-actions"><button class="btn btn-primary">Salvar apontamento do dia</button></div></form>`;
+ bindServiceRows();bindPersonSearch($('#day-person-search'),()=>$$('#day-form .person-card'));
+ // X para inclusões já gravadas, desde que não exista apontamento ou
+ // histórico associado. O servidor valida novamente antes de excluir.
+ for(const [id,entry] of people){
+   if(dayPendingAdds.has(id))continue;
+   const c=entry.conv;
+   if(!/^\d+$/.test(String(c.id))||apForConv(c.id)?.itens?.some(i=>String(i.colaboradorId)===String(id)))continue;
+   if(perfilAtual==='SUPERVISOR'&&(c.supervisor!==supervisorAtual||c.executor!==supervisorAtual))continue;
+   const card=[...body.querySelectorAll('#day-form .person-card')].find(el=>el.dataset.person===String(id));
+   if(!card)continue;
+   card.style.position='relative';card.style.paddingTop='42px';
+   const button=document.createElement('button');
+   button.type='button';button.className='day-remove-pending day-remove-saved';
+   button.textContent='×';
+   button.title='Retirar inclusão sem apontamento';
+   button.setAttribute('aria-label','Retirar '+(colaboradorById(id)?.nome||'colaborador')+' desta equipe');
+   Object.assign(button.style,{position:'absolute',top:'8px',right:'9px',width:'30px',height:'30px',
+     background:'#fff3f3',border:'1px solid #d9b0b0',borderRadius:'6px',
+     color:'#9c2929',fontSize:'21px',fontWeight:'700',cursor:'pointer',zIndex:'2'});
+   button.onclick=async()=>{
+     if(onlineQueued||onlineSaving)return showToast('Existe uma gravação em andamento.',true);
+     const label=colaboradorById(id)?.nome||'colaborador';
+     if(!window.confirm('Retirar '+label+' desta equipe? Esta ação só é permitida sem apontamento confirmado e não apaga o cadastro do colaborador.'))return;
+     snapshotDayDraft();
+     const requestId=crypto.randomUUID();
+     onlineSaving=true;lockOnline(true);
+     let saved=false;
+     try{
+       try{
+         const result=await api('/api/unpointed-convocation-remove',{method:'POST',
+           body:JSON.stringify({convocationId:String(c.id),requestId})});
+         saved=result?.ok===true&&result.requestId===requestId;
+       }catch(err){
+         if(!err?.status||err.status>=500){
+           try{const check=await api('/api/save-status?requestId='+encodeURIComponent(requestId));
+             saved=check?.confirmed===true&&check.requestId===requestId;}catch{}
+         }
+         if(!saved)throw err;
+       }
+       applyOnline(await restoreOnlineSession());
+       // Mantém os dados digitados nas outras fichas, retirando só esta inclusão.
+       dayUnsavedDrafts.get(dayKey)?.items.delete(id);
+       onlineSaving=false;render();
+       showToast('Inclusão retirada da equipe. Os demais colaboradores foram preservados.');
+     }catch(error){
+       if(saved){onlineWritable=false;showToast('Remoção confirmada no banco, mas a tela não atualizou. Use Ctrl + F5; não repita.',true);}
+       else showToast(String(error.message||'Falha ao retirar inclusão. Confira o histórico antes de repetir.'),true);
+     }finally{onlineSaving=false;lockOnline(false);}
+   };
+   card.appendChild(button);
+ }
+ // X apenas nas fichas de pessoas incluídas agora e ainda não salvas.
+ for(const [id,pending] of dayPendingAdds){
+   if(pending.dayKey!==dayKey)continue;
+   const card=[...body.querySelectorAll('#day-form .person-card')].find(el=>el.dataset.person===id);
+   if(!card)continue;
+   card.style.position='relative';
+   card.style.paddingTop='42px';
+   const remove=document.createElement('button');
+   remove.type='button';
+   remove.className='day-remove-pending';
+   remove.textContent='×';
+   remove.title='Remover da equipe antes de salvar';
+   remove.setAttribute('aria-label','Remover '+(colaboradorById(id)?.nome||'avulso')+' da equipe antes de salvar');
+   Object.assign(remove.style,{
+     position:'absolute',top:'8px',right:'9px',width:'30px',height:'30px',
+     background:'#fff3f3',border:'1px solid #d9b0b0',borderRadius:'6px',
+     color:'#9c2929',fontSize:'21px',fontWeight:'700',cursor:'pointer',zIndex:'2'
+   });
+   remove.onclick=()=>{
+     if(onlineQueued||onlineSaving)return toast('Aguarde a conclusão do salvamento.',true);
+     snapshotDayDraft();
+     if(!removePendingDayAdd(id,dayKey))return toast('Não foi possível remover a inclusão pendente.',true);
+     render();
+     showToast('Colaborador retirado do formulário. Os outros preenchimentos foram mantidos.');
+   };
+   card.appendChild(remove);
+ }
+ const extraToggle=$('#day-extra-kind'),extraFields=$('#day-extra-fields');
+ const refreshExternalFields=()=>{const enabled=extraToggle.value!=='Não';extraFields.classList.remove('hidden');$('#day-extra-amount').required=enabled;$('#day-extra-amount').min=enabled?'0.01':'0';};
+ const suggestExternalWork=()=>{
+  const personId=$('#day-extra-person').value,existing=extraRecordFor(portalDate,personId,supervisorAtual),day=mainWorkForPersonOnDate(personId,portalDate);
+  const defaultWork=existing?.obraId||day.workId||convs.find(c=>c.obraId)?.obraId||OBRAS[0]?.id||'';
+  if(OBRAS.some(o=>String(o.id)===String(defaultWork)))$('#day-extra-work').value=defaultWork;
+  if(existing){extraToggle.value=EXTRA_OPTIONS.includes(existing.extra)?existing.extra:'Diária';$('#day-extra-obs').value=existing.observacao||'';$('#day-extra-amount').value=Number(existing.valorExtraOriginal)>0?Number(existing.valorExtraOriginal).toFixed(2):'';}
+  else{extraToggle.value='Não';$('#day-extra-obs').value='';$('#day-extra-amount').value='';}
+  refreshExternalFields();
+  $('#day-extra-origin').textContent=day.work?'Serviço principal do funcionário neste dia: '+day.work.unidade+' · '+day.work.nome+'. A obra/unidade da extra pode ser alterada.':'Não foi encontrado apontamento principal para este funcionário nesta data. Escolha abaixo a obra/unidade onde a extra ocorreu.';
+ };
+ extraToggle.onchange=refreshExternalFields;$('#day-extra-person').onchange=suggestExternalWork;suggestExternalWork();
+ if(dayDraft?.extra){
+   const draft=dayDraft.extra;
+   if([...$('#day-extra-person').options].some(o=>o.value===draft.person))$('#day-extra-person').value=draft.person;
+   if([...extraToggle.options].some(o=>o.value===draft.kind))extraToggle.value=draft.kind;
+   $('#day-extra-amount').value=draft.amount;$('#day-extra-obs').value=draft.obs;
+   if([...$('#day-extra-work').options].some(o=>o.value===draft.work))$('#day-extra-work').value=draft.work;
+   $('#day-person-search').value=draft.search;
+   $('#day-person-search').dispatchEvent(new Event('input',{bubbles:true}));
+   refreshExternalFields();
+ }
+ $('#day-all-present').onclick=()=>{if(!people.size)return toast('Adicione pessoas à equipe.',true);const items=readPersonRows([...people.keys()]);if(items.some(i=>i.servicos.some(s=>!s.obraId)))return toast('Selecione primeiro os serviços de todos os colaboradores.',true);$$('#day-form .row-status').forEach(x=>{x.value='Presente (Integral)';x.onchange?.();});};
+ $('#day-add-button').onclick=()=>{
+   if(onlineQueued||onlineSaving)return toast('Aguarde o salvamento atual.',true);
+   const unit=portalUnit==='Todas'?(convs[0]?.unidade||adminUnits()[0]):portalUnit;
+   if(!unit)return toast('Cadastre uma unidade antes de incluir o colaborador.',true);
+   if(!OBRAS.some(o=>o.unidade===unit))return toast('Esta unidade ainda não possui obra cadastrada. Solicite à Controladoria o cadastro de uma obra antes da inclusão.',true);
+   const name=$('#day-avulso-nome').value.trim();
+   let id=$('#day-add-person').value,staff=null;
+   if(!id&&!name)return toast('Escolha um colaborador ou informe o nome do avulso.',true);
+   if(!id){const funcao=$('#day-avulso-funcao').value;if(!funcao)return toast('Selecione Profissional ou Servente para o avulso.',true);id=uid('c');staff={id,nome:name,...avulsoData(funcao)};}
+   if(people.has(id))return toast('Este colaborador já está na equipe.',true);
+   if(blocked(id,portalDate)||state.convocacoes.some(c=>c.dataServico===portalDate&&c.colaboradores.includes(id)&&overlaps(c.turno,'Integral')))return toast('Colaborador indisponível ou convocado em outra equipe.',true);
+   snapshotDayDraft();
+   if(staff)COLABORADORES.push(staff);
+   let conv=convs.find(c=>c.unidade===unit);
+   if(!conv){conv={id:uid('cv'),supervisor:supervisorAtual,dataServico:portalDate,unidade:unit,obraId:'',turno:'Integral',colaboradores:[],criadoEm:now().toISOString(),origem:'inclusao_apontamento'};state.convocacoes.push(conv);}
+   conv.colaboradores.push(id);
+   // Evita POST isolado: a equipe e o apontamento são gravados juntos.
+   dayPendingAdds.set(id,{id,staff,unit,dayKey,selectedUnit:portalUnit,convId:conv.id});
+   const preferredWork=convs.find(c=>c.unidade===unit&&OBRAS.some(o=>o.id===c.obraId))?.obraId
+     ||OBRAS.find(o=>o.unidade===unit)?.id||'';
+   dayUnsavedDrafts.get(dayKey)?.items.set(id,{
+     colaboradorId:id,status:'Presente (Integral)',extra:'Não',
+     tipoDiariaAvulso:staff?'Diária':null,
+     servicos:[{obraId:preferredWork,periodo:'Integral'}]
+   });
+   render();
+   showToast('Colaborador incluído no formulário, ainda não salvo. Confira os dados e clique em “Salvar apontamento do dia”.');
+ };
+ $('#day-form').noValidate=true;
+ $('#day-form').onsubmit=e=>{
+  e.preventDefault();
+  try{
+    if(portalDate>isoToday())return toast('Não é possível apontar uma data futura.',true);
+    snapshotDayDraft();
+    const items=readPersonRows([...people.keys()]);if(!validateAgreementObservations(items,$('#day-form')))return;if(!validateExtraAmounts(items,$('#day-form')))return;for(const i of items)if(!validServices([i],people.get(i.colaboradorId).conv.unidade))return;
+    const selectedExternal=$('#day-extra-person').value,toggleExternal=$('#day-extra-kind').value!=='Não';
+    if(toggleExternal&&!selectedExternal)return toast('Selecione o funcionário que realizou a extra.',true);if(toggleExternal){const amount=Number($('#day-extra-amount').value);if(!Number.isFinite(amount)||amount<=0||amount>10000000){$('#day-extra-amount').focus();return toast('Informe um valor da extra maior que R$ 0,00. A opção de extra está diferente de “Não”.',true);}}
+    if(!items.length&&!selectedExternal)return toast('Selecione funcionários para o apontamento normal ou informe uma extra.',true);
+    const extraBatch=items.slice();
+    if(selectedExternal){const day=mainWorkForPersonOnDate(selectedExternal,portalDate);extraBatch.push({colaboradorId:selectedExternal,status:'Extra independente',extra:'Não',servicos:[],extraLancamento:{enabled:toggleExternal,extra:$('#day-extra-kind').value,valorExtraOriginal:Number($('#day-extra-amount').value),obraId:$('#day-extra-work').value,observacao:$('#day-extra-obs').value.trim(),dayWorkId:day.workId}});}
+    if(!applyInlineExtras(extraBatch,portalDate,supervisorAtual))return;
+    for(const c of convs){const selected=items.filter(i=>c.colaboradores.includes(i.colaboradorId));if(!selected.length)continue;let ap=apForConv(c.id);if(ap){ap.itens=[...ap.itens.filter(i=>!selected.some(x=>x.colaboradorId===i.colaboradorId)),...selected];ap.atualizadoEm=now().toISOString();}else state.apontamentos.push({executor:supervisorAtual||perfilLabel(perfilAtual),id:uid('ap'),convocacaoId:c.id,supervisor:c.supervisor,dataServico:c.dataServico,apontadoEm:now().toISOString(),retroativo:false,itens:selected});}
+    audit('Apontamento da equipe',portalDate);if(!saveData(()=>{
+      dayUnsavedDrafts.delete(dayKey);
+      dayPendingAdds.clear();
+      render();
+    }))return;toast('Apontamento do dia e extras salvos.');
+  }catch(error){
+    console.error('APROAR day-form submit failure',String(error?.message||error).slice(0,240));
+    showToast('Não foi possível preparar o apontamento. Confira os campos e tente novamente.',true);showSaveFeedback('Não foi possível preparar o apontamento. Confira os campos e tente novamente.',true);
+  }
+ };
+}
+    let unitConvDate='';let avulsoDraft=[];
+  function convocationReviewMarkup(review){
+    const people=review.ids.map(id=>review.avulsos.find(p=>p.id===id)||colaboradorById(id)||{id,nome:id,funcao:'Não informado'});
+    const sorted=alphabeticalPeople(people);
+    const detail=(label,value)=>`<div><span class="field-label">${label}</span><strong>${escapeHtml(value)}</strong></div>`;
+    return `<div class="section-title"><div><h3>Espelho da convocação</h3>
+      <p>Confira todos os dados antes de confirmar definitivamente. Ainda não foi salvo.</p></div></div>
+      <div class="grid grid-3">${detail('Data do serviço',formatDate(review.date))}
+        ${detail('Unidade',review.unit)}${detail('Turno',review.turno)}
+        ${detail('Supervisor responsável',review.supervisor)}
+        ${detail('Colaboradores',String(sorted.length))}</div>
+      <h4 class="section">Equipe selecionada (ordem alfabética)</h4>
+      <div class="rect-list">${sorted.map((p,index)=>`<div class="team-list-item">
+        <strong>${index+1}. ${escapeHtml(p.nome)}</strong>
+        <small>${escapeHtml(p.funcao||'Não informado')}${review.avulsos.some(a=>a.id===p.id)?' · Avulso':''}</small>
+      </div>`).join('')}</div>
+      <p class="notice info section">A convocação só será gravada depois que você clicar em <strong>Confirmar convocação definitiva</strong>. Os serviços serão definidos no apontamento.</p>
+      <div class="form-actions"><button type="button" class="btn btn-secondary" id="unit-conv-correct">Voltar e corrigir</button>
+      <button type="button" class="btn btn-primary" id="unit-conv-final">Confirmar convocação definitiva</button></div>`;
+  }
+  function renderUnitConvocacao(){
+    if(!unitConvDate)unitConvDate=tomorrowISO();
+    const existing=convocacoesSupervisor().filter(c=>c.dataServico===unitConvDate);const total=existing.reduce((v,c)=>v+c.colaboradores.length,0);
+    $('#main-content').innerHTML=head('Convocação','Escolha unidade, turno e pessoas. Os serviços serão definidos individualmente no apontamento.')+`<div class="grid grid-3">${metric('DATA',formatDate(unitConvDate),'data da convocação')}${metric('CONVOCADOS',total,'já registrados')}${metric('AÇÃO','Montar','e confirmar abaixo')}</div><details class="card card-pad section convocados-destaque"><summary>Já convocados · ${total}</summary>${existing.flatMap(c=>c.colaboradores.map(id=>({c,id}))).sort((a,b)=>comparePersonNames(colaboradorById(a.id)||{id:a.id},colaboradorById(b.id)||{id:b.id})).map(({c,id})=>{const p=colaboradorById(id);return `<div class="team-list-item"><strong>${escapeHtml(p?.nome)}</strong><small>${escapeHtml(p?.funcao)} · ${escapeHtml(c.unidade)} · ${c.turno}</small></div>`;}).join('')||'<p>Nenhum convocado nesta data.</p>'}</details><form id="unit-conv-form" class="card card-pad section unit-conv"><h3>Adicionar à equipe</h3><p style="font-size:12px">Primeiro revise o espelho da convocação. A equipe será gravada somente após a confirmação definitiva.</p><div class="convocation-fields">${field('Data',`<input class="control" id="unit-conv-date" type="date" value="${unitConvDate}" required>`)}${field('Unidade',`<select class="control" id="unit-conv-unit">${options(adminUnits())}</select>`)}${field('Turno',`<select class="control" id="unit-conv-turn">${options(['Integral','Manhã','Tarde','Noite'])}</select>`)}${field('Função',`<select class="control" id="unit-conv-function">${options(['Todas',...[...new Set(COLABORADORES.map(c=>c.funcao))]])}</select>`)}</div><details class="card card-pad section" id="previous-team-panel"><summary>Usar equipe do dia anterior</summary><p style="font-size:12px">Confira a equipe desta unidade. Desmarque quem não precisa ser convocado.</p>${field('Data da equipe de referência','<input id="previous-team-date" type="date" class="control">')}<div id="previous-team-list" class="rect-list section"></div><div class="form-actions"><button id="previous-team-use" type="button" class="btn btn-secondary">Usar pessoas selecionadas</button></div></details>${field('Colaboradores','<input class="control" id="unit-conv-search" placeholder="Digite um nome para buscar…">')}<div id="unit-conv-people" class="checkbox-grid section"></div><details class="section"><summary>Adicionar pessoas que não estão na lista</summary><p style="font-size:12px">Adicione quantos avulsos precisar e confirme toda a equipe de uma vez.</p>${field('Nome','<input class="control" id="unit-avulso-name" placeholder="Nome completo">')}${field('Categoria do avulso',avulsoFuncaoSelect('unit-avulso-function'))}<button class="btn btn-secondary" type="button" id="unit-avulso-add">Adicionar pessoa</button><div id="unit-avulso-list" class="section"></div></details><div class="form-actions"><button class="btn btn-primary">Revisar convocação</button></div></form><section id="unit-conv-review" class="card card-pad section hidden" aria-live="polite"></section><section class="card card-pad section" id="unit-no-conv-box"><h3>Sem convocação para a unidade</h3><p>Confirme quando não houver atividade nem necessidade de equipe na unidade e na data selecionadas. A confirmação justifica a ausência de convocação no acompanhamento do responsável.</p><div id="unit-no-conv-status" class="notice info" role="status"></div><div class="form-actions"><button id="unit-no-conv-button" type="button" class="btn btn-secondary">Sem convocação para a unidade</button></div></section>`;
+    const selected=new Set();const refresh=(sync=true)=>{if(sync)$$('#unit-conv-people input').forEach(x=>x.checked?selected.add(x.value):selected.delete(x.value));const term=$('#unit-conv-search').value.toLowerCase(),func=$('#unit-conv-function').value;$('#unit-conv-people').innerHTML=alphabeticalPeople(COLABORADORES.filter(c=>!c.inativo&&c.nome.toLowerCase().includes(term)&&(func==='Todas'||c.funcao===func))).map(c=>`<label class="check-card"><input type="checkbox" value="${c.id}" ${selected.has(c.id)?'checked':''}><span>${escapeHtml(c.nome)}<small style="display:block;color:var(--muted)">${escapeHtml(c.funcao)}</small></span></label>`).join('');};$('#unit-conv-search').oninput=refresh;$('#unit-conv-function').onchange=refresh;refresh();
+    if(portalUnit!=='Todas')$('#unit-conv-unit').value=portalUnit;
+    const referenceDate=()=>{const d=dateLocal(unitConvDate);d.setDate(d.getDate()-1);return calendarISO(d);};$('#previous-team-date').value=referenceDate();
+    const previewPrevious=()=>{const date=$('#previous-team-date').value,unit=$('#unit-conv-unit').value,turn=$('#unit-conv-turn').value;const source=state.convocacoes.filter(c=>c.supervisor===supervisorAtual&&c.dataServico===date&&c.unidade===unit);const ids=alphabeticalPersonIds([...new Set(source.flatMap(c=>c.colaboradores))]);
+      $('#previous-team-list').innerHTML=ids.length?ids.map(id=>{const p=colaboradorById(id);const reason=blocked(id,unitConvDate)?'Indisponível na data de destino':state.convocacoes.some(c=>c.dataServico===unitConvDate&&c.colaboradores.includes(id)&&overlaps(c.turno,turn))?'Já convocado no turno de destino':'';return `<label class="check-card"><input class="previous-team-person" type="checkbox" value="${id}" ${reason?'disabled':'checked'}><span><strong>${escapeHtml(p?.nome||id)}</strong><small style="display:block">${escapeHtml(p?.funcao||'')} · ${escapeHtml(unit)}${reason?' · '+reason:''}</small></span></label>`;}).join(''):'<div class="empty">Não há equipe convocada nesta unidade em '+formatDate(date)+'. Escolha outra data de referência ou monte a equipe abaixo.</div>';
+      $('#previous-team-use').disabled=!ids.length;
+    };
+    $('#previous-team-date').onchange=previewPrevious;$('#unit-conv-unit').onchange=()=>{previewPrevious();refreshNoConv();};$('#unit-conv-turn').onchange=previewPrevious;previewPrevious();
+    const refreshNoConv=()=>{
+      const date=$('#unit-conv-date').value,unit=$('#unit-conv-unit').value,marked=temConfirmacaoSemConvocacao(supervisorAtual,unit,date);
+      const hasTeam=state.convocacoes.some(c=>c.supervisor===supervisorAtual&&c.unidade===unit&&c.dataServico===date);
+      const owner=state.unitOwners?.[unit],wrongOwner=!!owner&&owner!==supervisorAtual;
+      const button=$('#unit-no-conv-button'),status=$('#unit-no-conv-status');
+      button.textContent=marked?'Desfazer confirmação sem convocação':'Sem convocação para a unidade';
+      button.disabled=!onlineWritable||(!marked&&(hasTeam||wrongOwner||!unit||!date));
+      status.textContent=marked?'Confirmado: '+unit+' · '+formatDate(date)+'. A ausência de convocação está justificada para esta unidade.':hasTeam?'Já existe convocação para '+unit+' nesta data.':wrongOwner?'Unidade atribuída a outro supervisor.':!onlineWritable?'Gravação indisponível nesta sessão.':'Nenhuma confirmação registrada para '+unit+' em '+formatDate(date)+'.';
+    };
+    $('#unit-no-conv-button').onclick=()=>{
+      const date=$('#unit-conv-date').value,unit=$('#unit-conv-unit').value,marked=temConfirmacaoSemConvocacao(supervisorAtual,unit,date);
+      if(!marked&&state.convocacoes.some(c=>c.supervisor===supervisorAtual&&c.unidade===unit&&c.dataServico===date))return toast('Já existe convocação nesta unidade e data.',true);
+      if(!window.confirm((marked?'Desfazer a confirmação':'Confirmar que não haverá convocação')+' para '+unit+' em '+formatDate(date)+'?'))return;
+      state.semConvocacoesUnidade=marked?(state.semConvocacoesUnidade||[]).filter(x=>!(x.supervisor===supervisorAtual&&x.unidade===unit&&x.dataServico===date)):[...(state.semConvocacoesUnidade||[]),{supervisor:supervisorAtual,unidade:unit,dataServico:date,registradoEm:now().toISOString()}];
+      audit(marked?'Confirmação sem convocação desfeita':'Sem convocação na unidade',unit+' · '+date);
+      if(!saveData())return;
+      toast(marked?'Confirmação retirada. A data poderá voltar às pendências.':'Sem convocação confirmado para a unidade.');
+    };
+    refreshNoConv();
+    $('#previous-team-use').onclick=()=>{const ids=$$('.previous-team-person:checked').filter(x=>!x.disabled).map(x=>x.value);if(!ids.length)return toast('Nenhuma pessoa disponível foi selecionada.',true);selected.clear();ids.forEach(id=>selected.add(id));$('#unit-conv-function').value='Todas';$('#unit-conv-search').value='';refresh(false);toast('Equipe carregada. Você pode desmarcar pessoas antes de confirmar.');};
+    $('#unit-conv-date').onchange=()=>{unitConvDate=$('#unit-conv-date').value;render();};
+    const avulsoList=()=>$('#unit-avulso-list').innerHTML=avulsoDraft.map(x=>`<div class="team-list-item">${escapeHtml(x.nome)} · ${escapeHtml(x.funcao)}</div>`).join('');avulsoList();
+    $('#unit-avulso-add').onclick=()=>{const nome=$('#unit-avulso-name').value.trim();if(!nome)return toast('Informe o nome.',true);const funcao=$('#unit-avulso-function').value;if(!funcao)return toast('Selecione Profissional ou Servente para o avulso.',true);avulsoDraft.push({id:uid('c'),nome,...avulsoData(funcao)});$('#unit-avulso-name').value='';$('#unit-avulso-function').value='';avulsoList();};
+    const form=$('#unit-conv-form'),reviewBox=$('#unit-conv-review'),noConvBox=$('#unit-no-conv-box');
+    let reviewDraft=null;
+    const leaveReview=()=>{
+      reviewDraft=null;
+      reviewBox.classList.add('hidden');
+      form.classList.remove('hidden');
+      noConvBox.classList.remove('hidden');
+      refreshNoConv();
+    };
+    const validateReview=draft=>{
+      if(!draft||!draft.ids.length){toast('Selecione pelo menos uma pessoa.',true);return false;}
+      if(temConfirmacaoSemConvocacao(draft.supervisor,draft.unit,draft.date)){
+        toast('Desfaça primeiro a confirmação sem convocação da unidade.',true);return false;
+      }
+      if(!OBRAS.some(o=>o.unidade===draft.unit)){
+        toast('Esta unidade já está cadastrada, mas ainda não possui obra. Solicite à Controladoria o cadastro de uma obra nesta unidade antes da convocação.',true);
+        return false;
+      }
+      const conflict=draft.ids.find(id=>blocked(id,draft.date)||state.convocacoes.some(c=>c.dataServico===draft.date&&c.colaboradores.includes(id)&&overlaps(c.turno,draft.turno)));
+      if(conflict){
+        registerConvocationConflicts(draft.ids,draft.date,draft.turno,draft.unit,draft.supervisor);
+        toast('Colaborador indisponível ou já convocado neste turno: '+(colaboradorById(conflict)?.nome||draft.avulsos.find(p=>p.id===conflict)?.nome||conflict),true);
+        return false;
+      }
+      return true;
+    };
+    form.onsubmit=e=>{
+      e.preventDefault();
+      if(onlineQueued||onlineSaving)return toast('Aguarde a gravação em andamento.',true);
+      if(!onlineWritable)return toast('Gravação indisponível nesta sessão.',true);
+      $$('#unit-conv-people input').forEach(x=>x.checked?selected.add(x.value):selected.delete(x.value));
+      const draft={
+        ids:[...new Set([...selected,...avulsoDraft.map(x=>x.id)])],
+        date:$('#unit-conv-date').value,turno:$('#unit-conv-turn').value,
+        unit:$('#unit-conv-unit').value,supervisor:supervisorAtual,
+        avulsos:avulsoDraft.map(x=>({...x}))
+      };
+      if(!validateReview(draft))return;
+      reviewDraft=draft;
+      reviewBox.innerHTML=convocationReviewMarkup(draft);
+      form.classList.add('hidden');
+      noConvBox.classList.add('hidden');
+      reviewBox.classList.remove('hidden');
+      reviewBox.scrollIntoView?.({behavior:'smooth',block:'start'});
+      $('#unit-conv-correct').onclick=leaveReview;
+      $('#unit-conv-final').onclick=()=>{
+        const approved=reviewDraft;
+        if(!approved||onlineQueued||onlineSaving)return;
+        if(!onlineWritable)return toast('Gravação indisponível nesta sessão.',true);
+        if(!validateReview(approved)){leaveReview();return;}
+        // A primeira confirmação é somente uma prévia. Criamos a convocação
+        // e os avulsos apenas aqui, após a revisão definitiva.
+        const duplicateAvulsos=approved.avulsos.some(p=>COLABORADORES.some(c=>String(c.id)===String(p.id)));
+        if(duplicateAvulsos){toast('A equipe foi modificada. Volte e revise novamente.',true);leaveReview();return;}
+        COLABORADORES.push(...approved.avulsos);
+        state.convocacoes.push({id:uid('cv'),supervisor:approved.supervisor,
+          dataServico:approved.date,unidade:approved.unit,obraId:'',
+          turno:approved.turno,colaboradores:[...approved.ids],
+          criadoEm:now().toISOString(),origem:'normal',executor:approved.supervisor});
+        audit('Convocação da equipe',approved.date);
+        const queued=saveData();
+        if(!queued)return;
+        reviewDraft=null;avulsoDraft=[];
+        toast('Equipe convocada. Serviços serão escolhidos no apontamento.');
+      };
+    };
+  }
+
+  function operationalRows(convs){return convs.flatMap(c=>c.colaboradores.map(id=>({c,p:colaboradorById(id),i:(apForConv(c.id)?.itens||[]).find(i=>i.colaboradorId===id),id})));}
+  function readableName(value){return String(value||'').toLocaleLowerCase('pt-BR').split(/\s+/).map((v,i)=>i&&['da','das','de','do','dos','e'].includes(v)?v:v.charAt(0).toLocaleUpperCase('pt-BR')+v.slice(1)).join(' ');}
+  function unitTitle(u){return ['SEBRAE','UNIFOR','FIEC','PARTICULAR'].includes(clean(u))?clean(u):readableName(u);}
+  async function copyText(id){const el=$('#'+id);try{await navigator.clipboard.writeText(el.value);toast('Mensagem copiada.');}catch{el.select();toast('Use Ctrl+C para copiar a mensagem selecionada.');}}
+  function unidadesSemServicoConfirmadas(date){
+    return (state.semConvocacoesUnidade||[])
+      .filter(x=>x&&x.dataServico===date&&typeof x.unidade==='string'&&x.unidade.trim()&&typeof x.supervisor==='string'&&x.supervisor.trim())
+      .slice().sort((a,b)=>clean(a.unidade).localeCompare(clean(b.unidade),'pt-BR')||clean(a.supervisor).localeCompare(clean(b.supervisor),'pt-BR'));
+  }
+  function painelWhatsAppSemServico(date){
+    const confirmed=unidadesSemServicoConfirmadas(date);
+    const rows=confirmed.map(x=>`<div class="team-list-item"><strong>${escapeHtml(unitTitle(x.unidade))}</strong> — sinalizado por <strong>${escapeHtml(x.supervisor)}</strong></div>`).join('');
+    return `<details class="card card-pad" open><summary>Unidades que não funcionarão · ${confirmed.length}</summary><p>Confirmações de ausência de serviço para ${escapeHtml(formatDate(date))}. Somente unidades sinalizadas pelos supervisores aparecem aqui.</p>${rows?`<div class="section">${rows}</div>`:'<div class="empty">Nenhuma unidade foi sinalizada sem serviço nesta data.</div>'}</details>`;
+  }
+  function renderWhatsApp(){
+    $('#main-content').innerHTML=head('WhatsApp','Gere a mensagem de convocação já organizada para copiar e enviar aos grupos.')+`<div class="form-grid">${field('Data da divisão',`<input id="wp-data" class="control" type="date" value="${tomorrowISO()}">`)}${field('','<label><input id="wp-func" type="checkbox"> Mostrar função entre parênteses</label>')}</div><div id="wp-missing" class="section"></div><label class="section" style="display:block"><input id="wp-pend" type="checkbox" checked> Ainda existem demandas que serão enviadas por outros responsáveis</label><h3 class="section">Mensagem completa</h3><p>Copie o texto abaixo e cole no WhatsApp.</p><textarea id="wp-text" class="control message-box" readonly></textarea><button class="btn btn-secondary section" id="wp-copy">Copiar mensagem completa</button><h3 class="section">Mensagem separada por unidade</h3><p>Caso prefira enviar a divisão de cada unidade separadamente.</p><div id="wp-units"></div><div id="wp-no-service" class="section" aria-live="polite"></div><p class="section">A mensagem usa somente a unidade da convocação. Obra e serviço não são exibidos.</p>`;
+    const update=()=>{const date=$('#wp-data').value,convs=state.convocacoes.filter(c=>c.dataServico===date),group={};for(const {c,p} of operationalRows(convs)){const names=(group[c.unidade]??={})[c.turno]??=new Set();names.add(readableName(p?.nome)+($('#wp-func').checked?' ('+readableName(p?.funcao)+')':''));}const units=Object.keys(group).sort((a,b)=>clean(a).localeCompare(clean(b)));const next=dateLocal(isoToday());next.setDate(next.getDate()+1);const label=date===isoToday()?'hoje':date===calendarISO(next)?'amanhã':'o dia';const message=u=>{let n=1;const turns=Object.keys(group[u]).sort((a,b)=>['Integral','Manhã','Tarde','Noite'].indexOf(a)-['Integral','Manhã','Tarde','Noite'].indexOf(b));return '*'+unitTitle(u)+'*\n\n'+turns.map(t=>(turns.length>1||t!=='Integral'?'_'+t+'_\n':'')+[...group[u][t]].sort().map(name=>n+++'. '+name).join('\n')).join('\n\n');};const prefix='Segue divisão de Equipes para '+label+' '+formatDate(date).slice(0,5)+'\n\n';$('#wp-text').value=prefix+units.map(message).join('\n\n')+($('#wp-pend').checked?'\n\nAs demais demandas serão enviadas pelos respectivos responsáveis.':'');const missing=[...new Set(OBRAS.map(o=>o.unidade))].filter(u=>!units.includes(u));$('#wp-missing').innerHTML=`<div class="notice success">${operationalRows(convs).length} convocação(ões) encontrada(s) em ${units.length} unidade(s).</div><details class="card card-pad section"><summary>Unidades sem convocação registrada nesta data</summary><p>${escapeHtml(missing.join(', ')||'Nenhuma')}</p></details>`;$('#wp-units').innerHTML=units.map((u,index)=>`<details class="card card-pad section"><summary>${escapeHtml(unitTitle(u))}</summary><textarea class="control message-box" id="wp-unit-${index}" readonly>${escapeHtml(prefix+message(u))}</textarea><button class="btn btn-secondary section" data-copy-unit="${index}">Copiar mensagem</button></details>`).join('');$('#wp-no-service').innerHTML=painelWhatsAppSemServico(date);$('[data-copy-unit]').forEach(b=>b.onclick=()=>copyText('wp-unit-'+b.dataset.copyUnit));};['wp-data','wp-func','wp-pend'].forEach(id=>$('#'+id).onchange=update);$('#wp-copy').onclick=()=>copyText('wp-text');update();
+  }
+  let indicatorUnit='Todas',indicatorSup=SUPERVISORES[0],indicatorOnlyLate=true;
+  function renderIndicators(){
+    $('#main-content').innerHTML=head('Indicadores','Acompanhe prazos, ausências e comportamento operacional das equipes.')+`<div class="reference-filters">${field('Início',`<input class="control" id="ix-start" type="date" value="${reportFilters.inicio}">`)}${field('Fim',`<input class="control" id="ix-end" type="date" value="${reportFilters.fim}">`)}${field('Unidade',`<select class="control" id="ix-unit">${options(['Todas',...[...new Set(OBRAS.map(o=>o.unidade))]])}</select>`)}</div><div id="indicator-body" class="section"></div><div class="form-actions"><button id="ix-excel" class="btn btn-secondary">Baixar indicador de prazos em Excel</button><button id="ix-pdf" class="btn btn-primary">Baixar relatório executivo em PDF</button></div>`;$('#ix-unit').value=indicatorUnit;
+    const refresh=()=>{reportFilters.inicio=$('#ix-start').value;reportFilters.fim=$('#ix-end').value;indicatorUnit=$('#ix-unit').value;if(reportFilters.fim<reportFilters.inicio)return toast('O fim deve ser igual ou posterior ao início.',true);const cv=state.convocacoes.filter(c=>c.dataServico>=reportFilters.inicio&&c.dataServico<=reportFilters.fim&&(indicatorUnit==='Todas'||c.unidade===indicatorUnit));const ids=new Set(cv.map(c=>c.id));const ap=state.apontamentos.filter(a=>ids.has(a.convocacaoId));const count=rows=>new Set(rows.map(x=>x.dataServico)).size;const summary=SUPERVISORES.map(s=>{const own=cv.filter(c=>c.supervisor===s&&(c.executor||s)===s),pointed=ap.filter(a=>a.supervisor===s&&(a.executor||s)===s),n=count(own),late=count(own.filter(convocacaoAtrasada));return [s,n,late,count(pointed),count(pointed.filter(apontamentoAtrasado)),n?((n-late)/n*100).toFixed(1)+'%':'—'];});const records=operationalRows(cv);const absent=records.filter(x=>['Falta','Atestado'].includes(x.i?.status));const impact=xs=>xs.reduce((v,x)=>v+dayCost(x.p),0);const ranking=new Map();absent.filter(x=>x.i.status==='Falta').forEach(x=>ranking.set(x.p?.nome||x.id,(ranking.get(x.p?.nome||x.id)||0)+1));const days=['Domingo','Segunda','Terça','Quarta','Quinta','Sexta','Sábado'];const weekday=days.map((d,i)=>({d,f:absent.filter(x=>dateLocal(x.c.dataServico).getDay()===i&&x.i.status==='Falta').length,a:absent.filter(x=>dateLocal(x.c.dataServico).getDay()===i&&x.i.status==='Atestado').length}));const max=Math.max(1,...weekday.map(x=>x.f+x.a));const chart=`<div class="absence-chart" role="img" aria-label="Ausências por dia da semana">${weekday.map(x=>`<div class="chart-column"><div class="chart-track"><div title="${x.d}: ${x.a} atestados, ${x.f} faltas" style="height:${(x.f+x.a)/max*100}%;display:flex;flex-direction:column"><div style="background:#0068c9;flex:${x.a}"></div><div style="background:#83c9ff;flex:${x.f}"></div></div></div><small>${x.d}</small><strong>${x.f+x.a}</strong></div>`).join('')}</div><p class="chart-legend"><span style="color:#0068c9">■ Atestado</span> <span style="color:#54aceb">■ Falta</span></p>`;const unitRows=[...new Set(records.map(x=>x.c.unidade))].map(u=>{const xs=records.filter(x=>x.c.unidade===u),f=xs.filter(x=>x.i?.status==='Falta').length,a=xs.filter(x=>x.i?.status==='Atestado').length;return [u,xs.length,f,a,f+a,((f+a)/xs.length*100).toFixed(1)+'%',money(impact(xs.filter(x=>['Falta','Atestado'].includes(x.i?.status))))];}).sort((a,b)=>parseFloat(b[5])-parseFloat(a[5]));const missing=diasSemConvocacao(SUPERVISORES,reportFilters.inicio,reportFilters.fim);const gaps=SUPERVISORES.map(s=>{const dates=indicatorUnit==='Todas'?missing.filter(x=>x.supervisor===s).map(x=>x.dataServico):[];const noAp=[...new Set(cv.filter(c=>c.supervisor===s&&!completeConv(c)&&now()>=deadlineApontamento(c.dataServico)).map(c=>c.dataServico))];return [s,indicatorUnit==='Todas'?dates.length:'—',noAp.length,dates.map(formatDate).join(', ')||(indicatorUnit==='Todas'?'Nenhum':'Selecione Todas para esta conferência'),noAp.map(formatDate).join(', ')||'Nenhum'];}).sort((a,b)=>Number(b[1])-Number(a[1]));
+      $('#indicator-body').innerHTML=`<h3>Cumprimento por supervisor</h3><p>Cada dia com convocação conta como uma convocação por supervisor. Sábados e domingos não geram atraso automático.</p>${table(['Supervisor','Convocações feitas','Convocações atrasadas','Apontamentos feitos','Apontamentos atrasados','No prazo (%)'],summary)}<h3 class="section">Ver datas e ocorrências</h3>${field('Supervisor para detalhar',`<select class="control" id="ix-sup">${options(SUPERVISORES)}</select>`)}<label style="display:block;margin:12px 0"><input type="checkbox" id="ix-late" ${indicatorOnlyLate?'checked':''}> Mostrar somente atrasos</label><div id="ix-events"></div><h3 class="section">Absenteísmo</h3><p>Faltas, atestados e impacto por colaborador, dia e unidade.</p><div class="grid grid-5">${metric('Convocações',records.length,'colaboradores convocados')}${metric('Faltas',absent.filter(x=>x.i.status==='Falta').length,'confirmadas')}${metric('Atestados',absent.filter(x=>x.i.status==='Atestado').length,'registrados')}${metric('Absenteísmo',records.length?(absent.length/records.length*100).toFixed(1)+'%':'0%','ausências / convocações')}${metric('Impacto est.',money(impact(absent)),'diárias-base das ausências')}</div><p>Impacto estimado = soma das diárias-base associadas às faltas e atestados.</p><div class="grid grid-2 section"><div><h3>Colaboradores com mais faltas</h3><div class="limited-table absence-ranking">${table(['Posição','Colaborador','Quantidade de faltas'],[...ranking].sort((a,b)=>b[1]-a[1]).map(([n,v],i)=>[i+1,escapeHtml(n),v]))}</div></div><div><h3>Ausências por dia da semana</h3><div class="card card-pad">${chart}</div></div></div><h3 class="section">Detalhamento por unidade</h3>${table(['Unidade','Convocações','Faltas','Atestados','Total ausências','Taxa absenteísmo (%)','Impacto estimado (R$)'],unitRows)}<h3 class="section">Supervisores sem convocações registradas</h3><p>Convocações e apontamentos não realizados, com as respectivas datas. Felipe é considerado a partir de 28/09/2026.</p>${table(['Supervisor','Conv. não feitas','Apt. não feitos','Dias sem convocação','Dias sem apontamento'],gaps)}`;
+      const events=()=>{indicatorSup=$('#ix-sup').value;indicatorOnlyLate=$('#ix-late').checked;const rows=[];for(const c of cv.filter(c=>c.supervisor===indicatorSup)){const late=convocacaoAtrasada(c);if(!indicatorOnlyLate||late)c.colaboradores.forEach(id=>rows.push([c.supervisor,formatDate(c.dataServico),escapeHtml(colaboradorById(id)?.nome),'Convocação',formatDateTime(c.criadoEm),late?'SIM':'NÃO']));const a=apForConv(c.id);if(a){const lateAp=apontamentoAtrasado(a);if(!indicatorOnlyLate||lateAp)a.itens.forEach(i=>rows.push([c.supervisor,formatDate(c.dataServico),escapeHtml(colaboradorById(i.colaboradorId)?.nome),'Apontamento',formatDateTime(a.apontadoEm),lateAp?'SIM':'NÃO']));}}$('#ix-events').innerHTML=table(['Supervisor','Data do serviço','Colaborador','Tipo','Registrado em','Atrasado'],rows);};$('#ix-sup').value=indicatorSup;$('#ix-sup').onchange=events;$('#ix-late').onchange=events;events();};['ix-start','ix-end','ix-unit'].forEach(id=>$('#'+id).onchange=refresh);$('#ix-pdf').onclick=()=>reportPDF('executive');$('#ix-excel').onclick=()=>exportWorkbook(indicatorWorkbook(),'indicador_prazos_'+reportFilters.inicio+'_a_'+reportFilters.fim);refresh();
+  }
+
+  let homeDate=isoToday(),homeUnit='Todas',homeSup='Todos';
+  function renderControladoriaInicio(){
+    $('#main-content').innerHTML=head('Visão do dia','O que precisa de atenção e como está a equipe hoje.')+`<div class="reference-filters home-filters">${field('Data',`<input class="control" id="home-date" type="date" value="${homeDate}">`)}${field('Unidade',`<select class="control" id="home-unit">${options(['Todas',...[...new Set(OBRAS.map(o=>o.unidade))]])}</select>`)}${field('Supervisor',`<select class="control" id="home-sup">${options(['Todos',...SUPERVISORES])}</select>`)}<button class="btn btn-primary" id="home-refresh">Atualizar</button></div><div id="home-body" class="section"></div>`;$('#home-unit').value=homeUnit;$('#home-sup').value=homeSup;const refresh=()=>{homeDate=$('#home-date').value;homeUnit=$('#home-unit').value;homeSup=$('#home-sup').value;const match=c=>(homeUnit==='Todas'||c.unidade===homeUnit)&&(homeSup==='Todos'||c.supervisor===homeSup);const cv=state.convocacoes.filter(c=>c.dataServico===homeDate&&match(c)),rows=operationalRows(cv),pointed=rows.filter(x=>x.i),pending=rows.filter(x=>!x.i),absent=pointed.filter(x=>['Falta','Atestado'].includes(x.i.status));const next=dateLocal(homeDate);next.setDate(next.getDate()+1);const tomorrow=operationalRows(state.convocacoes.filter(c=>c.dataServico===calendarISO(next)&&match(c))).length;const conflicts=convocationConflictRows().filter(x=>!x.resolvido&&x.dataServico===homeDate&&(homeUnit==='Todas'||x.unidade===homeUnit||x.unidadeExistente===homeUnit)&&(homeSup==='Todos'||x.supervisor===homeSup||x.supervisorExistente===homeSup));$('#home-body').innerHTML=`<div class="grid grid-5 home-metrics">${metric('Equipe hoje',rows.length,'convocados na data')}${metric('Apontados',pointed.length,rows.length?(pointed.length/rows.length*100).toFixed(0)+'% da equipe':'sem equipe')}${metric('Pendentes do dia',pending.length,'ainda sem apontamento')}<button type="button" class="card metric clickable-metric" id="home-absences-button" aria-controls="home-absences" aria-expanded="false"><span class="metric-label">Faltas / Atestados</span><span class="metric-value">${absent.length}</span><span class="metric-note">Ver colaboradores →</span></button>${metric('Convocados amanhã',tomorrow,formatDate(calendarISO(next)))}</div><div class="grid grid-2 section home-attention"><div class="card card-pad"><h3>Precisa de atenção</h3><div class="notice ${pending.length?'warning':'success'}">${pending.length?pending.length+' apontamento(s) pendente(s).':'Nenhum apontamento pendente.'}<br>O registro só fica atrasado após o prazo do apontamento. Não selecionar uma pessoa não registra falta.</div></div><div class="card card-pad"><h3>Conflitos</h3><div class="notice ${conflicts.length?'warning':'success'}">${conflicts.length?'<strong>'+conflicts.length+(conflicts.length===1?' tentativa bloqueada':' tentativas bloqueadas')+'</strong><details class="home-conflict-details"><summary>Ver colaboradores e responsáveis</summary>'+conflicts.map(x=>'<div class="conflict-summary-item"><strong>'+escapeHtml(x.colaboradorNome||colaboradorById(x.colaboradorId)?.nome)+'</strong><br>'+escapeHtml(x.supervisor)+' tentou convocar para '+escapeHtml(x.unidade)+' ('+escapeHtml(x.turno)+').<br>Já convocado por '+escapeHtml(x.supervisorExistente)+' para '+escapeHtml(x.unidadeExistente)+' ('+escapeHtml(x.turnoExistente)+').</div>').join('')+'</details>':'Nenhum conflito pendente.'}</div></div></div><details id="home-absences" class="card card-pad section"><summary>Faltas e atestados · ${absent.length}</summary>${absent.length?table(['Colaborador','Situação','Unidade','Supervisor','Turno','Observação'],absent.map(x=>[escapeHtml(x.p?.nome),`<span class="badge ${x.i.status==='Falta'?'danger':'warning'}">${escapeHtml(x.i.status)}</span>`,escapeHtml(x.c.unidade),escapeHtml(x.c.supervisor),escapeHtml(x.c.turno),escapeHtml(x.i.observacao||'Sem observação')])):'<div class="empty">Nenhuma falta ou atestado nos filtros selecionados.</div>'}</details><details class="card card-pad section"><summary>Ver apontamentos pendentes · ${pending.length}</summary>${table(['Colaborador','Unidade','Supervisor','Turno','Situação'],pending.map(x=>[escapeHtml(x.p?.nome),escapeHtml(x.c.unidade),x.c.supervisor,x.c.turno,now()>=deadlineApontamento(x.c.dataServico)?'Prazo vencido':'Pendente do dia']))}</details><h3 class="section">Ações rápidas</h3><div class="inline-actions">${[['convocacao','Nova convocação'],['apontamento','Apontamentos'],['disponibilidade','Disponibilidade'],['indicadores','Indicadores']].map(([v,t])=>`<button class="btn btn-outline" data-admin-go="${v}">${t}</button>`).join('')}</div>`;$('#home-absences-button').onclick=()=>{const panel=$('#home-absences');panel.open=!panel.open;$('#home-absences-button').setAttribute('aria-expanded',String(panel.open));if(panel.open)panel.scrollIntoView({behavior:'smooth',block:'nearest'});};$('#home-absences').ontoggle=()=>$('#home-absences-button').setAttribute('aria-expanded',String($('#home-absences').open));$$('[data-admin-go]').forEach(b=>b.onclick=()=>setView(b.dataset.adminGo));};$('#home-refresh').onclick=refresh;refresh();
+  }
+  function renderConvCompleta(){if(perfilAtual==='SUPERVISOR')return renderUnitConvocacao();if(perfilAtual!=='CONTROLADORIA')return renderConvCompletaBase();renderAdminConv(false);}
+  let adminConvDate=tomorrowISO(),adminEditDate=isoToday();
+  // Paulo opera somente pela Controladoria, não é supervisor do portal público.
+  const RESPONSAVEIS_CONTROLADORIA=['PAULO',...SUPERVISORES];
+  function unitLabelIsSafe(label){return typeof label==='string'&&label.trim().length>0&&label.trim().length<=80&&!/(?:https?:\/\/|www\.|sharepoint|link\s+para\s+acesso)/i.test(label);}
+  function adminUnits(){return [...new Set([...(state.units||[]),...OBRAS.map(o=>o.unidade)])].filter(unitLabelIsSafe).sort();}
+  function renderAdminConv(edit){const content=$('#main-content');content.innerHTML=head('Convocação','Monte a equipe e faça correções administrativas quando necessário. Os serviços são definidos no apontamento.')+`<div class="tabs"><button id="admin-new" class="tab-btn ${!edit?'active':''}">Nova convocação</button><button id="admin-edit" class="tab-btn ${edit?'active':''}">Correção / Exclusão administrativa</button></div><div id="admin-conv-body" class="section"></div>`;$('#admin-new').onclick=()=>renderAdminConv(false);$('#admin-edit').onclick=()=>renderAdminConv(true);const body=$('#admin-conv-body');
+    if(!edit){body.innerHTML=`<form id="admin-conv-form"><div class="reference-filters">${field('Supervisor responsável',`<select class="control" id="ac-sup">${options(RESPONSAVEIS_CONTROLADORIA)}</select>`)}${field('Data da convocação',`<input class="control" type="date" id="ac-date" value="${adminConvDate}" required>`)}${field('Turno',`<select class="control" id="ac-turn">${options(['Integral','Manhã','Tarde','Noite'])}</select>`)}</div>${field('Unidade',`<select class="control" id="ac-unit">${options(adminUnits())}</select>`)}${field('Filtrar por função (opcional)',`<select class="control" id="ac-function">${options(['Todas',...[...new Set(COLABORADORES.filter(c=>!c.inativo).map(c=>c.funcao))]])}</select>`)}${field('Buscar colaboradores cadastrados','<input class="control" id="ac-search" placeholder="Nome ou função">')}<div id="ac-people" class="rect-list section"></div><details class="card card-pad section"><summary>Incluir nome digitado</summary><div class="form-grid">${field('Nome','<input class="control" id="ac-name">')}${field('Função','<input class="control" id="ac-role">')}</div><label><input type="checkbox" id="ac-loose"> É avulso?</label></details><div id="ac-panorama" class="card card-pad section"></div><div class="form-actions"><button class="btn btn-primary">Confirmar convocação</button></div></form>`;const selected=new Set();const people=()=>{$$('#ac-people input').forEach(x=>x.checked?selected.add(x.value):selected.delete(x.value));const term=clean($('#ac-search').value),role=$('#ac-function').value;$('#ac-people').innerHTML=alphabeticalPeople(COLABORADORES.filter(c=>!c.inativo&&clean(c.nome+' '+c.funcao).includes(term)&&(role==='Todas'||c.funcao===role))).map(c=>`<label class="check-card"><input type="checkbox" value="${c.id}" ${selected.has(c.id)?'checked':''}><span>${escapeHtml(c.nome)}<small style="display:block">${escapeHtml(c.funcao)}</small></span></label>`).join('');};const panorama=()=>{const cv=state.convocacoes.filter(c=>c.dataServico===$('#ac-date').value&&c.supervisor===$('#ac-sup').value);$('#ac-panorama').innerHTML='<strong>Panorama de '+$('#ac-sup').value+' · '+formatDate($('#ac-date').value)+' · '+$('#ac-turn').value+'</strong>'+table(['Colaborador','Unidade','Turno'],operationalRows(cv).sort((a,b)=>comparePersonNames(a.p,b.p)).map(x=>[escapeHtml(x.p?.nome),escapeHtml(x.c.unidade),x.c.turno]));};$('#ac-search').oninput=people;$('#ac-function').onchange=people;['ac-date','ac-sup','ac-turn'].forEach(id=>$('#'+id).onchange=()=>{if(id==='ac-date')adminConvDate=$('#ac-date').value;panorama();});people();panorama();$('#admin-conv-form').onsubmit=e=>{e.preventDefault();$$('#ac-people input').forEach(x=>x.checked?selected.add(x.value):selected.delete(x.value));const date=$('#ac-date').value,turno=$('#ac-turn').value,unit=$('#ac-unit').value,sup=$('#ac-sup').value;const ids=[...selected];const name=$('#ac-name').value.trim();let manual;if(name){manual=COLABORADORES.find(c=>clean(c.nome)===clean(name)&&!c.inativo)||{id:uid('c'),nome:name,funcao:$('#ac-role').value.trim()||'Avulso',avulso:$('#ac-loose').checked?'Sim':'Não',custo:0};if(!ids.includes(manual.id))ids.push(manual.id);}if(!ids.length)return toast('Selecione pelo menos um colaborador.',true);if(!OBRAS.some(o=>o.unidade===unit))return toast('Cadastre uma obra nesta unidade antes de confirmar a convocação.',true);const conflict=ids.find(id=>blocked(id,date)||state.convocacoes.some(c=>c.dataServico===date&&c.colaboradores.includes(id)&&overlaps(c.turno,turno)));if(conflict){registerConvocationConflicts(ids,date,turno,unit,sup);return toast('Convocação bloqueada por conflito ou indisponibilidade: '+(colaboradorById(conflict)?.nome||name),true);}if(manual&&!colaboradorById(manual.id))COLABORADORES.push(manual);state.convocacoes.push({id:uid('cv'),supervisor:sup,dataServico:date,unidade:unit,obraId:'',turno,colaboradores:ids,criadoEm:now().toISOString(),executor:'CONTROLADORIA',origem:'administrativa'});adminConvDate=date;audit('Convocação administrativa',date);saveData();toast('Equipe convocada.');renderAdminConv(false);};
+    }else{body.innerHTML=`<h3>Correção / Exclusão administrativa</h3><p>Realocar um colaborador para outra unidade ou excluir uma convocação lançada incorretamente.</p><div class="form-grid">${field('Data da convocação para corrigir',`<input class="control" id="ae-date" type="date" value="${adminEditDate}">`)}${field('Selecione o colaborador / convocação','<div class="ae-record-search-wrap"><input class="control" type="search" id="ae-record-search" autocomplete="off" placeholder="Digite o nome do colaborador..." aria-label="Pesquisar colaborador ou convocação"><select id="ae-record" hidden tabindex="-1" aria-hidden="true"></select><div id="ae-record-selected" class="ae-record-selected" aria-live="polite"></div></div>')}</div><details class="card card-pad section"><summary>Excluir várias convocações de uma vez</summary><div id="ae-bulk" class="rect-list section"></div><label><input id="ae-confirm-bulk" type="checkbox"> Confirmo a exclusão dos registros selecionados</label><div class="form-actions"><button class="btn btn-secondary" id="ae-delete-bulk">Excluir selecionadas</button></div></details><div id="ae-editor" class="section"></div>`;let rows=[];const recordLabel=x=>[x.p?.nome||'Colaborador',x.c.unidade,x.c.turno,'Supervisor: '+x.c.supervisor,obraById(x.c.obraId)?.nome||'Obra/Serviço a definir'].join(' · ');const renderEditor=()=>{const selected=$('#ae-record').value,x=selected===''?null:rows[Number(selected)];if(!x){$('#ae-editor').innerHTML='<div class="empty">'+(rows.length?'Digite e selecione um colaborador para corrigir a convocação.':'Nenhuma convocação nesta data.')+'</div>';return;}$('#ae-editor').innerHTML=`<form id="ae-form"><p>Colaborador: <strong>${escapeHtml(x.p?.nome)}</strong></p><div class="reference-filters">${field('Unidade de destino',`<select class="control" id="ae-unit">${options(adminUnits())}</select>`)}${field('Obra / Serviço de destino','<select class="control" id="ae-work"></select>')}${field('Supervisor responsável',`<select class="control" id="ae-sup">${options(RESPONSAVEIS_CONTROLADORIA)}</select>`)}</div><div class="form-grid">${field('Data',`<input class="control" id="ae-target-date" type="date" value="${x.c.dataServico}" required>`)}${field('Turno',`<select class="control" id="ae-turn">${options(['Integral','Manhã','Tarde','Noite'])}</select>`)}</div><div class="form-actions"><button class="btn btn-primary">Salvar realocação</button><button type="button" id="ae-delete" class="btn btn-secondary">Excluir convocação deste colaborador</button></div></form>`;$('#ae-unit').value=x.c.unidade;$('#ae-sup').value=x.c.supervisor;$('#ae-turn').value=x.c.turno;const works=()=>{$('#ae-work').innerHTML='<option value="">A definir no apontamento</option>'+options(OBRAS.filter(o=>o.unidade===$('#ae-unit').value));};$('#ae-unit').onchange=works;works();$('#ae-work').value=x.c.obraId||'';$('#ae-delete').onclick=()=>{removeConvPerson(x.c.id,x.id);audit('Exclusão administrativa',x.id);saveData();refresh();};$('#ae-form').onsubmit=e=>{e.preventDefault();const date=$('#ae-target-date').value,turno=$('#ae-turn').value;if(blocked(x.id,date)||state.convocacoes.some(c=>c.id!==x.c.id&&c.dataServico===date&&c.colaboradores.includes(x.id)&&overlaps(c.turno,turno)))return toast('A realocação geraria conflito.',true);const result=relocateAdminPerson(x,{dataServico:date,supervisor:$('#ae-sup').value,unidade:$('#ae-unit').value,obraId:$('#ae-work').value,turno});
+      if(!result.ok)return toast(result.message,true);
+      audit('Realocação administrativa',x.id);saveData();toast('Realocação solicitada, aguardando confirmação do servidor.');refresh();};};const refresh=()=>{adminEditDate=$('#ae-date').value;rows=operationalRows(state.convocacoes.filter(c=>c.dataServico===adminEditDate)).sort((a,b)=>comparePersonNames(a.p,b.p));$('#ae-record').innerHTML='<option value="">Selecione uma convocação</option>'+rows.map((x,index)=>`<option value="${index}">${escapeHtml(recordLabel(x))}</option>`).join('');$('#ae-bulk').innerHTML=rows.map((x,index)=>`<label class="check-card"><input type="checkbox" class="ae-bulk-person" value="${index}"><span>${escapeHtml(x.p?.nome)} · ${escapeHtml(x.c.unidade)} · ${x.c.turno}</span></label>`).join('');syncRecordSearch(rows.length?0:'');};const syncRecordSearch=index=>{const input=$('#ae-record-search'),select=$('#ae-record'),display=$('#ae-record-selected');const valid=index!==''&&rows[Number(index)];const x=valid?rows[Number(index)]:null;select.value=x?String(index):'';input.value=x?x.p?.nome||'':'';input.title=x?recordLabel(x):'';display.textContent=x?recordLabel(x):'Digite o nome do colaborador e escolha um resultado.';renderEditor();};const searchInput=$('#ae-record-search');searchInput.addEventListener('input',()=>{const select=$('#ae-record');select.value='';$('#ae-record-selected').textContent='Selecione uma opção da busca para confirmar a convocação.';renderEditor();});wireLiveSuggestions(searchInput,()=>rows.map((x,index)=>({id:String(index),label:recordLabel(x),searchText:[x.p?.funcao||'',x.c.dataServico,x.c.id].join(' ')})),choice=>syncRecordSearch(choice.id));$('#ae-date').onchange=refresh;$('#ae-record').onchange=()=>syncRecordSearch($('#ae-record').value);$('#ae-delete-bulk').onclick=()=>{if(!$('#ae-confirm-bulk').checked)return toast('Confirme a exclusão dos selecionados.',true);const indices=$$('.ae-bulk-person:checked').map(el=>Number(el.value));if(!indices.length)return toast('Selecione os registros.',true);indices.forEach(i=>removeConvPerson(rows[i].c.id,rows[i].id));audit('Exclusão administrativa em lote',String(indices.length));saveData();refresh();};refresh();}
+  }
+  // Realocação administrativa: mantenha os IDs do registro e do apontamento para
+  // não simular uma exclusão seguida de inclusão, que é proibida em produção.
+  function relocateAdminPerson(entry,destination){
+    const conv=state.convocacoes.find(c=>String(c.id)===String(entry.c.id));
+    if(!conv||!(conv.colaboradores||[]).some(id=>String(id)===String(entry.id)))
+      return {ok:false,message:'Convocação não encontrada. Atualize a página e tente novamente.'};
+    if(conv.colaboradores.length!==1)
+      return {ok:false,message:'Esta convocação inclui mais de um colaborador. A realocação individual precisa ser regularizada pela Controladoria sem remover os demais registros.'};
+    if(!OBRAS.some(o=>o.unidade===destination.unidade))
+      return {ok:false,message:'Cadastre uma obra na unidade de destino antes de realocar.'};
+    if(destination.obraId&&(!OBRAS.some(o=>String(o.id)===String(destination.obraId)&&o.unidade===destination.unidade)))
+      return {ok:false,message:'A obra de destino não pertence à unidade selecionada.'};
+    const ap=apForConv(conv.id),item=ap?.itens.find(i=>String(i.colaboradorId)===String(entry.id));
+    const isDifferentUnit=conv.unidade!==destination.unidade;
+    if(item&&isDifferentUnit)
+      return {ok:false,message:'Este colaborador já possui apontamento registrado. Para mudar a unidade sem alterar o histórico financeiro, solicite uma revisão específica pela Controladoria. Nenhum registro foi excluído.'};
+    if(item&&destination.obraId&&String(destination.obraId)!==String(conv.obraId)){
+      const services=item.servicos||[];
+      if(services.length>1)
+        return {ok:false,message:'O apontamento possui vários serviços. A realocação automática não pode substituir esses vínculos históricos. Nenhum registro foi excluído.'};
+      if(services.length===1)item.servicos=[{...services[0],obraId:String(destination.obraId)}];
+      else if(presence(item.status))item.servicos=[{obraId:String(destination.obraId),periodo:destination.turno}];
+    }
+    if(item&&presence(item.status)&&!destination.obraId&&!(item.servicos||[]).length)
+      return {ok:false,message:'Escolha a obra do colaborador apontado para preservar o vínculo do serviço.'};
+    // Somente após validar todos os impedimentos, altera os objetos originais.
+    Object.assign(conv,{dataServico:destination.dataServico,supervisor:destination.supervisor,unidade:destination.unidade,obraId:destination.obraId,turno:destination.turno,corrigidoPor:'CONTROLADORIA'});
+    if(ap){ap.dataServico=destination.dataServico;ap.supervisor=destination.supervisor;ap.atualizadoEm=now().toISOString();}
+    return {ok:true,id:conv.id};
+  }
+  function removeConvPerson(cvId,id){const c=state.convocacoes.find(c=>c.id===cvId);if(!c)return;c.colaboradores=c.colaboradores.filter(v=>v!==id);const ap=apForConv(cvId);if(ap)ap.itens=ap.itens.filter(i=>i.colaboradorId!==id);if(!c.colaboradores.length){state.convocacoes=state.convocacoes.filter(c=>c.id!==cvId);state.apontamentos=state.apontamentos.filter(a=>a.convocacaoId!==cvId);}}
+  function renderSettings(){
+    renderSettingsBase();const main=$('#main-content');
+    const diagnostic=main.querySelector('.settings-diagnostics details');
+    // Bootstrap is served from Neon; only report a connection after a session has loaded its state.
+    if(diagnostic&&onlineSession){
+      const p=diagnostic.querySelector('p'),badge=diagnostic.querySelector('.badge');
+      const environment=onlineStage==='producao'?'produção':'homologação';
+      if(p)p.textContent='Banco Neon · '+environment+' · '+state.convocacoes.length+' convocações · '+state.apontamentos.length+' apontamentos.';
+      if(badge){badge.textContent='Conectado ao banco de '+environment+' · '+(onlineWritable?'gravação habilitada':'somente leitura');badge.className='badge '+(onlineWritable?'success':'info');}
+    }
+    const trello=main.querySelector('details.section');if(trello){trello.outerHTML=`<div class="card card-pad section"><h3>Sincronização com o Trello</h3><p>A lista principal é <strong>EM EXECUÇÃO</strong>. No sistema conectado, a sincronização ocorre a cada 12 horas.</p><div class="form-grid"><div><button id="trello-main" class="btn btn-primary">Sincronizar EM EXECUÇÃO agora</button></div>${field('Selecionar lista diretamente',`<select class="control" id="trello-list">${options(['SOLICITADOS - PENDÊNCIAS CLIENTE','EM EXECUÇÃO','CONCLUÍDOS'])}</select><button class="btn btn-primary section" id="trello-selected">Sincronizar lista selecionada</button>`)}</div><h3 class="section">Busca manual para medições retroativas</h3>${field('Buscar card ou lista por nome','<input class="control" id="trello-search" placeholder="Ex.: MEDIÇÃO JUNHO 2026, MARACANAÚ…">')}<div id="trello-results"></div><div class="notice info section">A sincronização consulta o Trello em tempo real e atualiza o Neon. Nenhuma obra existente é apagada.</div></div>`;
+    const listSelect=$('#trello-list'),cardResults=$('#trello-results'),cardSearch=$('#trello-search');
+    let remoteCards=[];
+    async function runTrelloSync(payload){
+      if(onlineSaving||onlineQueued)return showToast('Aguarde a gravação em andamento.',true);
+      if(!onlineWritable||onlineSession?.role!=='CONTROLADORIA')return showToast('A sincronização só está disponível à Controladoria quando as gravações estão autorizadas.',true);
+      if(!window.confirm('Sincronizar as obras do Trello com o banco conectado? Nenhuma obra será excluída.'))return;
+      lockOnline(true);
+      try{
+        const result=await api('/api/trello/sync',{method:'POST',body:JSON.stringify(payload)});
+        applyOnline(await api('/api/bootstrap'));render();
+        showToast('Trello sincronizado: '+result.novas+' nova(s), '+result.atualizadas+' atualizada(s), '+result.jaExistentes+' sem alteração, '+(result.ignoradas?.length||0)+' para conferência.');
+      }catch(e){showToast('Falha ao sincronizar Trello: '+e.message,true);}
+      finally{lockOnline(false);}
+    }
+    $('#trello-main').onclick=()=>runTrelloSync({});
+    $('#trello-selected').onclick=()=>runTrelloSync({listId:listSelect.value});
+    const liveResults=()=>{
+      const term=clean(cardSearch.value),matches=term?remoteCards.filter(c=>clean(c.name+' '+c.unidade).includes(term)).slice(0,30):[];
+      cardResults.innerHTML=term?'<div class="section">'+(matches.length?matches.map(c=>'<div class="team-list-item"><strong>'+escapeHtml(c.name)+'</strong><small>'+escapeHtml(c.unidade||'NÃO IDENTIFICADA')+'</small><button type="button" class="link-btn" data-trello-card="'+escapeHtml(c.id)+'">Importar este card</button></div>').join(''):'Nenhum card correspondente no quadro.')+'</div>':'';
+      document.querySelectorAll('[data-trello-card]').forEach(b=>b.onclick=()=>runTrelloSync({cardId:b.dataset.trelloCard}));
+    };
+    (async()=>{
+      try{
+        cardResults.innerHTML='<p>Consultando o Trello...</p>';
+        const board=await api('/api/trello/lists');
+        if(!document.body.contains(listSelect))return;
+        const desired=listSelect.options[listSelect.selectedIndex]?.text||'EM EXECUÇÃO';
+        listSelect.replaceChildren(...board.lists.map(l=>{const opt=document.createElement('option');opt.value=l.id;opt.textContent=l.name;opt.selected=l.name===desired;return opt;}));
+        if(![...listSelect.options].some(o=>o.selected))listSelect.selectedIndex=Math.max(0,board.lists.findIndex(l=>clean(l.name)==='EM EXECUCAO'));
+        remoteCards=board.cards||[];
+        cardSearch.oninput=liveResults;liveResults();
+      }catch(e){if(document.body.contains(listSelect))cardResults.innerHTML='<div class="notice warning">'+escapeHtml('O Trello não respondeu: '+e.message)+'</div>';}
+    })();}
+    if(settingsTab==='Obras'){
+      const currentUnits=()=>[...new Set([...(state.units||[]),...OBRAS.map(o=>o.unidade)].filter(unitLabelIsSafe))].sort((a,b)=>a.localeCompare(b,'pt-BR'));
+      const workForm=$('#obra-form'),name=$('#obra-nome'),unit=$('#obra-unidade');
+      workForm.insertAdjacentHTML('beforebegin',`<form id="unit-form" class="card card-pad" style="margin-bottom:16px"><h3>Cadastrar unidade</h3><div class="form-grid">${field('Nome da nova unidade','<input id="unit-name" class="control" maxlength="200" required placeholder="Ex.: NOVA UNIDADE">')}<div class="form-actions" style="align-items:end"><button class="btn btn-primary">Cadastrar unidade</button></div></div><p>Unidades cadastradas ficam disponíveis nas convocações, obras e filtros.</p><div id="unit-list" class="section"></div></form>`);
+      const refreshUnits=()=>{
+        state.units=currentUnits();
+        $('#unit-list').innerHTML=table(['Unidade','Ação'],state.units.map(u=>[escapeHtml(u),`<button type="button" class="link-btn danger-link" data-excluir-unidade="${escapeHtml(u)}">Excluir</button>`]));
+        unit.innerHTML=options(state.units);
+        $$('[data-excluir-unidade]').forEach(b=>b.onclick=()=>{
+          const selected=b.dataset.excluirUnidade;
+          const linkedWorks=OBRAS.filter(o=>o.unidade===selected).length;
+          const linkedHistory=state.convocacoes.some(c=>c.unidade===selected)||state.conflitosTentados.some(c=>c.unidade===selected||c.unidadeExistente===selected)||state.apontamentos.some(a=>a.itens.some(i=>i.servicos?.some(s=>obraById(s.obraId)?.unidade===selected)));
+          if(linkedWorks||linkedHistory)return showToast('Não é possível excluir a unidade "'+selected+'": '+(linkedWorks?linkedWorks+' obra(s) cadastrada(s)':'')+(linkedWorks&&linkedHistory?' e ':'')+(linkedHistory?'histórico de registros vinculado':'')+'. Exclua primeiro as obras sem vínculo. Se houver histórico, a exclusão deve permanecer bloqueada para preservá-lo.',true);
+          if(!window.confirm('Excluir a unidade "'+selected+'"? As demais unidades e obras permanecerão intactas.'))return;
+          state.units=state.units.filter(u=>u!==selected);
+          if(state.unitOwners)delete state.unitOwners[selected];
+          audit('Exclusão de unidade sem vínculos',selected);
+          saveData();
+        });
+      };
+      $('#unit-form').onsubmit=async e=>{
+         e.preventDefault();
+         const label=$('#unit-name').value.trim().replace(/\s+/g,' ').toUpperCase();
+         if(!label)return showToast('Informe o nome da unidade.',true);
+         if(!unitLabelIsSafe(label))return showToast('Use um nome curto de unidade (até 80 caracteres), sem links ou URLs.',true);
+         if(currentUnits().some(u=>clean(u)===clean(label)))return showToast('Esta unidade já está cadastrada.',true);
+         if(onlineQueued||onlineSaving)return showToast('Já existe uma gravação em andamento. Confira o resultado antes de tentar novamente.',true);
+         if(!onlineSession||onlineSession.role!=='CONTROLADORIA'||!onlineWritable)
+           return showToast('Cadastro não autorizado. Confirme o acesso à Controladoria e à produção.',true);
+         const requestId=typeof crypto!=='undefined'&&typeof crypto.randomUUID==='function'
+           ?crypto.randomUUID():'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return(c==='x'?r:(r&0x3|0x8)).toString(16);});
+         const payload=JSON.stringify({requestId,version:onlineVersion,name:label});
+         let saved=false;
+         onlineSaving=true;lockOnline(true);
+         showSaveFeedback('Cadastrando unidade no Neon…',false,40000);
+         try{
+           const controller=new AbortController();
+           const timeout=setTimeout(()=>controller.abort(),30000);
+           try{
+             const reply=await api('/api/unit-register',{method:'POST',body:payload,signal:controller.signal});
+             saved=reply?.ok===true&&reply.requestId===requestId;
+             if(!saved)throw Error('O banco não confirmou o cadastro da unidade.');
+           }catch(error){
+             // Resposta perdida não significa falha do commit: conferir pelo
+             // mesmo requestId e nunca criar uma operação duplicada.
+             if(error?.name==='AbortError'||!error?.status||error.status>=500){
+               for(let attempt=0;attempt<3&&!saved;attempt++){
+                 if(attempt)await new Promise(resolve=>setTimeout(resolve,500*attempt));
+                 try{
+                   const check=await api('/api/save-status?requestId='+encodeURIComponent(requestId));
+                   if(check?.confirmed===true&&check.requestId===requestId)saved=true;
+                 }catch(checkError){
+                   if(checkError?.status===401||checkError?.status===403)throw checkError;
+                 }
+               }
+             }
+             if(!saved)throw error;
+           }finally{clearTimeout(timeout);}
+           const fresh=await restoreOnlineSession();
+           applyOnline(fresh);
+           renderSettings();
+           showSaveFeedback('Unidade cadastrada e confirmada no banco.');
+           showToast('Unidade cadastrada com sucesso.');
+         }catch(error){
+           const message=saved
+             ?'A unidade foi SALVA no banco, mas a atualização da tela falhou. Atualize com Ctrl + F5. Não cadastre novamente.'
+             :String(error?.message||'Não foi possível cadastrar a unidade. Confira a conexão e tente novamente.');
+           if(saved)onlineWritable=false;
+           showSaveFeedback(message,true,45000);showToast(message,true);
+         }finally{onlineSaving=false;lockOnline(false);}
+       };
+      const formSubmit=workForm.onsubmit;
+      // Inclusao de obra nao retransmite convocacoes e apontamentos.
+      // Edicoes existentes mantem as validacoes de vinculos.
+      workForm.onsubmit=async e=>{
+        e.preventDefault();
+        const selected=unit.value,workName=name.value.trim().replace(/\s+/g,' ');
+        if(!selected||!workName)return showToast('Informe a obra e selecione uma unidade cadastrada.',true);
+        if(workForm.dataset.editingObra)return formSubmit(e);
+        if(OBRAS.some(o=>clean(o.nome)===clean(workName)))
+          return showToast('Esta obra já está cadastrada. Confira a lista antes de repetir.',true);
+        if(onlineQueued||onlineSaving)return showToast('Uma gravação está em andamento. Confira o resultado antes de tentar novamente.',true);
+        if(!onlineSession||onlineSession.role!=='CONTROLADORIA'||!onlineWritable)
+          return showToast('Cadastro não autorizado. Entre com acesso da Controladoria.',true);
+        const requestId=crypto.randomUUID(),payload=JSON.stringify({requestId,name:workName,unit:selected});
+        let saved=false;
+        onlineSaving=true;lockOnline(true);
+        showSaveFeedback('Cadastrando obra no Neon…',false,40000);
+        try{
+          const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),30000);
+          try{
+            try{
+              const reply=await api('/api/work-register',{method:'POST',body:payload,signal:controller.signal});
+              saved=reply?.ok===true&&reply.requestId===requestId;
+              if(!saved)throw Error('O banco não confirmou o cadastro da obra.');
+            }catch(error){
+              if(error?.name==='AbortError'||!error?.status||error.status>=500){
+                for(let attempt=0;attempt<3&&!saved;attempt++){
+                  if(attempt)await new Promise(resolve=>setTimeout(resolve,500*attempt));
+                  try{
+                    const status=await api('/api/save-status?requestId='+encodeURIComponent(requestId));
+                    if(status?.confirmed===true&&status.requestId===requestId)saved=true;
+                  }catch(checkError){
+                    if(checkError?.status===401||checkError?.status===403)throw checkError;
+                  }
+                }
+              }
+              if(!saved)throw error;
+            }
+          }finally{clearTimeout(timeout);}
+          applyOnline(await restoreOnlineSession());
+          renderSettings();
+          showSaveFeedback('Obra cadastrada e confirmada no banco.');
+          showToast('Obra cadastrada com sucesso.');
+        }catch(error){
+          const message=saved
+            ?'A obra foi SALVA no banco, mas a tela não foi atualizada. Use Ctrl + F5 para consultar; não cadastre novamente.'
+            :String(error?.message||'Não foi possível cadastrar a obra. Confira a conexão.');
+          if(saved)onlineWritable=false;
+          showSaveFeedback(message,true,45000);showToast(message,true);
+        }finally{onlineSaving=false;lockOnline(false);}
+      };
+      $$('[data-edit-obra]').forEach(b=>{const previous=b.onclick;b.onclick=()=>{previous();if(!currentUnits().includes(unit.value)){unit.innerHTML+=options([unit.value]);}};});
+      refreshUnits();
+      $('#obra-list').insertAdjacentHTML('afterbegin','<div class="form-actions" style="justify-content:flex-start;align-items:center;flex-wrap:wrap;margin-bottom:12px"><button id="obra-selecionar-disponiveis" type="button" class="btn btn-secondary">Selecionar disponíveis</button><button id="obra-limpar-selecao" type="button" class="btn btn-secondary">Limpar seleção</button><button id="obra-excluir-selecionadas" type="button" class="btn btn-secondary" disabled>Excluir selecionadas (0)</button></div>');
+      const boxes=$$('#obra-list .obra-bulk-checkbox');
+      const selectedWorks=()=>new Set(boxes.filter(b=>b.checked).map(b=>b.value));
+      const updateSelected=()=>{const count=selectedWorks().size,button=$('#obra-excluir-selecionadas');button.textContent='Excluir selecionadas ('+count+')';button.disabled=count===0;};
+      boxes.forEach(b=>b.onchange=updateSelected);
+      $('#obra-selecionar-disponiveis').onclick=()=>{boxes.filter(b=>!b.disabled).forEach(b=>b.checked=true);updateSelected();};
+      $('#obra-limpar-selecao').onclick=()=>{boxes.forEach(b=>b.checked=false);updateSelected();};
+      $('#obra-excluir-selecionadas').onclick=()=>{
+        const ids=selectedWorks(),works=OBRAS.filter(o=>ids.has(String(o.id)));
+        if(!works.length)return showToast('Selecione ao menos uma obra.',true);
+        if(works.length>50)return showToast('Selecione até 50 obras por exclusão.',true);
+        if(works.some(obraTemVinculos))return showToast('A seleção contém obra com registros vinculados. Nenhuma obra foi excluída.',true);
+        if(!window.confirm('Excluir as '+works.length+' obras selecionadas? Unidades, convocações e apontamentos serão preservados.'))return;
+        const rest=OBRAS.filter(o=>!ids.has(String(o.id)));
+        OBRAS.splice(0,OBRAS.length,...rest);
+        audit('Exclusão administrativa de obras em lote',String(works.length));
+        saveData();
+      };
+      const cells=$$('#obra-list table tbody tr');
+      cells.forEach((tr,index)=>{const obra=OBRAS[index];if(!obra)return;const last=tr.querySelector('td:last-child');if(!last)return;const btn=document.createElement('button');btn.type='button';btn.className='link-btn danger-link';btn.textContent='Excluir';btn.style.marginLeft='12px';btn.onclick=()=>{const used=obraTemVinculos(obra);if(used)return showToast('Esta obra possui registros vinculados e não pode ser excluída.',true);if(!window.confirm('Excluir somente a obra "'+obra.nome+'"? Esta ação não exclui a unidade.'))return;const index=OBRAS.findIndex(o=>o.id===obra.id);if(index<0)return;OBRAS.splice(index,1);audit('Exclusão de obra sem vínculos',obra.id);saveData();};last.appendChild(btn);});
+    }
+    const body=$('#settings-body');
+    if(settingsTab==='Colaboradores'){const form=$('#colab-form');const wrapper=document.createElement('details');wrapper.className='card card-pad';wrapper.innerHTML='<summary>Cadastrar novo funcionário / editar cadastro</summary>';form.before(wrapper);wrapper.appendChild(form);form.className='section';body.insertAdjacentHTML('afterbegin','<h3>Banco de funcionários</h3><p>Cadastre, consulte, edite ou retire colaboradores da base operacional. A exclusão inativa o cadastro para preservar o histórico.</p>');const search=$('#colab-search');search.parentElement.insertAdjacentHTML('beforeend',field('Moradia',`<select id="colab-home-filter" class="control">${options(['Todas','Não informado','Fortaleza','Maracanaú','Caucaia','Horizonte'])}</select>`));let page=0;const pendingHomes=new Map();const refresh=()=>{const term=clean(search.value),home=$('#colab-home-filter').value;const rows=COLABORADORES.filter(c=>!c.inativo&&clean(c.nome+' '+c.funcao).includes(term)&&(home==='Todas'||(c.moradia||'Não informado')===home));const pages=Math.max(1,Math.ceil(rows.length/12));page=Math.min(page,pages-1);$('#colab-table').innerHTML=`<div class="section-title"><strong>${rows.length} funcionário(s) encontrado(s)</strong><div class="inline-actions"><button class="btn btn-secondary" id="colab-prev" ${page===0?'disabled':''}>Anterior</button><span>${page+1} / ${pages}</span><button class="btn btn-secondary" id="colab-next" ${page===pages-1?'disabled':''}>Próxima</button></div></div>`+table(['Nome','Função','Valor diário','Moradia','Ações'],rows.slice(page*12,page*12+12).map(c=>[escapeHtml(c.nome),escapeHtml(c.funcao),money(dayCost(c)),`<select class="control" data-home-colab="${c.id}">${options(['Não informado','Fortaleza','Maracanaú','Caucaia','Horizonte',...(!['Fortaleza','Maracanaú','Caucaia','Horizonte'].includes(c.moradia)&&c.moradia?[c.moradia]:[])])}</select>`,`<button class="link-btn" data-new-edit="${c.id}">Editar</button> <button class="link-btn danger-link" data-inactivate="${c.id}">Excluir</button>`]))+`<div class="form-actions"><button class="btn btn-primary" id="save-homes">Salvar alterações de moradia</button></div><details class="card card-pad section"><summary>Funcionários excluídos · ${COLABORADORES.filter(c=>c.inativo).length}</summary>${table(['Nome','Função','Ação'],COLABORADORES.filter(c=>c.inativo).map(c=>[escapeHtml(c.nome),escapeHtml(c.funcao),`<button class="link-btn" data-reactivate="${c.id}">Reativar</button>`]))}</details>`;$('#colab-prev').onclick=()=>{page--;refresh();};$('#colab-next').onclick=()=>{page++;refresh();};$$('[data-home-colab]').forEach(el=>{el.value=pendingHomes.get(el.dataset.homeColab)||colaboradorById(el.dataset.homeColab).moradia||'Não informado';el.onchange=()=>pendingHomes.set(el.dataset.homeColab,el.value);});$('#save-homes').onclick=()=>{for(const [id,home] of pendingHomes)colaboradorById(id).moradia=home==='Não informado'?'':home;audit('Moradias alteradas em lote',String(pendingHomes.size));pendingHomes.clear();saveData();toast('Moradias salvas.');refresh();};$$('[data-new-edit]').forEach(b=>b.onclick=()=>{const c=colaboradorById(b.dataset.newEdit);wrapper.open=true;for(const k of ['nome','funcao','custo','moradia','categoria','avulso'])$('#colab-'+k).value=c[k]??(k==='custo'?dayCost(c):k==='categoria'?category(c):k==='avulso'?'Não':'');form.onsubmit=e=>{e.preventDefault();Object.assign(c,{nome:$('#colab-nome').value.trim(),funcao:$('#colab-funcao').value.trim(),custo:Number($('#colab-custo').value),moradia:$('#colab-moradia').value.trim(),categoria:$('#colab-categoria').value,avulso:$('#colab-avulso').value});audit('Edição de colaborador',c.id);saveData();renderSettings();};wrapper.scrollIntoView({behavior:'smooth',block:'start'});});$$('[data-inactivate]').forEach(b=>b.onclick=()=>{colaboradorById(b.dataset.inactivate).inativo=true;audit('Colaborador inativado',b.dataset.inactivate);saveData();refresh();});$$('[data-reactivate]').forEach(b=>b.onclick=()=>{colaboradorById(b.dataset.reactivate).inativo=false;audit('Colaborador reativado',b.dataset.reactivate);saveData();refresh();});};search.oninput=()=>{page=0;refresh();};$('#colab-home-filter').onchange=()=>{page=0;refresh();};refresh();
+    }else if(settingsTab==='Importar Colaboradores'){renderImportSettings();}else if(settingsTab==='Cobranças Teams'){renderTeamsSettings(body);}else if(settingsTab==='Limpeza de Dados'&&onlineStage==='producao'){body.innerHTML='<div class="notice warning">Exclusões em produção estão bloqueadas por segurança. Solicite uma operação específica com backup e autorização separada.</div>';}else if(settingsTab==='Limpeza de Dados'){body.innerHTML=`<h3>Limpeza e manutenção de registros</h3><p>Use esta área apenas para corrigir registros operacionais incorretos.</p><div class="card card-pad"><h3>Excluir convocações de uma data</h3><div class="form-grid">${field('Data',`<input class="control" id="clean-date" type="date" value="${isoToday()}">`)}<div><label class="field-label">&nbsp;</label><button class="btn btn-secondary" id="clean-day">Excluir esta data</button></div></div><label><input type="checkbox" id="clean-day-confirm"> Confirmo que desejo excluir as convocações desta data e os apontamentos associados.</label></div><div class="card card-pad section"><h3>Limpar todos os dados operacionais</h3><p>Remove convocações, apontamentos, indisponibilidades, conflitos e histórico de alterações. Obras e colaboradores são mantidos.</p><div class="notice warning">Esta ação é permanente e deixa o sistema sem histórico operacional.</div><label class="section" style="display:block"><input id="clean-all-check" type="checkbox"> Entendo que os dados operacionais serão excluídos.</label>${field('Digite LIMPAR DADOS para confirmar','<input class="control" id="clean-confirm" placeholder="LIMPAR DADOS">')}<button class="btn btn-primary btn-block" id="clean-all" disabled>Limpar todos os dados operacionais</button></div>`;const enable=()=>$('#clean-all').disabled=!$('#clean-all-check').checked||$('#clean-confirm').value!=='LIMPAR DADOS';$('#clean-all-check').onchange=enable;$('#clean-confirm').oninput=enable;$('#clean-day').onclick=()=>{if(!$('#clean-day-confirm').checked)return toast('Confirme a exclusão da data.',true);const d=$('#clean-date').value;state.convocacoes=state.convocacoes.filter(c=>c.dataServico!==d);state.apontamentos=state.apontamentos.filter(a=>a.dataServico!==d);audit('Exclusão por data',d);saveData();toast('Registros da data excluídos.');};$('#clean-all').onclick=()=>{if($('#clean-all').disabled)return;state.convocacoes=[];state.apontamentos=[];state.indisponibilidades=[];state.conflitosTentados=[];state.auditoria=[];state.teamsHistory=[];saveData();toast('Dados operacionais excluídos.');renderSettings();};}
+    main.insertAdjacentHTML('beforeend',`<details class="card card-pad section"><summary>Obras puxadas do Trello</summary><p>Registros armazenados no Neon e conferidos com o Trello.</p>${table(['Obra','Unidade'],OBRAS.map(o=>[escapeHtml(o.nome),escapeHtml(o.unidade)]))}</details>`);
+  }
+  function renderTeamsSettings(body){state.teamsConfig??={};const units=adminUnits();body.innerHTML=`<h3>Cobranças Teams</h3><p>Destinatários e prévia das pendências de apontamento. O envio externo depende da integração com o Teams.</p><form id="teams-config-form"><div class="form-grid">${field('Rotina automática','<label><input id="teams-automation" type="checkbox"> Ativar rotina de cobranças quando o Teams estiver conectado</label>')}${field('Texto da cobrança manual','<input id="teams-manual-message" class="control" placeholder="Regularize os apontamentos pendentes no Portal do Supervisor.">')}</div><h3 class="section">Destinatários por supervisor</h3>${table(['Supervisor','E-mail Teams','Ativo','Ação'],SUPERVISORES.map((s,index)=>[s,`<input class="control" type="email" id="teams-email-${index}" value="${escapeHtml(state.teamsConfig[s]?.email||'')}">`,`<input type="checkbox" id="teams-enabled-${index}" ${state.teamsConfig[s]?.ativo!==false?'checked':''}>`,`<button type="button" class="btn btn-primary" data-teams-now="${s}">Cobrar agora</button>`]))}<button class="btn btn-primary btn-block">Salvar destinatários e configuração</button></form><h3 class="section">Responsáveis cadastrados</h3><div id="teams-responsible"></div><div class="form-grid">${field('Unidade',`<select id="teams-owner-unit" class="control">${options(units)}</select>`)}${field('Supervisor',`<select id="teams-owner-sup" class="control">${options(SUPERVISORES)}</select>`)}</div><button class="btn btn-secondary section" id="teams-save-owner">Salvar responsável da unidade</button><h3 class="section">Pendências de apontamento e destinatários</h3><p>A pendência considera colaboradores ainda sem apontamento, inclusive em equipes parcialmente regularizadas.</p><div id="teams-pending"></div><h3 class="section">Histórico recente de cobranças</h3><div id="teams-history"></div><div class="notice info section">Demais unidades: 16:00 do dia do serviço e 09:30 do dia seguinte. SEBRAE: 21:00 do próprio dia. Prévia local; nenhuma cobrança é enviada por este HTML.</div>`;$('#teams-automation').checked=Boolean(state.teamsAutomation);$('#teams-manual-message').value=state.teamsMessage||'';const refresh=()=>{const pending=operationalRows(state.convocacoes.filter(c=>c.dataServico<=isoToday())).filter(x=>!x.i);const noDest=pending.filter(x=>!state.teamsConfig[x.c.supervisor]?.email||state.teamsConfig[x.c.supervisor]?.ativo===false);$('#teams-pending').innerHTML=`<div class="grid grid-4">${metric('Pendências',pending.length,'colaboradores')}${metric('Pendentes hoje',pending.filter(x=>x.c.dataServico===isoToday()).length,'dia atual')}${metric('Atrasados',pending.filter(x=>!isWeekend(x.c.dataServico)&&now()>=deadlineApontamento(x.c.dataServico)).length,'prazo vencido')}${metric('Sem destinatário',noDest.length,'e-mail ausente ou inativo')}</div><div class="limited-table section">`+table(['Data','Unidade','Colaborador','Turno','Situação','Automação','Responsável','Destinatário'],pending.map(x=>[formatDate(x.c.dataServico),escapeHtml(x.c.unidade),escapeHtml(x.p?.nome),x.c.turno,!isWeekend(x.c.dataServico)&&now()>=deadlineApontamento(x.c.dataServico)?'Atrasado':'Pendente',reminder(x.c),x.c.supervisor,escapeHtml(state.teamsConfig[x.c.supervisor]?.email||'Sem destinatário')]))+'</div>';$('#teams-responsible').innerHTML=table(['Supervisor','Unidades'],SUPERVISORES.map(s=>[s,escapeHtml(Object.entries(state.unitOwners||{}).filter(([u,v])=>v===s).map(([u])=>u).join(', ')||[...new Set(state.convocacoes.filter(c=>c.supervisor===s).map(c=>c.unidade))].join(', '))]));$('#teams-history').innerHTML=table(['Data','Supervisor','Pendências','Status','Detalhe'],(state.teamsHistory||[]).slice().reverse().map(x=>[formatDateTime(x.data),x.supervisor,x.quantidade,x.status,escapeHtml(x.detalhe)]));};$('#teams-config-form').onsubmit=e=>{e.preventDefault();SUPERVISORES.forEach((s,i)=>state.teamsConfig[s]={email:$('#teams-email-'+i).value.trim(),ativo:$('#teams-enabled-'+i).checked});state.teamsAutomation=$('#teams-automation').checked;state.teamsMessage=$('#teams-manual-message').value.trim();audit('Configuração de destinatários Teams');saveData();toast('Configuração salva.');refresh();};$('#teams-save-owner').onclick=()=>{state.unitOwners??={};state.unitOwners[$('#teams-owner-unit').value]=$('#teams-owner-sup').value;audit('Responsável da unidade alterado');saveData();refresh();};$$('[data-teams-now]').forEach(b=>b.onclick=()=>{const s=b.dataset.teamsNow,rows=operationalRows(state.convocacoes.filter(c=>c.supervisor===s&&c.dataServico<=isoToday())).filter(x=>!x.i);body.insertAdjacentHTML('beforeend',`<div class="card card-pad section"><h3>Prévia da cobrança · ${s}</h3><textarea class="control" id="teams-preview" readonly>${escapeHtml((state.teamsMessage||'Regularize os apontamentos pendentes no Portal do Supervisor.')+'\n'+rows.map(x=>formatDate(x.c.dataServico)+' · '+x.c.unidade+' · '+x.p?.nome).join('\n'))}</textarea><p>Prévia gerada. Envio não realizado: Teams não conectado.</p></div>`);state.teamsHistory??=[];state.teamsHistory.push({data:now().toISOString(),supervisor:s,quantidade:rows.length,status:'Não enviado',detalhe:'Prévia local; Teams não conectado'});saveData();refresh();});refresh();}
+  const xmlSafe=v=>String(v??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
+  function zipStore(files){const enc=new TextEncoder(),parts=[],central=[];let offset=0;const crc=data=>{let c=0xffffffff;for(const b of data){c^=b;for(let k=0;k<8;k++)c=(c>>>1)^((c&1)?0xedb88320:0);}return (c^0xffffffff)>>>0;};for(const [name,content] of Object.entries(files)){const n=enc.encode(name),d=enc.encode(content),h=new Uint8Array(30+n.length),v=new DataView(h.buffer),sum=crc(d);v.setUint32(0,0x04034b50,true);v.setUint16(4,20,true);v.setUint32(14,sum,true);v.setUint32(18,d.length,true);v.setUint32(22,d.length,true);v.setUint16(26,n.length,true);h.set(n,30);parts.push(h,d);const c=new Uint8Array(46+n.length),cv=new DataView(c.buffer);cv.setUint32(0,0x02014b50,true);cv.setUint16(4,20,true);cv.setUint16(6,20,true);cv.setUint32(16,sum,true);cv.setUint32(20,d.length,true);cv.setUint32(24,d.length,true);cv.setUint16(28,n.length,true);cv.setUint32(42,offset,true);c.set(n,46);central.push(c);offset+=h.length+d.length;}const length=central.reduce((v,x)=>v+x.length,0),end=new Uint8Array(22),ev=new DataView(end.buffer);ev.setUint32(0,0x06054b50,true);ev.setUint16(8,central.length,true);ev.setUint16(10,central.length,true);ev.setUint32(12,length,true);ev.setUint32(16,offset,true);return new Blob([...parts,...central,end],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});}
+  function downloadBlob(name,blob){
+    if(!(blob instanceof Blob)||!blob.size)throw Error('O arquivo gerado está vazio.');
+    const url=URL.createObjectURL(blob),a=document.createElement('a');
+    a.href=url;a.download=name;a.style.display='none';document.body.appendChild(a);
+    try{
+      a.click();
+      showToast('Download iniciado: '+name);
+    }finally{
+      a.remove();
+      // Revogação imediata ou em 1 segundo pode interromper downloads em alguns navegadores.
+      setTimeout(()=>URL.revokeObjectURL(url),60000);
+    }
+  }
+  function exportVisibleWorkbook(filename){const tables=$$('#main-content table');if(!tables.length)return toast('Sem dados para exportar.',true);exportWorkbook(tables.map((t,i)=>({name:'Tabela '+(i+1),center:[...t.rows[0].cells].map((c,j)=>/data|status|situação|turno|quantidade|dias|atrasado|prazo|posição|extra|percentual|%/i.test(c.innerText)?j:-1).filter(j=>j>=0),rows:[...t.rows].map(r=>[...r.cells].map(c=>c.innerText))})),filename);}
+  function reportRowsForExport(rows){const fin=perfilAtual==='FINANCEIRO';return [['Data','Supervisor','Unidade','Obra','Colaborador','Período','Status',fin?'Extra / Diária avulso (R$)':'Custo normal',fin?'Valores complementares já registrados (R$)':'Extra (R$)','Noturno','Acordos',...(fin?['Passagens/Ajuda de custo']:['Periculosidade']),'Total'],...rows.map(x=>[formatDate(x.c.dataServico),x.c.supervisor,x.c.unidade,fin?financialWorkNumber(x.c.obraId):obraById(x.c.obraId)?.nome||'',x.p?.nome||'',x.service.periodo,x.displayStatus||x.i.status,fin?x.extra:x.daily,fin?x.finance:x.extra,x.night,x.bonus,fin?x.ajudaCusto:x.danger,fin?x.extra+x.finance+x.night+x.bonus+x.ajudaCusto:x.daily+x.extra+x.danger+x.night+x.bonus])];}
+  const excelCol=n=>{let s='';for(n++;n;n=Math.floor((n-1)/26))s=String.fromCharCode(65+(n-1)%26)+s;return s;};
+  function exportWorkbook(sheets,filename){
+    const ns='http://schemas.openxmlformats.org/spreadsheetml/2006/main',rel='http://schemas.openxmlformats.org/package/2006/relationships',files={};
+    files['_rels/.rels']=`<Relationships xmlns="${rel}"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`;
+    files['xl/workbook.xml']=`<workbook xmlns="${ns}" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheets.map((s,i)=>`<sheet name="${xmlSafe(s.name.slice(0,31))}" sheetId="${i+1}" r:id="rId${i+1}"/>`).join('')}</sheets><calcPr calcMode="auto"/></workbook>`;
+    files['xl/_rels/workbook.xml.rels']=`<Relationships xmlns="${rel}">`+sheets.map((s,i)=>`<Relationship Id="rId${i+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i+1}.xml"/>`).join('')+`<Relationship Id="styles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`;
+    files['[Content_Types].xml']='<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'+sheets.map((s,i)=>`<Override PartName="/xl/worksheets/sheet${i+1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')+'</Types>';
+    const xf=(font,fill,num=0,align='left')=>`<xf numFmtId="${num}" fontId="${font}" fillId="${fill}" borderId="0" xfId="0" applyAlignment="1" applyNumberFormat="1"><alignment horizontal="${align}" vertical="center" wrapText="1"/></xf>`;
+    files['xl/styles.xml']=`<styleSheet xmlns="${ns}"><numFmts count="1"><numFmt numFmtId="164" formatCode="&quot;R$&quot; #,##0.00"/></numFmts><fonts count="3"><font><sz val="10"/><name val="Arial"/></font><font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Arial"/></font><font><b/><sz val="12"/><name val="Arial"/><color rgb="FF1E293B"/></font></fonts><fills count="5"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF1E293B"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FF2563EB"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFF1F5F9"/></patternFill></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1">${xf(0,0)}</cellStyleXfs><cellXfs count="10">${xf(0,0)}${xf(1,2,0,'center')}${xf(2,0)}${xf(0,0,164,'right')}${xf(1,3,0,'center')}${xf(0,4)}${xf(0,4,164,'right')}${xf(2,4)}${xf(0,0,0,'center')}${xf(0,4,0,'center')}</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
+    sheets.forEach((s,i)=>{const cols=s.widths||Array.from({length:Math.max(...s.rows.map(r=>r.length),1)},()=>24),freeze=s.freeze||1;files[`xl/worksheets/sheet${i+1}.xml`]=`<worksheet xmlns="${ns}"><sheetViews><sheetView workbookViewId="0"><pane ySplit="${freeze}" topLeftCell="A${freeze+1}" state="frozen"/></sheetView></sheetViews><cols>${cols.map((w,j)=>`<col min="${j+1}" max="${j+1}" width="${w}" customWidth="1"/>`).join('')}</cols><sheetData>${s.rows.map((r,ri)=>`<row r="${ri+1}" ht="${(s.headers||[0]).includes(ri)?40:ri===0?30:26}" customHeight="1">${r.map((v,j)=>{const obj=v&&typeof v==='object',value=obj?v.value:v,style=obj&&v.style!=null?v.style:(s.headers||[0]).includes(ri)?(s.blue?4:1):(s.titles||[]).includes(ri)?2:(s.sections||[]).includes(ri)?7:(s.money||[]).includes(j)&&typeof value==='number'?(ri%2?3:6):(s.center||[]).includes(j)?(ri%2?8:9):(ri%2?0:5),ref=excelCol(j)+(ri+1);return obj&&v.formula?`<c r="${ref}" s="${style}"><f>${xmlSafe(v.formula)}</f><v>${Number(value)||0}</v></c>`:typeof value==='number'?`<c r="${ref}" s="${style}"><v>${value}</v></c>`:`<c r="${ref}" s="${style}" t="inlineStr"><is><t xml:space="preserve">${xmlSafe(value)}</t></is></c>`;}).join('')}</row>`).join('')}</sheetData>${s.merges?.length?`<mergeCells count="${s.merges.length}">${s.merges.map(m=>`<mergeCell ref="${m}"/>`).join('')}</mergeCells>`:''}<pageMargins left="0.25" right="0.25" top="0.4" bottom="0.4" header="0.2" footer="0.2"/><pageSetup paperSize="9" orientation="landscape" fitToWidth="1" fitToHeight="0"/></worksheet>`;});downloadBlob(filename+'.xlsx',zipStore(files));
+  }
+  function reportPeriod(){return formatDate(reportFilters.inicio)+' a '+formatDate(reportFilters.fim);}
+  function controlValues(x){const multiplier=dangerEligible(x.p)?1.3:1;return [roundMoney(x.daily*multiplier),roundMoney(x.extra*multiplier),x.night,x.bonus];}
+  function controlWorkbook(){
+    const data=entries(),generalHeaders=['Data','Unidade','Colaborador','Função','Supervisor responsável','Status','Extra','Custo do Dia c/ Encargos (R$)','Extra c/ Encargos (R$)','Adicional Noturno (R$)','Acordos / Bonificações (R$)','Total (R$)','Observação'],dailyHeaders=generalHeaders.slice(2);
+    function make(name,rows,general){return {name,rows,headers:[],titles:[0],sections:[],merges:[`A1:${general?'M':'K'}1`],freeze:4,money:general?[7,8,9,10,11]:[5,6,7,8,9],center:general?[0,5,6]:[3,4],widths:general?[16,18,38,26,22,22,13,32,25,25,30,19,30]:[38,26,22,22,13,32,25,25,30,19,30]};}
+    function blocks(sheet,xs,general){const groups=new Map();xs.forEach(x=>{const key=x.c.unidade+'|'+x.c.obraId;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(x);});for(const group of groups.values()){const x=group[0],n=sheet.rows.length+1,last=general?'M':'K';sheet.sections.push(n-1);sheet.merges.push(`A${n}:${last}${n}`);sheet.rows.push([`UNIDADE: ${x.c.unidade} | OBRA: ${obraById(x.c.obraId)?.nome||'Sem obra'} | PERÍODO: ${[...new Set(group.map(x=>x.service.periodo))].join(', ')}`]);sheet.headers.push(sheet.rows.length);sheet.rows.push(general?generalHeaders:dailyHeaders);const start=sheet.rows.length+1;let total=0;for(const x of group){const v=controlValues(x),r=sheet.rows.length+1,sum=roundMoney(v.reduce((a,b)=>a+b,0));total+=sum;sheet.rows.push([...(general?[formatDate(x.c.dataServico),x.c.unidade]:[]),x.p?.nome||'',x.p?.funcao||'',x.c.supervisor,x.displayStatus||x.i.status,x.displayExtra||x.i.extra||'Não',...v,{formula:general?`H${r}+I${r}+J${r}+K${r}`:`F${r}+G${r}+H${r}+I${r}`,value:sum},x.i.observacao||x.i.obs||'']);}const row=Array(general?13:11).fill(''),totalCol=general?'L':'J';row[general?10:8]='TOTAL DA OBRA';row[general?11:9]={formula:`SUM(${totalCol}${start}:${totalCol}${sheet.rows.length})`,value:roundMoney(total)};sheet.rows.push(row,[]);}}
+    const general=make('GERAL',[['APONTAMENTO DIÁRIO DE EQUIPES - PERÍODO: '+reportPeriod()],['Periculosidade de 30% aplicada na Controladoria para ELETRICISTA e AUXILIAR DE ELETRICISTA.'],[]],true);general.merges.push('A2:M2');blocks(general,data,true);return [general,...[...new Set(data.map(x=>x.c.dataServico))].sort().map(d=>{const sheet=make(d,[['APONTAMENTO DIÁRIO DE EQUIPES - DATA: '+d],[]],false);blocks(sheet,data.filter(x=>x.c.dataServico===d),false);return sheet;})];
+  }
+  function indicatorReportData(){const cv=state.convocacoes.filter(c=>c.dataServico>=reportFilters.inicio&&c.dataServico<=reportFilters.fim&&(indicatorUnit==='Todas'||c.unidade===indicatorUnit)),ids=new Set(cv.map(c=>c.id)),ap=state.apontamentos.filter(a=>ids.has(a.convocacaoId)),count=xs=>new Set(xs.map(x=>x.dataServico)).size;const summary=SUPERVISORES.map(s=>{const own=cv.filter(c=>c.supervisor===s&&(c.executor||s)===s),pointed=ap.filter(a=>a.supervisor===s&&(a.executor||s)===s),n=count(own),late=count(own.filter(convocacaoAtrasada));return [s,n,late,count(pointed),count(pointed.filter(apontamentoAtrasado)),n?roundMoney((n-late)/n*100):0];});const events=[];for(const c of cv){if(!SUPERVISORES.includes(c.supervisor))continue;for(const id of c.colaboradores)events.push([c.supervisor,formatDate(c.dataServico),colaboradorById(id)?.nome||id,'Convocação',formatDateTime(c.criadoEm),convocacaoAtrasada(c)?'SIM':'NÃO']);const a=apForConv(c.id);if(a)for(const i of a.itens)events.push([c.supervisor,formatDate(c.dataServico),colaboradorById(i.colaboradorId)?.nome||i.colaboradorId,'Apontamento',formatDateTime(a.apontadoEm),apontamentoAtrasado(a)?'SIM':'NÃO']);}const missing=indicatorUnit==='Todas'?diasSemConvocacao(SUPERVISORES,reportFilters.inicio,reportFilters.fim):[],gaps=SUPERVISORES.map(s=>{const dates=missing.filter(x=>x.supervisor===s).map(x=>x.dataServico),noAp=[...new Set(cv.filter(c=>c.supervisor===s&&!completeConv(c)&&now()>=deadlineApontamento(c.dataServico)).map(c=>c.dataServico))];return [s,indicatorUnit==='Todas'?dates.length:'—',noAp.length,dates.map(formatDate).join(', ')||(indicatorUnit==='Todas'?'Nenhum':'Somente com todas as unidades'),noAp.map(formatDate).join(', ')||'Nenhum'];});return {summary,events,gaps};}
+  function indicatorWorkbook(){const d=indicatorReportData(),make=(name,title,headers,rows,widths)=>({name,rows:[[title],['Período: '+reportPeriod()+' | Unidade: '+indicatorUnit],[],headers,...rows],headers:[3],titles:[],blue:true,merges:['A1:F1','A2:F2'],freeze:4,center:[1,2,3,4,5],widths});const sheets=[make('Resumo','INDICADOR DE CUMPRIMENTO DE PRAZOS',['Supervisor','Convocações feitas','Convocações atrasadas','Apontamentos feitos','Apontamentos atrasados','No prazo (%)'],d.summary,[18,21,24,22,25,15]),make('Ocorrências','OCORRÊNCIAS DE CONVOCAÇÃO E APONTAMENTO',['Supervisor','Data do serviço','Colaborador','Tipo','Registrado em','Atrasado'],d.events,[18,18,42,18,24,11])];sheets[1].center=[1,3,4,5];sheets.forEach(s=>s.rows[0][0]={value:s.rows[0][0],style:4});return sheets;}
+  function financialWorkNumber(id){const name=obraById(id)?.nome||'';const obra=name.match(/\bOBRA\s*(?:N[º°.]*\s*)?(\d+(?:[.,/-]\d+)*)/i),code=name.match(/\b(APR[A-Z]*\s*[-.]?\s*\d+(?:[./-]\d+)*)/i),number=name.match(/^\s*(\d+(?:[.,/-]\d+)*)(?=\s|$|\s*-)/);return obra?obra[1]:code?code[1].replace(/\s+/g,'').toUpperCase():number?number[1]:'Sem número cadastrado';}
+  function exportFinancialSummaryExcel(){
+    const people=financialSummaryRows(),columns=['Colaborador','Função','Supervisor(es)','Unidade(s)','Dias','Extra / Diária avulso (R$)','Valores complementares já registrados (R$)','Adicional noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total (R$)'];
+    const rows=[['APROAR | CONSOLIDADO FINANCEIRO POR COLABORADOR'],['Período: '+reportPeriod()],[],columns];
+    for(const p of people){
+      const line=rows.length+1;
+      rows.push([p.nome,p.funcao,p.supervisores,p.unidades,p.dias,p.extra,p.finance,p.night,p.bonus,p.ajudaCusto,{formula:'F'+line+'+G'+line+'+H'+line+'+I'+line+'+J'+line,value:p.total}]);
+    }
+    const last=rows.length,summary=Array(11).fill('');summary[0]='TOTAL GERAL';
+    for(const [index,key] of [[5,'extra'],[6,'finance'],[7,'night'],[8,'bonus'],[9,'ajudaCusto'],[10,'total']]){
+      const column=excelCol(index);
+      summary[index]={formula:people.length?'SUM('+column+'5:'+column+last+')':'0',value:roundMoney(people.reduce((sum,p)=>sum+p[key],0)),style:6};
+    }
+    rows.push(summary);
+    exportWorkbook([{name:'CONSOLIDADO POR PESSOA',rows,headers:[3],titles:[0,1],sections:[rows.length-1],blue:true,freeze:4,merges:['A1:K1','A2:K2'],center:[4],money:[5,6,7,8,9,10],widths:[38,24,30,28,11,23,23,23,20,31,22]}],'financeiro_consolidado_colaboradores_'+reportFilters.inicio+'_a_'+reportFilters.fim);
+  }
+  function financialWorkbook(){
+    const data=financialEntries().filter(x=>presence(x.i.status)&&x.extra+x.finance+x.night+x.bonus+x.ajudaCusto>0.005);
+    function sheet(name,xs){
+      const rows=[['RELATÓRIO FINANCEIRO - '+reportPeriod()],[]],headers=[],sections=[],merges=['A1:N1'],groups=new Map();
+      for(const x of xs){const k=x.c.unidade+'|'+x.c.obraId;if(!groups.has(k))groups.set(k,[]);groups.get(k).push(x);}
+      for(const group of groups.values()){
+        const x=group[0],n=rows.length+1;
+        sections.push(n-1);merges.push(`A${n}:N${n}`);
+        rows.push(['UNIDADE: '+x.c.unidade+' | OBRA: '+financialWorkNumber(x.c.obraId)]);
+        headers.push(rows.length);
+        rows.push(['Data','Supervisor','Unidade','Colaborador','Função','Período','Status','Extra / Diária avulso (R$)','Valores complementares já registrados (R$)','Noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total (R$)','Observação']);
+        let total=0;const first=rows.length+1;
+        for(const x of group){
+          const row=rows.length+1,value=roundMoney(x.extra+x.finance+x.night+x.bonus+x.ajudaCusto);total+=value;
+          rows.push([formatDate(x.c.dataServico),x.c.supervisor,x.c.unidade,x.p?.nome||'',x.p?.funcao||'',x.service.periodo,x.displayStatus||x.i.status,x.extra,x.finance,x.night,x.bonus,x.ajudaCusto,{formula:`H${row}+I${row}+J${row}+K${row}+L${row}`,value},x.i.observacao||x.i.obs||'']);
+        }
+        const summary=Array(14).fill('');
+        summary[11]='TOTAL DA OBRA';
+        summary[12]={formula:`SUM(M${first}:M${rows.length})`,value:roundMoney(total)};
+        rows.push(summary,[]);
+      }
+      return {name,rows,headers,sections,merges,titles:[0],freeze:4,center:[0,5,6],money:[7,8,9,10,11,12],widths:[16,22,20,38,26,22,22,22,22,22,22,30,22,30]};
+    }
+    return [sheet('GERAL',data),...[...new Set(data.map(x=>x.c.dataServico))].sort().map(d=>sheet(d,data.filter(x=>x.c.dataServico===d)))];
+  }
+  function exportReportsExcel(){exportWorkbook(perfilAtual==='FINANCEIRO'?financialWorkbook():controlWorkbook(),(perfilAtual==='FINANCEIRO'?'financeiro':'controladoria_rateada')+'_'+reportFilters.inicio+'_a_'+reportFilters.fim);}
+  async function reportPDF(kind){try{const {PDFDocument,StandardFonts,rgb}=PDFLib,doc=await PDFDocument.create(),regular=await doc.embedFont(StandardFonts.Helvetica),bold=await doc.embedFont(StandardFonts.HelveticaBold),W=841.89,H=595.28,margin=36;let page,y;const navy=rgb(.118,.161,.231),blue=rgb(.145,.388,.922),gray=rgb(.94,.96,.98),black=rgb(.08,.09,.11);const safe=v=>String(v??'').replace(/[\u2014\u2013]/g,'-').replace(/[^\x20-\x7e\xa0-\xff\n]/g,'');
+    const text=(v,x,yy,size=9,font=regular,color=black)=>page.drawText(safe(v),{x,y:yy,size,font,color});const title=kind==='absences'?'APROAR | FALTAS E ATESTADOS':kind==='executive'?'APROAR | RELATÓRIO DE RESULTADOS':kind==='financial-consolidated'?'APROAR | FINANCEIRO POR COLABORADOR':kind==='financial'?'APROAR - RELATÓRIO FINANCEIRO':'APROAR | APONTAMENTO DIÁRIO DE EQUIPES';
+    function newPage(){page=doc.addPage([W,H]);y=H-40;text(title,['financial','financial-consolidated'].includes(kind)?(W-bold.widthOfTextAtSize(title,16))/2:margin,y,16,bold,['financial','financial-consolidated'].includes(kind)?black:navy);y-=21;text('Período: '+reportPeriod()+(kind==='executive'?' | Unidade: '+indicatorUnit:''),margin,y,9);y-=25;}
+    const wrap=(v,width,font=regular,size=8)=>{const result=[];for(const paragraph of safe(v).split('\n')){let line='';for(const word of paragraph.split(/\s+/)){if(font.widthOfTextAtSize((line?line+' ':'')+word,size)>width&&line){result.push(line);line='';}if(font.widthOfTextAtSize(word,size)>width){let chunk='';for(const ch of word){if(font.widthOfTextAtSize(chunk+ch,size)>width&&chunk){result.push(chunk);chunk='';}chunk+=ch;}line=chunk;}else line+=(line?' ':'')+word;}result.push(line);}return result;};
+    function paragraph(v,size=9,font=regular){for(const line of wrap(v,W-2*margin,font,size)){if(y<55)newPage();text(line,margin,y,size,font);y-=size+4;}y-=7;}
+    function grid(headers,rows,widths,financial=false){const sum=widths.reduce((a,b)=>a+b,0),ws=widths.map(w=>w/sum*(W-2*margin));function draw(values,header=false,index=0,prepared=null){const lines=prepared||values.map((v,i)=>wrap(v,ws[i]-10,header?bold:regular,8));const maxLines=Math.max(...lines.map(l=>l.length));if(maxLines>36){for(let offset=0;offset<maxLines;offset+=36)draw(values,header,index,lines.map(l=>l.slice(offset,offset+36)));return;}const height=Math.max(24,...lines.map(l=>l.length*11+10));if(y-height<45){newPage();if(!header)draw(headers,true);}let x=margin;values.forEach((v,i)=>{page.drawRectangle({x,y:y-height,width:ws[i],height,color:header?(financial?rgb(1,1,1):blue):financial||index%2?rgb(1,1,1):gray,borderWidth:financial?.4:0,borderColor:black});lines[i].forEach((line,k)=>{const font=header?bold:regular,right=!header&&/^R\$/.test(String(v));text(line,right?x+ws[i]-5-font.widthOfTextAtSize(line,8):x+5,y-14-k*11,8,font,header&&!financial?rgb(1,1,1):black);});x+=ws[i];});y-=height;}draw(headers,true);if(!rows.length)rows=[headers.map((_,i)=>i===0?'Nenhum registro no período':'')];rows.forEach((r,i)=>draw(r,false,i));y-=18;}
+    function cards(values){if(y<110)newPage();const width=(W-2*margin-30)/values.length;values.forEach(([label,value],i)=>{const x=margin+i*(width+10);page.drawRectangle({x,y:y-62,width,height:62,color:gray});text(label,x+10,y-18,8,bold,navy);text(value,x+10,y-46,21,bold,navy);});y-=82;}
+    newPage();if(kind==='executive'){const d=indicatorReportData(),total=d.summary.reduce((a,r)=>a+r[1],0),late=d.summary.reduce((a,r)=>a+r[2],0);cards([['CONVOCAÇÕES',total],['NO PRAZO',total-late],['ATRASADAS',late],['NÃO FEITAS',d.gaps.reduce((a,r)=>a+(Number(r[1])||0),0)]]);paragraph('1. Desempenho dos supervisores',12,bold);paragraph('Cada supervisor e dia de serviço conta como uma convocação, independentemente do tamanho da equipe.');grid(['Supervisor','Convocações','Atrasadas','No prazo','Apontamentos','Apt. atrasados'],d.summary.map(r=>[r[0],r[1],r[2],r[1]-r[2],r[3],r[4]]),[2,1,1,1,1,1]);paragraph('2. Convocações e apontamentos pendentes',12,bold);paragraph('Quantidade e datas dos registros não realizados no período selecionado.');grid(['Supervisor','Não feitas','Apt. não feitos','Dias sem convocação','Dias sem apontamento'],d.gaps,[1.3,1,1,3,3]);newPage();paragraph('3. Apontamentos',12,bold);cards([['TOTAL DE APONTAMENTOS',d.summary.reduce((a,r)=>a+r[3],0)],['APONTAMENTOS ATRASADOS',d.summary.reduce((a,r)=>a+r[4],0)]]);paragraph('Apontamentos por supervisor',12,bold);grid(['Supervisor','Apontamentos','Atrasados'],d.summary.map(r=>[r[0],r[3],r[4]]),[3,1,1]);paragraph('Critério: o indicador considera somente ações lançadas pelo próprio supervisor. Lançamentos administrativos não são atribuídos ao seu desempenho. Sábados e domingos não geram atraso automático.');
+    }else if(kind==='absences'){const records=absenceRecords();paragraph('Faltas: '+records.filter(x=>x.i.status==='Falta').length+' | Atestados: '+records.filter(x=>x.i.status==='Atestado').length,11,bold);grid(absenceHeaders,absenceReportRows(),[1,1.3,2.5,1.6,1.6,1,2.7],true);
+    }else if(kind==='financial-consolidated'){
+      const people=financialSummaryRows();
+      const total=people.reduce((sum,p)=>sum+p.total,0);
+      paragraph('Consolidado do período: uma linha por colaborador, em ordem alfabética.',10,bold);
+      if(viewAtual==='pagamentos'&&selectedCycle!=='custom')paragraph('Pagamento previsto: '+formatDate(financialCycle(isoToday(),Number(selectedCycle)).pagamento));
+      paragraph('COLABORADORES: '+people.length+' | TOTAL A PAGAR: '+money(total),11,bold);
+      grid(['Colaborador','Dias','Supervisor(es)','Valor da Extra','Valores anteriores','Noturno','Acordos','Passagens/Ajuda','Total'],people.map(p=>[p.nome,p.dias,p.supervisores,money(p.extra),money(p.finance),money(p.night),money(p.bonus),money(p.ajudaCusto),money(p.total)]),[2.9,.55,1.9,1.1,1.3,1.1,1.2,1.7,1.3],true);
+    }else if(kind==='financial'){
+      const rows=financialEntries(),groups=new Map();
+      for(const x of rows.filter(x=>presence(x.i.status)&&x.extra+x.finance+x.night+x.bonus+x.ajudaCusto>0.005)){
+        const key=x.c.supervisor+'|'+x.p.id;
+        if(!groups.has(key))groups.set(key,{sup:x.c.supervisor,p:x.p,days:new Set(),units:new Set(),works:new Set(),extra:0,finance:0,night:0,bonus:0,ajudaCusto:0});
+        const g=groups.get(key);
+        g.days.add(x.c.dataServico);x.units.forEach(u=>g.units.add(u));x.works.forEach(w=>g.works.add(financialWorkNumber(w)));
+        g.extra+=x.extra;g.finance+=x.finance;g.night+=x.night;g.bonus+=x.bonus;g.ajudaCusto+=x.ajudaCusto;
+      }
+      const values=[...groups.values()],amount=x=>x.extra+x.finance+x.night+x.bonus+x.ajudaCusto;
+      if(viewAtual==='pagamentos'&&selectedCycle!=='custom')paragraph('Pagamento previsto: '+formatDate(financialCycle(isoToday(),Number(selectedCycle)).pagamento));
+      paragraph('TOTAL A PAGAR: '+money(values.reduce((a,x)=>a+amount(x),0)),12,bold);
+      for(const sup of [...new Set(values.map(x=>x.sup))]){
+        const xs=values.filter(x=>x.sup===sup);
+        if(y<125)newPage();
+        paragraph('SUPERVISOR: '+sup+' | SUBTOTAL: '+money(xs.reduce((a,x)=>a+amount(x),0)),10,bold);
+        grid(['Colaborador','Função','Unidade(s)','Obra','Dias','Valor da Extra','Valores anteriores','Adic. not.','Acordos / Bonif.','Passagens/Ajuda de custo','Total'],xs.map(x=>[x.p.nome,x.p.funcao,[...x.units].join(', '),[...x.works].join(', '),x.days.size,money(x.extra),money(x.finance),money(x.night),money(x.bonus),money(x.ajudaCusto),money(amount(x))]),[2.2,1.6,1.3,2.1,.5,1,1,1,1.2,1.4,1],true);
+      }
+    }else{grid(['Data','Unidade / Obra','Colaborador / Função','Supervisor','Status','Normal','Extra','Noturno','Acordos','Total'],entries().map(x=>{const v=controlValues(x);return [formatDate(x.c.dataServico),x.c.unidade+'\n'+(obraById(x.c.obraId)?.nome||''),x.p?.nome+'\n'+x.p?.funcao,x.c.supervisor,x.displayStatus,...v.map(money),money(v.reduce((a,b)=>a+b,0))];}),[1,2.5,2.5,1.2,1.2,1,1,1,1,1]);}
+    doc.getPages().forEach((p,i)=>{const label='APROAR | '+(kind==='absences'?'Faltas e Atestados':kind==='executive'?'Relatório de Resultados':kind==='financial-consolidated'?'Financeiro por Colaborador':kind==='financial'?'Relatório Financeiro':'Controladoria')+' | Página '+(i+1);p.drawText(label,{x:(W-regular.widthOfTextAtSize(label,8))/2,y:22,size:8,font:regular,color:navy});});downloadBlob((kind==='absences'?'faltas_atestados':kind==='executive'?'relatorio_resultados':kind==='financial-consolidated'?'financeiro_consolidado_colaboradores':kind==='financial'?'financeiro_pagamentos':'controladoria')+'_'+reportFilters.inicio+'_a_'+reportFilters.fim+'.pdf',new Blob([await doc.save()],{type:'application/pdf'}));}catch(e){toast('Não foi possível gerar o PDF: '+e.message,true);}}
+  async function xlsxRows(file){const bytes=new Uint8Array(await file.arrayBuffer()),view=new DataView(bytes.buffer);let end=bytes.length-22;while(end>=0&&view.getUint32(end,true)!==0x06054b50)end--;if(end<0)throw Error('Arquivo XLSX inválido.');let ptr=view.getUint32(end+16,true);const count=view.getUint16(end+10,true),files={};for(let j=0;j<count;j++){if(view.getUint32(ptr,true)!==0x02014b50)throw Error('Estrutura ZIP inválida.');const method=view.getUint16(ptr+10,true),size=view.getUint32(ptr+20,true),n=view.getUint16(ptr+28,true),extra=view.getUint16(ptr+30,true),comment=view.getUint16(ptr+32,true),off=view.getUint32(ptr+42,true),name=new TextDecoder().decode(bytes.slice(ptr+46,ptr+46+n));const start=off+30+view.getUint16(off+26,true)+view.getUint16(off+28,true);let data=bytes.slice(start,start+size);if(method===8)data=new Uint8Array(await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer());else if(method!==0)throw Error('Compressão não suportada.');files[name]=new TextDecoder().decode(data);ptr+=46+n+extra+comment;}const parse=s=>new DOMParser().parseFromString(s,'application/xml'),strings=files['xl/sharedStrings.xml']?[...parse(files['xl/sharedStrings.xml']).getElementsByTagName('si')].map(si=>[...si.getElementsByTagName('t')].map(t=>t.textContent).join('')):[];const workbook=parse(files['xl/workbook.xml']),first=workbook.getElementsByTagName('sheet')[0],rid=first?.getAttribute('r:id'),rels=parse(files['xl/_rels/workbook.xml.rels']);const target=[...rels.getElementsByTagName('Relationship')].find(x=>x.getAttribute('Id')===rid)?.getAttribute('Target');const path=target?.startsWith('/')?target.slice(1):'xl/'+target;const sheet=files[path]||files['xl/worksheets/sheet1.xml'];if(!sheet)throw Error('Não foi possível ler a primeira aba.');return [...parse(sheet).getElementsByTagName('row')].map(row=>{const values=[];for(const c of row.getElementsByTagName('c')){const ref=c.getAttribute('r').replace(/[0-9]/g,''),index=[...ref].reduce((v,ch)=>v*26+ch.charCodeAt(0)-64,0)-1,t=c.getAttribute('t'),v=c.getElementsByTagName('v')[0]?.textContent||'';values[index]=t==='s'?strings[Number(v)]:t==='inlineStr'?[...c.getElementsByTagName('t')].map(t=>t.textContent).join(''):v;}return values;});}
+  function parseCSV(text){text=text.replace(/^\uFEFF/,'');const delim=(text.split(/\r?\n/)[0].match(/;/g)||[]).length>=(text.split(/\r?\n/)[0].match(/,/g)||[]).length?';':',';const rows=[];let row=[],value='',quoted=false;for(let i=0;i<text.length;i++){const c=text[i];if(c==='"'){if(quoted&&text[i+1]==='"'){value+='"';i++;}else quoted=!quoted;}else if(c===delim&&!quoted){row.push(value);value='';}else if((c==='\n'||c==='\r')&&!quoted){if(c==='\r'&&text[i+1]==='\n')i++;row.push(value);if(row.some(v=>v.trim()))rows.push(row);row=[];value='';}else value+=c;}row.push(value);if(row.some(v=>v.trim()))rows.push(row);return rows;}
+  function renderImportSettings(){const body=$('#settings-body');body.innerHTML=`<h3>Importar planilha de colaboradores</h3><p>Adicione novos colaboradores ou atualize cadastros pelo nome. Nenhum colaborador ausente da planilha será excluído.</p><input class="control" id="import-file" type="file" accept=".xlsx,.csv"><p>XLSX ou CSV. A primeira aba deve conter nome, função e custo diário.</p><div id="import-mapping" class="section"></div><div id="import-preview" class="section"></div><div class="form-actions"><button class="btn btn-secondary" id="import-template">Baixar modelo Excel</button><button class="btn btn-primary" id="import-save" disabled>Importar prévia</button></div>`;let matrix=[],rows=[];$('#import-template').onclick=()=>exportWorkbook([{name:'Colaboradores',rows:[['Nome','Função','Custo diário','Moradia','Categoria','Avulso'],['Exemplo fictício','Pedreiro',241.74,'Fortaleza','Profissional','Não']]}],'modelo_colaboradores');const preview=()=>{const map=Object.fromEntries(['nome','funcao','custo','moradia','categoria','avulso'].map(k=>[k,Number($('#map-'+k).value)]));rows=matrix.slice(1).filter(r=>r.some(v=>String(v||'').trim())).map(r=>{const x=Object.fromEntries(Object.entries(map).map(([k,j])=>[k,j>=0?String(r[j]??'').trim():'']));let cost=x.custo.replace(/R\$\s*/g,'');if(cost.includes(','))cost=cost.replaceAll('.','').replace(',','.');x.custo=Number(cost);return x;});const invalid=rows.filter(x=>!x.nome||!x.funcao||!Number.isFinite(x.custo)||x.custo<=0);$('#import-preview').innerHTML=`<div class="notice ${invalid.length?'warning':'info'}">${rows.length} linha(s). ${invalid.length} linha(s) inválida(s). Preencha nome, função e um custo diário positivo para importar.</div>`+table(['Nome','Função','Custo','Moradia','Ação'],rows.map(x=>[escapeHtml(x.nome),escapeHtml(x.funcao),money(x.custo),escapeHtml(x.moradia),COLABORADORES.some(c=>clean(c.nome)===clean(x.nome))?'Atualizar':'Adicionar']));$('#import-save').disabled=!rows.length||Boolean(invalid.length)||map.nome<0||map.funcao<0||map.custo<0;};$('#import-file').onchange=async()=>{const f=$('#import-file').files[0];if(!f)return;try{matrix=f.name.toLowerCase().endsWith('.xlsx')?await xlsxRows(f):parseCSV(await f.text());if(matrix.length<2)throw Error('A planilha precisa de cabeçalho e dados.');const headers=matrix[0];const hints={nome:/NOME|COLABORADOR|FUNCIONARIO/,funcao:/FUNCAO|CARGO/,custo:/CUSTO|DIARIA|VALOR/,moradia:/MORADIA|RESIDENCIA/,categoria:/CATEGORIA/,avulso:/AVULSO/};$('#import-mapping').innerHTML='<h3>Conferir colunas</h3><div class="form-grid">'+Object.keys(hints).map(k=>field(k==='funcao'?'Função':readableName(k),`<select class="control" id="map-${k}"><option value="-1">Não usar</option>${headers.map((v,i)=>`<option value="${i}">${escapeHtml(v)}</option>`).join('')}</select>`)).join('')+'</div>';Object.keys(hints).forEach(k=>{$('#map-'+k).value=String(headers.findIndex(v=>hints[k].test(clean(v))));$('#map-'+k).onchange=preview;});preview();}catch(e){rows=[];$('#import-save').disabled=true;$('#import-preview').innerHTML='<div class="notice warning">'+escapeHtml(e.message)+'</div>';}};$('#import-save').onclick=()=>{if($('#import-save').disabled)return;let added=0,updated=0;for(const x of rows){const c=COLABORADORES.find(c=>clean(c.nome)===clean(x.nome));const data={nome:x.nome,funcao:x.funcao,custo:x.custo,...(x.moradia?{moradia:x.moradia}:{}),...(x.categoria?{categoria:x.categoria}:{}),...(x.avulso?{avulso:x.avulso}:{})};if(c){Object.assign(c,data);updated++;}else{COLABORADORES.push({id:uid('c'),...data});added++;}}audit('Importação de colaboradores',added+' novos / '+updated+' atualizados');saveData();toast(added+' adicionados e '+updated+' atualizados.');renderSettings();};}
+
+  const extendedRenderers={convocacao:renderConvCompleta,apontamento:renderApCompleto,extras:renderExtras,disponibilidade:renderDisponibilidade,indisponibilidade:renderIndisponibilidade,conflitos:renderConflitos,whatsapp:renderWhatsApp,dashboard:renderDashboard,relatorios:renderReports,financeiro:renderPayments,'historico-financeiro':renderFinancialHistory,ausencias:renderAbsences,configuracoes:renderSettings,indicadores:renderIndicators};
+  
+  let onlineVersion='',onlineSession=null,onlineWritable=false,onlineStage='homologacao',onlineConfirmed=null,onlineQueued=false,onlineSaving=false,onlineMessage='';
+  const copy=v=>JSON.parse(JSON.stringify(v));
+  async function api(path,options={}){
+    const response=await fetch(path,{credentials:'same-origin',...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});
+    const contentType=response.headers.get('content-type')||'';
+    let data;
+    if(contentType.toLowerCase().includes('application/json')){
+      try{data=await response.json();}catch{/* Incomplete or interrupted API response. */}
+    }
+    if(!data||typeof data!=='object'){
+      const saving=path==='/api/save';
+      throw Object.assign(new Error(saving
+        ?'A resposta do servidor não chegou completa. O sistema verificará automaticamente se o apontamento já foi registrado, sem criar outro.'
+        :'O servidor da APROAR respondeu com uma página inválida ou ficou temporariamente indisponível. Aguarde e tente novamente.'),{status:response.ok?502:response.status||502,nonJson:true});
+    }
+    if(!response.ok)throw Object.assign(new Error(data.error||'Falha na comunicação.'),{status:response.status});
+    return data;
+  }
+  async function restoreOnlineSession(){
+    try{return await api('/api/bootstrap');}
+    catch(error){
+      if(error.status===401||error.status===403)return Promise.reject(error);
+      // Only retry a read: never repeat a write merely because a response was interrupted.
+      await new Promise(resolve=>setTimeout(resolve,1500));
+      return api('/api/bootstrap');
+    }
+  }
+  function applyOnline(result){state=result.state;OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);onlineVersion=result.version;onlineSession=result.session;onlineWritable=result.writesEnabled;onlineStage=result.stage||'homologacao';onlineConfirmed=copy(state);perfilAtual=result.session.role;supervisorAtual=result.session.role==='SUPERVISOR'?result.session.user:'';}
+  function lockOnline(locked){$('#app-view').inert=locked;$('#online-saving').classList.toggle('hidden',!locked);}
+  function toast(message,error=false){if((onlineQueued||onlineSaving)&&!error){onlineMessage=message;return;}showToast(message,error);}
+  function showSaveFeedback(message,error=false,duration=null){
+    let node=$('#online-save-feedback');
+    if(!node){
+      node=document.createElement('div');node.id='online-save-feedback';
+      node.setAttribute('role','status');node.setAttribute('aria-live','polite');
+      Object.assign(node.style,{position:'fixed',right:'20px',bottom:'20px',zIndex:'100010',maxWidth:'min(440px,calc(100vw - 40px))',padding:'16px 20px',borderRadius:'10px',boxShadow:'0 5px 24px rgba(0,0,0,.24)',color:'#fff',fontWeight:'600'});
+      document.body.appendChild(node);
+    }
+    node.textContent=message;
+    node.style.background=error?'#8f2d2d':'#126244';
+    node.style.display='block';
+    clearTimeout(showSaveFeedback._timer);
+    showSaveFeedback._timer=setTimeout(()=>{node.style.display='none';},duration||(error?18000:12000));
+  }
+  function saveData(onSuccess=null){
+    if(!onlineSession||!onlineWritable||onlineSession.role==='VISUALIZAR'){
+      if(onlineConfirmed){state=copy(onlineConfirmed);OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);}
+      const reason=!onlineSession?'Sua sessão não está autenticada. Entre novamente.':onlineSession.role==='VISUALIZAR'?'Este perfil é somente para visualização.':'A gravação está bloqueada no ambiente do Worker. Confira a autorização de escrita da produção.';
+      toast(reason,true);showSaveFeedback(reason,true);queueMicrotask(()=>render());return false;
+    }
+    if(onlineQueued||onlineSaving){const message='Já existe um salvamento em andamento. Aguarde a confirmação antes de enviar outro apontamento.';showToast(message,true);showSaveFeedback(message,true);return false;}
+    showSaveFeedback('Enviando apontamento para gravação no banco…',false,40000);
+    state.obras=OBRAS;state.colaboradores=COLABORADORES;onlineQueued=true;lockOnline(true);
+    queueMicrotask(async()=>{
+      onlineQueued=false;onlineSaving=true;
+      let savedOnServer=false;
+      try{
+        const requestId=typeof crypto!=='undefined'&&typeof crypto.randomUUID==='function'
+          ?crypto.randomUUID()
+          :'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return(c==='x'?r:(r&0x3|0x8)).toString(16);});
+        const payload=JSON.stringify({requestId,version:onlineVersion,state:copy(state)});
+        if(typeof payload!=='string')throw new Error('Não foi possível preparar os dados para salvar.');
+        // Reenviar EXATAMENTE o mesmo requestId e payload é seguro: aproar_web_apply
+        // é idempotente e registra o ID atomicamente na mesma transação.
+        // Sempre consultar o banco após erro de rede antes de tentar reenviar.
+        let reply=null,lastTransient=null;
+        const confirmById=async()=>{
+          for(let checkAttempt=0;checkAttempt<3;checkAttempt++){
+            if(checkAttempt)await new Promise(resolve=>setTimeout(resolve,700*checkAttempt));
+            try{
+              const check=await api('/api/save-status?requestId='+encodeURIComponent(requestId));
+              if(check?.confirmed===true&&check.requestId===requestId)return true;
+              if(check?.confirmed===false)continue;
+            }catch(checkError){
+              if(checkError?.status===401||checkError?.status===403)throw checkError;
+              console.warn('APROAR consulta de salvamento temporariamente indisponível',String(checkError?.message||checkError).slice(0,120));
+            }
+          }
+          return false;
+        };
+        for(let sendAttempt=0;sendAttempt<2&&!savedOnServer;sendAttempt++){
+          if(sendAttempt){
+            showSaveFeedback('Conexão instável. Recuperando o mesmo salvamento, sem duplicar apontamentos…',false,45000);
+            await new Promise(resolve=>setTimeout(resolve,900*sendAttempt));
+          }
+          const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),sendAttempt?22000:30000);
+          try{
+            reply=await api('/api/save',{method:'POST',body:payload,signal:controller.signal,
+              headers:{'X-APROAR-Save-Ack':'1'}});
+            if(!reply?.ok||!(reply.requestId===requestId||reply.state))
+              throw Object.assign(new Error('O servidor respondeu sem a confirmação do apontamento.'),{status:502});
+            savedOnServer=true;
+          }catch(error){
+            const status=Number(error?.status||0);
+            const temporary=error?.name==='AbortError'||(!status||status>=500);
+            if(!temporary){
+              // 409 pode ocorrer quando o primeiro POST salvou, mas o segundo
+              // encontrou uma versão antiga; conferir o ID antes de informar erro.
+              if(status===409&&await confirmById()){savedOnServer=true;break;}
+              throw error;
+            }
+            lastTransient=error;
+            if(await confirmById()){savedOnServer=true;break;}
+          }finally{clearTimeout(timeout);}
+        }
+        if(!savedOnServer){
+          throw Object.assign(new Error(
+            'Não foi possível confirmar o salvamento após recuperar a conexão. Confira as pendências e o histórico antes de lançar novamente. Nenhum segundo apontamento foi criado automaticamente.'
+          ),{status:lastTransient?.status||503,unconfirmed:true});
+        }
+        // A gravação já está confirmada pelo banco. Nunca tratar a falha de
+        // atualização da tela como uma falha do próprio apontamento.
+        const result=reply?.state?reply:await restoreOnlineSession();
+        if(!result||!result.state||typeof result.version!=='string'||!result.session)
+          throw new Error('O apontamento foi gravado, mas não foi possível atualizar os dados da tela.');
+        applyOnline(result);onlineSaving=false;
+        if(typeof onSuccess==='function'){try{onSuccess(result);}catch(callbackError){console.error('APROAR post-save callback failure',String(callbackError?.message||callbackError));}}
+        else render();
+        showSaveFeedback(onlineMessage||'Apontamento confirmado e gravado no Neon.');
+        showToast(onlineMessage||'Apontamento salvo com sucesso.');
+      }catch(error){
+        console.error('APROAR save failure',JSON.stringify({message:String(error?.message||error).slice(0,240),status:Number(error?.status||0),name:String(error?.name||'Error').slice(0,60)}));
+        if(savedOnServer){
+          // Confirmed on Neon, but reloading the full state failed. Do not allow
+          // another write from potentially stale data until the user refreshes.
+          onlineWritable=false;onlineSaving=false;
+          const notice='O banco confirmou que o apontamento foi SALVO. A atualização da tela falhou; pressione Ctrl + F5 para consultar o registro. Não lance novamente.';
+          showSaveFeedback(notice,true,60000);
+          return;
+        }
+        const message=String(error?.message||'Não foi possível salvar o apontamento. Confira a conexão e tente novamente.');
+        try{applyOnline(await restoreOnlineSession());}
+        catch(refreshError){
+          console.error('APROAR state refresh after save failure',String(refreshError?.message||refreshError).slice(0,240));
+          if(onlineConfirmed){state=copy(onlineConfirmed);OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);}
+        }
+        // Retain the retroactive form values on a rejected write. The authoritative state
+        // has already been restored above, so a later retry rebuilds the request safely.
+        const preserveRetroDraft=Boolean(document.querySelector('#form-retro')&&viewAtual==='apontamento'&&apontamentoTab==='retroativo');
+        if(preserveRetroDraft)for(const [id,staff] of retroUnsavedAvulsos)if(!COLABORADORES.some(c=>c.id===id))COLABORADORES.push(staff);
+        // Restaurar inclusões e rascunho local após rejeição de gravação.
+        if(typeof dayPendingAdds!=='undefined'&&dayPendingAdds.size)restoreDayPendingAdds();
+        onlineSaving=false;if(!preserveRetroDraft)render();showSaveFeedback(message,true);
+      }finally{onlineQueued=false;onlineSaving=false;onlineMessage='';lockOnline(false);}
+    });
+    return true;
+  }
+  async function submitComplementConfirmation(row,amount,justificativa){
+    if(onlineSaving||onlineQueued||!onlineWritable||onlineSession?.role!=='FINANCEIRO')
+      return showToast('A confirmação requer acesso ativo do Financeiro e gravação disponível.',true);
+    const convId=state.apontamentos.find(a=>a.itens.includes(row.refs?.[0]))?.convocacaoId;
+    if(!convId||!row.refs||row.refs.length!==1)return showToast('Não foi possível identificar um apontamento único. Atualize os dados.',true);
+    const payload={requestId:crypto.randomUUID(),version:onlineVersion,
+      convocacaoId:String(convId),financeiro:roundMoney(amount),acordo:roundMoney(row.bonus),justificativa};
+    onlineSaving=true;lockOnline(true);
+    try{
+      await api('/api/financial-confirm-duplicate',{method:'POST',body:JSON.stringify(payload)});
+      applyOnline(await restoreOnlineSession());
+      onlineSaving=false;render();
+      showToast('Dois pagamentos confirmados pelo Financeiro e registrados na auditoria.');
+    }catch(error){
+      let refreshed=false;
+      try{applyOnline(await restoreOnlineSession());refreshed=true;}catch{}
+      onlineSaving=false;render();
+      showToast(refreshed?'Confirmação não verificada. Confira o histórico antes de repetir. '+String(error.message||''):'Falha de conexão. Não repita a confirmação sem consultar o histórico.',true);
+    }finally{onlineSaving=false;lockOnline(false);}
+  }
+  // Financial changes are sent as a small, explicit batch: never re-upload the entire system.
+  async function saveFinancialUpdates(items){
+    if(!onlineSession||onlineSession.role!=='FINANCEIRO'||!onlineWritable){
+      if(onlineConfirmed){state=copy(onlineConfirmed);OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);}
+      render();return showToast('Gravação financeira não autorizada.',true);
+    }
+    const ids=new Map();
+    for(const a of state.apontamentos)for(const i of a.itens)ids.set(i,String(a.convocacaoId));
+    const fields=['financeiro','noturno','acordo','ajudaCusto'];
+    const changes=items.map(i=>({convocacaoId:ids.get(i),...Object.fromEntries(fields.map(k=>[k,roundMoney(Number(i[k])||0)]))}));
+    if(changes.some(c=>!c.convocacaoId))return showToast('Não foi possível identificar o apontamento. Atualize os dados.',true);
+    const payload={requestId:crypto.randomUUID(),version:onlineVersion,changes};
+    onlineSaving=true;lockOnline(true);
+    try{
+      const response=await api('/api/financial-adjust',{method:'POST',body:JSON.stringify(payload)});
+      if(!response.ok||typeof response.version!=='string')throw new Error('Resposta incompleta após o salvamento.');
+      onlineVersion=response.version;
+      onlineConfirmed=copy(state);
+      onlineSaving=false;render();
+      showToast('Valores financeiros salvos no Neon.');
+    }catch(error){
+      let confirmed=false,loaded=false;
+      try{
+        const current=await restoreOnlineSession();
+        confirmed=changes.every(change=>{
+          const a=current.state.apontamentos.find(record=>String(record.convocacaoId)===change.convocacaoId);
+          const i=a?.itens.find(item=>fields.every(k=>Math.abs(Number(item[k]||0)-change[k])<0.005));
+          return !!i;
+        });
+        applyOnline(current);loaded=true;
+      }catch{if(onlineConfirmed){state=copy(onlineConfirmed);OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);}}
+      onlineSaving=false;render();
+      if(confirmed)showToast('Valores confirmados no Neon após restabelecer a conexão.');
+      else showToast(loaded?'Não foi possível confirmar a alteração. Dados atualizados; confira os valores antes de lançar novamente.':'Servidor indisponível. Não repita o lançamento antes de conferir no Neon ou após reconectar.',true);
+    }finally{onlineSaving=false;lockOnline(false);}
+  }
+  function resetData(){toast('Restauração automática desativada na versão conectada.',true);}
+  async function logout(){chooseLogin('CONTROLADORIA');if(onlineSaving||onlineQueued)return;try{await api('/api/logout',{method:'POST',body:'{}'});}catch(e){return showToast(e.message,true);}perfilAtual='';supervisorAtual='';onlineSession=null;onlineConfirmed=null;state=seedData();OBRAS.length=0;COLABORADORES.length=0;render();}
+  const renderLocal=render;
+  render=function(){renderLocal();if(!perfilAtual)return;const selector=$('#portal-sup');if(onlineSession?.role==='SUPERVISOR'&&selector){selector.value=onlineSession.user;selector.disabled=true;}const old=$('#live-status');if(old)old.remove();const status=document.createElement('div');status.id='live-status';status.className='notice '+(onlineWritable?'info':'warning');status.innerHTML=`<strong>${onlineStage==='producao'?'Produção':'Homologação'} · ${onlineWritable?'dados conectados ao Neon':'somente leitura'}</strong> <span>${onlineStage==='producao'?'Dados oficiais da APROAR.':'Ambiente de testes.'}</span> <button type="button" class="link-btn" id="sync-online">Atualizar dados</button>`;$('#main-content').prepend(status);$('#sync-online').onclick=async()=>{if(onlineSaving||onlineQueued)return;lockOnline(true);try{applyOnline(await api('/api/bootstrap'));render();showToast('Dados atualizados.');}catch(e){showToast(e.message,true);}finally{lockOnline(false);}};};
+  function chooseLogin(role){loginRole=role;const shortcut=['SUPERVISOR','VISUALIZAR'].includes(role);$('#login-access-wrap').classList.toggle('hidden',shortcut);$('#login-shortcut-mode').classList.toggle('hidden',!shortcut);$('#login-shortcut-label').textContent=role==='SUPERVISOR'?'Portal do Supervisor':'Somente visualizar';if(!shortcut)$('#login-access').value=role;$('#login-supervisor-wrap').classList.toggle('hidden',role!=='SUPERVISOR');const passwordRequired=role!=='VISUALIZAR';$('#login-password').required=passwordRequired;$('#login-password').closest('.password-wrap').classList.toggle('hidden',!passwordRequired);document.querySelector('label[for="login-password"]').classList.toggle('hidden',!passwordRequired);$('#login-error').textContent='';$('#login-password').value='';$(role==='SUPERVISOR'?'#login-supervisor':role==='VISUALIZAR'?'#login-button':'#login-password').focus();}
+  function enterConnectedSession(result){applyOnline(result);viewAtual=perfilAtual==='SUPERVISOR'?'apontamento':perfilAtual==='VISUALIZAR'?'dashboard':'inicio';portalUnit=state.convocacoes.find(c=>c.supervisor===supervisorAtual&&c.dataServico===portalDate)?.unidade||OBRAS[0]?.unidade||'Todas';render();}
+  async function initOnline(){
+    init();$('#reset-demo').classList.add('hidden');$('#login-access').onchange=()=>chooseLogin($('#login-access').value);$('#enter-supervisor').onclick=()=>chooseLogin('SUPERVISOR');$('#enter-viewer').onclick=()=>chooseLogin('VISUALIZAR');$('#login-back').onclick=()=>chooseLogin($('#login-access').value);
+    $('#login-form').onsubmit=async e=>{e.preventDefault();const button=$('#login-button');button.disabled=true;$('#login-error').textContent='';try{await api('/api/login',{method:'POST',body:JSON.stringify({role:loginRole,supervisor:$('#login-supervisor').value,password:$('#login-password').value})});$('#login-password').value='';enterConnectedSession(await api('/api/bootstrap'));}catch(err){$('#login-error').textContent=err.message;}finally{button.disabled=false;}};
+    // Preserve a valid signed HttpOnly session across F5; only Sair clears it.
+    $('#login-button').disabled=true;try{enterConnectedSession(await restoreOnlineSession());}catch(e){if(e.status!==401)$('#login-error').textContent=e.message+' Sua sessão não foi encerrada automaticamente.';}finally{$('#login-password').value='';$('#login-button').disabled=false;}
+    window.addEventListener('pageshow',event=>{if(event.persisted)window.location.reload();});
+  }
+  initOnline();
+
+})();
+
+),item('historico-financeiro','Histórico de registros','▤'),item('ausencias','Faltas / Atestados','⊘'),item('relatorios','Relatório','▥')];
     return [item('inicio','Início','⌂'),item('convocacao','Convocação','▤'),item('apontamento','Apontamento','✓'),item('disponibilidade','Disponibilidade','♙'),item('pendencias','Pendências','!')];
   }
 
