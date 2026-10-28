@@ -178,7 +178,7 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
     return json({ok:true,requestId:body.requestId});
    }
    if(path==='/api/financial-release/decide'&&request.method==='POST'){
-    if(!['CONTROLADORIA','FINANCEIRO'].includes(session.role))return json({error:'Somente Controladoria ou Financeiro autorizam.',403);
+    if(!['CONTROLADORIA','FINANCEIRO'].includes(session.role))return json({error:'Somente Controladoria ou Financeiro autorizam.'},403);
     if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);
     if(!writes(env))return json({error:'Gravação indisponível.'},403);
     const body=await bodyJSON(request),requestId=String(body?.releaseId||''),decision=body?.decision;
