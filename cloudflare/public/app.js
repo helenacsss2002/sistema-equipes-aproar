@@ -862,13 +862,13 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
     });
     wireLiveSuggestions(input,()=>OBRAS.filter(o=>o&&o.id).map(o=>({
       id:String(o.id),label:o.unidade+' · '+o.nome,searchText:String(o.id)
-    })),choice=>setSelected(choice.id));
+    })),choice=>{setSelected(choice.id);input.dispatchEvent(new Event('change',{bubbles:true}));});
     const current=select.value;
     setSelected(current);
   }
   function bindServiceRows(){
     $$('.person-card .service-work').forEach(input=>{
-      wireLiveSuggestions(input,()=>OBRAS.filter(o=>o.unidade===input.closest('.person-card')?.dataset.unit).map(o=>({label:o.nome,id:o.id})));
+      wireLiveSuggestions(input,()=>OBRAS.filter(o=>o.unidade===input.closest('.person-card')?.dataset.unit).map(o=>({label:o.nome,id:o.id})),()=>input.dispatchEvent(new Event('change',{bubbles:true})));
     });
     $$('.person-card').forEach(card=>{
       bindExtraWorkSearch(card);
@@ -896,10 +896,10 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       field('.add-service').onclick=()=>{
         field('.additional-services').insertAdjacentHTML('beforeend',allocationRow(card.dataset.unit,{},card.querySelectorAll('.allocation-row').length));
         const added=card.querySelector('.additional-services .allocation-row:last-child .service-work');
-        wireLiveSuggestions(added,()=>OBRAS.filter(o=>o.unidade===card.dataset.unit).map(o=>({label:o.nome,id:o.id})));
-        countServices();
+        wireLiveSuggestions(added,()=>OBRAS.filter(o=>o.unidade===card.dataset.unit).map(o=>({label:o.nome,id:o.id})),()=>added.dispatchEvent(new Event('change',{bubbles:true})));
+        countServices();card.dispatchEvent(new Event('change',{bubbles:true}));
       };
-      field('.remove-last-service').onclick=()=>{field('.additional-services .allocation-row:last-child')?.remove();countServices();};
+      field('.remove-last-service').onclick=()=>{field('.additional-services .allocation-row:last-child')?.remove();countServices();card.dispatchEvent(new Event('change',{bubbles:true}));};
       status.onchange=()=>{
         if(night&&!night.disabled){
           if(!presence(status.value))night.value='0';
