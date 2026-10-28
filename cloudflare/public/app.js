@@ -2153,11 +2153,112 @@ function renderEquipeDia(){
     };
     refreshNoConv();
     $('#previous-team-use').onclick=()=>{const ids=$$('.previous-team-person:checked').filter(x=>!x.disabled).map(x=>x.value);if(!ids.length)return toast('Nenhuma pessoa disponível foi selecionada.',true);selected.clear();ids.forEach(id=>selected.add(id));$('#unit-conv-function').value='Todas';$('#unit-conv-search').value='';refresh(false);storeConvDraft();toast('Equipe carregada. Você pode desmarcar pessoas antes de confirmar.');};
-    $('#unit-conv-date').onchange=()=>{storeConvDraft();unitConvDate=$('#unit-conv-date').value;render();};
+    $('#unit-conv-date').onchange=()=>{storeConvDraft();unitConvDate=$('#unit-conv-date').value;avulsoDraft=[];render();};
     const avulsoList=()=>$('#unit-avulso-list').innerHTML=avulsoDraft.map(x=>`<div class="team-list-item">${escapeHtml(x.nome)} · ${escapeHtml(x.funcao)}</div>`).join('');avulsoList();
     $('#unit-avulso-add').onclick=()=>{const nome=$('#unit-avulso-name').value.trim();if(!nome)return toast('Informe o nome.',true);const funcao=$('#unit-avulso-function').value;if(!funcao)return toast('Selecione Profissional ou Servente para o avulso.',true);avulsoDraft.push({id:uid('c'),nome,...avulsoData(funcao)});$('#unit-avulso-name').value='';$('#unit-avulso-function').value='';avulsoList();storeConvDraft();};
     const form=$('#unit-conv-form'),reviewBox=$('#unit-conv-review'),noConvBox=$('#unit-no-conv-box');
     let reviewDraft=null;
+    // Salva apenas no navegador: não altera state e não chama /api/save.
+    let unresolvedConvDraft=null;
+    const convStatus=document.createElement('div');
+    convStatus.className='notice info section';convStatus.id='unit-conv-draft-status';
+    convStatus.setAttribute('role','status');
+    convStatus.textContent='O preenchimento será guardado automaticamente neste navegador. A convocação só será confirmada no botão de confirmação definitiva.';
+    form.appendChild(convStatus);
+    const convDraftData=()=>{
+      $$('#unit-conv-people input').forEach(x=>x.checked?selected.add(x.value):selected.delete(x.value));
+      return {
+        supervisor:supervisorAtual,date:unitConvDate,unit:activeConvUnit,
+        turn:$('#unit-conv-turn').value,func:$('#unit-conv-function').value,
+        search:$('#unit-conv-search').value,
+        referenceDate:$('#previous-team-date').value,
+        selected:[...selected],avulsos:avulsoDraft.map(x=>({...x})),
+        avulsoName:$('#unit-avulso-name').value,
+        avulsoFunction:$('#unit-avulso-function').value,
+        previousSelected:$$('.previous-team-person:checked').map(x=>x.value)
+      };
+    };
+    const storeConvDraft=()=>{
+      if(unresolvedConvDraft)return false;
+      const data=convDraftData();
+      const ok=storeDraft(activeConvKey,data);
+      if(ok){
+        storeDraft(convLastKey(supervisorAtual),{date:unitConvDate,unit:activeConvUnit});
+        convStatus.textContent='Rascunho armazenado neste navegador. Ainda não é uma convocação confirmada.';
+      }else convStatus.textContent='Falha ao guardar rascunho. Não atualize esta página antes de concluir.';
+      return ok;
+    };
+    const restoreConvDraft=draft=>{
+      if(!draft||draft.supervisor!==supervisorAtual||draft.date!==unitConvDate||draft.unit!==activeConvUnit)return false;
+      if(!Array.isArray(draft.selected)||!Array.isArray(draft.avulsos))return false;
+      if([...$('#unit-conv-turn').options].some(x=>x.value===draft.turn))$('#unit-conv-turn').value=draft.turn;
+      if([...$('#unit-conv-function').options].some(x=>x.value===draft.func))$('#unit-conv-function').value=draft.func;
+      $('#unit-conv-search').value=draft.search||'';
+      if(draft.referenceDate)$('#previous-team-date').value=draft.referenceDate;
+      selected.clear();
+      for(const id of draft.selected)if(COLABORADORES.some(p=>p.id===id))selected.add(id);
+      avulsoDraft=draft.avulsos.filter(x=>x&&typeof x.id==='string'&&typeof x.nome==='string'
+        &&!COLABORADORES.some(p=>p.id===x.id)).map(x=>({...x}));
+      refresh(false);previewPrevious();
+      if(Array.isArray(draft.previousSelected)){
+        const allowed=new Set(draft.previousSelected);
+        $$('.previous-team-person').forEach(x=>{if(!x.disabled)x.checked=allowed.has(x.value);});
+      }
+      avulsoList();
+      $('#unit-avulso-name').value=draft.avulsoName||'';
+      if([...$('#unit-avulso-function').options].some(x=>x.value===draft.avulsoFunction))
+        $('#unit-avulso-function').value=draft.avulsoFunction;
+      unresolvedConvDraft=null;form.inert=false;
+      convStatus.textContent='Rascunho recuperado. Revise a equipe e confirme definitivamente somente quando terminar.';
+      return true;
+    };
+    const loadConvDraft=()=>{
+      const saved=readStoredDraft(activeConvKey);
+      if(!saved){form.inert=false;convStatus.textContent='Preenchimento ainda não confirmado. As alterações serão guardadas neste navegador.';return;}
+      if(saved.version===onlineVersion){
+        if(restoreConvDraft(saved))return;
+        // Rascunho incompatível não é aplicado nem sobrescrito automaticamente.
+      }
+      unresolvedConvDraft=saved;form.inert=true;
+      convStatus.className='notice warning section';
+      convStatus.textContent='Existe um rascunho, mas os dados do servidor mudaram. Escolha recuperar ou descartar; nenhum registro será confirmado automaticamente.';
+      const buttons=document.createElement('div');buttons.className='inline-actions section';
+      const recover=document.createElement('button');recover.type='button';recover.className='btn btn-primary';recover.textContent='Recuperar rascunho para conferência';
+      const discard=document.createElement('button');discard.type='button';discard.className='btn btn-secondary';discard.textContent='Descartar rascunho local';
+      buttons.append(recover,discard);convStatus.appendChild(buttons);
+      recover.onclick=()=>{
+        if(!window.confirm('O banco foi atualizado. Recuperar os campos para revisar? Confira antes de confirmar.'))return;
+        if(!restoreConvDraft(saved))return showToast('O rascunho não corresponde a esta equipe. Ele não foi aplicado.',true);
+        buttons.remove();convStatus.className='notice info section';storeConvDraft();
+      };
+      discard.onclick=()=>{
+        if(!window.confirm('Descartar definitivamente este rascunho não confirmado?'))return;
+        clearStoredDraft(activeConvKey);unresolvedConvDraft=null;form.inert=false;buttons.remove();
+        selected.clear();avulsoDraft=[];refresh(false);avulsoList();
+        convStatus.className='notice info section';convStatus.textContent='Rascunho descartado. Você pode começar um novo preenchimento.';
+      };
+    };
+    const switchConvDraftUnit=()=>{
+      const newUnit=$('#unit-conv-unit').value;
+      if(newUnit===activeConvUnit){previewPrevious();refreshNoConv();return;}
+      storeConvDraft(); // Guarda a unidade anterior antes de trocar a chave.
+      activeConvUnit=newUnit;activeConvKey=convDraftKey(supervisorAtual,unitConvDate,activeConvUnit);
+      selected.clear();avulsoDraft=[];
+      $('#unit-avulso-name').value='';$('#unit-avulso-function').value='';
+      $('#unit-conv-search').value='';$('#unit-conv-function').value='Todas';
+      refresh(false);avulsoList();previewPrevious();refreshNoConv();
+      loadConvDraft();
+    };
+    // Todos os campos e checkboxes têm gravação imediata, sem "Salvar convocação".
+    form.addEventListener('input',event=>{
+      if(event.target?.id==='unit-conv-date'||event.target?.id==='unit-conv-unit')return;
+      storeConvDraft();
+    });
+    form.addEventListener('change',event=>{
+      if(event.target?.id==='unit-conv-date'||event.target?.id==='unit-conv-unit')return;
+      storeConvDraft();
+    });
+    loadConvDraft();
     const leaveReview=()=>{
       reviewDraft=null;
       reviewBox.classList.add('hidden');
@@ -2195,6 +2296,7 @@ function renderEquipeDia(){
       };
       if(!validateReview(draft))return;
       reviewDraft=draft;
+      storeConvDraft();
       reviewBox.innerHTML=convocationReviewMarkup(draft);
       form.classList.add('hidden');
       noConvBox.classList.add('hidden');
@@ -2216,10 +2318,16 @@ function renderEquipeDia(){
           turno:approved.turno,colaboradores:[...approved.ids],
           criadoEm:now().toISOString(),origem:'normal',executor:approved.supervisor});
         audit('Convocação da equipe',approved.date);
-        const queued=saveData();
+        const confirmedKey=activeConvKey,confirmedDate=approved.date,confirmedUnit=approved.unit;
+        const queued=saveData(()=>{
+          clearStoredDraft(confirmedKey);
+          const last=readStoredDraft(convLastKey(supervisorAtual));
+          if(last?.date===confirmedDate&&last?.unit===confirmedUnit)clearStoredDraft(convLastKey(supervisorAtual));
+          reviewDraft=null;avulsoDraft=[];unitConvDate='';
+          render();
+        });
         if(!queued)return;
-        reviewDraft=null;avulsoDraft=[];
-        toast('Equipe convocada. Serviços serão escolhidos no apontamento.');
+        toast('Confirmação enviada. A convocação só será considerada salva após resposta do banco.');
       };
     };
   }
