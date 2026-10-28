@@ -1853,12 +1853,12 @@ function renderEquipeDia(){
    }
    restoreDayPendingAdds();
  };
- const recoverSameVersion=Boolean(savedLocal&&savedLocal.version===onlineVersion);
- if(recoverSameVersion&&!dayUnsavedDrafts.has(pendingDayKey))loadLocalDayDraft(savedLocal);
  if([...dayPendingAdds.values()].some(x=>x.dayKey!==pendingDayKey||x.selectedUnit!==portalUnit)){
    discardDayPendingAdds();
-   showToast('Inclusões não salvas da outra data foram descartadas. Confira o novo apontamento.',true);
+   showToast('Inclusões não salvas da outra data foram descartadas. O rascunho anterior continua disponível neste navegador.',true);
  }
+ const recoverSameVersion=Boolean(savedLocal&&savedLocal.version===onlineVersion);
+ if(recoverSameVersion&&!dayUnsavedDrafts.has(pendingDayKey))loadLocalDayDraft(savedLocal);
  const body=$('#apontamento-body'),convs=convocacoesSupervisor().filter(c=>c.dataServico===portalDate&&(portalUnit==='Todas'||c.unidade===portalUnit));
  const dayKey=portalDate+'|'+supervisorAtual,dayDraft=dayUnsavedDrafts.get(dayKey);
  const people=new Map();for(const c of convs)for(const id of c.colaboradores)
