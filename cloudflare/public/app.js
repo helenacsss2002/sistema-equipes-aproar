@@ -1031,8 +1031,9 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
     bindPersonSearch($('#retro-person-search'),()=>$$('.retro-person-list .check-card'));
     let retroDrafts=new Map();
     const retroKey=draftKey('retroativo',$('#retro-sup')?.value||supervisorAtual);
-    const persistedRetro=readStoredDraft(retroKey);
+    const persistedRetro=perfilAtual==='SUPERVISOR'?readStoredDraft(retroKey):null;
     const storeRetroDraft=()=>{
+      if(perfilAtual!=='SUPERVISOR')return true;
       const selected=$$('input[name="retro-colab"]:checked').map(x=>x.value);
       const current=$$('#retro-rows [data-person]').map(x=>x.dataset.person);
       for(const item of readPersonRows(current))retroDrafts.set(item.colaboradorId,item);
@@ -1142,7 +1143,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       for(const id of ids){const c=matching.find(c=>c.colaboradores.includes(id));if(c){if(!batches.has(c.id))batches.set(c.id,{conv:c,items:[]});batches.get(c.id).items.push(itens.find(i=>i.colaboradorId===id));}else newIds.push(id);}
       if(newIds.length){const conv={id:uid('cv'),supervisor:responsavel,dataServico,unidade:unidade.value,obraId:obraRef?.id||'',turno:$('#retro-turno').value,colaboradores:newIds,criadoEm:now().toISOString(),origem:'retroativo'};state.convocacoes.push(conv);batches.set(conv.id,{conv,items:itens.filter(i=>newIds.includes(i.colaboradorId))});}
       for(const {conv,items} of batches.values()){const selected=new Set(items.map(i=>i.colaboradorId));let ap=apForConv(conv.id);if(ap){ap.itens=[...ap.itens.filter(i=>!selected.has(i.colaboradorId)),...items];ap.atualizadoEm=now().toISOString();ap.retroativo=true;}else state.apontamentos.push({executor:supervisorAtual||perfilLabel(perfilAtual),id:uid('ap'),convocacaoId:conv.id,supervisor:conv.supervisor,dataServico,apontadoEm:now().toISOString(),retroativo:true,itens:items});}
-      audit('Apontamento retroativo',dataServico);const savedMessage=[...batches.values()].every(({conv})=>completeConv(conv))?'Apontamento retroativo salvo. Equipe regularizada.':'Apontamento salvo. Há colaboradores convocados que continuam pendentes.';if(!saveData(()=>{clearStoredDraft(retroKey);retroUnsavedAvulsos.clear();setView('pendencias');}))return;toast(savedMessage);
+      audit('Apontamento retroativo',dataServico);const savedMessage=[...batches.values()].every(({conv})=>completeConv(conv))?'Apontamento retroativo salvo. Equipe regularizada.':'Apontamento salvo. Há colaboradores convocados que continuam pendentes.';if(!saveData(()=>{clearStoredDraft(retroKey);if(perfilAtual==='SUPERVISOR')clearStoredDraft(draftKey('last',supervisorAtual));retroUnsavedAvulsos.clear();setView('pendencias');}))return;toast(savedMessage);
       }catch(error){
         console.error('APROAR retroactive form submit failure',String(error?.message||error).slice(0,240));
         showToast('Não foi possível preparar o apontamento retroativo. Confira os campos e tente novamente.',true);showSaveFeedback('Não foi possível preparar o apontamento retroativo. Confira os campos e tente novamente.',true);
@@ -2066,6 +2067,7 @@ function renderEquipeDia(){
     audit('Apontamento da equipe',portalDate);if(!saveData(()=>{
       dayUnsavedDrafts.delete(dayKey);
       clearStoredDraft(storageKey);
+      if(supervisorAtual)clearStoredDraft(draftKey('last',supervisorAtual));
       dayPendingAdds.clear();
       render();
     }))return;toast('Apontamento do dia e extras salvos.');
