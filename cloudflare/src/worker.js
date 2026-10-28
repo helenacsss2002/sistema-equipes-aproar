@@ -2,6 +2,7 @@ import { neon } from '@neondatabase/serverless';
 import {mapNeonData,metadata} from './neon-adapter.js';
 import {readDatabase,visibleState,supervisors} from './data.js';
 import {buildOperations} from './operations.js';
+import {financialDeadline,afterFinancialDeadline,validRequest,releaseState,releaseActions} from './financial-release.js';
 import {validateFinancialPayload,buildFinancialOperations} from './financial-adjust.js';
 import {validateComplementConfirmation,buildComplementConfirmationOperations} from './financial-approval.js';
 import {login,identity,sameOrigin,equalSecret,logoutCookie} from './auth.js';
@@ -133,6 +134,69 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
      ORDER BY a.data_servico DESC,a.id DESC LIMIT 501`;
     return json({ok:true,eventos:logs.slice(0,500),anteriores:older.slice(0,500),
       limiteAtingido:logs.length>500||older.length>500});
+   }
+   // Pedidos de liberação financeira e decisões são append-only na auditoria.
+   // As permissões são conferidas no servidor e cada autorização é consumida
+   // atomicamente junto com o apontamento quando usada.
+   if(path==='/api/financial-release'&&request.method==='GET'){
+    if(!['SUPERVISOR','CONTROLADORIA','FINANCEIRO'].includes(session.role))return json({error:'Acesso não autorizado.'},403);
+    const events=await sql`SELECT a.acao,a.usuario,a.ocorrido_em,a.contexto
+      FROM auditoria a WHERE a.acao IN ('SOLICITACAO_LIBERACAO_FINANCEIRA','LIBERACAO_FINANCEIRA_AUTORIZADA',
+        'LIBERACAO_FINANCEIRA_NEGADA','LIBERACAO_FINANCEIRA_UTILIZADA')
+      ORDER BY a.id ASC LIMIT 20000`;
+    const all=releaseState(events).filter(r=>session.role!=='SUPERVISOR'||r.supervisor===session.user);
+    const records=await sql`SELECT id::text AS id,nome FROM colaboradores`;
+    const names=new Map(records.map(x=>[x.id,x.nome]));
+    return json({ok:true,requests:all.map(x=>({...x,colaborador:names.get(x.colaboradorId)||x.colaboradorId,
+      deadline:financialDeadline(x.dataServico).limitAt}))});
+   }
+   if(path==='/api/financial-release/request'&&request.method==='POST'){
+    if(session.role!=='SUPERVISOR')return json({error:'Somente supervisores solicitam liberação.'},403);
+    if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);
+    if(!writes(env))return json({error:'Gravação indisponível.'},403);
+    const body=await bodyJSON(request),parsed=validRequest(body);
+    if(!/^[a-f0-9-]{36}$/i.test(body.requestId||''))return json({error:'Identificador de solicitação inválido.'},400);
+    if(!afterFinancialDeadline(parsed.dataServico,new Date().toISOString()))
+      return json({error:'O prazo financeiro ainda está aberto. Não é necessário solicitar autorização.'},400);
+    const candidates=await sql`SELECT c.id FROM convocacoes c WHERE c.colaborador_id::text=${parsed.colaboradorId}
+      AND c.data=${parsed.dataServico}::date AND c.engenheiro=${session.user} LIMIT 1`;
+    if(!candidates.length)return json({error:'Colaborador sem convocação vinculada a este supervisor e data.'},403);
+    const exists=await sql`SELECT 1 FROM auditoria WHERE acao='SOLICITACAO_LIBERACAO_FINANCEIRA'
+      AND contexto->>'supervisor'=${session.user} AND contexto->>'colaboradorId'=${parsed.colaboradorId}
+      AND contexto->>'dataServico'=${parsed.dataServico}
+      AND contexto->'fields'=${JSON.stringify(parsed.fields)}::jsonb
+      AND NOT EXISTS (SELECT 1 FROM auditoria f WHERE f.acao IN ('LIBERACAO_FINANCEIRA_UTILIZADA','LIBERACAO_FINANCEIRA_NEGADA')
+        AND f.contexto->>'requestId'=auditoria.contexto->>'requestId') LIMIT 1`;
+    if(exists.length)return json({error:'Já existe uma solicitação para estas colunas. Consulte o status antes de enviar outra.'},409);
+    const operations=[{table:'auditoria',action:'insert',id:'audit:'+body.requestId,
+      data:{entidade:'apontamentos',entidade_id:parsed.colaboradorId,acao:'SOLICITACAO_LIBERACAO_FINANCEIRA',
+        usuario:session.user,ocorrido_em:new Date().toISOString(),
+        contexto:{requestId:body.requestId,supervisor:session.user,...parsed,limitAt:financialDeadline(parsed.dataServico).limitAt}}}];
+    const version=await sql`SELECT aproar_web_fingerprint() AS version`;
+    const digest=await sha(JSON.stringify(body));
+    await sql`SELECT aproar_web_apply(${version[0].version},${body.requestId},${session.user},${digest},${JSON.stringify(operations)}::jsonb)`;
+    return json({ok:true,requestId:body.requestId});
+   }
+   if(path==='/api/financial-release/decide'&&request.method==='POST'){
+    if(!['CONTROLADORIA','FINANCEIRO'].includes(session.role))return json({error:'Somente Controladoria ou Financeiro autorizam.',403);
+    if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);
+    if(!writes(env))return json({error:'Gravação indisponível.'},403);
+    const body=await bodyJSON(request),requestId=String(body?.releaseId||''),decision=body?.decision;
+    if(!/^[a-f0-9-]{36}$/i.test(body?.requestId||'')||!/^[a-f0-9-]{36}$/i.test(requestId)
+      ||!['approve','deny'].includes(decision))return json({error:'Decisão inválida.'},400);
+    const events=await sql`SELECT acao,usuario,ocorrido_em,contexto FROM auditoria WHERE acao IN (
+     'SOLICITACAO_LIBERACAO_FINANCEIRA','LIBERACAO_FINANCEIRA_AUTORIZADA','LIBERACAO_FINANCEIRA_NEGADA',
+     'LIBERACAO_FINANCEIRA_UTILIZADA') ORDER BY id ASC LIMIT 20000`;
+    const entry=releaseState(events).find(x=>x.id===requestId);
+    if(!entry||entry.status!=='Pendente')return json({error:'Solicitação não está pendente. Recarregue a lista.'},409);
+    const action=decision==='approve'?'LIBERACAO_FINANCEIRA_AUTORIZADA':'LIBERACAO_FINANCEIRA_NEGADA';
+    const operations=[{table:'auditoria',action:'insert',id:'audit:'+body.requestId,
+      data:{entidade:'apontamentos',entidade_id:entry.colaboradorId,acao:action,usuario:session.user,
+       ocorrido_em:new Date().toISOString(),contexto:{requestId,supervisor:entry.supervisor,colaboradorId:entry.colaboradorId,
+         dataServico:entry.dataServico,fields:entry.fields,reason:String(body.reason||'').slice(0,600)}}}];
+    const current=await sql`SELECT aproar_web_fingerprint() AS version`,digest=await sha(JSON.stringify(body));
+    await sql`SELECT aproar_web_apply(${current[0].version},${body.requestId},${session.user},${digest},${JSON.stringify(operations)}::jsonb)`;
+    return json({ok:true,requestId});
    }
    // Read-only acknowledgement: disambiguates a write whose HTTP response was lost.
    // Confirm only operations belonging to this authenticated user, never infer from a global version.
@@ -356,6 +420,12 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
     const digest=await sha(JSON.stringify(body)),previous=await sql`SELECT actor,payload_hash FROM aproar_web_requests WHERE id=${body.requestId}`;
     if(previous.length){if(previous[0].actor!==session.user||previous[0].payload_hash!==digest)return json({error:'Identificador de requisição reutilizado.'},409);return compactAck?json({ok:true,requestId:body.requestId,replayed:true}):json({...summary(await readDatabase(sql,readOptions),session,env),ok:true,replayed:true});}
     const db=await readDatabase(sql,readOptions);if(body.version!==db.version)return json({error:'Outro usuário atualizou os dados. Suas alterações não foram gravadas; recarregue e confira os registros.'},409);
+    if(session.role==='SUPERVISOR'){
+      db.releaseEvents=await sql`SELECT acao,usuario,ocorrido_em,contexto FROM auditoria
+       WHERE acao IN ('SOLICITACAO_LIBERACAO_FINANCEIRA','LIBERACAO_FINANCEIRA_AUTORIZADA',
+         'LIBERACAO_FINANCEIRA_NEGADA','LIBERACAO_FINANCEIRA_UTILIZADA')
+         AND contexto->>'supervisor'=${session.user} ORDER BY id ASC LIMIT 20000`;
+    }
     const operations=buildOperations(db,body.state,session);
     if(!permittedProductionDeletion(env,session,db,operations))return json({error:'A Controladoria pode excluir uma convocação sem apontamento por vez ou até 50 obras sem vínculos. Registros com histórico devem ser preservados.'},403);
     // Work deletions run after dependent records, never before them.
