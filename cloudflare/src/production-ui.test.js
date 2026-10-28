@@ -159,10 +159,11 @@ test('Portal Supervisor remove a data duplicada apenas da aba de convocacao',()=
 test('Convocacao inicia no proximo dia corrido inclusive sabado e domingo e permite alteracao',()=>{
  const js=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
  const conv=js.slice(js.indexOf('function renderUnitConvocacao(){'),js.indexOf('function operationalRows('));
- assert.ok(conv.includes('if(!unitConvDate)unitConvDate=tomorrowISO();'));
+ assert.ok(conv.includes('if(!unitConvDate)unitConvDate=previousConvDraft?.date||tomorrowISO();'));
+ assert.ok(conv.includes("const previousConvDraft=readStoredDraft(convLastKey(supervisorAtual))"));
  assert.doesNotMatch(conv,/nextBusinessDay\(/);
  assert.ok(conv.includes('id="unit-conv-date" type="date" value="${unitConvDate}" required'));
- assert.ok(conv.includes("$('#unit-conv-date').onchange=()=>{unitConvDate=$('#unit-conv-date').value;render();}"));
+ assert.ok(conv.includes("$('#unit-conv-date').onchange=()=>{storeConvDraft();unitConvDate=$('#unit-conv-date').value;avulsoDraft=[];render();}"));
  // Verifica a virada real de sexta-feira para sábado e domingo para segunda.
  const following=iso=>{const [y,m,d]=iso.split('-').map(Number);const t=new Date(y,m-1,d,12);t.setDate(t.getDate()+1);return [t.getFullYear(),String(t.getMonth()+1).padStart(2,'0'),String(t.getDate()).padStart(2,'0')].join('-');};
  assert.equal(following('2026-10-09'),'2026-10-10');

@@ -2091,6 +2091,10 @@ function renderEquipeDia(){
  };
 }
     let unitConvDate='';let avulsoDraft=[];
+  // Separado do apontamento: rascunhos de convocação NUNCA geram registro no servidor.
+  const convDraftKey=(supervisor,date,unit)=>draftKey('convocacao',supervisor,date,unit);
+  const convLastKey=supervisor=>draftKey('conv-last',supervisor);
+
   function convocationReviewMarkup(review){
     const people=review.ids.map(id=>review.avulsos.find(p=>p.id===id)||colaboradorById(id)||{id,nome:id,funcao:'Não informado'});
     const sorted=alphabeticalPeople(people);
@@ -2111,17 +2115,25 @@ function renderEquipeDia(){
       <button type="button" class="btn btn-primary" id="unit-conv-final">Confirmar convocação definitiva</button></div>`;
   }
   function renderUnitConvocacao(){
-    if(!unitConvDate)unitConvDate=tomorrowISO();
+    const previousConvDraft=readStoredDraft(convLastKey(supervisorAtual));
+    if(!unitConvDate)unitConvDate=previousConvDraft?.date||tomorrowISO();
+    const draftUnit=previousConvDraft?.date===unitConvDate&&adminUnits().includes(previousConvDraft.unit)
+      ?previousConvDraft.unit:(portalUnit!=='Todas'&&adminUnits().includes(portalUnit)?portalUnit:adminUnits()[0]||'');
+    let activeConvUnit=draftUnit;
+    let activeConvKey=convDraftKey(supervisorAtual,unitConvDate,activeConvUnit);
+    avulsoDraft=[];
     const existing=convocacoesSupervisor().filter(c=>c.dataServico===unitConvDate);const total=existing.reduce((v,c)=>v+c.colaboradores.length,0);
     $('#main-content').innerHTML=head('Convocação','Escolha unidade, turno e pessoas. Os serviços serão definidos individualmente no apontamento.')+`<div class="grid grid-3">${metric('DATA',formatDate(unitConvDate),'data da convocação')}${metric('CONVOCADOS',total,'já registrados')}${metric('AÇÃO','Montar','e confirmar abaixo')}</div><details class="card card-pad section convocados-destaque"><summary>Já convocados · ${total}</summary>${existing.flatMap(c=>c.colaboradores.map(id=>({c,id}))).sort((a,b)=>comparePersonNames(colaboradorById(a.id)||{id:a.id},colaboradorById(b.id)||{id:b.id})).map(({c,id})=>{const p=colaboradorById(id);return `<div class="team-list-item"><strong>${escapeHtml(p?.nome)}</strong><small>${escapeHtml(p?.funcao)} · ${escapeHtml(c.unidade)} · ${c.turno}</small></div>`;}).join('')||'<p>Nenhum convocado nesta data.</p>'}</details><form id="unit-conv-form" class="card card-pad section unit-conv"><h3>Adicionar à equipe</h3><p style="font-size:12px">Primeiro revise o espelho da convocação. A equipe será gravada somente após a confirmação definitiva.</p><div class="convocation-fields">${field('Data',`<input class="control" id="unit-conv-date" type="date" value="${unitConvDate}" required>`)}${field('Unidade',`<select class="control" id="unit-conv-unit">${options(adminUnits())}</select>`)}${field('Turno',`<select class="control" id="unit-conv-turn">${options(['Integral','Manhã','Tarde','Noite'])}</select>`)}${field('Função',`<select class="control" id="unit-conv-function">${options(['Todas',...[...new Set(COLABORADORES.map(c=>c.funcao))]])}</select>`)}</div><details class="card card-pad section" id="previous-team-panel"><summary>Usar equipe do dia anterior</summary><p style="font-size:12px">Confira a equipe desta unidade. Desmarque quem não precisa ser convocado.</p>${field('Data da equipe de referência','<input id="previous-team-date" type="date" class="control">')}<div id="previous-team-list" class="rect-list section"></div><div class="form-actions"><button id="previous-team-use" type="button" class="btn btn-secondary">Usar pessoas selecionadas</button></div></details>${field('Colaboradores','<input class="control" id="unit-conv-search" placeholder="Digite um nome para buscar…">')}<div id="unit-conv-people" class="checkbox-grid section"></div><details class="section"><summary>Adicionar pessoas que não estão na lista</summary><p style="font-size:12px">Adicione quantos avulsos precisar e confirme toda a equipe de uma vez.</p>${field('Nome','<input class="control" id="unit-avulso-name" placeholder="Nome completo">')}${field('Categoria do avulso',avulsoFuncaoSelect('unit-avulso-function'))}<button class="btn btn-secondary" type="button" id="unit-avulso-add">Adicionar pessoa</button><div id="unit-avulso-list" class="section"></div></details><div class="form-actions"><button class="btn btn-primary">Revisar convocação</button></div></form><section id="unit-conv-review" class="card card-pad section hidden" aria-live="polite"></section><section class="card card-pad section" id="unit-no-conv-box"><h3>Sem convocação para a unidade</h3><p>Confirme quando não houver atividade nem necessidade de equipe na unidade e na data selecionadas. A confirmação justifica a ausência de convocação no acompanhamento do responsável.</p><div id="unit-no-conv-status" class="notice info" role="status"></div><div class="form-actions"><button id="unit-no-conv-button" type="button" class="btn btn-secondary">Sem convocação para a unidade</button></div></section>`;
     const selected=new Set();const refresh=(sync=true)=>{if(sync)$$('#unit-conv-people input').forEach(x=>x.checked?selected.add(x.value):selected.delete(x.value));const term=$('#unit-conv-search').value.toLowerCase(),func=$('#unit-conv-function').value;$('#unit-conv-people').innerHTML=alphabeticalPeople(COLABORADORES.filter(c=>!c.inativo&&c.nome.toLowerCase().includes(term)&&(func==='Todas'||c.funcao===func))).map(c=>`<label class="check-card"><input type="checkbox" value="${c.id}" ${selected.has(c.id)?'checked':''}><span>${escapeHtml(c.nome)}<small style="display:block;color:var(--muted)">${escapeHtml(c.funcao)}</small></span></label>`).join('');};$('#unit-conv-search').oninput=refresh;$('#unit-conv-function').onchange=refresh;refresh();
-    if(portalUnit!=='Todas')$('#unit-conv-unit').value=portalUnit;
+    if(activeConvUnit&&[...$('#unit-conv-unit').options].some(o=>o.value===activeConvUnit))$('#unit-conv-unit').value=activeConvUnit;
     const referenceDate=()=>{const d=dateLocal(unitConvDate);d.setDate(d.getDate()-1);return calendarISO(d);};$('#previous-team-date').value=referenceDate();
     const previewPrevious=()=>{const date=$('#previous-team-date').value,unit=$('#unit-conv-unit').value,turn=$('#unit-conv-turn').value;const source=state.convocacoes.filter(c=>c.supervisor===supervisorAtual&&c.dataServico===date&&c.unidade===unit);const ids=alphabeticalPersonIds([...new Set(source.flatMap(c=>c.colaboradores))]);
       $('#previous-team-list').innerHTML=ids.length?ids.map(id=>{const p=colaboradorById(id);const reason=blocked(id,unitConvDate)?'Indisponível na data de destino':state.convocacoes.some(c=>c.dataServico===unitConvDate&&c.colaboradores.includes(id)&&overlaps(c.turno,turn))?'Já convocado no turno de destino':'';return `<label class="check-card"><input class="previous-team-person" type="checkbox" value="${id}" ${reason?'disabled':'checked'}><span><strong>${escapeHtml(p?.nome||id)}</strong><small style="display:block">${escapeHtml(p?.funcao||'')} · ${escapeHtml(unit)}${reason?' · '+reason:''}</small></span></label>`;}).join(''):'<div class="empty">Não há equipe convocada nesta unidade em '+formatDate(date)+'. Escolha outra data de referência ou monte a equipe abaixo.</div>';
       $('#previous-team-use').disabled=!ids.length;
     };
-    $('#previous-team-date').onchange=previewPrevious;$('#unit-conv-unit').onchange=()=>{previewPrevious();refreshNoConv();};$('#unit-conv-turn').onchange=previewPrevious;previewPrevious();
+    $('#previous-team-date').onchange=previewPrevious;
+    $('#unit-conv-unit').onchange=()=>switchConvDraftUnit();
+    $('#unit-conv-turn').onchange=previewPrevious;previewPrevious();
     const refreshNoConv=()=>{
       const date=$('#unit-conv-date').value,unit=$('#unit-conv-unit').value,marked=temConfirmacaoSemConvocacao(supervisorAtual,unit,date);
       const hasTeam=state.convocacoes.some(c=>c.supervisor===supervisorAtual&&c.unidade===unit&&c.dataServico===date);
@@ -2141,12 +2153,113 @@ function renderEquipeDia(){
       toast(marked?'Confirmação retirada. A data poderá voltar às pendências.':'Sem convocação confirmado para a unidade.');
     };
     refreshNoConv();
-    $('#previous-team-use').onclick=()=>{const ids=$$('.previous-team-person:checked').filter(x=>!x.disabled).map(x=>x.value);if(!ids.length)return toast('Nenhuma pessoa disponível foi selecionada.',true);selected.clear();ids.forEach(id=>selected.add(id));$('#unit-conv-function').value='Todas';$('#unit-conv-search').value='';refresh(false);toast('Equipe carregada. Você pode desmarcar pessoas antes de confirmar.');};
-    $('#unit-conv-date').onchange=()=>{unitConvDate=$('#unit-conv-date').value;render();};
+    $('#previous-team-use').onclick=()=>{const ids=$$('.previous-team-person:checked').filter(x=>!x.disabled).map(x=>x.value);if(!ids.length)return toast('Nenhuma pessoa disponível foi selecionada.',true);selected.clear();ids.forEach(id=>selected.add(id));$('#unit-conv-function').value='Todas';$('#unit-conv-search').value='';refresh(false);storeConvDraft();toast('Equipe carregada. Você pode desmarcar pessoas antes de confirmar.');};
+    $('#unit-conv-date').onchange=()=>{storeConvDraft();unitConvDate=$('#unit-conv-date').value;avulsoDraft=[];render();};
     const avulsoList=()=>$('#unit-avulso-list').innerHTML=avulsoDraft.map(x=>`<div class="team-list-item">${escapeHtml(x.nome)} · ${escapeHtml(x.funcao)}</div>`).join('');avulsoList();
-    $('#unit-avulso-add').onclick=()=>{const nome=$('#unit-avulso-name').value.trim();if(!nome)return toast('Informe o nome.',true);const funcao=$('#unit-avulso-function').value;if(!funcao)return toast('Selecione Profissional ou Servente para o avulso.',true);avulsoDraft.push({id:uid('c'),nome,...avulsoData(funcao)});$('#unit-avulso-name').value='';$('#unit-avulso-function').value='';avulsoList();};
+    $('#unit-avulso-add').onclick=()=>{const nome=$('#unit-avulso-name').value.trim();if(!nome)return toast('Informe o nome.',true);const funcao=$('#unit-avulso-function').value;if(!funcao)return toast('Selecione Profissional ou Servente para o avulso.',true);avulsoDraft.push({id:uid('c'),nome,...avulsoData(funcao)});$('#unit-avulso-name').value='';$('#unit-avulso-function').value='';avulsoList();storeConvDraft();};
     const form=$('#unit-conv-form'),reviewBox=$('#unit-conv-review'),noConvBox=$('#unit-no-conv-box');
     let reviewDraft=null;
+    // Salva apenas no navegador: não altera state e não chama /api/save.
+    let unresolvedConvDraft=null;
+    const convStatus=document.createElement('div');
+    convStatus.className='notice info section';convStatus.id='unit-conv-draft-status';
+    convStatus.setAttribute('role','status');
+    convStatus.textContent='O preenchimento será guardado automaticamente neste navegador. A convocação só será confirmada no botão de confirmação definitiva.';
+    form.before(convStatus);
+    const convDraftData=()=>{
+      $$('#unit-conv-people input').forEach(x=>x.checked?selected.add(x.value):selected.delete(x.value));
+      return {
+        supervisor:supervisorAtual,date:unitConvDate,unit:activeConvUnit,
+        turn:$('#unit-conv-turn').value,func:$('#unit-conv-function').value,
+        search:$('#unit-conv-search').value,
+        referenceDate:$('#previous-team-date').value,
+        selected:[...selected],avulsos:avulsoDraft.map(x=>({...x})),
+        avulsoName:$('#unit-avulso-name').value,
+        avulsoFunction:$('#unit-avulso-function').value,
+        previousSelected:$$('.previous-team-person:checked').map(x=>x.value)
+      };
+    };
+    const storeConvDraft=()=>{
+      if(unresolvedConvDraft)return false;
+      const data=convDraftData();
+      const ok=storeDraft(activeConvKey,data);
+      if(ok){
+        storeDraft(convLastKey(supervisorAtual),{date:unitConvDate,unit:activeConvUnit});
+        convStatus.textContent='Rascunho armazenado neste navegador. Ainda não é uma convocação confirmada.';
+      }else convStatus.textContent='Falha ao guardar rascunho. Não atualize esta página antes de concluir.';
+      return ok;
+    };
+    const restoreConvDraft=draft=>{
+      if(!draft||draft.supervisor!==supervisorAtual||draft.date!==unitConvDate||draft.unit!==activeConvUnit)return false;
+      if(!Array.isArray(draft.selected)||!Array.isArray(draft.avulsos))return false;
+      if([...$('#unit-conv-turn').options].some(x=>x.value===draft.turn))$('#unit-conv-turn').value=draft.turn;
+      if([...$('#unit-conv-function').options].some(x=>x.value===draft.func))$('#unit-conv-function').value=draft.func;
+      $('#unit-conv-search').value=draft.search||'';
+      if(draft.referenceDate)$('#previous-team-date').value=draft.referenceDate;
+      selected.clear();
+      for(const id of draft.selected)if(COLABORADORES.some(p=>p.id===id))selected.add(id);
+      avulsoDraft=draft.avulsos.filter(x=>x&&typeof x.id==='string'&&typeof x.nome==='string'
+        &&!COLABORADORES.some(p=>p.id===x.id)).map(x=>({...x}));
+      refresh(false);previewPrevious();
+      if(Array.isArray(draft.previousSelected)){
+        const allowed=new Set(draft.previousSelected);
+        $$('.previous-team-person').forEach(x=>{if(!x.disabled)x.checked=allowed.has(x.value);});
+      }
+      avulsoList();
+      $('#unit-avulso-name').value=draft.avulsoName||'';
+      if([...$('#unit-avulso-function').options].some(x=>x.value===draft.avulsoFunction))
+        $('#unit-avulso-function').value=draft.avulsoFunction;
+      unresolvedConvDraft=null;form.inert=false;
+      convStatus.textContent='Rascunho recuperado. Revise a equipe e confirme definitivamente somente quando terminar.';
+      return true;
+    };
+    const loadConvDraft=()=>{
+      const saved=readStoredDraft(activeConvKey);
+      if(!saved){form.inert=false;convStatus.textContent='Preenchimento ainda não confirmado. As alterações serão guardadas neste navegador.';return;}
+      if(saved.version===onlineVersion){
+        if(restoreConvDraft(saved))return;
+        // Rascunho incompatível não é aplicado nem sobrescrito automaticamente.
+      }
+      unresolvedConvDraft=saved;form.inert=true;
+      convStatus.className='notice warning section';
+      convStatus.textContent='Existe um rascunho, mas os dados do servidor mudaram. Escolha recuperar ou descartar; nenhum registro será confirmado automaticamente.';
+      const buttons=document.createElement('div');buttons.className='inline-actions section';
+      const recover=document.createElement('button');recover.type='button';recover.className='btn btn-primary';recover.textContent='Recuperar rascunho para conferência';
+      const discard=document.createElement('button');discard.type='button';discard.className='btn btn-secondary';discard.textContent='Descartar rascunho local';
+      buttons.append(recover,discard);convStatus.appendChild(buttons);
+      recover.onclick=()=>{
+        if(!window.confirm('O banco foi atualizado. Recuperar os campos para revisar? Confira antes de confirmar.'))return;
+        if(!restoreConvDraft(saved))return showToast('O rascunho não corresponde a esta equipe. Ele não foi aplicado.',true);
+        buttons.remove();convStatus.className='notice info section';storeConvDraft();
+      };
+      discard.onclick=()=>{
+        if(!window.confirm('Descartar definitivamente este rascunho não confirmado?'))return;
+        clearStoredDraft(activeConvKey);unresolvedConvDraft=null;form.inert=false;buttons.remove();
+        selected.clear();avulsoDraft=[];refresh(false);avulsoList();
+        convStatus.className='notice info section';convStatus.textContent='Rascunho descartado. Você pode começar um novo preenchimento.';
+      };
+    };
+    const switchConvDraftUnit=()=>{
+      const newUnit=$('#unit-conv-unit').value;
+      if(newUnit===activeConvUnit){previewPrevious();refreshNoConv();return;}
+      storeConvDraft(); // Guarda a unidade anterior antes de trocar a chave.
+      activeConvUnit=newUnit;activeConvKey=convDraftKey(supervisorAtual,unitConvDate,activeConvUnit);
+      selected.clear();avulsoDraft=[];
+      $('#unit-avulso-name').value='';$('#unit-avulso-function').value='';
+      $('#unit-conv-search').value='';$('#unit-conv-function').value='Todas';
+      refresh(false);avulsoList();previewPrevious();refreshNoConv();
+      loadConvDraft();
+    };
+    // Todos os campos e checkboxes têm gravação imediata, sem "Salvar convocação".
+    form.addEventListener('input',event=>{
+      if(event.target?.id==='unit-conv-date'||event.target?.id==='unit-conv-unit')return;
+      storeConvDraft();
+    });
+    form.addEventListener('change',event=>{
+      if(event.target?.id==='unit-conv-date'||event.target?.id==='unit-conv-unit')return;
+      storeConvDraft();
+    });
+    loadConvDraft();
     const leaveReview=()=>{
       reviewDraft=null;
       reviewBox.classList.add('hidden');
@@ -2184,6 +2297,7 @@ function renderEquipeDia(){
       };
       if(!validateReview(draft))return;
       reviewDraft=draft;
+      storeConvDraft();
       reviewBox.innerHTML=convocationReviewMarkup(draft);
       form.classList.add('hidden');
       noConvBox.classList.add('hidden');
@@ -2205,10 +2319,16 @@ function renderEquipeDia(){
           turno:approved.turno,colaboradores:[...approved.ids],
           criadoEm:now().toISOString(),origem:'normal',executor:approved.supervisor});
         audit('Convocação da equipe',approved.date);
-        const queued=saveData();
+        const confirmedKey=activeConvKey,confirmedDate=approved.date,confirmedUnit=approved.unit;
+        const queued=saveData(()=>{
+          clearStoredDraft(confirmedKey);
+          const last=readStoredDraft(convLastKey(supervisorAtual));
+          if(last?.date===confirmedDate&&last?.unit===confirmedUnit)clearStoredDraft(convLastKey(supervisorAtual));
+          reviewDraft=null;avulsoDraft=[];unitConvDate='';
+          render();
+        });
         if(!queued)return;
-        reviewDraft=null;avulsoDraft=[];
-        toast('Equipe convocada. Serviços serão escolhidos no apontamento.');
+        toast('Confirmação enviada. A convocação só será considerada salva após resposta do banco.');
       };
     };
   }
