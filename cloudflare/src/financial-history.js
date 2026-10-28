@@ -12,7 +12,7 @@ export function financialHistoryEvents({convocationId,colaboradorId,dataServico,
     const before=value(previous?.[f.column]),after=value(next?.[f.column]);
     if(before===after)continue;
     events.push({
-      table:'auditoria',action:'insert',id:'financial-history:'+crypto.randomUUID(),
+      table:'auditoria',action:'insert',id:'audit:'+crypto.randomUUID(),
       data:{
         entidade:'apontamentos',
         entidade_id:String(convocationId),
