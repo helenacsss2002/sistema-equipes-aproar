@@ -1030,11 +1030,45 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
     list.insertAdjacentElement('afterend',avulsoPanel);
     bindPersonSearch($('#retro-person-search'),()=>$$('.retro-person-list .check-card'));
     let retroDrafts=new Map();
+    const retroKey=draftKey('retroativo',$('#retro-sup')?.value||supervisorAtual);
+    const persistedRetro=readStoredDraft(retroKey);
+    const storeRetroDraft=()=>{
+      const selected=$$('input[name="retro-colab"]:checked').map(x=>x.value);
+      const current=$$('#retro-rows [data-person]').map(x=>x.dataset.person);
+      for(const item of readPersonRows(current))retroDrafts.set(item.colaboradorId,item);
+      return storeDraft(retroKey,{
+        supervisor:$('#retro-sup')?.value||supervisorAtual,date:$('#retro-data').value,
+        unit:unidade.value,turn:$('#retro-turno').value,selected,items:[...retroDrafts.values()],
+        avulsos:[...retroUnsavedAvulsos.values()],
+        search:$('#retro-person-search')?.value||'',
+        avulsoName:$('#retro-avulso-name')?.value||'',
+        avulsoFuncao:$('#retro-avulso-funcao')?.value||''
+      });
+    };
+    const recoverRetroDraft=stored=>{
+      if(!stored||stored.supervisor!==($('#retro-sup')?.value||supervisorAtual))return;
+      if(stored.date&&stored.date<=isoToday()){$('#retro-data').value=stored.date;retroDateSelected=stored.date;}
+      if([...unidade.options].some(o=>o.value===stored.unit))unidade.value=stored.unit;
+      if([...$('#retro-turno').options].some(o=>o.value===stored.turn))$('#retro-turno').value=stored.turn;
+      for(const person of stored.avulsos||[]){
+        if(!person||!person.id||!person.nome)continue;
+        if(!COLABORADORES.some(c=>String(c.id)===String(person.id)))COLABORADORES.push(person);
+        retroUnsavedAvulsos.set(person.id,person);
+      }
+      list.innerHTML=alphabeticalPeople(COLABORADORES.filter(c=>!c.inativo))
+        .map(c=>'<label class="check-card"><input type="checkbox" name="retro-colab" value="'+escapeHtml(c.id)+'" '+((stored.selected||[]).includes(c.id)?'checked':'')+'><span><strong>'+escapeHtml(c.nome)+'</strong><small>'+escapeHtml(c.funcao)+'</small></span></label>').join('');
+      retroDrafts=new Map((stored.items||[]).filter(x=>x&&typeof x.colaboradorId==='string').map(x=>[x.colaboradorId,x]));
+      connectRetroChoices();refreshRows(true);
+      $('#retro-person-search').value=stored.search||'';
+      $('#retro-person-search').dispatchEvent(new Event('input',{bubbles:true}));
+      $('#retro-avulso-name').value=stored.avulsoName||'';
+      $('#retro-avulso-funcao').value=stored.avulsoFuncao||'';
+    };
     if(perfilAtual==='SUPERVISOR'){
       const pending=new Map();for(const c of state.convocacoes.filter(c=>c.supervisor===supervisorAtual&&c.dataServico<=isoToday()&&!completeConv(c))){const done=new Set(apForConv(c.id)?.itens.map(i=>i.colaboradorId)||[]),ids=c.colaboradores.filter(id=>!done.has(id));if(!ids.length)continue;const key=c.dataServico+'|'+c.unidade+'|'+c.turno;if(!pending.has(key))pending.set(key,{date:c.dataServico,unit:c.unidade,turn:c.turno,ids:new Set()});ids.forEach(id=>pending.get(key).ids.add(id));}
       const groups=[...pending.values()].sort((a,b)=>a.date.localeCompare(b.date)||a.unit.localeCompare(b.unit,'pt-BR')||a.turn.localeCompare(b.turn,'pt-BR'));
       let date='';$('#retro-pending-list').innerHTML=groups.length?groups.map((g,index)=>{const title=date!==g.date?'<h4 class="retro-pending-date">'+formatDate(g.date)+'</h4>':'';date=g.date;return title+`<button type="button" class="retro-pending-item" data-retro-pending="${index}"><span><strong>${escapeHtml(g.unit)}</strong><small>${escapeHtml(g.turn)} · ${g.ids.size} colaborador(es) sem apontamento</small></span><span class="retro-pending-action">Regularizar →</span></button>`;}).join(''):'<div class="notice success">Nenhum apontamento pendente até hoje.</div>';
-      $$('[data-retro-pending]').forEach(button=>button.onclick=()=>{const g=groups[Number(button.dataset.retroPending)];retroDateSelected=g.date;portalDate=g.date;portalUnit=g.unit;$('#retro-data').value=g.date;unidade.value=g.unit;$('#retro-turno').value=g.turn;retroDrafts.clear();$$('input[name="retro-colab"]').forEach(input=>input.checked=g.ids.has(input.value));refreshRows(true);syncRetroHeader();if($('#portal-unit'))$('#portal-unit').value=g.unit;$$('[data-retro-pending]').forEach(b=>b.classList.toggle('active',b===button));});
+      $$('[data-retro-pending]').forEach(button=>button.onclick=()=>{const g=groups[Number(button.dataset.retroPending)];retroDateSelected=g.date;portalDate=g.date;portalUnit=g.unit;$('#retro-data').value=g.date;unidade.value=g.unit;$('#retro-turno').value=g.turn;retroDrafts.clear();$$('input[name="retro-colab"]').forEach(input=>input.checked=g.ids.has(input.value));refreshRows(true);syncRetroHeader();if($('#portal-unit'))$('#portal-unit').value=g.unit;$$('[data-retro-pending]').forEach(b=>b.classList.toggle('active',b===button));storeRetroDraft();});
     }
     $('#retro-data').onchange=()=>{retroDateSelected=$('#retro-data').value;if(perfilAtual==='SUPERVISOR'&&retroDateSelected){portalDate=retroDateSelected;syncRetroHeader();}};
     unidade.onchange=()=>{retroDrafts.clear();refreshRows(true);};
@@ -1067,9 +1101,28 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       connectRetroChoices();
       refreshRows();
       $('#retro-avulso-name').value='';$('#retro-avulso-funcao').value='';
+      storeRetroDraft();
       toast('Avulso incluído. Os dados já preenchidos foram mantidos; confira a diária e o serviço.');
     };
 
+    if(persistedRetro?.supervisor===($('#retro-sup')?.value||supervisorAtual)){
+      if(persistedRetro.version===onlineVersion){
+        recoverRetroDraft(persistedRetro);
+        const notice=document.createElement('div');notice.className='notice success section';
+        notice.textContent='Rascunho retroativo recuperado automaticamente deste navegador. Confira antes de confirmar o salvamento.';
+        $('#form-retro').prepend(notice);
+      }else{
+        const notice=document.createElement('div');notice.className='notice warning section';
+        notice.innerHTML='Existe um rascunho retroativo salvo no navegador, porém o banco foi atualizado desde então. <button class="btn btn-secondary" type="button" id="recover-retro-draft">Recuperar para conferência</button>';
+        $('#form-retro').prepend(notice);
+        $('#recover-retro-draft').onclick=()=>{
+          if(!window.confirm('Os dados atuais do servidor podem ser diferentes. Deseja recuperar o rascunho local para revisar?'))return;
+          recoverRetroDraft(persistedRetro);notice.remove();
+        };
+      }
+    }
+    $('#form-retro').addEventListener('input',storeRetroDraft);
+    $('#form-retro').addEventListener('change',storeRetroDraft);
     $('#form-retro').noValidate=true;
     $('#form-retro').onsubmit = (e) => {
       e.preventDefault();
@@ -1087,7 +1140,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       for(const id of ids){const c=matching.find(c=>c.colaboradores.includes(id));if(c){if(!batches.has(c.id))batches.set(c.id,{conv:c,items:[]});batches.get(c.id).items.push(itens.find(i=>i.colaboradorId===id));}else newIds.push(id);}
       if(newIds.length){const conv={id:uid('cv'),supervisor:responsavel,dataServico,unidade:unidade.value,obraId:obraRef?.id||'',turno:$('#retro-turno').value,colaboradores:newIds,criadoEm:now().toISOString(),origem:'retroativo'};state.convocacoes.push(conv);batches.set(conv.id,{conv,items:itens.filter(i=>newIds.includes(i.colaboradorId))});}
       for(const {conv,items} of batches.values()){const selected=new Set(items.map(i=>i.colaboradorId));let ap=apForConv(conv.id);if(ap){ap.itens=[...ap.itens.filter(i=>!selected.has(i.colaboradorId)),...items];ap.atualizadoEm=now().toISOString();ap.retroativo=true;}else state.apontamentos.push({executor:supervisorAtual||perfilLabel(perfilAtual),id:uid('ap'),convocacaoId:conv.id,supervisor:conv.supervisor,dataServico,apontadoEm:now().toISOString(),retroativo:true,itens:items});}
-      audit('Apontamento retroativo',dataServico);const savedMessage=[...batches.values()].every(({conv})=>completeConv(conv))?'Apontamento retroativo salvo. Equipe regularizada.':'Apontamento salvo. Há colaboradores convocados que continuam pendentes.';if(!saveData(()=>{retroUnsavedAvulsos.clear();setView('pendencias');}))return;toast(savedMessage);
+      audit('Apontamento retroativo',dataServico);const savedMessage=[...batches.values()].every(({conv})=>completeConv(conv))?'Apontamento retroativo salvo. Equipe regularizada.':'Apontamento salvo. Há colaboradores convocados que continuam pendentes.';if(!saveData(()=>{clearStoredDraft(retroKey);retroUnsavedAvulsos.clear();setView('pendencias');}))return;toast(savedMessage);
       }catch(error){
         console.error('APROAR retroactive form submit failure',String(error?.message||error).slice(0,240));
         showToast('Não foi possível preparar o apontamento retroativo. Confira os campos e tente novamente.',true);showSaveFeedback('Não foi possível preparar o apontamento retroativo. Confira os campos e tente novamente.',true);
