@@ -31,7 +31,9 @@ test('Unidade e obra consultam versao atual no servidor e usam tentativa atomica
  assert.match(worker,/async function applyCatalogRegistration\(/);
  assert.match(worker,/current=await sql`SELECT aproar_web_fingerprint\(\) AS version`/);
  assert.match(worker,/includes\('APROAR_STALE'\)\|\|attempt===2/);
- assert.equal((worker.match(/await applyCatalogRegistration\(/g)||[]).length,3,'Cadastro de unidades, obras e remoção pontual usam gravacao atomica');
+ assert.equal((worker.match(/await applyCatalogRegistration\(/g)||[]).length,4,'Cadastro de unidades, obras, dispensa de pendência e remoção pontual usam gravação atômica');
+ assert.match(worker,/path==='\/api\/indicator-dismissal'/);
+ assert.match(worker,/acao:action==='dispensar'\?'DISPENSAR_PENDENCIA_MANUAL':'REATIVAR_PENDENCIA_MANUAL'/);
 });
 
 function driver(pg){
