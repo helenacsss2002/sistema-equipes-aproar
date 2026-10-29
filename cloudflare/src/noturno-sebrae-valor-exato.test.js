@@ -61,6 +61,7 @@ test('Ficha do SEBRAE seleciona precisamente 0, 50 ou 90; sem apontamento o padr
   obraById:()=>({id:'1',nome:'APRL009 - REFORMA DO 6° ANDAR - SEBRAE',unidade:'SEBRAE'}),
   field:(label,html)=>'<label>'+label+html+'</label>',
   allocationRow:()=>'<div class="allocation-row"></div>',
+  extraWorkSearchMarkup:()=>'<input class="row-extra-work">',
   presence:status=>String(status).startsWith('Presente'),
   escapeHtml:value=>String(value??'').replaceAll('&','&amp;').replaceAll('"','&quot;').replaceAll('<','&lt;'),
   roundMoney:n=>Math.round(n*100)/100,
