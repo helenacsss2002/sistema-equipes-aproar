@@ -536,7 +536,17 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
   if(message.includes('APROAR_CONFLITO_TURNO'))return json({error:'Há outra convocação no mesmo turno para um dos colaboradores. Confira a data antes de regularizar o apontamento.'},409);
   if(e.code==='57014'||e.code==='55P03')return json({error:'O banco está ocupado ou excedeu o tempo permitido. Confira o histórico antes de tentar novamente.'},503);if(message.includes('APROAR_STALE'))return json({error:'Os dados mudaram durante a gravação. Nenhuma alteração foi salva. Atualize e tente novamente.'},409);
   if(message.includes('APROAR_REQUEST_MISMATCH'))return json({error:'Requisição repetida com conteúdo diferente.'},409);
-  if(e.code==='23505')return json({error:'Já existe um registro equivalente. Atualize os dados e confira antes de repetir.'},409);
+  if(e.code==='23505'){
+   const constraint=String(e?.constraint||e?.constraint_name||'').slice(0,90);
+   console.error('APROAR unique conflict',JSON.stringify({route:path,role:session?.role||'unknown',constraint}));
+   if(constraint==='ux_colaboradores_nome_upper')
+     return json({error:'Este nome já está cadastrado. No retroativo, selecione o colaborador existente; não insira outro avulso com o mesmo nome. Seu rascunho foi preservado.'},409);
+   if(constraint==='apontamentos_convocacao_id_key')
+     return json({error:'Esta convocação já possui um apontamento registrado. Abra o apontamento existente para conferir ou corrigir; o sistema não deve duplicar a presença.'},409);
+   if(constraint==='uq_conflito_pendente_equivalente')
+     return json({error:'Este conflito entre convocações já está registrado. Confira as equipes e turnos existentes antes de tentar novamente.'},409);
+   return json({error:'O Neon bloqueou a gravação por registro duplicado. Nenhum segundo registro foi criado. Confira a data, a equipe e os avulsos cadastrados antes de salvar novamente.'},409);
+  }
   if(e.code==='23503')return json({error:'Este registro está vinculado ao histórico e não pode ser excluído.'},409);
   if(e.code==='42883'||e.code==='42P01')return json({error:'Estrutura do banco incompleta: confira a migração de banco correspondente ao ambiente.'},503);
   if(path==='/api/save'){
