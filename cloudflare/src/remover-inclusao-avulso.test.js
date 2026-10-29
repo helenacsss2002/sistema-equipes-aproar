@@ -32,7 +32,9 @@ test('Servidor verifica autor, data, vinculos, concorrencia e confirma exclusao 
  assert(start>=0&&end>start);
  const route=worker.slice(start,end);
  assert.match(route,/session\.role==='SUPERVISOR'/);
- assert.match(route,/conv\.engenheiro!==session\.user\|\|conv\.criado_por!==session\.user/);
+ assert.match(route,/conv\.engenheiro!==session\.user/);
+ assert.doesNotMatch(route,/conv\.criado_por!==session\.user/);
+ assert.match(route,/String\(conv\.colaborador_id\)!==colaboradorId/);
  assert.match(route,/EXISTS\(SELECT 1 FROM apontamentos/);
  assert.match(route,/EXISTS\(SELECT 1 FROM servicos_apontamento/);
  assert.match(route,/EXISTS\(SELECT 1 FROM conflitos_convocacao/);
