@@ -338,15 +338,15 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
     if(!writes(env))return json({error:'Gravação não autorizada neste ambiente.'},403);
     const body=await bodyJSON(request);
     if(!body||typeof body!=='object'||Array.isArray(body)
-       ||Object.keys(body).some(k=>!['requestId','supervisor','dataServico','motivo','acao'].includes(k))
+       ||Object.keys(body).some(k=>!['requestId','supervisor','dataServico','motivo','acao','tipo'].includes(k))
        ||!/^[a-f0-9-]{36}$/i.test(body.requestId||''))return json({error:'Solicitação inválida.'},400);
     const supervisor=String(body.supervisor||'').trim().toUpperCase(),date=String(body.dataServico||'');
-    const action=body.acao,reason=String(body.motivo||'').trim();
+    const action=body.acao,reason=String(body.motivo||'').trim(),tipo=String(body.tipo||'convocacao');
     const validDate=/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date)&&
       !Number.isNaN(Date.parse(date+'T12:00:00Z'))&&new Date(date+'T12:00:00Z').toISOString().slice(0,10)===date;
     const today=new Intl.DateTimeFormat('sv-SE',{timeZone:'America/Fortaleza',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
     if(!supervisors.includes(supervisor)||!validDate||date<(supervisor==='FELIPE'?'2026-09-28':'2026-09-16')||date>today
-       ||!['dispensar','reativar'].includes(action)||reason.length<5||reason.length>500)
+       ||!['dispensar','reativar'].includes(action)||!['convocacao','apontamento'].includes(tipo)||reason.length<5||reason.length>500)
       return json({error:'Informe supervisor, data monitorada e justificativa válida (5 a 500 caracteres).'},400);
     const digest=await sha(JSON.stringify(body));
     const previous=await sql`SELECT actor,payload_hash FROM aproar_web_requests WHERE id=${body.requestId}`;
@@ -358,12 +358,13 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
       const settings=await sql`SELECT data FROM aproar_web_settings WHERE id=1`;
       if(!settings.length)throw Object.assign(Error('Configuração de indicadores indisponível.'),{status:503});
       const config=settings[0].data||{};
-      const history=Array.isArray(config.dispensasPendenciaConvocacao)?config.dispensasPendenciaConvocacao:[];
+      const field=tipo==='convocacao'?'dispensasPendenciaConvocacao':'dispensasPendenciaApontamento';
+      const history=Array.isArray(config[field])?config[field]:[];
       if(history.length>50000)throw Object.assign(Error('Limite de dispensas atingido.'),{status:400});
       const existing=history.find(x=>x.supervisor===supervisor&&x.dataServico===date);
       if(action==='dispensar'&&existing)throw Object.assign(Error('Esta data já foi dispensada. Atualize o indicador.'),{status:409});
       if(action==='reativar'&&!existing)throw Object.assign(Error('Esta dispensa já foi retirada. Atualize o indicador.'),{status:409});
-      if(action==='dispensar'){
+      if(action==='dispensar'&&tipo==='convocacao'){
         const registered=await sql`SELECT id FROM convocacoes WHERE engenheiro=${supervisor} AND data=${date}::date LIMIT 1`;
         if(registered.length)throw Object.assign(Error('Já existe convocação nessa data. Não há pendência para dispensar.'),{status:409});
         const assigned=Object.entries(config.unitOwners||{}).filter(([,owner])=>owner===supervisor).map(([unit])=>unit);
@@ -374,17 +375,22 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
         const justified=units.length?units.every(unit=>confirmed.some(x=>x.unidade===unit)):confirmed.length>0;
         if(justified)throw Object.assign(Error('A data já foi justificada automaticamente pelo supervisor.'),{status:409});
       }
+      if(action==='dispensar'&&tipo==='apontamento'){
+        const pending=await sql`SELECT c.id FROM convocacoes c WHERE c.engenheiro=${supervisor} AND c.data=${date}::date
+          AND NOT EXISTS(SELECT 1 FROM apontamentos a WHERE a.convocacao_id=c.id::text) LIMIT 1`;
+        if(!pending.length)throw Object.assign(Error('Não existe apontamento pendente para esse supervisor nessa data.'),{status:409});
+      }
       const now=new Date().toISOString();
       const record={supervisor,dataServico:date,motivo:reason,registradoEm:now,registradoPor:session.user};
       const next=action==='dispensar'?[...history,record]:history.filter(x=>!(x.supervisor===supervisor&&x.dataServico===date));
       return [
-        {table:'aproar_web_settings',action:'update',id:'1',data:{data:{...config,dispensasPendenciaConvocacao:next}}},
+        {table:'aproar_web_settings',action:'update',id:'1',data:{data:{...config,[field]:next}}},
         {table:'auditoria',action:'insert',id:'audit:'+body.requestId,data:{
-          entidade:'indicador_pendencia_convocacao',entidade_id:supervisor+'|'+date,
+          entidade:'indicador_pendencia_'+tipo,entidade_id:supervisor+'|'+date,
           acao:action==='dispensar'?'DISPENSAR_PENDENCIA_MANUAL':'REATIVAR_PENDENCIA_MANUAL',
           usuario:session.user,ocorrido_em:now,antes:existing||null,
           depois:action==='dispensar'?record:null,
-          contexto:{supervisor,dataServico:date,motivo:reason,origem:'controladoria_indicadores',somenteIndicador:true}
+          contexto:{supervisor,dataServico:date,tipo,motivo:reason,origem:'controladoria_indicadores',somenteIndicador:true}
         }}
       ];
     });
