@@ -11,6 +11,9 @@ const begin=app.indexOf('  function saveData(onSuccess=null){');
 const end=app.indexOf('  async function submitComplementConfirmation(',begin);
 assert(begin>=0&&end>begin,'O fluxo de salvamento deve estar presente');
 const saveSource=app.slice(begin,end);
+const helperStart=app.indexOf('  function nightChangesToVerify(');
+assert(helperStart>0&&helperStart<begin);
+const nightHelperSource=app.slice(helperStart,begin);
 
 function setup({post,check,bootstrap}){
  const state={obras:[{id:'w1'}],colaboradores:[{id:'a1'}],convocacoes:[],apontamentos:[]};
@@ -43,7 +46,7 @@ function setup({post,check,bootstrap}){
   },
  };
  vm.createContext(ctx);
- vm.runInContext(saveSource+'\nglobalThis.runSave=saveData;',ctx,{timeout:2000});
+ vm.runInContext(nightHelperSource+saveSource+'\nglobalThis.runSave=saveData;',ctx,{timeout:2000});
  return {ctx,calls,alerts,ui,done};
 }
 const wait=()=>new Promise(resolve=>setTimeout(resolve,35));
@@ -168,5 +171,5 @@ test('Falha HTTP não mostra aviso antigo e nunca duplica a gravação ao confir
  assert.match(original,/O sistema verificará automaticamente se o apontamento já foi registrado/);
  assert.match(original,/for\(let sendAttempt=0;sendAttempt<2&&!savedOnServer;sendAttempt\+\+\)/);
  assert.match(original,/if\(status===409&&await confirmById\(\)\)/);
- assert.match(original,/const result=reply\?\.state\?reply:await restoreOnlineSession\(\)/);
+ assert.match(original,/pendingNightChanges\.length\?await restoreOnlineSession\(\)/);
 });
