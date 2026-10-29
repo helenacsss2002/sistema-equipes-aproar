@@ -331,6 +331,65 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
     });
     return json({ok:true,requestId:body.requestId,obraId:result.ids?.[key],version:result.version});
    }
+   // Dispensa pontual e auditada: modifica somente o indicador, sem apagar historico.
+   if(path==='/api/indicator-dismissal'&&request.method==='POST'){
+    if(session.role!=='CONTROLADORIA')return json({error:'Somente a Controladoria pode ajustar pendências do indicador.'},403);
+    if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);
+    if(!writes(env))return json({error:'Gravação não autorizada neste ambiente.'},403);
+    const body=await bodyJSON(request);
+    if(!body||typeof body!=='object'||Array.isArray(body)
+       ||Object.keys(body).some(k=>!['requestId','supervisor','dataServico','motivo','acao'].includes(k))
+       ||!/^[a-f0-9-]{36}$/i.test(body.requestId||''))return json({error:'Solicitação inválida.'},400);
+    const supervisor=String(body.supervisor||'').trim().toUpperCase(),date=String(body.dataServico||'');
+    const action=body.acao,reason=String(body.motivo||'').trim();
+    const validDate=/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date)&&
+      !Number.isNaN(Date.parse(date+'T12:00:00Z'))&&new Date(date+'T12:00:00Z').toISOString().slice(0,10)===date;
+    const today=new Intl.DateTimeFormat('sv-SE',{timeZone:'America/Fortaleza',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+    if(!supervisors.includes(supervisor)||!validDate||date<(supervisor==='FELIPE'?'2026-09-28':'2026-09-16')||date>today
+       ||!['dispensar','reativar'].includes(action)||reason.length<5||reason.length>500)
+      return json({error:'Informe supervisor, data monitorada e justificativa válida (5 a 500 caracteres).'},400);
+    const digest=await sha(JSON.stringify(body));
+    const previous=await sql`SELECT actor,payload_hash FROM aproar_web_requests WHERE id=${body.requestId}`;
+    if(previous.length){
+      if(previous[0].actor!==session.user||previous[0].payload_hash!==digest)return json({error:'Identificador de requisição reutilizado.'},409);
+      return json({ok:true,requestId:body.requestId,replayed:true});
+    }
+    await applyCatalogRegistration(sql,body.requestId,session.user,digest,async()=>{
+      const settings=await sql`SELECT data FROM aproar_web_settings WHERE id=1`;
+      if(!settings.length)throw Object.assign(Error('Configuração de indicadores indisponível.'),{status:503});
+      const config=settings[0].data||{};
+      const history=Array.isArray(config.dispensasPendenciaConvocacao)?config.dispensasPendenciaConvocacao:[];
+      if(history.length>50000)throw Object.assign(Error('Limite de dispensas atingido.'),{status:400});
+      const existing=history.find(x=>x.supervisor===supervisor&&x.dataServico===date);
+      if(action==='dispensar'&&existing)throw Object.assign(Error('Esta data já foi dispensada. Atualize o indicador.'),{status:409});
+      if(action==='reativar'&&!existing)throw Object.assign(Error('Esta dispensa já foi retirada. Atualize o indicador.'),{status:409});
+      if(action==='dispensar'){
+        const registered=await sql`SELECT id FROM convocacoes WHERE engenheiro=${supervisor} AND data=${date}::date LIMIT 1`;
+        if(registered.length)throw Object.assign(Error('Já existe convocação nessa data. Não há pendência para dispensar.'),{status:409});
+        const assigned=Object.entries(config.unitOwners||{}).filter(([,owner])=>owner===supervisor).map(([unit])=>unit);
+        const historic=assigned.length?[]:await sql`SELECT DISTINCT o.unidade FROM convocacoes c JOIN obras o ON o.id=c.obra_id WHERE c.engenheiro=${supervisor}`;
+        const units=assigned.length?assigned:historic.map(x=>x.unidade);
+        const confirmations=Array.isArray(config.semConvocacoesUnidade)?config.semConvocacoesUnidade:[];
+        const confirmed=confirmations.filter(x=>x.supervisor===supervisor&&x.dataServico===date);
+        const justified=units.length?units.every(unit=>confirmed.some(x=>x.unidade===unit)):confirmed.length>0;
+        if(justified)throw Object.assign(Error('A data já foi justificada automaticamente pelo supervisor.'),{status:409});
+      }
+      const now=new Date().toISOString();
+      const record={supervisor,dataServico:date,motivo:reason,registradoEm:now,registradoPor:session.user};
+      const next=action==='dispensar'?[...history,record]:history.filter(x=>!(x.supervisor===supervisor&&x.dataServico===date));
+      return [
+        {table:'aproar_web_settings',action:'update',id:'1',data:{data:{...config,dispensasPendenciaConvocacao:next}}},
+        {table:'auditoria',action:'insert',id:'audit:'+body.requestId,data:{
+          entidade:'indicador_pendencia_convocacao',entidade_id:supervisor+'|'+date,
+          acao:action==='dispensar'?'DISPENSAR_PENDENCIA_MANUAL':'REATIVAR_PENDENCIA_MANUAL',
+          usuario:session.user,ocorrido_em:now,antes:existing||null,
+          depois:action==='dispensar'?record:null,
+          contexto:{supervisor,dataServico:date,motivo:reason,origem:'controladoria_indicadores',somenteIndicador:true}
+        }}
+      ];
+    });
+    return json({ok:true,requestId:body.requestId});
+   }
    // Remocao pontual e auditada de uma inclusao sem apontamento.
    // Nao retransmite equipes, nao remove o cadastro do colaborador e nao apaga historico.
    if(path==='/api/convocation-remove'&&request.method==='POST'){
