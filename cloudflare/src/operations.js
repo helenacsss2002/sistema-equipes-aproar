@@ -75,6 +75,12 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
    const data={obra_id:work,colaborador_id:pid,data:c.dataServico,engenheiro:c.supervisor,turno:c.turno,observacao:'Turno: '+c.turno+' ||APROAR_META|| '+JSON.stringify(meta)};if(!raw)Object.assign(data,{status:'Presente (Integral)',valor_extra:0,criado_em:timestamp,criado_por:session.user});add('convocacoes',raw?'update':'insert',key,data);
   }
   if(!pointChanged)continue;
+  // Nunca aceitar o salvamento e restaurar silenciosamente R$ 90 (ou outro valor)
+  // quando o adicional noturno foi confirmado pelo Financeiro.
+  if(session.role==='SUPERVISOR'&&oldPoint?.financeAdjusted
+      &&money(Number(ap.i.noturno??0))!==money(Number(oldPoint.noturno??0))
+      &&!(releaseGrant?.data?.contexto?.fields||[]).includes('Adicional noturno'))
+    fail('O adicional noturno foi ajustado pelo Financeiro. O valor selecionado NÃO foi salvo; solicite autorização da Controladoria ou do Financeiro para alterá-lo.',403);
   const i={...ap.i};if(pendingAvulsoInvalid(i,staff.get(pid)))fail('Escolha um tipo válido de diária para o avulso.');if(session.role==='SUPERVISOR'&&oldPoint?.financeAdjusted){const authorized=releaseGrant?.data?.contexto?.fields||[];const labels={financeiro:'Complemento financeiro',noturno:'Adicional noturno',acordo:'Bonificação',ajudaCusto:'Passagem / ajuda de custo'};for(const k of ['financeiro','noturno','acordo','ajudaCusto'])if(!authorized.includes(labels[k]))i[k]=oldPoint[k];}const p=staff.get(pid),isPresent=present(i.status),ss=normServices(i).filter(s=>s.obraId),hasSebrae=ss.some(s=>clean(works.get(s.obraId)?.unidade)==='SEBRAE'),financialAdjusted=session.role==='FINANCEIRO'||oldPoint?.financeAdjusted===true;
   const extra=isPresent?(i.extra==='Valor específico'?Number(oldPoint.valorExtraOriginal):money(Number(p.custo)*mult(i.extra))):0;
   const night=isPresent&&hasSebrae?Number(i.noturno??0):0,finance=isPresent?Number(i.financeiro):0,bonus=isPresent?Number(i.acordo):0,ajudaCusto=isPresent?Number(i.ajudaCusto||0):0;
