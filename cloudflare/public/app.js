@@ -2821,6 +2821,24 @@ function renderEquipeDia(){
     clearTimeout(showSaveFeedback._timer);
     showSaveFeedback._timer=setTimeout(()=>{node.style.display='none';},duration||(error?18000:12000));
   }
+  // Compara o adicional noturno solicitado com o estado realmente lido do Neon.
+  // Nunca dá como confirmado um R$ 0/50 se o banco ainda apresentar R$ 90.
+  function nightChangesToVerify(previous,next){
+    const originals=new Map((previous?.apontamentos||[]).flatMap(a=>(a.itens||[]).map(i=>[
+      String(a.convocacaoId)+'|'+String(i.colaboradorId),Number(i.noturno??0)
+    ])));
+    return (next?.apontamentos||[]).flatMap(a=>(a.itens||[]).flatMap(i=>{
+      const key=String(a.convocacaoId)+'|'+String(i.colaboradorId),value=Number(i.noturno??0),before=originals.get(key);
+      return before!==undefined&&Math.abs(value-before)>0.005?[{key,expected:value}]:[];
+    }));
+  }
+  function nightValuesMatch(state,changes){
+    if(!changes.length)return true;
+    const actual=new Map((state?.apontamentos||[]).flatMap(a=>(a.itens||[]).map(i=>[
+      String(a.convocacaoId)+'|'+String(i.colaboradorId),Number(i.noturno??0)
+    ])));
+    return changes.every(x=>actual.has(x.key)&&Number.isFinite(actual.get(x.key))&&Math.abs(actual.get(x.key)-x.expected)<0.005);
+  }
   function saveData(onSuccess=null){
     if(!onlineSession||!onlineWritable||onlineSession.role==='VISUALIZAR'){
       if(onlineConfirmed){state=copy(onlineConfirmed);OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);}
@@ -2829,6 +2847,7 @@ function renderEquipeDia(){
     }
     if(onlineQueued||onlineSaving){const message='Já existe um salvamento em andamento. Aguarde a confirmação antes de enviar outro apontamento.';showToast(message,true);showSaveFeedback(message,true);return false;}
     showSaveFeedback('Enviando apontamento para gravação no banco…',false,40000);
+    const pendingNightChanges=nightChangesToVerify(onlineConfirmed,state);
     state.obras=OBRAS;state.colaboradores=COLABORADORES;onlineQueued=true;lockOnline(true);
     queueMicrotask(async()=>{
       onlineQueued=false;onlineSaving=true;
@@ -2889,10 +2908,19 @@ function renderEquipeDia(){
         }
         // A gravação já está confirmada pelo banco. Nunca tratar a falha de
         // atualização da tela como uma falha do próprio apontamento.
-        const result=reply?.state?reply:await restoreOnlineSession();
+        // A resposta compacta apenas confirma a transação; para adicional noturno
+        // buscamos o valor efetivo no banco antes de dar a operação como concluída.
+        const result=pendingNightChanges.length?await restoreOnlineSession():(reply?.state?reply:await restoreOnlineSession());
         if(!result||!result.state||typeof result.version!=='string'||!result.session)
           throw new Error('O apontamento foi gravado, mas não foi possível atualizar os dados da tela.');
+        const nightConfirmed=nightValuesMatch(result.state,pendingNightChanges);
         applyOnline(result);onlineSaving=false;
+        if(!nightConfirmed){
+          onlineWritable=false; // Precisa recarregar e conciliar antes de outra escrita.
+          const alert='O adicional noturno selecionado não corresponde ao valor retornado pelo Neon. O apontamento não será marcado como confirmado nesta tela. Confira o histórico e a autorização financeira antes de tentar novamente.';
+          showSaveFeedback(alert,true,60000);showToast(alert,true);
+          return;
+        }
         if(typeof onSuccess==='function'){try{onSuccess(result);}catch(callbackError){console.error('APROAR post-save callback failure',String(callbackError?.message||callbackError));}}
         else render();
         showSaveFeedback(onlineMessage||'Apontamento confirmado e gravado no Neon.');
@@ -2960,10 +2988,21 @@ function renderEquipeDia(){
     try{
       const response=await api('/api/financial-adjust',{method:'POST',body:JSON.stringify(payload)});
       if(!response.ok||typeof response.version!=='string')throw new Error('Resposta incompleta após o salvamento.');
-      onlineVersion=response.version;
-      onlineConfirmed=copy(state);
+      // Releia o resultado verdadeiro do servidor. Não confirme um valor de
+      // adicional noturno apenas porque ele foi escolhido na interface.
+      const current=await restoreOnlineSession();
+      const fieldsToVerify=['financeiro','noturno','acordo','ajudaCusto'];
+      const persisted=changes.every(change=>{
+        const record=current.state.apontamentos.find(a=>String(a.convocacaoId)===String(change.convocacaoId));
+        return !!record?.itens?.some(item=>fieldsToVerify.every(k=>Math.abs(Number(item[k]??0)-Number(change[k]))<0.005));
+      });
+      applyOnline(current);
       onlineSaving=false;render();
-      showToast('Valores financeiros salvos no Neon.');
+      if(!persisted){
+        const message='Os valores do Financeiro não coincidem com o registro recuperado do Neon. Confira o adicional noturno e o histórico antes de repetir o lançamento.';
+        showSaveFeedback(message,true,60000);showToast(message,true);return;
+      }
+      showToast('Valores financeiros conferidos e confirmados no Neon.');
     }catch(error){
       let confirmed=false,loaded=false;
       try{
