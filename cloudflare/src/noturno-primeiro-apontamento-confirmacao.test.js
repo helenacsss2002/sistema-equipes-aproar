@@ -41,7 +41,7 @@ test('Alteração de adicional 90 para 0 ou 50 nunca é confirmada com valor div
 test('Controladoria pode escolher valor em apontamento previamente ajustado pelo Financeiro sem afrouxar permissão do Supervisor',()=>{
  const start=ui.indexOf('  function personRow('),end=ui.indexOf('  // Busca viva independente',start);
  const body=ui.slice(start,end);
- assert.match(body,/clean\(unit\)==='SEBRAE'/);
+ assert.match(body,/String\(unit\|\|''\)\.trim\(\)\.toUpperCase\(\)==='SEBRAE'/);
  assert.match(body,/perfilAtual!=='SUPERVISOR'\|\|!item\?\.financeAdjusted\|\|isApprovedFinancial/);
  const defaultContext={
   colaboradorById:()=>({nome:'TESTE SEBRAE',funcao:'Pedreiro',avulso:'Não'}),
