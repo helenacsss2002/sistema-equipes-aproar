@@ -1007,6 +1007,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
     body.innerHTML = `
       <div class="grid grid-2">
         <div class="card card-pad">
+          ${perfilAtual==='SUPERVISOR'?'<div class="notice info section"><strong>Precisa lançar uma extra após o prazo?</strong> <button type="button" class="btn btn-secondary" id="retro-request-extra">Solicitar liberação da extra</button></div>':''}
           <form id="form-retro">
           ${perfilAtual==='CONTROLADORIA'?`<label class="field-label">Supervisor responsável</label><select class="control" id="retro-sup">${options(RESPONSAVEIS_CONTROLADORIA)}</select>`:''}
             <div class="form-grid">
@@ -1136,6 +1137,10 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
     }
     $('#form-retro').addEventListener('input',storeRetroDraft);
     $('#form-retro').addEventListener('change',storeRetroDraft);
+    if(perfilAtual==='SUPERVISOR')$('#retro-request-extra').onclick=()=>{
+      storeRetroDraft();
+      setView('liberacoes-financeiras');
+    };
     $('#form-retro').noValidate=true;
     $('#form-retro').onsubmit = (e) => {
       e.preventDefault();
@@ -1322,7 +1327,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
     const convs=convocacoesSupervisor().filter(c=>c.dataServico===portalDate&&(portalUnit==='Todas'||c.unidade===portalUnit));
     const total=convs.reduce((v,c)=>v+c.colaboradores.length,0);const pointed=convs.reduce((v,c)=>v+c.colaboradores.filter(id=>apForConv(c.id)?.itens.some(i=>i.colaboradorId===id)).length,0);
     const logo=$('.brand-lockup img').src;
-    $('#main-content').insertAdjacentHTML('afterbegin',`<div class="portal-hero"><img src="${logo}" alt="Logo da APROAR"><div class="portal-heading"><span>Portal do Supervisor</span><h1>Minha equipe</h1></div><div class="portal-hero-end"><div class="portal-date">Data<strong id="portal-date-label">${formatDate(portalDate)}</strong></div><div class="inline-actions"><button class="btn btn-outline" id="portal-logout">Sair</button></div></div></div>
+    $('#main-content').insertAdjacentHTML('afterbegin',`<div class="portal-hero"><img src="${logo}" alt="Logo da APROAR"><div class="portal-heading"><span>Portal do Supervisor</span><h1>Minha equipe</h1></div><div class="portal-hero-end"><div class="portal-date">Data<strong id="portal-date-label">${formatDate(portalDate)}</strong></div><div class="inline-actions"><button type="button" class="btn btn-outline" id="portal-request-extra">Solicitar liberação da extra</button><button class="btn btn-outline" id="portal-logout">Sair</button></div></div></div>
       <div class="portal-tabs">${[['apontamento','Apontamentos'],['convocacao','Convocação'],['disponibilidade','Disponibilidade'],['liberacoes-financeiras','Solicitar liberação']].map(([v,l])=>`<button class="tab-btn ${viewAtual===v?'active':''}" data-portal-view="${v}">${l}</button>`).join('')}</div>
       <div class="portal-filters ${viewAtual==='convocacao'?'portal-filters-convocacao':''}">${field('SUPERVISOR',`<select id="portal-sup" class="control">${options(SUPERVISORES)}</select>`)}${field('Unidade',`<select id="portal-unit" class="control">${options(['Todas',...adminUnits()])}</select>`)}${viewAtual==='convocacao'?'':field('Data',`<input id="portal-date" class="control" type="date" value="${portalDate}">`)}</div>
       <div class="grid grid-3 portal-metrics"><div class="portal-metric"><strong id="portal-total">${total}</strong><span>convocados</span></div><div class="portal-metric"><strong id="portal-pointed">${pointed}</strong><span>apontados</span></div><button class="portal-metric pending" id="portal-pending"><strong id="portal-pending-total">${Math.max(0,total-pointed)}</strong><span>pendentes do dia</span><small>Ver minhas pendências</small></button></div>`);
@@ -1330,6 +1335,11 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
      $('#portal-sup').value=supervisorAtual;$('#portal-unit').value=portalUnit;
     $('#portal-sup').onchange=()=>{supervisorAtual=$('#portal-sup').value;portalUnit=state.convocacoes.find(c=>c.supervisor===supervisorAtual&&c.dataServico===portalDate)?.unidade||portalUnit;sessionStorage.setItem(SESSION_KEY,supervisorAtual);render();};
     $('#portal-unit').onchange=()=>{portalUnit=$('#portal-unit').value;render();};const portalDateInput=$('#portal-date');if(portalDateInput)portalDateInput.onchange=()=>{portalDate=portalDateInput.value;if(viewAtual==='apontamento'&&apontamentoTab==='retroativo'){retroDateSelected=portalDate;$('#retro-data').value=portalDate;syncRetroHeader();}else render();};
+    $('#portal-request-extra').onclick=()=>{
+      const form=viewAtual==='apontamento'?($('#day-form')||$('#form-retro')):null;
+      form?.dispatchEvent(new Event('change',{bubbles:true}));
+      setView('liberacoes-financeiras');
+    };
     $('#portal-logout').onclick=logout;$('#portal-pending').onclick=()=>setView('pendencias');$$('[data-portal-view]').forEach(b=>b.onclick=()=>setView(b.dataset.portalView));
     const unidade=$('#conv-unidade')||$('#disp-unit');if(unidade&&portalUnit!=='Todas'){unidade.value=portalUnit;unidade.onchange?.();}
     const apDate=$('#ap-data');if(apDate)apDate.onchange=()=>{portalDate=apDate.value;render();};
@@ -1708,7 +1718,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
   function renderFinancialReleases(){
     const supervisor=perfilAtual==='SUPERVISOR',canApprove=['CONTROLADORIA','FINANCEIRO'].includes(perfilAtual);
     if(!supervisor&&!canApprove)return setView('inicio');
-    const today=isoToday();
+    const today=supervisor&&/^\d{4}-\d{2}-\d{2}$/.test(portalDate)?portalDate:isoToday();
     $('#main-content').innerHTML=head(supervisor?'Solicitar liberação financeira':'Autorizações financeiras',
       'Após as 10h da terça-feira de pagamento, apenas uma autorização da Controladoria ou do Financeiro permite alterar extras, bonificações, passagens, adicional noturno ou complemento.')
       +(supervisor?'<div class="card card-pad"><h3>Solicitar preenchimento após o prazo</h3>'
@@ -1902,6 +1912,7 @@ function renderEquipeDia(){
  };
  const extraTypes=['Meia diária','Diária','Uma e meia diária','Duas diárias'];
  body.innerHTML=`<h3>Equipe do dia</h3><p style="font-size:12px">Preencha o apontamento normal. Se houver extra, selecione a categoria diretamente na ficha do funcionário.</p>
+  <div class="notice info section"><strong>Precisa lançar uma extra após o prazo?</strong> A Controladoria ou o Financeiro pode autorizar. <button type="button" class="btn btn-secondary" id="day-request-extra">Solicitar liberação da extra</button></div>
  <details class="card card-pad"><summary>Adicionar colaborador / avulso ao apontamento normal</summary><div class="form-grid">${field('Colaborador',`<select class="control" id="day-add-person"><option value="">Selecione</option>${options(COLABORADORES.filter(c=>!c.inativo&&!people.has(c.id)))}</select>`)}${field('Nome do avulso','<input class="control" id="day-avulso-nome">')}${field('Categoria do avulso',avulsoFuncaoSelect('day-avulso-funcao'))}</div><div class="form-actions"><button class="btn btn-secondary" type="button" id="day-add-button">Adicionar à equipe normal</button></div></details>
  <p style="font-size:12px">Para marcar todos como presentes, defina primeiro a obra/serviço de todos os colaboradores exibidos.</p><button class="btn btn-primary" style="width:100%" id="day-all-present">Marcar todos como presentes</button>
  <form id="day-form" class="section"><div class="person-search-wrap"><input id="day-person-search" class="control" type="search" autocomplete="off" placeholder="Buscar na equipe..." aria-label="Buscar colaborador na equipe"></div>
@@ -1912,6 +1923,7 @@ function renderEquipeDia(){
  <div id="day-extra-origin" class="notice info section">Escolha o funcionário. O serviço registrado para ele neste dia será sugerido automaticamente, mas pode ser trocado.</div></details>
  <div class="form-actions"><button class="btn btn-primary">Salvar apontamento do dia</button></div><div class="notice info" id="day-draft-status">O rascunho é armazenado automaticamente a cada alteração neste navegador. Não substitui a confirmação do apontamento.</div></form>`;
  bindServiceRows();bindPersonSearch($('#day-person-search'),()=>$$('#day-form .person-card'));
+ $('#day-request-extra').onclick=()=>{snapshotDayDraft();setView('liberacoes-financeiras');};
  // Cada tecla ou mudança grava instantaneamente no disco do navegador.
  const dayCapture=event=>{
    if(event.target?.closest('#day-form')||event.target?.id==='day-avulso-nome'||event.target?.id==='day-avulso-funcao'||event.target?.id==='day-add-person')
