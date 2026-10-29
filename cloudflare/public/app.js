@@ -257,7 +257,19 @@
     if (perfilAtual === 'SUPERVISOR' && !supervisorAtual) return showLogin();
 
     showApp();
-    if(perfilAtual==='VISUALIZAR'){const pages={dashboard:renderDashboard,relatorios:renderReports,indicadores:renderIndicators,conflitos:renderConflitos,disponibilidade:renderDisponibilidade,indisponibilidade:renderIndisponibilidade};return (pages[viewAtual]||renderDashboard)();}
+    if(perfilAtual==='VISUALIZAR'){
+      const pages={dashboard:renderDashboard,relatorios:renderReports,indicadores:renderIndicators,conflitos:renderConflitos,disponibilidade:renderDisponibilidade,indisponibilidade:renderIndisponibilidade};
+      (pages[viewAtual]||renderDashboard)();
+      // Acesso adicional permanente às três consultas, sem retirar as abas do menu.
+      // O perfil VISUALIZAR usa as versões somente leitura das páginas.
+      const tabs=[['conflitos','Conflitos'],['disponibilidade','Disponibilidade'],['indisponibilidade','Indisponibilidade']];
+      const shortcuts='<nav class="viewer-query-tabs" aria-label="Consultas do Somente visualizar">'+
+        tabs.map(([view,label])=>'<button type="button" data-viewer-query="'+view+'" class="viewer-query-tab'+(viewAtual===view?' active':'')+'"'+(viewAtual===view?' aria-current="page"':'')+'>'+label+'</button>').join('')+
+        '</nav>';
+      $('#main-content').insertAdjacentHTML('afterbegin',shortcuts);
+      $$('[data-viewer-query]').forEach(btn=>btn.onclick=()=>setView(btn.dataset.viewerQuery));
+      return;
+    }
 
     if (perfilAtual === 'CONTROLADORIA') {
       const renderers = { inicio: renderControladoriaInicio, indicadores: renderControladoriaIndicadores, relatorios: renderRelatoriosBase };
@@ -1324,6 +1336,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
     const logo=$('.brand-lockup img').src;
     $('#main-content').insertAdjacentHTML('afterbegin',`<div class="portal-hero"><img src="${logo}" alt="Logo da APROAR"><div class="portal-heading"><span>Portal do Supervisor</span><h1>Minha equipe</h1></div><div class="portal-hero-end"><div class="portal-date">Data<strong id="portal-date-label">${formatDate(portalDate)}</strong></div><div class="inline-actions"><button class="btn btn-outline" id="portal-logout">Sair</button></div></div></div>
       <div class="portal-tabs">${[['apontamento','Apontamentos'],['convocacao','Convocação'],['disponibilidade','Disponibilidade'],['liberacoes-financeiras','Solicitar liberação']].map(([v,l])=>`<button class="tab-btn ${viewAtual===v?'active':''}" data-portal-view="${v}">${l}</button>`).join('')}</div>
+      ${viewAtual==='liberacoes-financeiras'?'':'<div class="portal-release-shortcut"><span>Precisa lançar uma extra ou outro valor após o prazo financeiro?</span><button type="button" class="btn btn-primary" id="portal-request-release">Solicitar liberação financeira</button></div>'}
       <div class="portal-filters ${viewAtual==='convocacao'?'portal-filters-convocacao':''}">${field('SUPERVISOR',`<select id="portal-sup" class="control">${options(SUPERVISORES)}</select>`)}${field('Unidade',`<select id="portal-unit" class="control">${options(['Todas',...adminUnits()])}</select>`)}${viewAtual==='convocacao'?'':field('Data',`<input id="portal-date" class="control" type="date" value="${portalDate}">`)}</div>
       <div class="grid grid-3 portal-metrics"><div class="portal-metric"><strong id="portal-total">${total}</strong><span>convocados</span></div><div class="portal-metric"><strong id="portal-pointed">${pointed}</strong><span>apontados</span></div><button class="portal-metric pending" id="portal-pending"><strong id="portal-pending-total">${Math.max(0,total-pointed)}</strong><span>pendentes do dia</span><small>Ver minhas pendências</small></button></div>`);
     if(portalUnit!=='Todas'&&!adminUnits().includes(portalUnit))portalUnit='Todas';
@@ -1331,6 +1344,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
     $('#portal-sup').onchange=()=>{supervisorAtual=$('#portal-sup').value;portalUnit=state.convocacoes.find(c=>c.supervisor===supervisorAtual&&c.dataServico===portalDate)?.unidade||portalUnit;sessionStorage.setItem(SESSION_KEY,supervisorAtual);render();};
     $('#portal-unit').onchange=()=>{portalUnit=$('#portal-unit').value;render();};const portalDateInput=$('#portal-date');if(portalDateInput)portalDateInput.onchange=()=>{portalDate=portalDateInput.value;if(viewAtual==='apontamento'&&apontamentoTab==='retroativo'){retroDateSelected=portalDate;$('#retro-data').value=portalDate;syncRetroHeader();}else render();};
     $('#portal-logout').onclick=logout;$('#portal-pending').onclick=()=>setView('pendencias');$$('[data-portal-view]').forEach(b=>b.onclick=()=>setView(b.dataset.portalView));
+    const releaseShortcut=$('#portal-request-release');if(releaseShortcut)releaseShortcut.onclick=()=>setView('liberacoes-financeiras');
     const unidade=$('#conv-unidade')||$('#disp-unit');if(unidade&&portalUnit!=='Todas'){unidade.value=portalUnit;unidade.onchange?.();}
     const apDate=$('#ap-data');if(apDate)apDate.onchange=()=>{portalDate=apDate.value;render();};
   }
@@ -1963,7 +1977,7 @@ function renderEquipeDia(){
    if(dayPendingAdds.has(id))continue;
    const c=entry.conv;
    if(!/^\d+$/.test(String(c.id))||apForConv(c.id)?.itens?.some(i=>String(i.colaboradorId)===String(id)))continue;
-   if(perfilAtual==='SUPERVISOR'&&(c.supervisor!==supervisorAtual||c.executor!==supervisorAtual))continue;
+   if(perfilAtual==='SUPERVISOR'&&c.supervisor!==supervisorAtual)continue;
    const card=[...body.querySelectorAll('#day-form .person-card')].find(el=>el.dataset.person===String(id));
    if(!card)continue;
    card.style.position='relative';card.style.paddingTop='42px';
@@ -1986,7 +2000,7 @@ function renderEquipeDia(){
      try{
        try{
          const result=await api('/api/unpointed-convocation-remove',{method:'POST',
-           body:JSON.stringify({convocationId:String(c.id),requestId})});
+           body:JSON.stringify({convocationId:String(c.id),colaboradorId:String(id),requestId})});
          saved=result?.ok===true&&result.requestId===requestId;
        }catch(err){
          if(!err?.status||err.status>=500){
