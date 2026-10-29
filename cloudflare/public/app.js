@@ -1160,6 +1160,27 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       if (!ids.length) return toast('Selecione pelo menos um colaborador.', true);
       const responsavel=$('#retro-sup')?.value||supervisorAtual;
       const itens=readPersonRows(ids);if(!validateAgreementObservations(itens,$('#form-retro')))return;if(!validateExtraAmounts(itens,$('#form-retro')))return;if(!validServices(itens,unidade.value))return;
+      // Nao tentar criar segundo apontamento para a mesma pessoa e turno em
+      // outra unidade. Diferenciar conflitantes dos demais sem perder o rascunho.
+      const turnoRetro=$('#retro-turno').value;
+      const conflitosRetro=ids.flatMap(id=>{
+        const existentes=state.convocacoes.filter(c=>c.dataServico===dataServico
+          &&c.colaboradores.includes(id)&&overlaps(c.turno,turnoRetro)
+          &&!(c.supervisor===responsavel&&c.unidade===unidade.value&&c.turno===turnoRetro));
+        return existentes.map(c=>({nome:colaboradorById(id)?.nome||id,unidade:c.unidade,
+          turno:c.turno,supervisor:c.supervisor,apontado:!!apForConv(c.id)?.itens.some(i=>i.colaboradorId===id)}));
+      });
+      if(conflitosRetro.length){
+        const lista=[...new Set(conflitosRetro.map(x=>x.nome+' — '+x.unidade+' ('+x.turno+', '+x.supervisor+')'
+          +(x.apontado?' — apontamento já confirmado':'')))];
+        const mensagem='Conflito em '+formatDate(dataServico)+': '+lista.slice(0,8).join('; ')
+          +(lista.length>8?'; e mais '+(lista.length-8)+' colaborador(es)':'')
+          +'. Esses colaboradores já possuem convocação no mesmo turno em outro registro. '
+          +'Confira a unidade correta ou retire apenas os nomes conflitantes da seleção. '
+          +'Nenhum apontamento foi salvo ou apagado.';
+        showToast(mensagem,true);showSaveFeedback(mensagem,true,60000);
+        return;
+      }
       if(!applyInlineExtras(itens,dataServico,responsavel))return;
       const obraRef=obraById(itens.find(i=>i.servicos[0]?.obraId)?.servicos[0]?.obraId)||OBRAS.find(o=>o.unidade===unidade.value);
       const matching=state.convocacoes.filter(c=>c.supervisor===responsavel&&c.dataServico===dataServico&&c.unidade===unidade.value&&c.turno===$('#retro-turno').value);
