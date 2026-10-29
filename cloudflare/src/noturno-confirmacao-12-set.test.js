@@ -59,6 +59,7 @@ function driver(pg){
   const text=strings.reduce((out,s,i)=>out+(i?'$'+i:'')+s,'');
   return {text,values:args,then(ok,fail){return pg.query(text,args).then(r=>r.rows).then(ok,fail)}};
  };
+ sql.transaction=queries=>pg.transaction(async tx=>{const rows=[];for(const query of queries)rows.push((await tx.query(query.text,query.values)).rows);return rows;});
  return sql;
 }
 test('Registro retroativo de 12/09 preserva exatamente 0, 50 e 90 após reabrir banco isolado',async()=>{
