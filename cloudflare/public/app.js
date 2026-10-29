@@ -1117,6 +1117,15 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
     $('#retro-avulso-add').onclick=()=>{
       const nome=$('#retro-avulso-name').value.trim(),funcao=$('#retro-avulso-funcao').value;
       if(!nome)return toast('Informe o nome do colaborador avulso.',true);
+      // O Neon possui indice unico para o nome do colaborador. Reaproveitar
+      // cadastro existente em vez de tentar inserir avulso duplicado.
+      const jaCadastrado=COLABORADORES.find(c=>clean(c.nome)===clean(nome));
+      if(jaCadastrado){
+        const aviso='O colaborador '+jaCadastrado.nome+' já está cadastrado. '
+          +'Selecione esse nome na lista do retroativo em vez de criar um segundo cadastro. '
+          +'Os dados preenchidos permanecem no formulário.';
+        showToast(aviso,true);showSaveFeedback(aviso,true,30000);return;
+      }
       if(!funcao)return toast('Selecione Profissional ou Servente para o avulso.',true);
       if(!$('#retro-data').value||$('#retro-data').value>isoToday())return toast('Selecione uma data retroativa válida.',true);
       // Guardar todos os campos atuais ANTES de atualizar a lista de seleção.
