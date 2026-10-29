@@ -6,6 +6,7 @@ import {financialDeadline,afterFinancialDeadline,validRequest,releaseState,relea
 import {validateFinancialPayload,buildFinancialOperations} from './financial-adjust.js';
 import {validateComplementConfirmation,buildComplementConfirmationOperations} from './financial-approval.js';
 import {login,identity,sameOrigin,equalSecret,logoutCookie} from './auth.js';
+import {neonQuotaExceeded,neonQuotaPublicMessage} from './neon-quota.js';
 import {writes,writeControls,stage,permittedProductionDeletion} from './environment.js';
 import {consultarTrello,sincronizarTrello,unidadeCard} from './trello.js';
 import {isSafeUnitName} from './unit-label.js';
@@ -441,6 +442,10 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
   if(env.ASSETS){const response=await env.ASSETS.fetch(request);const headers=new Headers(response.headers);for(const [k,v] of Object.entries(common))headers.set(k,v);headers.set('content-security-policy',"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");return new Response(response.body,{status:response.status,headers});}
   return json({message:'Interface ainda não publicada.'},404);
  }catch(e){
+  if(neonQuotaExceeded(e)){
+   console.error('APROAR Neon monthly quota reached',JSON.stringify({route:path,code:'NEON_QUOTA_EXCEEDED',role:session?.role||'unknown'}));
+   return json({error:neonQuotaPublicMessage,code:'NEON_QUOTA_EXCEEDED'},503);
+  }
   if(path==='/api/login'){console.error('APROAR login failure',JSON.stringify({stage:loginStage,type:String(e?.name||'Error').slice(0,60),code:String(e?.code||'none').slice(0,60),status:Number(e?.status||0)}));if(e.status)return json({error:e.message,...(e.details?{details:e.details}:{})},e.status);return json({error:'Falha interna no login. Etapa: '+loginStage+'. Consulte o registro do Worker.'},502);}
   if(path.startsWith('/api/trello/')){
    console.error('APROAR Trello route failure', JSON.stringify({

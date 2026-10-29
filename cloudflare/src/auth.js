@@ -1,3 +1,4 @@
+import {neonQuotaExceeded,neonQuotaPublicMessage} from './neon-quota.js';
 const encode=v=>btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify(v)))).replaceAll('+','-').replaceAll('/','_').replace(/=+$/,'');
 const decode=v=>JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(v.replaceAll('-','+').replaceAll('_','/')),c=>c.charCodeAt(0))));
 const secretKey=env=>env.SESSION_SECRET||env.CONNECTION_CHECK_TOKEN;
@@ -12,7 +13,8 @@ async function verifySupervisorPassword(sql,user,password){
   // Never return password hashes or perform password comparisons in the browser.
   rows=await sql`SELECT (password_hash_bcrypt IS NOT NULL AND password_hash_bcrypt=public.crypt(${password},password_hash_bcrypt)) AS password_matches
    FROM public.aproar_supervisor_access WHERE supervisor=${user} AND active=true LIMIT 1`;
- }catch{
+ }catch(error){
+  if(neonQuotaExceeded(error))throw Object.assign(Error(neonQuotaPublicMessage),{status:503,code:'NEON_QUOTA_EXCEEDED'});
   throw Object.assign(Error('Não foi possível validar a chave de acesso. Confira a configuração do Neon.'),{status:503});
  }
  if(rows?.[0]?.password_matches!==true)
