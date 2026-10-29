@@ -29,6 +29,17 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
  for(const key of ['colaboradores','obras','convocacoes','apontamentos','indisponibilidades','conflitosTentados'])if(!Array.isArray(next[key]))fail('Dados incompletos. Atualize a página.');
  const staff=new Map(next.colaboradores.map(p=>[String(p.id),p])),oldStaff=new Map(base.colaboradores.map(p=>[p.id,p])),works=new Map(next.obras.map(o=>[String(o.id),o]));
  if(staff.size!==next.colaboradores.length||works.size!==next.obras.length)fail('Há identificadores repetidos.');
+ // Prevenir erro 23505 de nome unico do Neon, inclusive em avulsos retroativos
+ // restaurados de rascunho; nenhum cadastro original deve ser sobrescrito.
+ const nomesCadastrados=new Map();
+ for(const p of next.colaboradores){
+   const nome=String(p.nome||'').trim().toUpperCase();
+   if(!nome)continue;
+   const outro=nomesCadastrados.get(nome);
+   if(outro&&outro!==String(p.id))
+     fail('O colaborador '+p.nome+' já possui cadastro. Selecione o cadastro existente no retroativo; não crie outro avulso. Nenhum registro foi alterado.',409);
+   nomesCadastrados.set(nome,String(p.id));
+ }
  const staffFields=['nome','funcao','custo','moradia','inativo','categoria','avulso'];
  for(const p of next.colaboradores){const old=oldStaff.get(String(p.id));if(old&&same(field(old,staffFields),field(p,staffFields)))continue;if(session.role!=='CONTROLADORIA'&&(old||session.role!=='SUPERVISOR'||p.avulso!=='Sim'))fail('Sem permissão para alterar colaboradores.',403);if(!old&&numericId(p.id))fail('Cadastro novo com identificador inválido.');if(!finite(p.custo)||Number(p.custo)<=0)fail('Custo diário inválido.');add('colaboradores',old?'update':'insert',p.id,{nome:required(p.nome,'Nome'),funcao:required(p.funcao,'Função'),valor_diaria:money(p.custo),local_moradia:String(p.moradia||''),ativo:!p.inativo,categoria_diaria:String(p.categoria||''),avulso:p.avulso==='Sim'?'Sim':'Não'});}
  if([...oldStaff.keys()].some(k=>!staff.has(k)))fail('Use a inativação para preservar o histórico do colaborador.');
