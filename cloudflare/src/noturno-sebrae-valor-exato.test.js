@@ -54,6 +54,7 @@ test('Ficha do SEBRAE seleciona precisamente 0, 50 ou 90; sem apontamento o padr
   colaboradorById:()=>({id:'131',nome:'ANTONIO FERNANDO DA SILVA',funcao:'PEDREIRO',avulso:'Não'}),
   itemServices:(item,id)=>item?.servicos?.length?item.servicos:[{obraId:id,periodo:'Integral'}],
   extraRecordFor:()=>null,
+  STATUS_OPTIONS:['Presente (Integral)','Presente (Só Manhã)','Presente (Só Tarde)','Falta','Atestado'],
   EXTRA_OPTIONS:['Não','Diária'],
   APONTAMENTO_EXTRA_OPTIONS:[['Não','Não'],['Diária','Diária']],
   OBRAS:[{id:'1',nome:'APRL009 - REFORMA DO 6° ANDAR - SEBRAE',unidade:'SEBRAE'}],
