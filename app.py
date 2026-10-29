@@ -13913,7 +13913,7 @@ elif modo_visualizador:
     with c_view_titulo:
         st.markdown("## 👁️ Painel Administrativo — Visualização")
         st.caption(
-            "Dashboard, Relatórios e Indicadores disponíveis para consulta."
+            "Dashboard, Relatórios, Indicadores, Conflitos, Disponibilidade e Indisponibilidade disponíveis para consulta."
         )
 
     with c_view_sair:
@@ -13931,6 +13931,9 @@ elif modo_visualizador:
             "🎛️ DASHBOARD",
             "📊 RELATÓRIOS",
             "📈 INDICADORES",
+            "🚨 CONFLITOS",
+            "👥 DISPONIBILIDADE",
+            "🚫 INDISPONIBILIDADE",
         ],
         horizontal=True,
         label_visibility="collapsed",
@@ -13938,17 +13941,67 @@ elif modo_visualizador:
     )
 
     if secao_view == "🎛️ DASHBOARD":
-        render_dashboard_consulta(
-            "view_dash"
-        )
+        render_dashboard_consulta("view_dash")
     elif secao_view == "📊 RELATÓRIOS":
-        render_relatorio_visualizador(
-            "view_rel"
+        render_relatorio_visualizador("view_rel")
+    elif secao_view == "📈 INDICADORES":
+        render_indicadores_cumprimento("view_ind")
+    elif secao_view == "🚨 CONFLITOS":
+        cabecalho_pagina_aproar(
+            "Conflitos de convocação",
+            "Consulta de sobreposições de turnos. A resolução é exclusiva da Controladoria.",
+            categoria="OPERAÇÃO",
         )
-    else:
-        render_indicadores_cumprimento(
-            "view_ind"
+        conflitos_view = listar_conflitos_convocacao_pendentes(90)
+        st.metric("CONFLITOS PENDENTES", sum(len(p) for _, p in conflitos_view))
+        if not conflitos_view:
+            st.info("Nenhum conflito de convocação pendente.")
+        for registro, pendencias in conflitos_view:
+            colaborador = obter_colaborador_por_id(registro.get("colaborador_id"))
+            nome = (colaborador or {}).get("nome") or next(
+                (c.get("colaborador_nome") for c in pendencias if c.get("colaborador_nome")),
+                "Colaborador não identificado",
+            )
+            engenheiro = str(registro.get("engenheiro") or "N/A")
+            with st.container(border=True):
+                st.markdown(f"**{nome}**")
+                st.caption(f"Data: {registro.get('data') or '-'} • Convocado por: {engenheiro}")
+                for conflito in pendencias:
+                    st.warning(
+                        f"Turno original: {conflito.get('turno_original') or turno_da_convocacao(registro)}"
+                        f" • Tentativa por: {conflito.get('tentativa_por') or 'N/A'}"
+                        f" • Turno tentado: {conflito.get('turno_tentativa') or '-'}"
+                        f" • Unidade: {conflito.get('unidade_tentativa') or '-'}"
+                    )
+    elif secao_view == "👥 DISPONIBILIDADE":
+        render_aba_disponibilidade("view")
+    elif secao_view == "🚫 INDISPONIBILIDADE":
+        cabecalho_pagina_aproar(
+            "Indisponibilidade",
+            "Consulta dos períodos cadastrados, sem opção de inclusão ou exclusão.",
+            categoria="OPERAÇÃO",
         )
+        registros_view = _carregar_indisponibilidades_disponibilidade() or []
+        registros_view.sort(key=lambda x: (str(x.get("inicio") or ""), str(x.get("fim") or "")), reverse=True)
+        if not registros_view:
+            st.info("Nenhuma indisponibilidade registrada.")
+        else:
+            linhas_view = []
+            for item in registros_view:
+                colab = obter_colaborador_por_id(item.get("colaborador_id"))
+                nome = (
+                    str((colab or {}).get("nome") or "").strip()
+                    or str(item.get("colaborador_nome") or "").strip()
+                    or "Colaborador não identificado"
+                )
+                linhas_view.append({
+                    "Colaborador": nome,
+                    "Motivo": item.get("motivo") or "Indisponível",
+                    "Início": str(item.get("inicio") or ""),
+                    "Fim": str(item.get("fim") or ""),
+                    "Observação": item.get("observacao") or "",
+                })
+            st.dataframe(linhas_view, use_container_width=True, hide_index=True)
 
 elif modo_campo:
     # =====================================================================
