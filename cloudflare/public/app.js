@@ -185,7 +185,7 @@
   function navConfig() {
     const item=(view,label,icon,group='')=>({view,label,icon,group});
     if(perfilAtual==='CONTROLADORIA') return [item('inicio','Início','⌂'),item('convocacao','Convocação','▤','OPERAÇÃO'),item('liberacoes-financeiras','Autorizações financeiras','◌'),item('conflitos','Conflitos','!'),item('apontamento','Apontamento','✓'),item('whatsapp','WhatsApp','◌'),item('disponibilidade','Disponibilidade','♙'),item('indisponibilidade','Indisponibilidade','⊘'),item('dashboard','Dashboard','▦','ANÁLISE E FECHAMENTO'),item('relatorios','Relatórios','▥'),item('indicadores','Indicadores','↗'),item('configuracoes','Configurações','⚙','SISTEMA')];
-    if(perfilAtual==='VISUALIZAR') return [item('dashboard','Dashboard','▦'),item('relatorios','Relatórios','▥'),item('indicadores','Indicadores','↗')];
+    if(perfilAtual==='VISUALIZAR') return [item('dashboard','Dashboard','▦'),item('relatorios','Relatórios','▥'),item('indicadores','Indicadores','↗'),item('conflitos','Conflitos','!'),item('disponibilidade','Disponibilidade','♙'),item('indisponibilidade','Indisponibilidade','⊘')];
     if(perfilAtual==='FINANCEIRO') return [item('inicio','Início','⌂'),item('financeiro','Pagamentos','$'),item('liberacoes-financeiras','Autorizações financeiras','◌'),item('historico-financeiro','Histórico de registros','▤'),item('ausencias','Faltas / Atestados','⊘'),item('relatorios','Relatório','▥')];
     return [item('inicio','Início','⌂'),item('convocacao','Convocação','▤'),item('apontamento','Apontamento','✓'),item('liberacoes-financeiras','Solicitar liberação','◌'),item('disponibilidade','Disponibilidade','♙'),item('pendencias','Pendências','!')];
   }
@@ -257,7 +257,7 @@
     if (perfilAtual === 'SUPERVISOR' && !supervisorAtual) return showLogin();
 
     showApp();
-    if(perfilAtual==='VISUALIZAR'){const pages={dashboard:renderDashboard,relatorios:renderReports,indicadores:renderIndicators};return (pages[viewAtual]||renderDashboard)();}
+    if(perfilAtual==='VISUALIZAR'){const pages={dashboard:renderDashboard,relatorios:renderReports,indicadores:renderIndicators,conflitos:renderConflitos,disponibilidade:renderDisponibilidade,indisponibilidade:renderIndisponibilidade};return (pages[viewAtual]||renderDashboard)();}
 
     if (perfilAtual === 'CONTROLADORIA') {
       const renderers = { inicio: renderControladoriaInicio, indicadores: renderControladoriaIndicadores, relatorios: renderRelatoriosBase };
@@ -1429,6 +1429,17 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
     };$('#disp-data').onchange=refresh;$('#disp-turno').onchange=refresh;refresh();
   }
   function renderIndisponibilidade(){
+    if(perfilAtual==='VISUALIZAR'){
+      // Consulta sem formularios e sem botoes de exclusao: nunca oferece escrita.
+      $('#main-content').innerHTML=head('Indisponibilidade','Consulta de férias, atestados e afastamentos. Acesso somente para visualizar.')+
+        '<div class="section">'+table(['Colaborador','Motivo','Início','Fim','Observação'],
+          state.indisponibilidades.map(x=>[
+            escapeHtml(colaboradorById(x.colaboradorId)?.nome||'Colaborador não encontrado'),
+            escapeHtml(x.motivo||''),formatDate(x.inicio),formatDate(x.fim),
+            escapeHtml(x.obs||x.observacao||'')
+          ]))+'</div>';
+      return;
+    }
     $('#main-content').innerHTML=head('Indisponibilidade','Férias, atestados e afastamentos bloqueiam novas convocações nas datas cadastradas.')+`<form id="ind-form" class="card card-pad"><div class="form-grid">${field('Colaborador',`<select class="control" id="ind-colab">${options(COLABORADORES.filter(c=>!c.inativo))}</select>`)}${field('Motivo',`<select class="control" id="ind-motivo">${options(['Férias','Atestado','Afastamento','Outro'])}</select>`)}${field('Início',`<input class="control" type="date" id="ind-ini" value="${perfilAtual==='SUPERVISOR'?portalDate:isoToday()}" required>`)}${field('Fim',`<input class="control" type="date" id="ind-fim" value="${perfilAtual==='SUPERVISOR'?portalDate:isoToday()}" required>`)}${field('Observação','<input class="control" id="ind-obs">')}</div><div class="form-actions"><button class="btn btn-primary">Registrar indisponibilidade</button></div></form><div class="section">${table(['Colaborador','Motivo','Início','Fim','Observação','Ação'],state.indisponibilidades.map(x=>[escapeHtml(colaboradorById(x.colaboradorId)?.nome),x.motivo,formatDate(x.inicio),formatDate(x.fim),escapeHtml(x.obs),`<button class="link-btn" data-remove-ind="${x.id}">Excluir</button>`]))}</div>`;
     $('#ind-form').onsubmit=e=>{e.preventDefault();if($('#ind-fim').value<$('#ind-ini').value)return toast('O fim deve ser igual ou posterior ao início.',true);state.indisponibilidades.push({id:uid('ind'),colaboradorId:$('#ind-colab').value,motivo:$('#ind-motivo').value,inicio:$('#ind-ini').value,fim:$('#ind-fim').value,obs:$('#ind-obs').value});audit('Registro de indisponibilidade');saveData();renderIndisponibilidade();};$$('[data-remove-ind]').forEach(b=>b.onclick=()=>{state.indisponibilidades=state.indisponibilidades.filter(x=>x.id!==b.dataset.removeInd);audit('Exclusão de indisponibilidade');saveData();renderIndisponibilidade();});
   }
@@ -1444,6 +1455,23 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
     return state.convocacoes.filter(c=>c.dataServico===x.dataServico&&c.colaboradores.includes(x.colaboradorId)&&c.unidade!==x.unidade&&overlaps(c.turno,x.turno)).map(c=>({...x,key:String(index),colaboradorNome:colaboradorById(x.colaboradorId)?.nome,supervisorExistente:c.supervisor,unidadeExistente:c.unidade,turnoExistente:c.turno}));
   });}
   function renderConflitos(){const attempts=convocationConflictRows(),pending=attempts.filter(x=>!x.resolvido);
+    if(perfilAtual==='VISUALIZAR'){
+      // A consulta exibe os conflitos, mas nao pode conferi-los nem abrir telas de alteracao.
+      $('#main-content').innerHTML=head('Conflitos','Consulta de tentativas de convocação bloqueadas. Acesso somente para visualizar.')+
+        metric('Conflitos pendentes',pending.length,'tentativas aguardando conferência')+
+        '<div class="section">'+table([
+          'Data do serviço','Colaborador','Quem tentou convocar','Unidade solicitada','Turno solicitado',
+          'Já convocado por','Unidade original','Turno original','Tentativa registrada em','Situação'
+        ],attempts.slice().reverse().map(x=>[
+          formatDate(x.dataServico),
+          escapeHtml(x.colaboradorNome||colaboradorById(x.colaboradorId)?.nome||''),
+          escapeHtml(x.supervisor||''),escapeHtml(x.unidade||''),escapeHtml(x.turno||''),
+          escapeHtml(x.supervisorExistente||''),escapeHtml(x.unidadeExistente||''),
+          escapeHtml(x.turnoExistente||''),formatDateTime(x.data),
+          x.resolvido?'Conferido':'Pendente'
+        ]))+'</div>';
+      return;
+    }
     $('#main-content').innerHTML=head('Conflitos','Tentativas bloqueadas: um colaborador já convocado em outra unidade, na mesma data e em turno sobreposto.')+metric('Conflitos pendentes',pending.length,'tentativas que precisam de conferência')+`<div class="section">${table(['Data do serviço','Colaborador','Quem tentou convocar','Unidade solicitada','Turno solicitado','Já convocado por','Unidade original','Turno original','Tentativa registrada em','Situação','Ação'],attempts.slice().reverse().map(x=>[formatDate(x.dataServico),escapeHtml(x.colaboradorNome||colaboradorById(x.colaboradorId)?.nome),escapeHtml(x.supervisor),escapeHtml(x.unidade),escapeHtml(x.turno),escapeHtml(x.supervisorExistente),escapeHtml(x.unidadeExistente),escapeHtml(x.turnoExistente),formatDateTime(x.data),x.resolvido?'Conferido':'Pendente',x.resolvido?'—':`<button class="link-btn" data-resolve-conflict="${escapeHtml(x.key)}">Marcar como conferido</button>`]))}</div><div class="notice info section">A tentativa foi bloqueada: a convocação original permanece válida. Indisponibilidade cadastrada é acompanhada na aba Indisponibilidade. Turnos sem sobreposição não geram conflito.</div><div class="form-actions"><button class="btn btn-primary" id="conf-edit">Abrir convocações</button></div>`;
     $('#conf-edit').onclick=()=>setView('convocacao');$$('[data-resolve-conflict]').forEach(b=>b.onclick=()=>{const x=(state.conflitosTentados||[]).find((x,index)=>(x.id||String(index))===b.dataset.resolveConflict);if(!x)return;x.resolvido=true;x.conferidoEm=now().toISOString();audit('Conflito conferido',x.colaboradorId);saveData();renderConflitos();});
   }
