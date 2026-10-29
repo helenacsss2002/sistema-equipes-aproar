@@ -43,9 +43,9 @@ test('convocacao e justificativa automatica continuam prevalecendo',()=>{
   assert.deepEqual(pending(state),[]);
 });
 test('interface de dispensa so aparece na Controladoria',()=>{
-  assert.match(app,/function renderIndicatorManualPanel\(missing,inicio,fim\)\{\s*if\(perfilAtual!=='CONTROLADORIA'\)return '';/);
-  assert.match(app,/renderIndicatorManualPanel\(missing,reportFilters\.inicio,reportFilters\.fim\)/);
-  assert.match(app,/bindIndicatorManualPanel\(missing,reportFilters\.inicio,reportFilters\.fim\)/);
+  assert.match(app,/function renderIndicatorManualPanel\(missing,pendingAp,inicio,fim\)\{\s*if\(perfilAtual!=='CONTROLADORIA'\)return '';/);
+  assert.match(app,/renderIndicatorManualPanel\(missing,pendingAp,reportFilters\.inicio,reportFilters\.fim\)/);
+  assert.match(app,/bindIndicatorManualPanel\(missing,pendingAp,reportFilters\.inicio,reportFilters\.fim\)/);
 });
 test('servidor exige perfil Controladoria, origem valida e grava auditoria',()=>{
   const start=api.indexOf("if(path==='/api/indicator-dismissal'");
@@ -62,4 +62,8 @@ test('servidor exige perfil Controladoria, origem valida e grava auditoria',()=>
   assert.doesNotMatch(route,/action:'delete'/);
   assert.doesNotMatch(route,/table:'(?:convocacoes|apontamentos|servicos_apontamento)'/);
   assert.match(loader,/dispensasPendenciaConvocacao:Array\.isArray\(config\.dispensasPendenciaConvocacao\)/);
+  assert.match(loader,/dispensasPendenciaApontamento:Array\.isArray\(config\.dispensasPendenciaApontamento\)/);
+  assert.match(app,/dispensasPendenciaApontamento/);
+  assert.match(route,/const field=tipo==='convocacao'\?'dispensasPendenciaConvocacao':'dispensasPendenciaApontamento'/);
+  assert.match(route,/Não existe apontamento pendente/);
 });
