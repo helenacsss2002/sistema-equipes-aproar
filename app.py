@@ -3069,6 +3069,7 @@ def _garantir_estrutura_cadastros_admin():
                            v.valor_adicional_noturno,
                            0
                        ) = 0
+                       AND COALESCE(v.migracao_sebrae_noturno_v2, FALSE) = FALSE
                        AND v.status IN (
                            'Presente (Integral)',
                            'Presente (Só Manhã)',
@@ -4918,12 +4919,10 @@ def valor_extra_registro(registro):
 
 
 def valor_adicional_noturno_registro(registro):
-    """
-    Regra definitiva:
-    qualquer presença no SEBRAE recebe R$ 90,00 de adicional noturno.
+    """Respeita o adicional noturno registrado, inclusive zero.
 
-    Se um valor maior tiver sido lançado manualmente no futuro, ele é
-    preservado.
+    R$ 90,00 pode ser sugestão inicial para um NOVO lançamento no SEBRAE,
+    mas nunca substitui uma escolha já salva pelo supervisor.
     """
     registro = registro or {}
 
@@ -4943,32 +4942,8 @@ def valor_adicional_noturno_registro(registro):
         )
     )
 
-    if registro_tem_servico_sebrae(
-        registro
-    ):
-        # Enquanto o Financeiro não ajustar o lançamento, aplica o padrão
-        # de R$ 90,00. Depois de um ajuste financeiro, o valor gravado passa
-        # a prevalecer em todos os portais/relatórios, inclusive se for menor
-        # que o padrão ou zero.
-        if bool(
-            registro.get(
-                "custo_pago_definido_financeiro"
-            )
-        ):
-            return round(
-                max(0.0, salvo),
-                2,
-            )
-
-        return round(
-            max(
-                float(
-                    VALOR_ADICIONAL_NOTURNO_SEBRAE
-                ),
-                salvo,
-            ),
-            2,
-        )
+    if registro_tem_servico_sebrae(registro):
+        return round(max(0.0, salvo), 2)
 
     # Adicional noturno existe exclusivamente no SEBRAE.
     return 0.0
@@ -12380,14 +12355,8 @@ def render_apontamento_operacional(engenheiro_fixo=None, key_prefix="apont"):
                     )
 
                 if adicional_noturno_key not in st.session_state:
-                    st.session_state[adicional_noturno_key] = (
+                    st.session_state[adicional_noturno_key] = float(
                         adicional_noturno_atual
-                        if adicional_noturno_atual > 0
-                        else (
-                            VALOR_ADICIONAL_NOTURNO_SEBRAE
-                            if eh_sebrae_card
-                            else 0.0
-                        )
                     )
 
                 categoria_txt = categoria_diaria_colaborador(colab)
@@ -18624,10 +18593,8 @@ elif modo_campo:
                         if eh_sebrae_card:
                             pg3, pg4 = st.columns([1, 1])
                             if adicional_noturno_key not in st.session_state:
-                                st.session_state[adicional_noturno_key] = (
+                                st.session_state[adicional_noturno_key] = float(
                                     adicional_noturno_atual
-                                    if adicional_noturno_atual > 0
-                                    else VALOR_ADICIONAL_NOTURNO_SEBRAE
                                 )
                             with pg3:
                                 valor_acordo = st.number_input(
