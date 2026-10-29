@@ -623,6 +623,15 @@ input.control[type="search"], input.control.service-work, #r-obra-combo {text-ov
 /* Quarta aba efetiva do Portal: pedido de autorização financeira.
    No celular, duas linhas com botões legíveis em vez de quatro botões estreitos. */
 .supervisor-layout .portal-tabs { grid-template-columns:repeat(4,minmax(0,1fr)); }
+/* Consultas adicionais visíveis no perfil Somente visualizar. */
+.viewer-query-tabs { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 18px; }
+.viewer-query-tab { min-height:40px; padding:9px 13px; border-radius:8px; border:1px solid #c8d5e8; background:#fff; color:#214363; cursor:pointer; font:inherit; font-weight:600; }
+.viewer-query-tab.active { background:#245dd3; color:#fff; border-color:#245dd3; }
+.viewer-query-tab:focus-visible { outline:3px solid #8ab3df; outline-offset:2px; }
+.portal-release-shortcut {display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; background:#f2f7ff; padding:13px 16px; margin-top:12px; border:1px solid #cdddf2; border-radius:10px; font-size:13px; color:#1b4367;}
+.portal-release-shortcut .btn {min-height:40px;}
+@media(max-width:600px) { .viewer-query-tabs {display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;} .viewer-query-tab {font-size:11px;padding:9px 4px;overflow-wrap:anywhere;} .portal-release-shortcut .btn {width:100%;} }
+
 .supervisor-layout .portal-tabs .tab-btn { min-width:0; white-space:normal; overflow-wrap:anywhere; }
 @media(max-width:600px) {
   .supervisor-layout .portal-tabs {grid-template-columns:repeat(2,minmax(0,1fr));}
