@@ -15,7 +15,7 @@ test('Adicional noturno selecionado (0, 50, 90) é preservado em tela e relatór
   assert.equal(ctx.calc({status:'Presente (Integral)',noturno:value},{}),value);
  }
  assert.equal(ctx.calc({status:'Falta',noturno:90},{}),0);
- assert.match(app,/item&&Number\.isFinite\(Number\(item\.noturno\)\)\?Number\(item\.noturno\):90/);
+ assert.match(app,/item\?\.noturno!=null&&Number\.isFinite\(Number\(item\.noturno\)\)\?Number\(item\.noturno\):0/);
  assert.doesNotMatch(app,/else if\(card\.dataset\.unit==='SEBRAE'&&Number\(night\.value\)===0\)/);
  assert.match(operations,/const night=isPresent&&hasSebrae\?Number\(i\.noturno\?\?0\):0/);
  assert.doesNotMatch(operations,/Math\.max\(90,Number\(i\.noturno\)/);
