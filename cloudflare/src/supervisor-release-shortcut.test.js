@@ -11,8 +11,8 @@ test('Portal do Supervisor tem atalho visível mesmo com sidebar oculta',()=>{
  assert(start>0&&end>start);
  const s=ui.slice(start,end);
  assert.match(s,/id="portal-request-extra">Solicitar liberação da extra<\/button>/);
- assert.match(s,/\\$\\('#portal-request-extra'\\)\.onclick=/);
- assert.match(s,/setView\\('liberacoes-financeiras'\\)/);
+ assert.match(s,/\$\('#portal-request-extra'\\)\.onclick=/);
+ assert.match(s,/setView\('liberacoes-financeiras'\\)/);
  assert.match(s,/form\?\.dispatchEvent\(new Event\('change',\{bubbles:true\}\)\)/);
 });
 test('Supervisor encontra atalho no apontamento normal e não salva apontamento sem clicar no Salvar',()=>{
@@ -20,16 +20,16 @@ test('Supervisor encontra atalho no apontamento normal e não salva apontamento 
  assert(start>0&&end>start);
  const s=ui.slice(start,end);
  assert.match(s,/id="day-request-extra">Solicitar liberação da extra/);
- assert.match(s,/\\$\\('#day-request-extra'\\)\.onclick=\(\)=>\{snapshotDayDraft\(\);setView\('liberacoes-financeiras'\);\}/);
+ assert.match(s,/\$\('#day-request-extra'\\)\.onclick=\(\)=>\{snapshotDayDraft\(\);setView\('liberacoes-financeiras'\);\}/);
  assert.match(s,/Salvar apontamento do dia/);
- assert.doesNotMatch(s,/\\$\\('#day-request-extra'\\)\.onclick=[^;]*saveData/);
+ assert.doesNotMatch(s,/\$\('#day-request-extra'\\)\.onclick=[^;]*saveData/);
 });
 test('Retroativo salva somente rascunho ao abrir solicitação',()=>{
  const start=ui.indexOf('  function renderApontamentoRetroativo()'),end=ui.indexOf('  function renderExtras(){',start);
  assert(start>0&&end>start);
  const s=ui.slice(start,end);
  assert.match(s,/id="retro-request-extra">Solicitar liberação da extra/);
- assert.match(s,/\\$\\('#retro-request-extra'\\)\.onclick=\(\)=>\{/);
+ assert.match(s,/\$\('#retro-request-extra'\\)\.onclick=\(\)=>\{/);
  assert.match(s,/storeRetroDraft\(\);\s*setView\('liberacoes-financeiras'\)/);
  assert.match(s,/Salvar apontamento retroativo/);
 });
@@ -43,5 +43,5 @@ test('Formulário de solicitação abre na data do serviço do Supervisor',()=>{
  assert.match(s,/id="fr-date"/);
  assert.match(s,/api\/financial-release\/request/);
  assert.match(s,/api\/financial-release\/decide/);
- assert.match(s,/['"]Solicitar autorização['"]/);
+ assert.match(s,/>Solicitar autorização<\/button>/);
 });
