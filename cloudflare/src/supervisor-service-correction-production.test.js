@@ -94,10 +94,23 @@ test('Uma extra independente pode ser realocada entre serviços com vínculo ant
     VALUES('3','1','OBRA PRINCIPAL','SEBRAE','Integral',true)`);
   const db=await readDatabase(sql),next=structuredClone(visibleState(db,supervisor));
   next.extras[0].obraId='2';
+  const id='22222222-3333-4444-8555-666666666666';
+  db.releaseEvents=[
+    {acao:'SOLICITACAO_LIBERACAO_FINANCEIRA',usuario:'VICTOR',ocorrido_em:'2026-11-03T13:00:01Z',
+      contexto:{requestId:id,supervisor:'VICTOR',colaboradorId:'1',dataServico:'2026-10-30',fields:['Extra'],reason:'Corrigir obra da extra lançada'}},
+    {acao:'LIBERACAO_FINANCEIRA_AUTORIZADA',usuario:'FINANCEIRO',ocorrido_em:'2026-11-03T13:00:03Z',contexto:{requestId:id}}
+  ];
   const ops=buildOperations(db,next,supervisor,'2026-11-03T17:02:00Z');
-  // Pós-prazo exige liberação; testar apenas as validações de vínculo após autorização.
-  assert.equal(ops.some(x=>x.action==='delete'&&x.table==='servicos_apontamento'),false);
- }catch(error){
-  if(!/Prazo financeiro encerrado/.test(String(error.message)))throw error;
+  assert.equal(ops.filter(x=>x.action==='delete'&&x.table==='servicos_apontamento').length,1);
+  assert.equal(permittedProductionDeletion(env,supervisor,db,ops),true);
+  await pg.query('SELECT aproar_web_apply($1,$2,$3,$4,$5::jsonb)',[
+    db.version,webcrypto.randomUUID(),'VICTOR','qa-extra-realocada',JSON.stringify(ops)]);
+  const after=await readDatabase(sql);
+  assert.equal(after.raw.apontamentos.length,3);
+  assert.equal(after.raw.convocacoes.length,3);
+  assert.equal(after.state.extras.length,1);
+  assert.equal(after.state.extras[0].obraId,'2');
+  assert.equal(after.raw.servicos_apontamento.some(x=>x.convocacao_id==='3'&&x.obra_id==='2'),true);
+  assert.equal(after.raw.auditoria.some(x=>x.acao==='CORRECAO_VINCULO_SERVICO_APONTAMENTO'),true);
  }finally{await pg.close();}
 });
