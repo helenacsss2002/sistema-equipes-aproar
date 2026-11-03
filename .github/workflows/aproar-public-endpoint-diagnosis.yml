@@ -14,7 +14,7 @@ jobs:
         run: |
           set -euo pipefail
           URL="https://sistema-equipes-aproar.helenacsss2002.workers.dev"
-          for path in / /app.js /api/session; do
+          for path in / /app.js /api/health /api/session; do
             echo "Checking $URL$path"
             result=$(curl -sS -L --connect-timeout 10 --max-time 20 -o /tmp/aproar-body -w 'http=%{http_code} dns=%{time_namelookup} tls=%{time_appconnect} total=%{time_total} bytes=%{size_download}' "$URL$path") || {
               echo "FAIL: network/TLS/DNS error for $path"
@@ -28,6 +28,14 @@ jobs:
             if [ "$path" = /app.js ]; then
               echo "$result" | grep -q 'http=200' || { echo "FAIL: app.js missing"; exit 1; }
               grep -q 'function' /tmp/aproar-body || { echo "FAIL: JS content invalid/empty"; exit 1; }
+              grep -q 'async function saveAdministrativeRelocation' /tmp/aproar-body || { echo "FAIL: transfer fix not deployed"; exit 1; }
+            fi
+            if [ "$path" = /api/health ]; then
+              echo "$result" | grep -q 'http=200' || { echo "FAIL: health endpoint unavailable"; exit 1; }
+              grep -q '"application":"APROAR"' /tmp/aproar-body || { echo "FAIL: invalid health response"; exit 1; }
+            fi
+            if [ "$path" = /api/session ]; then
+              echo "$result" | grep -q 'http=401' || { echo "FAIL: unauthenticated session must be blocked"; exit 1; }
             fi
           done
           echo "OK: APROAR homepage and app.js are reachable from GitHub Actions"
