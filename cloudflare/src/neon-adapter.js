@@ -17,6 +17,8 @@ export function mapNeonData(db){
     const a=pointed.get(key);
     // Extra-only entries use the existing tables but stay separate from ordinary attendance.
     if(meta.extra_avulsa===true){
+      // Cancelamentos permanecem nos registros físicos e na auditoria, mas nunca geram pagamentos.
+      if(meta.extra_cancelada===true)continue;
       if(!a)continue;
       const cost=people.get(person)?.custo||0,extra=amount(a.valor_extra??c.valor_extra),targetWork=id(meta.extra_obra_id||work);
       const savedType=['Não','Meia diária','Diária','Uma e meia diária','Duas diárias'].includes(a.tipo_diaria)?a.tipo_diaria:null;
