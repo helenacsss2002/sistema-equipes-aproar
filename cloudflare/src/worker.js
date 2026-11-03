@@ -498,7 +498,15 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
          AND contexto->>'supervisor'=${session.user} ORDER BY id ASC LIMIT 20000`;
     }
     const operations=buildOperations(db,body.state,session);
-    if(!permittedProductionDeletion(env,session,db,operations))return json({error:'A Controladoria pode excluir uma convocação sem apontamento por vez ou até 50 obras sem vínculos. Registros com histórico devem ser preservados.'},403);
+    if(!permittedProductionDeletion(env,session,db,operations)){
+      const denied=operations.filter(op=>op.action==='delete');
+      const types=[...new Set(denied.map(op=>op.table))];
+      console.warn('APROAR blocked unsafe removal',JSON.stringify({role:session.role,types,count:denied.length}));
+      return json({error:session.role==='SUPERVISOR'
+        ?'Não foi possível salvar porque a alteração continha uma exclusão não autorizada ('+types.join(', ')+'). Nenhum apontamento, convocação ou registro financeiro foi apagado. Atualize a página e confira os serviços selecionados.'
+        :'A Controladoria só pode excluir uma convocação sem apontamento por vez ou até 50 obras sem vínculos. Correções de serviços exigem auditoria. Registros com histórico são protegidos.',
+        code:'APROAR_PROTECTED_REMOVAL',types},403);
+    }
     // Work deletions run after dependent records, never before them.
     operations.sort((a,b)=>(a.table==='obras'&&a.action==='delete'?1:0)-(b.table==='obras'&&b.action==='delete'?1:0));
     if(operations.length)await sql`SELECT aproar_web_apply(${body.version},${body.requestId},${session.user},${digest},${JSON.stringify(operations)}::jsonb)`;
