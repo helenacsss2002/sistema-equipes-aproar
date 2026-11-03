@@ -29,6 +29,7 @@ jobs:
               echo "$result" | grep -q 'http=200' || { echo "FAIL: app.js missing"; exit 1; }
               grep -q 'function' /tmp/aproar-body || { echo "FAIL: JS content invalid/empty"; exit 1; }
               grep -q 'async function saveAdministrativeRelocation' /tmp/aproar-body || { echo "FAIL: transfer fix not deployed"; exit 1; }
+              grep -q 'function retroactiveRecordsConfirmed' /tmp/aproar-body || { echo "FAIL: retroactive confirmation fix not deployed"; exit 1; }
             fi
             if [ "$path" = /api/health ]; then
               echo "$result" | grep -q 'http=200' || { echo "FAIL: health endpoint unavailable"; exit 1; }
