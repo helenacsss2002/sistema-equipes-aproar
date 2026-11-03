@@ -510,7 +510,7 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
         WHERE c.id=${parsed.convocacaoId}::bigint LIMIT 1`;
       const works=await sql`SELECT id::text AS id,unidade,nome FROM obras
         WHERE unidade=${parsed.destination.unidade} ORDER BY id`;
-      const conflicts=await sql`SELECT id::text AS id,turno FROM convocacoes
+      const conflicts=await sql`SELECT id::text AS id,turno,observacao FROM convocacoes
         WHERE id<>${parsed.convocacaoId}::bigint AND colaborador_id=${parsed.colaboradorId}::bigint
         AND data=${parsed.destination.dataServico}::date`;
       const unavailable=await sql`SELECT 1 FROM indisponibilidades
