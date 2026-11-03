@@ -1213,6 +1213,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
     $('#form-retro').onsubmit = (e) => {
       e.preventDefault();
       try{
+      storeRetroDraft(); // Rascunho do formulário permanece até confirmação e conferência do Neon.
       const dataServico = $('#retro-data').value;
       if (!dataServico) return toast('Escolha a data do serviço.', true);if(dataServico>isoToday())return toast('O apontamento retroativo não aceita data futura.',true);
       const ids = alphabeticalPersonIds($$('input[name="retro-colab"]:checked').map(x=>x.value));
@@ -1270,7 +1271,33 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       for(const id of ids){const c=matching.find(c=>c.colaboradores.includes(id));if(c){if(!batches.has(c.id))batches.set(c.id,{conv:c,items:[]});batches.get(c.id).items.push(itens.find(i=>i.colaboradorId===id));}else newIds.push(id);}
       if(newIds.length){const conv={id:uid('cv'),supervisor:responsavel,dataServico,unidade:unidade.value,obraId:obraRef?.id||'',turno:$('#retro-turno').value,colaboradores:newIds,criadoEm:now().toISOString(),origem:'retroativo'};state.convocacoes.push(conv);batches.set(conv.id,{conv,items:itens.filter(i=>newIds.includes(i.colaboradorId))});}
       for(const {conv,items} of batches.values()){const selected=new Set(items.map(i=>i.colaboradorId));let ap=apForConv(conv.id);if(ap){ap.itens=[...ap.itens.filter(i=>!selected.has(i.colaboradorId)),...items];ap.atualizadoEm=now().toISOString();ap.retroativo=true;}else state.apontamentos.push({executor:supervisorAtual||perfilLabel(perfilAtual),id:uid('ap'),convocacaoId:conv.id,supervisor:conv.supervisor,dataServico,apontadoEm:now().toISOString(),retroativo:true,itens:items});}
-      audit('Apontamento retroativo',dataServico);const savedMessage=[...batches.values()].every(({conv})=>completeConv(conv))?'Apontamento retroativo salvo. Equipe regularizada.':'Apontamento salvo. Há colaboradores convocados que continuam pendentes.';if(!saveData(()=>{clearStoredDraft(retroKey);if(perfilAtual==='SUPERVISOR')clearStoredDraft(draftKey('last',supervisorAtual));retroUnsavedAvulsos.clear();setView('pendencias');}))return;toast(savedMessage);
+      audit('Apontamento retroativo',dataServico);
+      const savedMessage=[...batches.values()].every(({conv})=>completeConv(conv))
+        ?'Apontamento retroativo confirmado no Neon. Equipe regularizada.'
+        :'Apontamento retroativo confirmado no Neon. Outros colaboradores ainda estão pendentes.';
+      const expected=itens.map(i=>({
+        colaboradorId:String(i.colaboradorId),dataServico,unidade:unidade.value,
+        turno:turnoRetro,supervisor:responsavel,status:i.status,
+        servicos:(i.servicos||[]).map(s=>({obraId:String(s.obraId||''),periodo:s.periodo||'Integral'})),
+        valorExtraDisponivel:Number(i.valorExtraDisponivel||0),
+        acordo:Number(i.acordo||0),ajudaCusto:Number(i.ajudaCusto||0),
+        noturno:Number(i.noturno||0)
+      }));
+      const feedback=$('#retro-save-status');
+      if(feedback){feedback.className='notice info section';feedback.textContent='Gravando e conferindo os apontamentos no Neon…';}
+      saveData(()=>{
+        clearStoredDraft(retroKey);
+        if(perfilAtual==='SUPERVISOR')clearStoredDraft(draftKey('last',supervisorAtual));
+        retroUnsavedAvulsos.clear();
+        setView('pendencias');
+        showToast(savedMessage);
+      },confirmed=>retroactiveRecordsConfirmed(confirmed,expected),message=>{
+        const node=$('#retro-save-status');
+        if(node){
+          node.className='notice warning section';
+          node.textContent='Salvamento retroativo NÃO confirmado: '+message+' Os dados preenchidos continuam nesta tela e no rascunho.';
+        }
+      });
       }catch(error){
         console.error('APROAR retroactive form submit failure',String(error?.message||error).slice(0,240));
         showToast('Não foi possível preparar o apontamento retroativo. Confira os campos e tente novamente.',true);showSaveFeedback('Não foi possível preparar o apontamento retroativo. Confira os campos e tente novamente.',true);
