@@ -3237,6 +3237,25 @@ function renderEquipeDia(){
     ])));
     return changes.every(x=>actual.has(x.key)&&Number.isFinite(actual.get(x.key))&&Math.abs(actual.get(x.key)-x.expected)<0.005);
   }
+  function retroactiveRecordsConfirmed(confirmed,expected){
+    if(!confirmed||!Array.isArray(confirmed.convocacoes)||!Array.isArray(confirmed.apontamentos)||!expected?.length)return false;
+    const cents=v=>Math.round((Number(v)||0)*100);
+    const serviceKeys=ss=>(ss||[]).map(s=>String(s.obraId||'')+'|'+String(s.periodo||'Integral')).sort().join(';');
+    return expected.every(target=>{
+      const conv=confirmed.convocacoes.find(c=>c.dataServico===target.dataServico&&
+        c.supervisor===target.supervisor&&c.unidade===target.unidade&&
+        c.turno===target.turno&&c.colaboradores?.some(id=>String(id)===target.colaboradorId));
+      if(!conv)return false;
+      const point=confirmed.apontamentos.find(a=>String(a.convocacaoId)===String(conv.id)&&
+        a.dataServico===target.dataServico);
+      const item=point?.itens?.find(i=>String(i.colaboradorId)===target.colaboradorId);
+      if(!item||item.status!==target.status)return false;
+      if(['Falta','Atestado'].includes(target.status))return true;
+      if(serviceKeys(item.servicos)!==serviceKeys(target.servicos))return false;
+      return ['valorExtraDisponivel','acordo','ajudaCusto','noturno'].every(k=>
+        cents(item[k])===cents(target[k]));
+    });
+  }
   function saveData(onSuccess=null){
     if(!onlineSession||!onlineWritable||onlineSession.role==='VISUALIZAR'){
       if(onlineConfirmed){state=copy(onlineConfirmed);OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);}
