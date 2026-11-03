@@ -1,6 +1,6 @@
 import {metadata} from './neon-adapter.js';
 import {financialHistoryEvents} from './financial-history.js';
-import {requireApprovedRelease,changedFinancialFields} from './financial-release.js';
+import {requireApprovedRelease,changedFinancialFields,afterFinancialDeadline} from './financial-release.js';
 import {hasValidComplementApproval,clearObsoleteApproval} from './financial-approval.js';
 import {supervisors,visibleState} from './data.js';
 const numericId=v=>/^\d+$/.test(String(v));
@@ -61,11 +61,14 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
   const blocked=db.state.indisponibilidades.find(x=>x.colaboradorId===pid&&x.inicio<=c.dataServico&&x.fim>=c.dataServico);if(blocked&&present(pointed.get(key)?.i.status||'Presente (Integral)'))fail(`${staff.get(pid).nome} está indisponível: ${blocked.motivo}.`,409);
  }
  // Remove dependents first, explicitly and atomically.
- for(const old of base.convocacoes){if(records.has(old.id))continue;if(!own(session,old))fail('Sem permissão para excluir esta convocação.',403);for(const s of (rawServicesByConv.get(old.id)||[]))add('servicos_apontamento','delete',s.id);const ap=rawAps.get(old.id);if(ap)add('apontamentos','delete',ap.id);add('convocacoes','delete',old.id);}
+ for(const old of base.convocacoes){if(records.has(old.id))continue;if(session.role==='SUPERVISOR')continue; // Nunca apagar convocações históricas por omissão no estado enviado.
+  if(!own(session,old))fail('Sem permissão para excluir esta convocação.',403);for(const s of (rawServicesByConv.get(old.id)||[]))add('servicos_apontamento','delete',s.id);const ap=rawAps.get(old.id);if(ap)add('apontamentos','delete',ap.id);add('convocacoes','delete',old.id);}
  for(const {key,c,pid,old,changed} of records.values()){
   const raw=old?rawConvs.get(old.id):null,oldPoint=oldApByConv.get(String(old?.id))?.itens.find(i=>i.colaboradorId===pid),ap=pointed.get(key),pointChanged=ap&&(changed||!same(apView(oldPoint),apView(ap.i)));
-  if(oldPoint&&!ap){if(!own(session,c))fail('Sem permissão para remover apontamento.',403);const row=rawAps.get(key);if(row)add('apontamentos','delete',row.id);for(const s of (rawServicesByConv.get(key)||[]))add('servicos_apontamento','delete',s.id);const {text,meta}=metadata(raw.observacao);delete meta.apontado_em;delete meta.apontado_por;delete meta.apontamento_atrasado;delete meta.valor_ajuda_custo;add('convocacoes','update',key,{status:'Presente (Integral)',valor_extra:0,custo_pago:0,valor_acordo:0,valor_adicional_noturno:0,custos_separados:false,observacao:text+(Object.keys(meta).length?' ||APROAR_META|| '+JSON.stringify(meta):'')});}
+  if(oldPoint&&!ap){if(session.role==='SUPERVISOR')continue; // Preservar apontamento existente, mesmo que uma tela antiga o omita.
+   if(!own(session,c))fail('Sem permissão para remover apontamento.',403);const row=rawAps.get(key);if(row)add('apontamentos','delete',row.id);for(const s of (rawServicesByConv.get(key)||[]))add('servicos_apontamento','delete',s.id);const {text,meta}=metadata(raw.observacao);delete meta.apontado_em;delete meta.apontado_por;delete meta.apontamento_atrasado;delete meta.valor_ajuda_custo;add('convocacoes','update',key,{status:'Presente (Integral)',valor_extra:0,custo_pago:0,valor_acordo:0,valor_adicional_noturno:0,custos_separados:false,observacao:text+(Object.keys(meta).length?' ||APROAR_META|| '+JSON.stringify(meta):'')});}
   let releaseGrant=null;
+  const financeLocked=session.role==='SUPERVISOR'&&oldPoint?.financeAdjusted&&afterFinancialDeadline(c.dataServico,timestamp);
   if(pointChanged){
    if(session.role==='SUPERVISOR'){
     const fields=changedFinancialFields(oldPoint,ap.i);
@@ -74,7 +77,7 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
    }
    if(session.role==='FINANCEIRO'){if(!oldPoint)fail('Financeiro não cria apontamentos.',403);const ignore=(i)=>{const x=apView(i);delete x.financeiro;delete x.noturno;delete x.acordo;delete x.ajudaCusto;return x;};if(!same(ignore(oldPoint),ignore(ap.i)))fail('Financeiro só altera pagamentos, adicionais, acordos e passagens/ajuda de custo.',403);}else if(!own(session,c))fail('Você só pode apontar sua própria equipe.',403);
    if(c.dataServico>isoToday(timestamp))fail('Apontamento não aceita data futura.');if(!['Presente (Integral)','Presente (Só Manhã)','Presente (Só Tarde)','Saída Antecipada','Falta','Atestado'].includes(ap.i.status))fail('Status inválido.');if(!['Valor específico',...Object.keys({'Não':0,'Meia diária':.5,'Diária':1,'Uma e meia diária':1.5,'Duas diárias':2})].includes(ap.i.extra))fail('Extra inválido.');
-   for(const k of ['financeiro','noturno','acordo','ajudaCusto'])if(!finite(ap.i[k]??0))fail('Valor financeiro inválido.');if(!finite(ap.i.valorExtraDisponivel??0))fail('Valor da extra disponível inválido.');if(oldPoint&&Number(ap.i.ajudaCusto??0)!==Number(oldPoint.ajudaCusto??0)&&session.role!=='FINANCEIRO'&&(session.role!=='SUPERVISOR'||oldPoint.financeAdjusted))fail('Somente o Financeiro pode alterar passagens/ajuda de custo após o ajuste financeiro.',403);
+   for(const k of ['financeiro','noturno','acordo','ajudaCusto'])if(!finite(ap.i[k]??0))fail('Valor financeiro inválido.');if(!finite(ap.i.valorExtraDisponivel??0))fail('Valor da extra disponível inválido.');if(oldPoint&&Number(ap.i.ajudaCusto??0)!==Number(oldPoint.ajudaCusto??0)&&session.role!=='FINANCEIRO'&&(session.role!=='SUPERVISOR'||financeLocked))fail('Somente o Financeiro pode alterar passagens/ajuda de custo após o ajuste financeiro.',403);
    const ss=normServices(ap.i);if(present(ap.i.status)&&(!ss.length||ss.some(s=>!works.has(s.obraId)||works.get(s.obraId).unidade!==c.unidade)))fail('Defina os serviços do colaborador na unidade convocada.');for(const s of ss){if(!s.obraId)continue;period(s.periodo);}if(new Set(ss.map(s=>s.obraId+'|'+s.periodo)).size!==ss.length)fail('Serviço repetido no mesmo período.');
    if(ap.i.extra==='Valor específico'&&(!oldPoint||oldPoint.extra!=='Valor específico'))fail('Extra específico deve existir no registro original.');
   }
@@ -88,11 +91,16 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
   if(!pointChanged)continue;
   // Nunca aceitar o salvamento e restaurar silenciosamente R$ 90 (ou outro valor)
   // quando o adicional noturno foi confirmado pelo Financeiro.
-  if(session.role==='SUPERVISOR'&&oldPoint?.financeAdjusted
+  if(financeLocked
       &&money(Number(ap.i.noturno??0))!==money(Number(oldPoint.noturno??0))
       &&!(releaseGrant?.data?.contexto?.fields||[]).includes('Adicional noturno'))
     fail('O adicional noturno foi ajustado pelo Financeiro. O valor selecionado NÃO foi salvo; solicite autorização da Controladoria ou do Financeiro para alterá-lo.',403);
-  const i={...ap.i};if(pendingAvulsoInvalid(i,staff.get(pid)))fail('Escolha um tipo válido de diária para o avulso.');if(session.role==='SUPERVISOR'&&oldPoint?.financeAdjusted){const authorized=releaseGrant?.data?.contexto?.fields||[];const labels={financeiro:'Complemento financeiro',noturno:'Adicional noturno',acordo:'Bonificação',ajudaCusto:'Passagem / ajuda de custo'};for(const k of ['financeiro','noturno','acordo','ajudaCusto'])if(!authorized.includes(labels[k]))i[k]=oldPoint[k];}const p=staff.get(pid),isPresent=present(i.status),ss=normServices(i).filter(s=>s.obraId),hasSebrae=ss.some(s=>clean(works.get(s.obraId)?.unidade)==='SEBRAE'),financialAdjusted=session.role==='FINANCEIRO'||oldPoint?.financeAdjusted===true;
+  const i={...ap.i};if(pendingAvulsoInvalid(i,staff.get(pid)))fail('Escolha um tipo válido de diária para o avulso.');if(session.role==='SUPERVISOR'&&oldPoint?.financeAdjusted){
+   const authorized=releaseGrant?.data?.contexto?.fields||[];
+   // Valor complementar definido pelo Financeiro nunca é sobrescrito implicitamente por uma revisão operacional.
+   if(!authorized.includes('Complemento financeiro'))i.financeiro=oldPoint.financeiro;
+   if(financeLocked){const labels={noturno:'Adicional noturno',acordo:'Bonificação',ajudaCusto:'Passagem / ajuda de custo'};for(const k of ['noturno','acordo','ajudaCusto'])if(!authorized.includes(labels[k]))i[k]=oldPoint[k];}
+  }const p=staff.get(pid),isPresent=present(i.status),ss=normServices(i).filter(s=>s.obraId),hasSebrae=ss.some(s=>clean(works.get(s.obraId)?.unidade)==='SEBRAE'),financialAdjusted=session.role==='FINANCEIRO'||oldPoint?.financeAdjusted===true;
   const extra=isPresent?(i.extra==='Valor específico'?Number(oldPoint.valorExtraOriginal):money(Number(p.custo)*mult(i.extra))):0;
   const night=isPresent&&hasSebrae?Number(i.noturno??0):0,finance=isPresent?Number(i.financeiro):0,bonus=isPresent?Number(i.acordo):0,ajudaCusto=isPresent?Number(i.ajudaCusto||0):0;
   // Avoid recording the same unapproved payment as both complementary finance and
@@ -135,6 +143,32 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
    const old=oldExtras.get(id);if(!old&&numericId(id))fail('Identificador novo de extra inválido.');
    if(session.role!=='SUPERVISOR'&&session.role!=='CONTROLADORIA')fail('Sem permissão para lançar extras.',403);
    if(old&&!own(session,{supervisor:old.supervisor}))fail('Você não pode alterar a extra de outro supervisor.',403);
+   // Cancelar uma extra indevida NÃO exclui convocações, apontamentos nem serviços:
+   // zera o valor e guarda valor anterior, motivo e autor nos registros e auditoria.
+   if(x.cancelada===true){
+    if(!old)fail('Extra inexistente. Atualize os dados e tente novamente.',409);
+    const reason=String(x.motivoCancelamento||'').trim();
+    if(reason.length<10||reason.length>600)fail('Informe o motivo do cancelamento da extra (10 a 600 caracteres).');
+    const previousConv=rawExtraConvs.get(id),previousPoint=rawAps.get(id);
+    if(!previousConv||!previousPoint)fail('Registro histórico da extra incompleto. Solicite conferência à Controladoria.',409);
+    if(session.role==='SUPERVISOR'){
+     const grant=requireApprovedRelease(db.releaseEvents,{supervisor:session.user,colaboradorId:old.colaboradorId,dataServico:old.dataServico,fields:['Extra']},timestamp,releaseUses);
+     if(grant)ops.push(grant);
+    }
+    const {text,meta}=metadata(previousConv.observacao);
+    const updatedMeta={...meta,extra_cancelada:true,extra_cancelada_em:timestamp,extra_cancelada_por:session.user,
+      extra_cancelada_motivo:reason,extra_valor_original:money(Number(previousPoint.valor_extra??old.valorExtraOriginal))};
+    add('convocacoes','update',id,{valor_extra:0,custo_encargos_base:0,observacao:text+' ||APROAR_META|| '+JSON.stringify(updatedMeta)});
+    add('apontamentos','update',String(previousPoint.id),{valor_extra:0,custo_encargos_base:0,atualizado_em:timestamp});
+    ops.push(...financialHistoryEvents({convocationId:id,colaboradorId:old.colaboradorId,dataServico:old.dataServico,
+      supervisor:old.supervisor,actor:session.user,role:session.role,source:'Cancelamento de extra indevida',
+      timestamp,previous:previousPoint,next:{...previousPoint,valor_extra:0}}));
+    add('auditoria','insert','audit:'+crypto.randomUUID(),{entidade:'apontamentos',entidade_id:String(id),
+      acao:'CANCELAMENTO_EXTRA_INDEVIDA',usuario:session.user,ocorrido_em:timestamp,
+      contexto:{convocacaoId:id,colaboradorId:String(old.colaboradorId),dataServico:old.dataServico,
+        valorAnterior:money(Number(previousPoint.valor_extra??old.valorExtraOriginal)),valorNovo:0,motivo:reason}});
+    continue;
+   }
    const personId=String(x.colaboradorId||''),p=staff.get(personId),work=works.get(String(x.obraId||''));
    if(!p)fail('Colaborador não encontrado para a extra.');
    const serviceDate=date(x.dataServico);
@@ -182,6 +216,7 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
   }
   for(const old of base.extras||[]){
    if(incomingIds.has(String(old.id)))continue;
+   if(session.role==='SUPERVISOR')continue; // Ausência no payload não equivale a permissão de excluir uma extra.
    if(!own(session,{supervisor:old.supervisor}))fail('Sem permissão para excluir esta extra.',403);
    if(session.role==='SUPERVISOR'){
     const grant=requireApprovedRelease(db.releaseEvents,{supervisor:session.user,colaboradorId:old.colaboradorId,dataServico:old.dataServico,fields:['Extra']},timestamp,releaseUses);

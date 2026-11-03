@@ -278,7 +278,8 @@ test('Financeiro grava passagem/ajuda de custo no Neon, sem alterar estrutura ou
 
   next=structuredClone(db.state);
   next.apontamentos[0].itens[0].ajudaCusto=25;
-  assert.throws(()=>buildOperations(db,next,actor,now),/Somente o Financeiro/);
+  assert.doesNotThrow(()=>buildOperations(db,next,actor,now),'Antes do fechamento, passagem pode ser corrigida pelo supervisor responsável.');
+  assert.throws(()=>buildOperations(db,next,actor,'2026-10-13T13:00:01Z'),/Prazo financeiro encerrado/);
   assert.throws(()=>buildOperations(db,next,admin,now),/Somente o Financeiro/);
   assert.equal((await readDatabase(sql)).state.apontamentos[0].itens[0].ajudaCusto,11,'Edição indevida não é persistida');
 

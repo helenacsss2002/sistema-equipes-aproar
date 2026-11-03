@@ -52,9 +52,10 @@ test('Ajuste do Financeiro registra seu próprio usuário e separa supervisor or
  assert.match(worker,/c\.colaborador_id::text AS colaborador_id/);
 });
 test('Captura eventos na mesma transação do apontamento normal e extra independente',()=>{
- assert.equal((ops.match(/ops\.push\(\.\.\.financialHistoryEvents\(/g)||[]).length,2);
+ assert.equal((ops.match(/ops\.push\(\.\.\.financialHistoryEvents\(/g)||[]).length,3);
  assert.match(ops,/source:'Apontamento'/);
  assert.match(ops,/source:'Extra independente'/);
+ assert.match(ops,/source:'Cancelamento de extra indevida'/);
  assert.match(ops,/previous:oldRow,next:values/);
  assert.match(ops,/previous:rawPoint,next:pointData/);
 });

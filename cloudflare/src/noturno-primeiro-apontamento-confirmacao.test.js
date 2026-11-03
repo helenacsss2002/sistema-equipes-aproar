@@ -42,7 +42,7 @@ test('Controladoria pode escolher valor em apontamento previamente ajustado pelo
  const start=ui.indexOf('  function personRow('),end=ui.indexOf('  // Busca viva independente',start);
  const body=ui.slice(start,end);
  assert.match(body,/String\(unit\|\|''\)\.trim\(\)\.toUpperCase\(\)==='SEBRAE'/);
- assert.match(body,/perfilAtual!=='SUPERVISOR'\|\|!item\?\.financeAdjusted\|\|isApprovedFinancial/);
+ assert.match(body,/perfilAtual!=='SUPERVISOR'\|\|!item\?\.financeAdjusted\|\|!isFinancialEditingLocked\(serviceDate,item\)\|\|isApprovedFinancial/);
  const defaultContext={
   colaboradorById:()=>({nome:'TESTE SEBRAE',funcao:'Pedreiro',avulso:'Não'}),
   itemServices:()=>[{obraId:'1',periodo:'Integral'}],extraRecordFor:()=>null,
@@ -53,7 +53,7 @@ test('Controladoria pode escolher valor em apontamento previamente ajustado pelo
   field:(_label,html)=>html,
   allocationRow:()=>'',extraWorkSearchMarkup:()=>'',roundMoney:n=>Math.round(n*100)/100,
   escapeHtml:x=>String(x??''),presence:x=>x.startsWith('Presente'),
-  clean:s=>String(s).toUpperCase(),isApprovedFinancial:()=>false,
+  clean:s=>String(s).toUpperCase(),isApprovedFinancial:()=>false,isFinancialEditingLocked:()=>true,
   perfilAtual:'CONTROLADORIA',portalDate:'2026-09-12',supervisorAtual:'SOARES'
  };
  const build=(role,allowed=false)=>{
