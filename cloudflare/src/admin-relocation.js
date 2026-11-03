@@ -39,11 +39,13 @@ export function buildAdminRelocationOperations({current,works=[],conflicts=[],un
   fail('O colaborador não corresponde à convocação selecionada.');
  const currentDate=cleanDate(current.data);
  const unit=String(current.unidade||'');
+ const meta=metadata(current.observacao).meta;
+ const visibleSourceWork=meta.servico_a_definir?'':String(current.obra_id||'');
  if(!same(currentDate,source.dataServico)||!same(unit,source.unidade)||
    !same(current.engenheiro,source.supervisor)||!same(current.turno||'Integral',source.turno)||
-   !same(current.obra_id,source.obraId))
+   !same(visibleSourceWork,source.obraId))
   fail('Esta convocação foi alterada por outra pessoa. Atualize os dados antes de transferir.');
- if(current.has_point||current.has_services||current.custos_separados===true||metadata(current.observacao).meta.apontado_em)
+ if(current.has_point||current.has_services||current.custos_separados===true||meta.apontado_em)
   fail('A convocação possui apontamento ou vínculo histórico. A transferência automática foi bloqueada; solicite conferência à Controladoria.');
  if(unavailable)fail('Este colaborador está indisponível na data de destino.');
  if(conflicts.some(c=>overlap(c.turno||'Integral',d.turno)))
@@ -61,7 +63,7 @@ export function buildAdminRelocationOperations({current,works=[],conflicts=[],un
  const newMeta={...oldObs.meta,servico_a_definir:!assigned,
    realocado_por:actor,realocado_em:timestamp};
  const oldValues={dataServico:currentDate,unidade:unit,supervisor:current.engenheiro,
-   obraId:String(current.obra_id),turno:current.turno||'Integral'};
+   obraId:visibleSourceWork,turno:current.turno||'Integral'};
  const newValues={dataServico:d.dataServico,unidade:d.unidade,supervisor:d.supervisor,
    obraId:assigned?String(chosen.id):'',turno:d.turno};
  if(Object.keys(oldValues).every(k=>same(oldValues[k],newValues[k])))
