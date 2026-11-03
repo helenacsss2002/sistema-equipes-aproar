@@ -1152,6 +1152,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       };
       rows.innerHTML = ids.length ? `<div class="section-title" style="margin-top:12px"><div><h3>Apontamento da equipe</h3><p>Defina status e a categoria da extra. O padrão é “Não”.</p></div></div>${ids.map(id=>personRow(id,retroDrafts.get(id)||previousItem(id),unidade.value,OBRAS.find(o=>o.unidade===unidade.value)?.id||'',retroDate,retroSupervisor)).join('')}` : '';
       bindServiceRows();
+      refreshFinancialReleaseInputs($('#form-retro'),retroDate,retroSupervisor);
     }
     const connectRetroChoices=()=>$$('input[name="retro-colab"]').forEach(x=>x.onchange=()=>refreshRows());
     connectRetroChoices();
@@ -2374,6 +2375,7 @@ function renderEquipeDia(){
     showToast('Não foi possível preparar o apontamento. Confira os campos e tente novamente.',true);showSaveFeedback('Não foi possível preparar o apontamento. Confira os campos e tente novamente.',true);
   }
  };
+ refreshFinancialReleaseInputs($('#day-form'),portalDate,supervisorAtual);
 }
     let unitConvDate='';let avulsoDraft=[];
   // Separado do apontamento: rascunhos de convocação NUNCA geram registro no servidor.
