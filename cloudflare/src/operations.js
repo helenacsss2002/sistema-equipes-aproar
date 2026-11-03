@@ -25,7 +25,7 @@ const isoToday=t=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/Fortaleza',
 const own=(s,c)=>s.role==='CONTROLADORIA'||s.role==='SUPERVISOR'&&c.supervisor===s.user;
 export function buildOperations(db,next,session,timestamp=new Date().toISOString()){
  if(session.role==='VISUALIZAR')fail('Este perfil permite somente visualização.',403);
- const base=visibleState(db,session),ops=[],releaseUses=new Set();const add=(table,action,id,data)=>ops.push({table,action,id:String(id),...(data?{data}: {})});
+ const base=visibleState(db,session),ops=[],releaseUses=new Map();const add=(table,action,id,data)=>ops.push({table,action,id:String(id),...(data?{data}: {})});
  for(const key of ['colaboradores','obras','convocacoes','apontamentos','indisponibilidades','conflitosTentados'])if(!Array.isArray(next[key]))fail('Dados incompletos. Atualize a página.');
  const staff=new Map(next.colaboradores.map(p=>[String(p.id),p])),oldStaff=new Map(base.colaboradores.map(p=>[p.id,p])),works=new Map(next.obras.map(o=>[String(o.id),o]));
  if(staff.size!==next.colaboradores.length||works.size!==next.obras.length)fail('Há identificadores repetidos.');
