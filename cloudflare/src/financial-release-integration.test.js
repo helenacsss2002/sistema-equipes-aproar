@@ -49,3 +49,58 @@ test('Apontamento mantém valor e presença; pós-prazo só altera bonificação
   assert.equal((await pg.query("SELECT count(*)::int AS n FROM apontamentos")).rows[0].n,1);
  }finally{await pg.close();}
 });
+
+test('Duas autorizações aprovadas no Neon corrigem uma pessoa sem exigir outra e não alteram os colegas',async()=>{
+ const pg=new PGlite();
+ try{
+  await pg.exec(fs.readFileSync(new URL('./fixture-schema.sql',import.meta.url),'utf8'));
+  await pg.exec(fs.readFileSync(new URL('../migracao_homologacao.sql',import.meta.url),'utf8'));
+  await pg.exec("INSERT INTO colaboradores(nome,funcao,valor_diaria) VALUES('QA EXTRA AUTORIZADA','Pintor',200),('QA COLEGA INTACTO','Servente',150)");
+  await pg.exec("INSERT INTO obras(unidade,nome) VALUES('CENTRO','QA SERVIÇO')");
+  await pg.exec(`INSERT INTO convocacoes(obra_id,colaborador_id,data,engenheiro,turno,observacao)
+    VALUES(1,1,'2026-10-30','VICTOR','Integral','Turno: Integral'),
+          (1,2,'2026-10-30','VICTOR','Integral','Turno: Integral')`);
+  await pg.exec(`INSERT INTO apontamentos(convocacao_id,data_servico,colaborador_id,engenheiro,status,valor_acordo,apontado_por,apontado_em,custo_encargos_base)
+    VALUES('1','2026-10-30','1','VICTOR','Presente (Integral)',0,'VICTOR','2026-10-30T20:00:00Z',200),
+          ('2','2026-10-30','2','VICTOR','Presente (Integral)',0,'VICTOR','2026-10-30T20:00:00Z',150)`);
+  await pg.exec(`INSERT INTO servicos_apontamento(convocacao_id,obra_id,unidade_snapshot,obra_nome_snapshot,periodo,principal)
+    VALUES('1','1','CENTRO','QA SERVIÇO','Integral',true),('2','1','CENTRO','QA SERVIÇO','Integral',true)`);
+  const sql=driver(pg),db=await readDatabase(sql),next=structuredClone(db.state);
+  const person=next.apontamentos.find(a=>a.itens[0].colaboradorId==='1').itens[0];
+  person.valorExtraDisponivel=100;
+  person.acordo=50;
+  const scope={supervisor:'VICTOR',colaboradorId:'1',dataServico:'2026-10-30'};
+  const grantIds=['77777777-7777-4777-8777-777777777777','88888888-8888-4888-8888-888888888888'];
+  const events=grantIds.flatMap((id,index)=>[
+   {acao:'SOLICITACAO_LIBERACAO_FINANCEIRA',usuario:'VICTOR',ocorrido_em:'2026-11-03T13:00:01Z',
+    contexto:{requestId:id,...scope,fields:[index?'Bonificação':'Extra'],reason:'Revisão já liberada pelo Financeiro'}},
+   {acao:'LIBERACAO_FINANCEIRA_AUTORIZADA',usuario:'FINANCEIRO',ocorrido_em:'2026-11-03T13:00:02Z',
+    contexto:{requestId:id,...scope}}
+  ]);
+  db.releaseEvents=events;
+  const ts='2026-11-03T17:15:00Z',ops=buildOperations(db,next,supervisor,ts);
+  const used=ops.filter(o=>o.data?.acao==='LIBERACAO_FINANCEIRA_UTILIZADA');
+  assert.equal(used.length,2);
+  assert.deepEqual(new Set(used.map(o=>o.data.contexto.requestId)),new Set(grantIds));
+  const pointed=ops.filter(o=>o.table==='apontamentos'&&o.action==='update');
+  assert.equal(pointed.length,1);
+  assert.equal(pointed[0].data.colaborador_id,'1');
+  assert.equal(ops.some(o=>o.action==='delete'),false);
+  const requestId=crypto.randomUUID();
+  await pg.query('SELECT aproar_web_apply($1,$2,$3,$4,$5::jsonb)',[db.version,requestId,'VICTOR','qa-aprovado-correto',JSON.stringify(ops)]);
+  const after=await readDatabase(sql);
+  assert.equal(after.raw.convocacoes.length,2);
+  assert.equal(after.raw.apontamentos.length,2);
+  const corrected=after.state.apontamentos.find(a=>a.itens[0].colaboradorId==='1').itens[0];
+  const colleague=after.state.apontamentos.find(a=>a.itens[0].colaboradorId==='2').itens[0];
+  assert.equal(corrected.valorExtraDisponivel,100);
+  assert.equal(corrected.acordo,50);
+  assert.equal(colleague.valorExtraDisponivel,0);
+  assert.equal(colleague.acordo,0);
+  after.releaseEvents=[...events,...used.map(o=>({acao:o.data.acao,usuario:o.data.usuario,
+    ocorrido_em:ts,contexto:o.data.contexto}))];
+  const nextSave=structuredClone(after.state);
+  nextSave.apontamentos.find(a=>a.itens[0].colaboradorId==='1').itens[0].acordo=70;
+  assert.throws(()=>buildOperations(after,nextSave,supervisor,'2026-11-03T17:16:00Z'),/Solicite liberação/);
+ }finally{await pg.close();}
+});

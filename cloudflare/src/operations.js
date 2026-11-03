@@ -1,6 +1,6 @@
 import {metadata} from './neon-adapter.js';
 import {financialHistoryEvents} from './financial-history.js';
-import {requireApprovedRelease,changedFinancialFields,afterFinancialDeadline} from './financial-release.js';
+import {requireApprovedReleases,changedFinancialFields,afterFinancialDeadline} from './financial-release.js';
 import {hasValidComplementApproval,clearObsoleteApproval} from './financial-approval.js';
 import {supervisors,visibleState} from './data.js';
 const numericId=v=>/^\d+$/.test(String(v));
@@ -79,13 +79,11 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
   const raw=old?rawConvs.get(old.id):null,oldPoint=oldApByConv.get(String(old?.id))?.itens.find(i=>i.colaboradorId===pid),ap=pointed.get(key),pointChanged=ap&&(changed||!same(apView(oldPoint),apView(ap.i)));
   if(oldPoint&&!ap){if(session.role==='SUPERVISOR')continue; // Preservar apontamento existente, mesmo que uma tela antiga o omita.
    if(!own(session,c))fail('Sem permissão para remover apontamento.',403);const row=rawAps.get(key);if(row)add('apontamentos','delete',row.id);for(const s of (rawServicesByConv.get(key)||[]))add('servicos_apontamento','delete',s.id);const {text,meta}=metadata(raw.observacao);delete meta.apontado_em;delete meta.apontado_por;delete meta.apontamento_atrasado;delete meta.valor_ajuda_custo;add('convocacoes','update',key,{status:'Presente (Integral)',valor_extra:0,custo_pago:0,valor_acordo:0,valor_adicional_noturno:0,custos_separados:false,observacao:text+(Object.keys(meta).length?' ||APROAR_META|| '+JSON.stringify(meta):'')});}
-  let releaseGrant=null;
   const financeLocked=session.role==='SUPERVISOR'&&oldPoint?.financeAdjusted&&afterFinancialDeadline(c.dataServico,timestamp);
   if(pointChanged){
    if(session.role==='SUPERVISOR'){
     const fields=changedFinancialFields(oldPoint,ap.i);
-    releaseGrant=requireApprovedRelease(db.releaseEvents,{supervisor:session.user,colaboradorId:pid,dataServico:c.dataServico,fields},timestamp,releaseUses);
-    if(releaseGrant)ops.push(releaseGrant);
+    ops.push(...requireApprovedReleases(db.releaseEvents,{supervisor:session.user,colaboradorId:pid,dataServico:c.dataServico,fields},timestamp,releaseUses));
    }
    if(session.role==='FINANCEIRO'){if(!oldPoint)fail('Financeiro não cria apontamentos.',403);const ignore=(i)=>{const x=apView(i);delete x.financeiro;delete x.noturno;delete x.acordo;delete x.ajudaCusto;return x;};if(!same(ignore(oldPoint),ignore(ap.i)))fail('Financeiro só altera pagamentos, adicionais, acordos e passagens/ajuda de custo.',403);}else if(!own(session,c))fail('Você só pode apontar sua própria equipe.',403);
    if(c.dataServico>isoToday(timestamp))fail('Apontamento não aceita data futura.');if(!['Presente (Integral)','Presente (Só Manhã)','Presente (Só Tarde)','Saída Antecipada','Falta','Atestado'].includes(ap.i.status))fail('Status inválido.');if(!['Valor específico',...Object.keys({'Não':0,'Meia diária':.5,'Diária':1,'Uma e meia diária':1.5,'Duas diárias':2})].includes(ap.i.extra))fail('Extra inválido.');
@@ -103,12 +101,17 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
   if(!pointChanged)continue;
   // Nunca aceitar o salvamento e restaurar silenciosamente R$ 90 (ou outro valor)
   // quando o adicional noturno foi confirmado pelo Financeiro.
+  // Reutilizar todas as colunas autorizadas para este colaborador na transação,
+  // mesmo quando a liberação já foi aplicada a outro lançamento do mesmo save.
+  const authorizedFields=new Set([...releaseUses.values()].filter(x=>
+    x.supervisor===session.user&&x.colaboradorId===String(pid)&&x.dataServico===c.dataServico
+  ).flatMap(x=>x.fields));
   if(financeLocked
       &&money(Number(ap.i.noturno??0))!==money(Number(oldPoint.noturno??0))
-      &&!(releaseGrant?.data?.contexto?.fields||[]).includes('Adicional noturno'))
+      &&!authorizedFields.has('Adicional noturno'))
     fail('O adicional noturno foi ajustado pelo Financeiro. O valor selecionado NÃO foi salvo; solicite autorização da Controladoria ou do Financeiro para alterá-lo.',403);
   const i={...ap.i};if(pendingAvulsoInvalid(i,staff.get(pid)))fail('Escolha um tipo válido de diária para o avulso.');if(session.role==='SUPERVISOR'&&oldPoint?.financeAdjusted){
-   const authorized=releaseGrant?.data?.contexto?.fields||[];
+   const authorized=[...authorizedFields];
    // Valor complementar definido pelo Financeiro nunca é sobrescrito implicitamente por uma revisão operacional.
    if(!authorized.includes('Complemento financeiro'))i.financeiro=oldPoint.financeiro;
    if(financeLocked){const labels={noturno:'Adicional noturno',acordo:'Bonificação',ajudaCusto:'Passagem / ajuda de custo'};for(const k of ['noturno','acordo','ajudaCusto'])if(!authorized.includes(labels[k]))i[k]=oldPoint[k];}
@@ -165,8 +168,7 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
     const previousConv=rawExtraConvs.get(id),previousPoint=rawAps.get(id);
     if(!previousConv||!previousPoint)fail('Registro histórico da extra incompleto. Solicite conferência à Controladoria.',409);
     if(session.role==='SUPERVISOR'){
-     const grant=requireApprovedRelease(db.releaseEvents,{supervisor:session.user,colaboradorId:old.colaboradorId,dataServico:old.dataServico,fields:['Extra']},timestamp,releaseUses);
-     if(grant)ops.push(grant);
+     ops.push(...requireApprovedReleases(db.releaseEvents,{supervisor:session.user,colaboradorId:old.colaboradorId,dataServico:old.dataServico,fields:['Extra']},timestamp,releaseUses));
     }
     const {text,meta}=metadata(previousConv.observacao);
     const updatedMeta={...meta,extra_cancelada:true,extra_cancelada_em:timestamp,extra_cancelada_por:session.user,
@@ -205,8 +207,7 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
    // Legacy records, including zero-valued extras, must remain readable and must not block unrelated saves.
    if(unchanged)continue;
    if(session.role==='SUPERVISOR'){
-    const grant=requireApprovedRelease(db.releaseEvents,{supervisor:session.user,colaboradorId:personId,dataServico:serviceDate,fields:['Extra']},timestamp,releaseUses);
-    if(grant)ops.push(grant);
+    ops.push(...requireApprovedReleases(db.releaseEvents,{supervisor:session.user,colaboradorId:personId,dataServico:serviceDate,fields:['Extra']},timestamp,releaseUses));
    }
    if(!finite(x.valorExtraOriginal)||amount<=0)fail('Informe o Valor da Extra em reais; o valor não é pré-definido.');
    const created=old?.criadoEm||oldMeta.extra_lancado_em||timestamp,creator=old?.executor||oldMeta.extra_lancado_por||session.user;
@@ -232,8 +233,7 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
    if(session.role==='SUPERVISOR')continue; // Ausência no payload não equivale a permissão de excluir uma extra.
    if(!own(session,{supervisor:old.supervisor}))fail('Sem permissão para excluir esta extra.',403);
    if(session.role==='SUPERVISOR'){
-    const grant=requireApprovedRelease(db.releaseEvents,{supervisor:session.user,colaboradorId:old.colaboradorId,dataServico:old.dataServico,fields:['Extra']},timestamp,releaseUses);
-    if(grant)ops.push(grant);
+    ops.push(...requireApprovedReleases(db.releaseEvents,{supervisor:session.user,colaboradorId:old.colaboradorId,dataServico:old.dataServico,fields:['Extra']},timestamp,releaseUses));
    }
    for(const service of (rawServicesByConv.get(String(old.id))||[]))add('servicos_apontamento','delete',service.id);
    const row=rawAps.get(String(old.id));if(row)add('apontamentos','delete',row.id);

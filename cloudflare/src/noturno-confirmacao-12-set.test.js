@@ -52,7 +52,7 @@ test('O app só mostra confirmação depois de recuperar o adicional noturno do 
 test('Apontamento já confirmado pelo Financeiro não volta silenciosamente para 90',()=>{
  assert.match(source,/O adicional noturno foi ajustado pelo Financeiro/);
  assert.match(source,/solicite autorização da Controladoria ou do Financeiro/);
- assert.match(source,/!\(releaseGrant\?\.data\?\.contexto\?\.fields\|\|\[\]\)\.includes\('Adicional noturno'\)/);
+ assert.match(source,/!authorizedFields\.has\('Adicional noturno'\)/);
 });
 function driver(pg){
  const sql=(strings,...args)=>{

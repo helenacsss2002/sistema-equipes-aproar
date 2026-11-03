@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {webcrypto} from 'node:crypto';
-import {financialDeadline,afterFinancialDeadline,validRequest,requireApprovedRelease,releaseState,changedFinancialFields} from './financial-release.js';
+import {financialDeadline,afterFinancialDeadline,validRequest,requireApprovedRelease,requireApprovedReleases,releaseState,changedFinancialFields} from './financial-release.js';
 
 globalThis.crypto??=webcrypto;
 const worker=fs.readFileSync(new URL('./worker.js',import.meta.url),'utf8');
@@ -53,6 +53,37 @@ test('Uma autorização no mesmo salvamento pode cobrir extra e apontamento do m
  const consumed=[...events,{acao:'LIBERACAO_FINANCEIRA_UTILIZADA',usuario:'VICTOR',ocorrido_em:timestamp,contexto:{requestId}}];
  assert.throws(()=>requireApprovedRelease(consumed,params,timestamp,new Map()),/Solicite liberação/);
 });
+test('Liberações independentes de Extra e Bonificação cobrem um salvamento único, sem solicitar novamente',()=>{
+ const extraId='22222222-2222-4222-8222-222222222222';
+ const bonusId='33333333-3333-4333-8333-333333333333';
+ const scope={supervisor:'VICTOR',colaboradorId:'71',dataServico:'2026-10-26'};
+ const grants=[
+  {acao:'SOLICITACAO_LIBERACAO_FINANCEIRA',usuario:'VICTOR',ocorrido_em:'2026-10-27T13:00:01Z',contexto:{requestId:extraId,...scope,fields:['Extra']}},
+  {acao:'LIBERACAO_FINANCEIRA_AUTORIZADA',usuario:'FINANCEIRO',ocorrido_em:'2026-10-27T13:00:02Z',contexto:{requestId:extraId}},
+  {acao:'SOLICITACAO_LIBERACAO_FINANCEIRA',usuario:'VICTOR',ocorrido_em:'2026-10-27T13:00:03Z',contexto:{requestId:bonusId,...scope,fields:['Bonificação']}},
+  {acao:'LIBERACAO_FINANCEIRA_AUTORIZADA',usuario:'FINANCEIRO',ocorrido_em:'2026-10-27T13:00:04Z',contexto:{requestId:bonusId}}
+ ];
+ const used=new Map();
+ const operations=requireApprovedReleases(grants,{...scope,fields:['Extra','Bonificação']},timestamp,used);
+ assert.equal(operations.length,2);
+ assert.equal(used.size,2);
+ assert.deepEqual(new Set(operations.map(o=>o.data.contexto.requestId)),new Set([extraId,bonusId]));
+ assert.deepEqual(requireApprovedReleases(grants,{...scope,fields:['Extra']},timestamp,used),[]);
+ assert.equal(used.size,2);
+ assert.throws(()=>requireApprovedReleases(grants,{...scope,fields:['Adicional noturno','Extra']},timestamp,used),
+  e=>e.status===403&&e.details.fields.length===1&&e.details.fields[0]==='Adicional noturno'&&
+   e.details.alreadyApproved.includes('Extra')&&/SOMENTE para: Adicional noturno/.test(e.message));
+ const consumed=[...grants,...operations.map(o=>({acao:o.data.acao,usuario:o.data.usuario,ocorrido_em:timestamp,contexto:o.data.contexto}))];
+ assert.throws(()=>requireApprovedReleases(consumed,{...scope,fields:['Extra']},timestamp,new Map()),/Solicite liberação/);
+});
+test('Liberação de outro colaborador, outra data ou outro supervisor nunca é aproveitada',()=>{
+ const same={supervisor:'VICTOR',colaboradorId:'71',dataServico:'2026-10-26',fields:['Extra']};
+ const used=new Map();
+ for(const changed of [{colaboradorId:'72'},{dataServico:'2026-10-25'},{supervisor:'FELIPE'}]){
+  assert.throws(()=>requireApprovedReleases(events,{...same,...changed},timestamp,used),/Solicite liberação/);
+ }
+ assert.equal(used.size,0);
+});
 test('Solicitação negada ou consumida não pode mais ser utilizada',()=>{
  for(const action of ['LIBERACAO_FINANCEIRA_NEGADA','LIBERACAO_FINANCEIRA_UTILIZADA']){
   const event={acao:action,usuario:'FINANCEIRO',ocorrido_em:'2026-10-27T13:00:25Z',contexto:{requestId}};
@@ -76,9 +107,9 @@ test('Solicitações exigem justificativa e campos válidos',()=>{
  assert.throws(()=>validRequest({...valid,fields:['Tudo']}),/colunas/);
 });
 test('Bloqueio ocorre em todas as rotas de salvamento do supervisor, com consumo atômico',()=>{
- assert.match(operations,/requireApprovedRelease\(db\.releaseEvents,\{supervisor:session\.user,colaboradorId:pid/);
- assert.match(operations,/requireApprovedRelease\(db\.releaseEvents,\{supervisor:session\.user,colaboradorId:personId/);
- assert.match(operations,/requireApprovedRelease\(db\.releaseEvents,\{supervisor:session\.user,colaboradorId:old\.colaboradorId/);
+ assert.match(operations,/requireApprovedReleases\(db\.releaseEvents,\{supervisor:session\.user,colaboradorId:pid/);
+ assert.match(operations,/requireApprovedReleases\(db\.releaseEvents,\{supervisor:session\.user,colaboradorId:personId/);
+ assert.match(operations,/requireApprovedReleases\(db\.releaseEvents,\{supervisor:session\.user,colaboradorId:old\.colaboradorId/);
  assert.match(operations,/releaseUses=new Map\(\)/);
  assert.match(worker,/if\(path==='\/api\/financial-release\/request'/);
  assert.match(worker,/if\(path==='\/api\/financial-release\/decide'/);
