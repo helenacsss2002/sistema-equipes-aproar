@@ -2,6 +2,7 @@ import { neon } from '@neondatabase/serverless';
 import {mapNeonData,metadata} from './neon-adapter.js';
 import {readDatabase,visibleState,supervisors} from './data.js';
 import {buildOperations} from './operations.js';
+import {validateAdminRelocationInput,buildAdminRelocationOperations} from './admin-relocation.js';
 import {financialDeadline,afterFinancialDeadline,validRequest,releaseState,releaseActions} from './financial-release.js';
 import {validateFinancialPayload,buildFinancialOperations} from './financial-adjust.js';
 import {validateComplementConfirmation,buildComplementConfirmationOperations} from './financial-approval.js';
@@ -483,6 +484,44 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
     // Verificacao dentro da mesma transacao via fingerprint; concorrencia falha fechada.
     await sql`SELECT aproar_web_apply(${version[0].version},${body.requestId},${session.user},${digest},${JSON.stringify(ops)}::jsonb)`;
     return json({ok:true,requestId:body.requestId});
+   }
+   // Transferência administrativa pontual: não reenvia o estado inteiro, e
+   // não utiliza a rota de apontamento. Mesma requestId e payload são seguros.
+   if(path==='/api/admin-relocation'&&request.method==='POST'){
+    if(session.role!=='CONTROLADORIA')return json({error:'Somente a Controladoria pode transferir convocados.'},403);
+    if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);
+    if(!writes(env))return json({error:'Gravação não autorizada na produção.'},403);
+    const input=await bodyJSON(request),parsed=validateAdminRelocationInput(input);
+    const digest=await sha(JSON.stringify(input));
+    const previous=await sql`SELECT actor,payload_hash FROM aproar_web_requests WHERE id=${parsed.requestId}`;
+    if(previous.length){
+      if(previous[0].actor!==session.user||previous[0].payload_hash!==digest)
+        return json({error:'Identificador da transferência reutilizado com dados diferentes.'},409);
+      return json({ok:true,requestId:parsed.requestId,replayed:true});
+    }
+    await applyCatalogRegistration(sql,parsed.requestId,session.user,digest,async()=>{
+      const currentRows=await sql`
+        SELECT c.id::text AS id,c.colaborador_id::text AS colaborador_id,
+          c.data,c.turno,c.obra_id::text AS obra_id,c.engenheiro,c.observacao,c.custos_separados,
+          w.unidade,
+          EXISTS(SELECT 1 FROM apontamentos a WHERE a.convocacao_id=c.id::text) AS has_point,
+          EXISTS(SELECT 1 FROM servicos_apontamento s WHERE s.convocacao_id=c.id::text) AS has_services
+        FROM convocacoes c JOIN obras w ON w.id=c.obra_id
+        WHERE c.id=${parsed.convocacaoId}::bigint LIMIT 1`;
+      const works=await sql`SELECT id::text AS id,unidade,nome FROM obras
+        WHERE unidade=${parsed.destination.unidade} ORDER BY id`;
+      const conflicts=await sql`SELECT id::text AS id,turno FROM convocacoes
+        WHERE id<>${parsed.convocacaoId}::bigint AND colaborador_id=${parsed.colaboradorId}::bigint
+        AND data=${parsed.destination.dataServico}::date`;
+      const unavailable=await sql`SELECT 1 FROM indisponibilidades
+        WHERE colaborador_id=${parsed.colaboradorId} AND inicio<=${parsed.destination.dataServico}::date
+          AND fim>=${parsed.destination.dataServico}::date AND ativo IS DISTINCT FROM false LIMIT 1`;
+      return buildAdminRelocationOperations({
+        current:currentRows[0],works,conflicts,unavailable:unavailable.length>0,
+        request:parsed,actor:session.user,timestamp:new Date().toISOString()
+      });
+    });
+    return json({ok:true,requestId:parsed.requestId});
    }
    if(path==='/api/save'&&request.method==='POST'){
     if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);if(!writes(env))return json({error:'Gravação desativada ou sem autorização específica para este ambiente.'},403);
