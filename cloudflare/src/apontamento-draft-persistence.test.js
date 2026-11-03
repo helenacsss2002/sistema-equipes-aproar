@@ -55,7 +55,7 @@ test('Apontamento normal guarda a cada tecla/mudança e restaura apenas a versã
 test('Retroativo guarda os campos, seleção e avulsos sem apagar os demais',()=>{
  const start=app.indexOf('  function renderApontamentoRetroativo()'),end=app.indexOf('  function renderExtras(){',start),s=app.slice(start,end);
  assert(start>0&&end>start);
- for(const fragment of ["draftKey('retroativo'","readStoredDraft(retroKey)",'items:[...retroDrafts.values()]','avulsos:[...retroUnsavedAvulsos.values()]','recoverRetroDraft(persistedRetro)',"addEventListener('input',storeRetroDraft)","addEventListener('change',storeRetroDraft)",'clearStoredDraft(retroKey)'])assert(s.includes(fragment),fragment);
+ for(const fragment of ["draftKey('retroativo'","readStoredDraft(retroKey)",'items:[...retroDrafts.values()]','avulsos:[...retroUnsavedAvulsos.values()]','recoverRetroDraft(persistedRetro)',"addEventListener('input',retroCapture)","addEventListener('change',retroCapture)",'dirtyFinancial:Object.fromEntries','clearStoredDraft(retroKey)'])assert(s.includes(fragment),fragment);
 });
 test('Logout remove cache da conta; o apontamento só apaga rascunho após sucesso',()=>{
  assert(app.includes('if(supervisorAtual)clearSupervisorDrafts(supervisorAtual)'));

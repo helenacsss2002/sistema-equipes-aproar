@@ -1058,6 +1058,16 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
     list.insertAdjacentElement('afterend',avulsoPanel);
     bindPersonSearch($('#retro-person-search'),()=>$$('.retro-person-list .check-card'));
     let retroDrafts=new Map();
+    const retroFinancialEdits=new Map();
+    const retroFinancialField=target=>{
+      const cls=target?.classList;
+      if(!cls)return null;
+      if(['row-extra','row-extra-value','row-extra-work','row-extra-work-search','row-extra-obs'].some(x=>cls.contains(x)))return 'Extra';
+      if(cls.contains('row-acordo'))return 'Bonificação';
+      if(cls.contains('row-ajuda-custo'))return 'Passagem / ajuda de custo';
+      if(cls.contains('row-noturno'))return 'Adicional noturno';
+      return null;
+    };
     const retroKey=draftKey('retroativo',$('#retro-sup')?.value||supervisorAtual);
     const persistedRetro=perfilAtual==='SUPERVISOR'?readStoredDraft(retroKey):null;
     const storeRetroDraft=()=>{
@@ -1068,6 +1078,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       const okay=storeDraft(retroKey,{
         supervisor:$('#retro-sup')?.value||supervisorAtual,date:$('#retro-data').value,
         unit:unidade.value,turn:$('#retro-turno').value,selected,items:[...retroDrafts.values()],
+        dirtyFinancial:Object.fromEntries([...retroFinancialEdits].map(([id,fields])=>[id,[...fields]])),
         avulsos:[...retroUnsavedAvulsos.values()],
         search:$('#retro-person-search')?.value||'',
         avulsoName:$('#retro-avulso-name')?.value||'',
@@ -1089,6 +1100,32 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       list.innerHTML=alphabeticalPeople(COLABORADORES.filter(c=>!c.inativo))
         .map(c=>'<label class="check-card"><input type="checkbox" name="retro-colab" value="'+escapeHtml(c.id)+'" '+((stored.selected||[]).includes(c.id)?'checked':'')+'><span><strong>'+escapeHtml(c.nome)+'</strong><small>'+escapeHtml(c.funcao)+'</small></span></label>').join('');
       retroDrafts=new Map((stored.items||[]).filter(x=>x&&typeof x.colaboradorId==='string').map(x=>[x.colaboradorId,x]));
+      retroFinancialEdits.clear();
+      for(const [id,fields] of Object.entries(stored.dirtyFinancial||{}))
+        if(Array.isArray(fields))retroFinancialEdits.set(id,new Set(fields));
+      // Compatibilidade com rascunhos feitos antes desta correção: reter
+      // valores que realmente divergem do Neon, sem confundir extra mostrada
+      // automaticamente com uma nova edição.
+      if(!stored.dirtyFinancial)for(const [id,item] of retroDrafts){
+        const c=state.convocacoes.find(c=>c.dataServico===stored.date&&c.unidade===stored.unit&&
+          c.turno===stored.turn&&c.supervisor===stored.supervisor&&c.colaboradores.includes(id));
+        const saved=c?apForConv(c.id)?.itens.find(i=>String(i.colaboradorId)===String(id)):null;
+        if(!saved)continue;
+        const n=v=>Math.round((Number(v)||0)*100)/100,fields=new Set();
+        const external=extraRecordFor(stored.date,id,stored.supervisor);
+        const entered=n(item.valorExtraDisponivel);
+        if(entered!==n(saved.valorExtraDisponivel)&&entered!==n(external?.valorExtraOriginal))fields.add('Extra');
+        const x=item.extraLancamento;
+        if(x&&x.enabled&&external&&(
+          String(x.extra)!==String(external.extra)||String(x.obraId)!==String(external.obraId)||
+          n(x.valorExtraOriginal)!==n(external.valorExtraOriginal)))fields.add('Extra');
+        if(x&&Boolean(x.enabled)!==Boolean(external)&&
+          !(x.enabled&&!external&&String(x.extra)===String(saved.extra)&&saved.extra!=='Não'))fields.add('Extra');
+        if(n(item.acordo)!==n(saved.acordo))fields.add('Bonificação');
+        if(n(item.ajudaCusto)!==n(saved.ajudaCusto))fields.add('Passagem / ajuda de custo');
+        if(n(item.noturno)!==n(saved.noturno))fields.add('Adicional noturno');
+        if(fields.size)retroFinancialEdits.set(id,fields);
+      }
       connectRetroChoices();refreshRows(true);
       $('#retro-person-search').value=stored.search||'';
       $('#retro-person-search').dispatchEvent(new Event('input',{bubbles:true}));
@@ -1099,10 +1136,10 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       const pending=new Map();for(const c of state.convocacoes.filter(c=>c.supervisor===supervisorAtual&&c.dataServico<=isoToday()&&!completeConv(c))){const done=new Set(apForConv(c.id)?.itens.map(i=>i.colaboradorId)||[]),ids=c.colaboradores.filter(id=>!done.has(id));if(!ids.length)continue;const key=c.dataServico+'|'+c.unidade+'|'+c.turno;if(!pending.has(key))pending.set(key,{date:c.dataServico,unit:c.unidade,turn:c.turno,ids:new Set()});ids.forEach(id=>pending.get(key).ids.add(id));}
       const groups=[...pending.values()].sort((a,b)=>a.date.localeCompare(b.date)||a.unit.localeCompare(b.unit,'pt-BR')||a.turn.localeCompare(b.turn,'pt-BR'));
       let date='';$('#retro-pending-list').innerHTML=groups.length?groups.map((g,index)=>{const title=date!==g.date?'<h4 class="retro-pending-date">'+formatDate(g.date)+'</h4>':'';date=g.date;return title+`<button type="button" class="retro-pending-item" data-retro-pending="${index}"><span><strong>${escapeHtml(g.unit)}</strong><small>${escapeHtml(g.turn)} · ${g.ids.size} colaborador(es) sem apontamento</small></span><span class="retro-pending-action">Regularizar →</span></button>`;}).join(''):'<div class="notice success">Nenhum apontamento pendente até hoje.</div>';
-      $$('[data-retro-pending]').forEach(button=>button.onclick=()=>{const g=groups[Number(button.dataset.retroPending)];retroDateSelected=g.date;portalDate=g.date;portalUnit=g.unit;$('#retro-data').value=g.date;unidade.value=g.unit;$('#retro-turno').value=g.turn;retroDrafts.clear();$$('input[name="retro-colab"]').forEach(input=>input.checked=g.ids.has(input.value));refreshRows(true);syncRetroHeader();if($('#portal-unit'))$('#portal-unit').value=g.unit;$$('[data-retro-pending]').forEach(b=>b.classList.toggle('active',b===button));storeRetroDraft();});
+      $('[data-retro-pending]').forEach(button=>button.onclick=()=>{const g=groups[Number(button.dataset.retroPending)];retroFinancialEdits.clear();retroDateSelected=g.date;portalDate=g.date;portalUnit=g.unit;$('#retro-data').value=g.date;unidade.value=g.unit;$('#retro-turno').value=g.turn;retroDrafts.clear();$$('input[name="retro-colab"]').forEach(input=>input.checked=g.ids.has(input.value));refreshRows(true);syncRetroHeader();if($('#portal-unit'))$('#portal-unit').value=g.unit;$$('[data-retro-pending]').forEach(b=>b.classList.toggle('active',b===button));storeRetroDraft();});
     }
-    $('#retro-data').onchange=()=>{retroDateSelected=$('#retro-data').value;if(perfilAtual==='SUPERVISOR'&&retroDateSelected){portalDate=retroDateSelected;syncRetroHeader();}};
-    unidade.onchange=()=>{retroDrafts.clear();refreshRows(true);};
+    $('#retro-data').onchange=()=>{retroFinancialEdits.clear();retroDateSelected=$('#retro-data').value;if(perfilAtual==='SUPERVISOR'&&retroDateSelected){portalDate=retroDateSelected;syncRetroHeader();}};
+    unidade.onchange=()=>{retroDrafts.clear();retroFinancialEdits.clear();refreshRows(true);};
     if(perfilAtual==='SUPERVISOR'&&portalUnit!=='Todas')unidade.value=portalUnit;
 
     function refreshRows(reset=false) {
@@ -1161,8 +1198,17 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
         };
       }
     }
-    $('#form-retro').addEventListener('input',storeRetroDraft);
-    $('#form-retro').addEventListener('change',storeRetroDraft);
+    const retroCapture=event=>{
+      const row=event.target?.closest?.('#retro-rows .person-card');
+      const financial=retroFinancialField(event.target),id=row?.dataset.person;
+      if(financial&&id){
+        if(!retroFinancialEdits.has(id))retroFinancialEdits.set(id,new Set());
+        retroFinancialEdits.get(id).add(financial);
+      }
+      storeRetroDraft();
+    };
+    $('#form-retro').addEventListener('input',retroCapture);
+    $('#form-retro').addEventListener('change',retroCapture);
     $('#form-retro').noValidate=true;
     $('#form-retro').onsubmit = (e) => {
       e.preventDefault();
@@ -1172,7 +1218,30 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       const ids = alphabeticalPersonIds($$('input[name="retro-colab"]:checked').map(x=>x.value));
       if (!ids.length) return toast('Selecione pelo menos um colaborador.', true);
       const responsavel=$('#retro-sup')?.value||supervisorAtual;
-      const itens=readPersonRows(ids);if(!validateAgreementObservations(itens,$('#form-retro')))return;if(!validateExtraAmounts(itens,$('#form-retro')))return;if(!validServices(itens,unidade.value))return;
+      const itens=readPersonRows(ids);
+      if(perfilAtual==='SUPERVISOR'){
+        for(const item of itens){
+          const conv=state.convocacoes.find(c=>c.dataServico===dataServico&&
+            c.unidade===unidade.value&&c.turno===$('#retro-turno').value&&
+            c.supervisor===responsavel&&c.colaboradores.includes(item.colaboradorId));
+          const saved=conv?apForConv(conv.id)?.itens.find(i=>String(i.colaboradorId)===String(item.colaboradorId)):null;
+          if(!saved)continue; // Inclusão inicial ainda valida todos os campos do financeiro.
+          const edited=retroFinancialEdits.get(String(item.colaboradorId))||new Set();
+          // Em revisões retroativas, não reenviar extras, adicionais e passagens
+          // que apenas foram exibidos automaticamente pelo navegador.
+          if(!edited.has('Extra')){
+            item.extra=saved.extra;
+            item.valorExtraOriginal=saved.valorExtraOriginal;
+            item.valorExtraDisponivel=saved.valorExtraDisponivel;
+            delete item.extraLancamento;
+          }
+          if(!edited.has('Bonificação'))item.acordo=saved.acordo;
+          if(!edited.has('Passagem / ajuda de custo'))item.ajudaCusto=saved.ajudaCusto;
+          if(!edited.has('Adicional noturno'))item.noturno=saved.noturno;
+          item.financeiro=saved.financeiro; // Complemento segue controlado pelo Financeiro.
+        }
+      }
+      if(!validateAgreementObservations(itens,$('#form-retro')))return;if(!validateExtraAmounts(itens,$('#form-retro')))return;if(!validServices(itens,unidade.value))return;
       // Nao tentar criar segundo apontamento para a mesma pessoa e turno em
       // outra unidade. Diferenciar conflitantes dos demais sem perder o rascunho.
       const turnoRetro=$('#retro-turno').value;
