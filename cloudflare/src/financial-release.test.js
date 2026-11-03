@@ -43,6 +43,16 @@ test('Autorização do Financeiro libera apenas o colaborador/data/campos solici
  assert.throws(()=>requireApprovedRelease(events,{...params,fields:['Adicional noturno']},timestamp),/Prazo financeiro encerrado/);
  assert.equal(requireApprovedRelease([],params,'2026-10-27T12:59:00Z'),null);
 });
+test('Uma autorização no mesmo salvamento pode cobrir extra e apontamento do mesmo colaborador uma única vez',()=>{
+ const used=new Map(),params={supervisor:'VICTOR',colaboradorId:'71',dataServico:'2026-10-26',fields:['Extra']};
+ const first=requireApprovedRelease(events,params,timestamp,used);
+ const second=requireApprovedRelease(events,params,timestamp,used);
+ assert.equal(first.data.acao,'LIBERACAO_FINANCEIRA_UTILIZADA');
+ assert.equal(second,null);
+ assert.equal(used.size,1);
+ const consumed=[...events,{acao:'LIBERACAO_FINANCEIRA_UTILIZADA',usuario:'VICTOR',ocorrido_em:timestamp,contexto:{requestId}}];
+ assert.throws(()=>requireApprovedRelease(consumed,params,timestamp,new Map()),/Solicite liberação/);
+});
 test('Solicitação negada ou consumida não pode mais ser utilizada',()=>{
  for(const action of ['LIBERACAO_FINANCEIRA_NEGADA','LIBERACAO_FINANCEIRA_UTILIZADA']){
   const event={acao:action,usuario:'FINANCEIRO',ocorrido_em:'2026-10-27T13:00:25Z',contexto:{requestId}};
@@ -69,7 +79,7 @@ test('Bloqueio ocorre em todas as rotas de salvamento do supervisor, com consumo
  assert.match(operations,/requireApprovedRelease\(db\.releaseEvents,\{supervisor:session\.user,colaboradorId:pid/);
  assert.match(operations,/requireApprovedRelease\(db\.releaseEvents,\{supervisor:session\.user,colaboradorId:personId/);
  assert.match(operations,/requireApprovedRelease\(db\.releaseEvents,\{supervisor:session\.user,colaboradorId:old\.colaboradorId/);
- assert.match(operations,/releaseUses=new Set\(\)/);
+ assert.match(operations,/releaseUses=new Map\(\)/);
  assert.match(worker,/if\(path==='\/api\/financial-release\/request'/);
  assert.match(worker,/if\(path==='\/api\/financial-release\/decide'/);
  assert.match(worker,/if\(path==='\/api\/financial-release'&&request\.method==='GET'\)/);
