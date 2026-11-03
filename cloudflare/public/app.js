@@ -1992,7 +1992,12 @@ function renderEquipeDia(){
  const initialFinanceFields=(id,item)=>{
    const saved=savedItem(id),fields=new Set();
    if(!saved)return fields;
-   if(amount(item?.valorExtraDisponivel)!==amount(saved.valorExtraDisponivel)||
+   // A interface antiga preenchia automaticamente "extra disponível" com o
+   // valor da extra independente. Isso NÃO representa uma edição manual e
+   // não deve consumir outra autorização após a aprovação do Financeiro.
+   const currentExtra=extraRecordFor(portalDate,id,supervisorAtual);
+   const enteredExtra=amount(item?.valorExtraDisponivel);
+   if((enteredExtra!==amount(saved.valorExtraDisponivel)&&enteredExtra!==amount(currentExtra?.valorExtraOriginal))||
       String(item?.extra||'Não')!==String(saved.extra||'Não'))fields.add('Extra');
    if(amount(item?.acordo)!==amount(saved.acordo))fields.add('Bonificação');
    if(amount(item?.ajudaCusto)!==amount(saved.ajudaCusto))fields.add('Passagem / ajuda de custo');
