@@ -5,7 +5,7 @@ import {isSafeUnitName} from './unit-label.js';
 const fail=(message,status=409)=>{throw Object.assign(new Error(message),{status});};
 const cleanDate=value=>{
  const date=String(value instanceof Date?value.toISOString().slice(0,10):value||'').slice(0,10);
- if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||Number.isNaN(Date.parse(date+'T12:00:00Z')))fail('Informe uma data válida para a transferência.',400);
+ if(!/^\d{4}-\d{2}-\d{2}$/.test(date)||!Number.isFinite(Date.parse(date+'T12:00:00Z'))||new Date(date+'T12:00:00Z').toISOString().slice(0,10)!==date)fail('Informe uma data válida para a transferência.',400);
  return date;
 };
 const validTurn=turn=>['Integral','Manhã','Tarde','Noite'].includes(turn);
@@ -48,7 +48,7 @@ export function buildAdminRelocationOperations({current,works=[],conflicts=[],un
  if(current.has_point||current.has_services||current.custos_separados===true||meta.apontado_em)
   fail('A convocação possui apontamento ou vínculo histórico. A transferência automática foi bloqueada; solicite conferência à Controladoria.');
  if(unavailable)fail('Este colaborador está indisponível na data de destino.');
- if(conflicts.some(c=>overlap(c.turno||'Integral',d.turno)))
+ if(conflicts.some(c=>metadata(c.observacao).meta.extra_avulsa!==true&&overlap(c.turno||'Integral',d.turno)))
   fail('A transferência geraria conflito: colaborador já convocado em turno sobreposto na data de destino.');
  const available=works.filter(w=>w.unidade===d.unidade);
  if(!available.length)fail('Cadastre uma obra na unidade de destino antes de transferir.');
