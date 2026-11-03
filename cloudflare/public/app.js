@@ -1997,14 +1997,15 @@ function renderEquipeDia(){
    // não deve consumir outra autorização após a aprovação do Financeiro.
    const currentExtra=extraRecordFor(portalDate,id,supervisorAtual);
    const enteredExtra=amount(item?.valorExtraDisponivel);
-   if((enteredExtra!==amount(saved.valorExtraDisponivel)&&enteredExtra!==amount(currentExtra?.valorExtraOriginal))||
-      String(item?.extra||'Não')!==String(saved.extra||'Não'))fields.add('Extra');
+   if(enteredExtra!==amount(saved.valorExtraDisponivel)&&enteredExtra!==amount(currentExtra?.valorExtraOriginal))fields.add('Extra');
    if(amount(item?.acordo)!==amount(saved.acordo))fields.add('Bonificação');
    if(amount(item?.ajudaCusto)!==amount(saved.ajudaCusto))fields.add('Passagem / ajuda de custo');
    if(amount(item?.noturno)!==amount(saved.noturno))fields.add('Adicional noturno');
    if(amount(item?.financeiro)!==amount(saved.financeiro))fields.add('Complemento financeiro');
    const oldExtra=extraRecordFor(portalDate,id,supervisorAtual),x=item?.extraLancamento;
-   if(x&&((Boolean(x.enabled)!==Boolean(oldExtra))||
+   const legacyExtra=String(saved.extra||'Não')!=='Não'&&!oldExtra;
+   if(x&&((Boolean(x.enabled)!==Boolean(oldExtra)&&
+      !(legacyExtra&&x.enabled&&String(x.extra)===String(saved.extra)))||
       (x.enabled&&oldExtra&&(
        String(x.extra)!==String(oldExtra.extra)||
        String(x.obraId)!==String(oldExtra.obraId)||
