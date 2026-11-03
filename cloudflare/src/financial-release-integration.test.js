@@ -50,7 +50,7 @@ test('Apontamento mantém valor e presença; pós-prazo só altera bonificação
  }finally{await pg.close();}
 });
 
-test('Duas autorizações aprovadas no Neon corrigem uma pessoa sem exigir outra e não alteram os colegas',async()=>{
+test('Uma autorização do Financeiro cobre Extra, Bonificação e Passagem, sem alterar colegas no Neon',async()=>{
  const pg=new PGlite();
  try{
   await pg.exec(fs.readFileSync(new URL('./fixture-schema.sql',import.meta.url),'utf8'));
@@ -69,19 +69,21 @@ test('Duas autorizações aprovadas no Neon corrigem uma pessoa sem exigir outra
   const person=next.apontamentos.find(a=>a.itens[0].colaboradorId==='1').itens[0];
   person.valorExtraDisponivel=100;
   person.acordo=50;
+  person.ajudaCusto=11;
   const scope={supervisor:'VICTOR',colaboradorId:'1',dataServico:'2026-10-30'};
-  const grantIds=['77777777-7777-4777-8777-777777777777','88888888-8888-4888-8888-888888888888'];
-  const events=grantIds.flatMap((id,index)=>[
+  const grantIds=['77777777-7777-4777-8777-777777777777'];
+  const events=grantIds.flatMap(id=>[
    {acao:'SOLICITACAO_LIBERACAO_FINANCEIRA',usuario:'VICTOR',ocorrido_em:'2026-11-03T13:00:01Z',
-    contexto:{requestId:id,...scope,fields:[index?'Bonificação':'Extra'],reason:'Revisão já liberada pelo Financeiro'}},
+    contexto:{requestId:id,...scope,fields:['Extra'],reason:'Revisão já liberada pelo Financeiro'}},
    {acao:'LIBERACAO_FINANCEIRA_AUTORIZADA',usuario:'FINANCEIRO',ocorrido_em:'2026-11-03T13:00:02Z',
     contexto:{requestId:id,...scope}}
   ]);
   db.releaseEvents=events;
   const ts='2026-11-03T17:15:00Z',ops=buildOperations(db,next,supervisor,ts);
   const used=ops.filter(o=>o.data?.acao==='LIBERACAO_FINANCEIRA_UTILIZADA');
-  assert.equal(used.length,2);
-  assert.deepEqual(new Set(used.map(o=>o.data.contexto.requestId)),new Set(grantIds));
+  assert.equal(used.length,1);
+  assert.ok(grantIds.includes(used[0].data.contexto.requestId));
+  assert.deepEqual(new Set(used[0].data.contexto.fields),new Set(['Extra','Bonificação','Passagem / ajuda de custo']));
   const pointed=ops.filter(o=>o.table==='apontamentos'&&o.action==='update');
   assert.equal(pointed.length,1);
   assert.equal(pointed[0].data.colaborador_id,'1');
@@ -95,6 +97,7 @@ test('Duas autorizações aprovadas no Neon corrigem uma pessoa sem exigir outra
   const colleague=after.state.apontamentos.find(a=>a.itens[0].colaboradorId==='2').itens[0];
   assert.equal(corrected.valorExtraDisponivel,100);
   assert.equal(corrected.acordo,50);
+  assert.equal(corrected.ajudaCusto,11);
   assert.equal(colleague.valorExtraDisponivel,0);
   assert.equal(colleague.acordo,0);
   after.releaseEvents=[...events,...used.map(o=>({acao:o.data.acao,usuario:o.data.usuario,

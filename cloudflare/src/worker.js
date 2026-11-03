@@ -194,7 +194,8 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
     const operations=[{table:'auditoria',action:'insert',id:'audit:'+body.requestId,
       data:{entidade:'apontamentos',entidade_id:entry.colaboradorId,acao:action,usuario:session.user,
        ocorrido_em:new Date().toISOString(),contexto:{requestId,supervisor:entry.supervisor,colaboradorId:entry.colaboradorId,
-         dataServico:entry.dataServico,fields:entry.fields,reason:String(body.reason||'').slice(0,600)}}}];
+         dataServico:entry.dataServico,fields:entry.fields,reason:String(body.reason||'').slice(0,600),
+         financialPaymentBundle:session.role==='FINANCEIRO'&&entry.fields.some(f=>['Extra','Bonificação','Passagem / ajuda de custo'].includes(f))}}}];
     const current=await sql`SELECT aproar_web_fingerprint() AS version`,digest=await sha(JSON.stringify(body));
     await sql`SELECT aproar_web_apply(${current[0].version},${body.requestId},${session.user},${digest},${JSON.stringify(operations)}::jsonb)`;
     return json({ok:true,requestId});
