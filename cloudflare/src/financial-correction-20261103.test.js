@@ -91,6 +91,31 @@ test('Ajuste do Financeiro não impede correção de passagem e noturno antes da
  }finally{await pg.close();}
 });
 
+test('Corrigir extra independente e valor do apontamento da mesma pessoa utiliza só uma autorização',async()=>{
+ const {pg,sql}=await fixture();
+ try{
+  const db=await readDatabase(sql),next=structuredClone(visibleState(db,supervisor));
+  const requestId='11111111-2222-4333-8444-555555555555';
+  db.releaseEvents=[
+   {acao:'SOLICITACAO_LIBERACAO_FINANCEIRA',usuario:'VICTOR',ocorrido_em:'2026-11-03T13:00:01Z',
+    contexto:{requestId,supervisor:'VICTOR',colaboradorId:'1',dataServico:'2026-10-30',fields:['Extra'],reason:'Corrigir extra não realizada'}},
+   {acao:'LIBERACAO_FINANCEIRA_AUTORIZADA',usuario:'FINANCEIRO',ocorrido_em:'2026-11-03T13:00:02Z',contexto:{requestId}}
+  ];
+  next.apontamentos[0].itens[0].valorExtraDisponivel=30;
+  next.extras[0].cancelada=true;
+  next.extras[0].motivoCancelamento='Colaborador não fez extra nesse dia';
+  const ops=buildOperations(db,next,supervisor,'2026-11-03T13:00:03Z');
+  assert.equal(ops.filter(o=>o.data?.acao==='LIBERACAO_FINANCEIRA_UTILIZADA').length,1);
+  assert.equal(ops.filter(o=>o.data?.acao==='CANCELAMENTO_EXTRA_INDEVIDA').length,1);
+  assert.equal(ops.some(o=>o.action==='delete'),false);
+  await pg.query('SELECT aproar_web_apply($1,$2,$3,$4,$5::jsonb)',[db.version,webcrypto.randomUUID(),'VICTOR','qa-unica-autorizacao',JSON.stringify(ops)]);
+  const after=await readDatabase(sql);
+  assert.equal(after.state.extras.length,0);
+  assert.equal(after.state.apontamentos[0].itens[0].valorExtraDisponivel,30);
+  assert.equal(after.raw.apontamentos.length,2);
+ }finally{await pg.close();}
+});
+
 test('Formulário de correção exige motivo e usa trava com prazo, não apenas financeAdjusted',()=>{
  const ui=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
  assert.match(ui,/motivoCancelamento:reason/);

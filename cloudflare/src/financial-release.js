@@ -39,10 +39,20 @@ export function releaseState(events){
 }
 export function requireApprovedRelease(events,{supervisor,colaboradorId,dataServico,fields},timestamp,usedIds=new Set()){
  if(!afterFinancialDeadline(dataServico,timestamp)||!fields.length)return null;
+ // No mesmo salvamento, uma liberação cobre todas as correções do mesmo
+ // colaborador/data que pertençam às colunas já autorizadas. O evento UTILIZADA
+ // é gravado uma única vez no banco, mesmo havendo apontamento e extra independentes.
+ if(usedIds instanceof Map){
+  const alreadyAuthorized=[...usedIds.values()].some(x=>x.supervisor===supervisor&&
+   x.colaboradorId===String(colaboradorId)&&x.dataServico===dataServico&&
+   fields.every(f=>x.fields.includes(f)));
+  if(alreadyAuthorized)return null;
+ }
  const requests=releaseState(events||[]);
  const valid=requests.find(x=>x.status==='Autorizada'&&x.supervisor===supervisor&&x.colaboradorId===String(colaboradorId)&&x.dataServico===dataServico&&!usedIds.has(x.id)&&fields.every(f=>x.fields.includes(f)));
  if(!valid)throw Object.assign(new Error('Prazo financeiro encerrado às 10h do dia do pagamento. Solicite liberação à Controladoria ou ao Financeiro para alterar: '+fields.join(', ')+'.'),{status:403,details:{dataServico,fields,limitAt:financialDeadline(dataServico).limitAt}});
- usedIds.add(valid.id);
+ if(usedIds instanceof Map)usedIds.set(valid.id,{supervisor,colaboradorId:String(colaboradorId),dataServico,fields:valid.fields.slice()});
+ else usedIds.add(valid.id);
  return {table:'auditoria',action:'insert',id:'audit:'+crypto.randomUUID(),data:{
   entidade:'apontamentos',entidade_id:String(colaboradorId),acao:'LIBERACAO_FINANCEIRA_UTILIZADA',usuario:supervisor,ocorrido_em:timestamp,
   contexto:{requestId:valid.id,supervisor,colaboradorId:String(colaboradorId),dataServico,fields,approvedBy:valid.approvedBy,approvedAt:valid.approvedAt}
