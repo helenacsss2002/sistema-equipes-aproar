@@ -24,7 +24,48 @@ export function permittedProductionDeletion(env,session,db,operations){
   if(mayDeleteProduction(env))return true;
   const deletions=operations.filter(op=>op.action==='delete');
   if(!deletions.length)return true;
-  if(env.APP_ENV!=='producao'||session.role!=='CONTROLADORIA')return false;
+  if(env.APP_ENV!=='producao')return false;
+  // Correções de serviços não são exclusões de convocação ou apontamento.
+  // Em produção, só aceitar vínculos antigos substituídos em uma transação
+  // com auditoria integral e com ambos os registros principais preservados.
+  if(deletions.every(op=>op.table==='servicos_apontamento')){
+    if(!['SUPERVISOR','CONTROLADORIA'].includes(session.role)||deletions.length>100)return false;
+    const ids=new Set(),oldServices=new Map(db.raw.servicos_apontamento.map(x=>[String(x.id),x]));
+    const affected=new Set();
+    for(const op of deletions){
+      if(ids.has(String(op.id)))return false;
+      ids.add(String(op.id));
+      const old=oldServices.get(String(op.id));
+      if(!old)return false;
+      const convId=String(old.convocacao_id);
+      const conv=db.raw.convocacoes.find(c=>String(c.id)===convId);
+      if(!conv||session.role==='SUPERVISOR'&&conv.engenheiro!==session.user)return false;
+      const pointed=operations.some(x=>x.table==='apontamentos'&&['insert','update'].includes(x.action)&&
+        String(x.data?.convocacao_id)===convId);
+      const convUpdated=operations.some(x=>x.table==='convocacoes'&&x.action==='update'&&String(x.id)===convId);
+      if(!pointed||!convUpdated)return false;
+      const audit=operations.find(x=>x.table==='auditoria'&&x.action==='insert'&&
+        x.data?.acao==='CORRECAO_VINCULO_SERVICO_APONTAMENTO'&&
+        String(x.data?.contexto?.servicoId)===String(op.id)&&
+        String(x.data?.contexto?.convocacaoId)===convId&&
+        String(x.data?.antes?.obraId)===String(old.obra_id||'')&&
+        String(x.data?.antes?.periodo||'')===String(old.periodo||'')&&
+        String(x.data?.antes?.unidade||'')===String(old.unidade_snapshot||'')&&
+        String(x.data?.usuario)===session.user);
+      if(!audit)return false;
+      affected.add(convId);
+    }
+    for(const convId of affected){
+      const pointOp=operations.find(x=>x.table==='apontamentos'&&['insert','update'].includes(x.action)&&
+        String(x.data?.convocacao_id)===convId);
+      const persisted=db.raw.servicos_apontamento.filter(x=>String(x.convocacao_id)===convId&&!ids.has(String(x.id))).length;
+      const incoming=operations.filter(x=>x.table==='servicos_apontamento'&&x.action==='insert'&&
+        String(x.data?.convocacao_id)===convId).length;
+      if(!['Falta','Atestado'].includes(pointOp?.data?.status)&&persisted+incoming<1)return false;
+    }
+    return true;
+  }
+  if(session.role!=='CONTROLADORIA')return false;
   // A group of unlinked works can be deleted in one atomic Controladoria save.
   // Never extend this bulk permission to convocations or other record types.
   const safeWork=id=>{

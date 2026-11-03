@@ -26,6 +26,18 @@ const own=(s,c)=>s.role==='CONTROLADORIA'||s.role==='SUPERVISOR'&&c.supervisor==
 export function buildOperations(db,next,session,timestamp=new Date().toISOString()){
  if(session.role==='VISUALIZAR')fail('Este perfil permite somente visualização.',403);
  const base=visibleState(db,session),ops=[],releaseUses=new Map();const add=(table,action,id,data)=>ops.push({table,action,id:String(id),...(data?{data}: {})});
+ // Uma correção explícita de serviço arquiva o vínculo anterior na auditoria
+ // da MESMA transação. Nenhum apontamento/convocação é excluído por isso.
+ const correctService=(service,convocationId,reason)=>{
+  const old={id:String(service.id),convocacaoId:String(service.convocacao_id),obraId:String(service.obra_id||''),
+   obraNome:service.obra_nome_snapshot||'',unidade:service.unidade_snapshot||'',periodo:service.periodo||'',
+   principal:Boolean(service.principal),criadoEm:service.criado_em||null};
+  add('auditoria','insert','audit:'+crypto.randomUUID(),{entidade:'servicos_apontamento',
+   entidade_id:String(service.id),acao:'CORRECAO_VINCULO_SERVICO_APONTAMENTO',usuario:session.user,
+   ocorrido_em:timestamp,antes:old,depois:{vinculoAtivo:false},
+   contexto:{servicoId:String(service.id),convocacaoId:String(convocationId),motivo:reason}});
+  add('servicos_apontamento','delete',String(service.id));
+ };
  for(const key of ['colaboradores','obras','convocacoes','apontamentos','indisponibilidades','conflitosTentados'])if(!Array.isArray(next[key]))fail('Dados incompletos. Atualize a página.');
  const staff=new Map(next.colaboradores.map(p=>[String(p.id),p])),oldStaff=new Map(base.colaboradores.map(p=>[p.id,p])),works=new Map(next.obras.map(o=>[String(o.id),o]));
  if(staff.size!==next.colaboradores.length||works.size!==next.obras.length)fail('Há identificadores repetidos.');
@@ -128,8 +140,9 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
       if(previous)add('servicos_apontamento','update',String(previous.id),values);
       else add('servicos_apontamento','insert',`service:${key}:${index}`,{...values,criado_em:timestamp});
     });
-    // Any actual removal of historical services continues to be blocked by production permissions.
-    for(const previous of previousServices.slice(ss.length))add('servicos_apontamento','delete',String(previous.id));
+    // Os serviços ativos acompanham a correção; os vínculos anteriores ficam no histórico auditável.
+    for(const previous of previousServices.slice(ss.length))
+      correctService(previous,key,'Correção da lista de serviços no apontamento');
    }
  }
  // Extra-only records are stored separately in the existing tables, without a second ordinary attendance.
@@ -210,7 +223,7 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
      timestamp,previous:rawPoint,next:pointData
    }));
    if(!old||String(old.obraId)!==String(work.id)||(rawServicesByConv.get(id)||[]).length===0){
-    if(old)for(const service of (rawServicesByConv.get(id)||[]))add('servicos_apontamento','delete',service.id);
+    if(old)for(const service of (rawServicesByConv.get(id)||[]))correctService(service,id,'Realocação da obra de extra independente');
     add('servicos_apontamento','insert','extra-service:'+id,{convocacao_id:convKey,obra_id:String(work.id),obra_nome_snapshot:work.nome,unidade_snapshot:work.unidade,periodo:'Integral',principal:true,criado_em:timestamp,atualizado_em:timestamp});
    }
   }
