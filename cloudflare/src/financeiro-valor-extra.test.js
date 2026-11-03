@@ -61,5 +61,5 @@ test('Todos os relatórios financeiros usam Valor da Extra e explicitam valores 
   assert.match(area,/Valores (complementares já registrados|anteriores)/,start);
   assert.doesNotMatch(area,/'Financeiro \(R\$\)'/,start);
  }
- assert.match(html,/app\.js\?v=aproar-liberacao-retro-extra-20261103-4/);
+ assert.match(html,/app\.js\?v=aproar-financeiro-pacote-20261103-5/);
 });
