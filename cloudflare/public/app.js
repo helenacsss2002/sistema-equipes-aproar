@@ -1035,7 +1035,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
               <div class="full"><label class="field-label">Colaboradores a apontar</label><p style="font-size:12px">Não selecionar alguém não registra falta. Para registrar falta, selecione a pessoa e escolha “Falta” no Status. Convocados sem apontamento permanecem pendentes.</p><div class="person-search-wrap"><input id="retro-person-search" class="control" type="search" autocomplete="off" placeholder="Buscar colaborador..." aria-label="Buscar colaboradores para apontamento"></div><div class="checkbox-grid retro-person-list">${alphabeticalPeople(COLABORADORES.filter(c=>!c.inativo)).map(c=>`<label class="check-card"><input type="checkbox" name="retro-colab" value="${c.id}"><span><strong>${c.nome}</strong><br><small>${c.funcao}</small></span></label>`).join('')}</div></div>
               <div class="full" id="retro-rows"></div>
             </div>
-            <div class="form-actions"><button class="btn btn-primary" type="submit">Salvar apontamento retroativo</button></div>
+            <div id="retro-save-status" class="notice info section" role="status" aria-live="polite">O registro será confirmado apenas após verificar o Neon.</div><div class="form-actions"><button class="btn btn-primary" type="submit">Salvar apontamento retroativo</button></div>
           </form>
         </div>
         ${perfilAtual==='SUPERVISOR'?'<aside class="card card-pad"><div class="section-title"><div><h3>Datas com apontamento pendente</h3><p>Selecione uma equipe para regularizar.</p></div></div><div id="retro-pending-list" class="retro-pending-list"></div></aside>':`        <div class="card card-pad">
@@ -1213,6 +1213,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
     $('#form-retro').onsubmit = (e) => {
       e.preventDefault();
       try{
+      storeRetroDraft(); // Rascunho do formulário permanece até confirmação e conferência do Neon.
       const dataServico = $('#retro-data').value;
       if (!dataServico) return toast('Escolha a data do serviço.', true);if(dataServico>isoToday())return toast('O apontamento retroativo não aceita data futura.',true);
       const ids = alphabeticalPersonIds($$('input[name="retro-colab"]:checked').map(x=>x.value));
@@ -1270,7 +1271,33 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       for(const id of ids){const c=matching.find(c=>c.colaboradores.includes(id));if(c){if(!batches.has(c.id))batches.set(c.id,{conv:c,items:[]});batches.get(c.id).items.push(itens.find(i=>i.colaboradorId===id));}else newIds.push(id);}
       if(newIds.length){const conv={id:uid('cv'),supervisor:responsavel,dataServico,unidade:unidade.value,obraId:obraRef?.id||'',turno:$('#retro-turno').value,colaboradores:newIds,criadoEm:now().toISOString(),origem:'retroativo'};state.convocacoes.push(conv);batches.set(conv.id,{conv,items:itens.filter(i=>newIds.includes(i.colaboradorId))});}
       for(const {conv,items} of batches.values()){const selected=new Set(items.map(i=>i.colaboradorId));let ap=apForConv(conv.id);if(ap){ap.itens=[...ap.itens.filter(i=>!selected.has(i.colaboradorId)),...items];ap.atualizadoEm=now().toISOString();ap.retroativo=true;}else state.apontamentos.push({executor:supervisorAtual||perfilLabel(perfilAtual),id:uid('ap'),convocacaoId:conv.id,supervisor:conv.supervisor,dataServico,apontadoEm:now().toISOString(),retroativo:true,itens:items});}
-      audit('Apontamento retroativo',dataServico);const savedMessage=[...batches.values()].every(({conv})=>completeConv(conv))?'Apontamento retroativo salvo. Equipe regularizada.':'Apontamento salvo. Há colaboradores convocados que continuam pendentes.';if(!saveData(()=>{clearStoredDraft(retroKey);if(perfilAtual==='SUPERVISOR')clearStoredDraft(draftKey('last',supervisorAtual));retroUnsavedAvulsos.clear();setView('pendencias');}))return;toast(savedMessage);
+      audit('Apontamento retroativo',dataServico);
+      const savedMessage=[...batches.values()].every(({conv})=>completeConv(conv))
+        ?'Apontamento retroativo confirmado no Neon. Equipe regularizada.'
+        :'Apontamento retroativo confirmado no Neon. Outros colaboradores ainda estão pendentes.';
+      const expected=itens.map(i=>({
+        colaboradorId:String(i.colaboradorId),dataServico,unidade:unidade.value,
+        turno:turnoRetro,supervisor:responsavel,status:i.status,
+        servicos:(i.servicos||[]).map(s=>({obraId:String(s.obraId||''),periodo:s.periodo||'Integral'})),
+        valorExtraDisponivel:Number(i.valorExtraDisponivel||0),
+        acordo:Number(i.acordo||0),ajudaCusto:Number(i.ajudaCusto||0),
+        noturno:Number(i.noturno||0)
+      }));
+      const feedback=$('#retro-save-status');
+      if(feedback){feedback.className='notice info section';feedback.textContent='Gravando e conferindo os apontamentos no Neon…';}
+      saveData(()=>{
+        clearStoredDraft(retroKey);
+        if(perfilAtual==='SUPERVISOR')clearStoredDraft(draftKey('last',supervisorAtual));
+        retroUnsavedAvulsos.clear();
+        setView('pendencias');
+        showToast(savedMessage);
+      },confirmed=>retroactiveRecordsConfirmed(confirmed,expected),message=>{
+        const node=$('#retro-save-status');
+        if(node){
+          node.className='notice warning section';
+          node.textContent='Salvamento retroativo NÃO confirmado: '+message+' Os dados preenchidos continuam nesta tela e no rascunho.';
+        }
+      });
       }catch(error){
         console.error('APROAR retroactive form submit failure',String(error?.message||error).slice(0,240));
         showToast('Não foi possível preparar o apontamento retroativo. Confira os campos e tente novamente.',true);showSaveFeedback('Não foi possível preparar o apontamento retroativo. Confira os campos e tente novamente.',true);
@@ -3237,13 +3264,35 @@ function renderEquipeDia(){
     ])));
     return changes.every(x=>actual.has(x.key)&&Number.isFinite(actual.get(x.key))&&Math.abs(actual.get(x.key)-x.expected)<0.005);
   }
-  function saveData(onSuccess=null){
+  function retroactiveRecordsConfirmed(confirmed,expected){
+    if(!confirmed||!Array.isArray(confirmed.convocacoes)||!Array.isArray(confirmed.apontamentos)||!expected?.length)return false;
+    const cents=v=>Math.round((Number(v)||0)*100);
+    const serviceKeys=ss=>(ss||[]).map(s=>String(s.obraId||'')+'|'+String(s.periodo||'Integral')).sort().join(';');
+    return expected.every(target=>{
+      const conv=confirmed.convocacoes.find(c=>c.dataServico===target.dataServico&&
+        c.supervisor===target.supervisor&&c.unidade===target.unidade&&
+        c.turno===target.turno&&c.colaboradores?.some(id=>String(id)===target.colaboradorId));
+      if(!conv)return false;
+      const point=confirmed.apontamentos.find(a=>String(a.convocacaoId)===String(conv.id)&&
+        a.dataServico===target.dataServico);
+      const item=point?.itens?.find(i=>String(i.colaboradorId)===target.colaboradorId);
+      if(!item||item.status!==target.status)return false;
+      if(['Falta','Atestado'].includes(target.status))return true;
+      if(serviceKeys(item.servicos)!==serviceKeys(target.servicos))return false;
+      return ['valorExtraDisponivel','acordo','ajudaCusto','noturno'].every(k=>
+        cents(item[k])===cents(target[k]));
+    });
+  }
+  function saveData(onSuccess=null,verifyPersisted=null,onFailure=null){
     if(!onlineSession||!onlineWritable||onlineSession.role==='VISUALIZAR'){
       if(onlineConfirmed){state=copy(onlineConfirmed);OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);}
       const reason=!onlineSession?'Sua sessão não está autenticada. Entre novamente.':onlineSession.role==='VISUALIZAR'?'Este perfil é somente para visualização.':'A gravação está bloqueada no ambiente do Worker. Confira a autorização de escrita da produção.';
-      toast(reason,true);showSaveFeedback(reason,true);queueMicrotask(()=>render());return false;
+      toast(reason,true);showSaveFeedback(reason,true);
+      if(typeof onFailure==='function')onFailure(reason);
+      if(!(viewAtual==='apontamento'&&apontamentoTab==='retroativo'))queueMicrotask(()=>render());
+      return false;
     }
-    if(onlineQueued||onlineSaving){const message='Já existe um salvamento em andamento. Aguarde a confirmação antes de enviar outro apontamento.';showToast(message,true);showSaveFeedback(message,true);return false;}
+    if(onlineQueued||onlineSaving){const message='Já existe um salvamento em andamento. Aguarde a confirmação antes de enviar outro apontamento.';showToast(message,true);showSaveFeedback(message,true);if(typeof onFailure==='function')onFailure(message);return false;}
     showSaveFeedback('Enviando apontamento para gravação no banco…',false,40000);
     const pendingNightChanges=nightChangesToVerify(onlineConfirmed,state);
     state.obras=OBRAS;state.colaboradores=COLABORADORES;onlineQueued=true;lockOnline(true);
@@ -3312,6 +3361,9 @@ function renderEquipeDia(){
         if(!result||!result.state||typeof result.version!=='string'||!result.session)
           throw new Error('O apontamento foi gravado, mas não foi possível atualizar os dados da tela.');
         const nightConfirmed=nightValuesMatch(result.state,pendingNightChanges);
+        if(typeof verifyPersisted==='function'&&!verifyPersisted(result.state)){
+          throw Object.assign(new Error('O servidor confirmou a operação, mas não foi possível localizar no Neon todos os apontamentos retroativos selecionados. Consulte o histórico antes de tentar novamente.'),{retroUnverified:true});
+        }
         applyOnline(result);onlineSaving=false;
         if(!nightConfirmed){
           onlineWritable=false; // Precisa recarregar e conciliar antes de outra escrita.
@@ -3326,11 +3378,15 @@ function renderEquipeDia(){
       }catch(error){
         console.error('APROAR save failure',JSON.stringify({message:String(error?.message||error).slice(0,240),status:Number(error?.status||0),name:String(error?.name||'Error').slice(0,60)}));
         if(savedOnServer){
-          // Confirmed on Neon, but reloading the full state failed. Do not allow
-          // another write from potentially stale data until the user refreshes.
+          // A confirmação da transação não basta para afirmar que cada retroativo
+          // selecionado foi efetivamente registrado. Manter tela/rascunho intactos.
           onlineWritable=false;onlineSaving=false;
-          const notice='O banco confirmou que o apontamento foi SALVO. A atualização da tela falhou; pressione Ctrl + F5 para consultar o registro. Não lance novamente.';
+          const notice=error?.retroUnverified
+            ?'O Neon confirmou a transação, mas o retroativo selecionado não foi localizado na conferência. Seus dados permanecem no rascunho. Consulte o histórico antes de repetir.'
+            :'O banco confirmou a gravação, mas a atualização da tela falhou. Pressione Ctrl + F5 para conferir o histórico. Não lance novamente.';
+          if(typeof onFailure==='function')onFailure(notice);
           showSaveFeedback(notice,true,60000);
+          showToast(notice,true);
           return;
         }
         const message=String(error?.message||'Não foi possível salvar o apontamento. Confira a conexão e tente novamente.');
@@ -3345,7 +3401,9 @@ function renderEquipeDia(){
         if(preserveRetroDraft)for(const [id,staff] of retroUnsavedAvulsos)if(!COLABORADORES.some(c=>c.id===id))COLABORADORES.push(staff);
         // Restaurar inclusões e rascunho local após rejeição de gravação.
         if(typeof dayPendingAdds!=='undefined'&&dayPendingAdds.size)restoreDayPendingAdds();
-        onlineSaving=false;if(!preserveRetroDraft)render();showSaveFeedback(message,true);
+        onlineSaving=false;if(!preserveRetroDraft)render();
+        if(typeof onFailure==='function')onFailure(message);
+        showSaveFeedback(message,true,60000);showToast(message,true);
       }finally{onlineQueued=false;onlineSaving=false;onlineMessage='';lockOnline(false);}
     });
     return true;

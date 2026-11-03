@@ -9,7 +9,7 @@ import {buildOperations} from './operations.js';
 const ui=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
 const source=fs.readFileSync(new URL('./operations.js',import.meta.url),'utf8');
 const marker='  function nightChangesToVerify(previous,next){';
-const start=ui.indexOf(marker),end=ui.indexOf('  function saveData(onSuccess=null){',start);
+const start=ui.indexOf(marker),end=ui.indexOf('  function saveData(onSuccess=null,verifyPersisted=null,onFailure=null){',start);
 assert(start>=0&&end>start);
 function verifier(){
  const ctx={};vm.createContext(ctx);

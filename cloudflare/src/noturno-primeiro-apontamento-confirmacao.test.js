@@ -5,7 +5,7 @@ import vm from 'node:vm';
 
 const ui=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
 const start=ui.indexOf('  function nightChangesToVerify(previous,next){');
-const end=ui.indexOf('  function saveData(onSuccess=null){',start);
+const end=ui.indexOf('  function saveData(onSuccess=null,verifyPersisted=null,onFailure=null){',start);
 assert(start>=0&&end>start);
 const ctx={};vm.createContext(ctx);
 vm.runInContext(ui.slice(start,end)+'\nglobalThis.helpers={changes:nightChangesToVerify,match:nightValuesMatch}',ctx);
