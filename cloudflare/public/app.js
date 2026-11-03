@@ -1940,7 +1940,8 @@ function renderEquipeDia(){
  const loadLocalDayDraft=stored=>{
    if(!stored||!Array.isArray(stored.items))return;
    const items=new Map(stored.items.filter(i=>i&&typeof i.colaboradorId==='string').map(i=>[i.colaboradorId,i]));
-   dayUnsavedDrafts.set(pendingDayKey,{items,extra:stored.extra||{},unit:portalUnit});
+   dayUnsavedDrafts.set(pendingDayKey,{items,extra:stored.extra||{},unit:portalUnit,
+     dirtyIds:Array.isArray(stored.dirtyIds)?stored.dirtyIds:null});
    for(const x of stored.pending||[]){
      if(!x||x.dayKey!==pendingDayKey||x.selectedUnit!==portalUnit||!x.id)continue;
      if(onlineConfirmed?.convocacoes?.some(c=>c.colaboradores?.includes(x.id)))continue;
@@ -1958,6 +1959,30 @@ function renderEquipeDia(){
  const dayKey=portalDate+'|'+supervisorAtual,dayDraft=dayUnsavedDrafts.get(dayKey);
  const people=new Map();for(const c of convs)for(const id of c.colaboradores)
    if(!people.has(id))people.set(id,{conv:c,item:dayDraft?.items?.get(id)||apForConv(c.id)?.itens.find(i=>i.colaboradorId===id)});
+ // Rascunhos de versões anteriores não tinham marcação de edição. Comparar
+ // com a versão confirmada, sem transformar todos os colegas em correções.
+ const oldDraftChanged=(id,item)=>{
+   const saved=apForConv(people.get(id)?.conv?.id)?.itens?.find(i=>String(i.colaboradorId)===String(id));
+   if(!saved)return true;
+   const amount=v=>Math.round((Number(v)||0)*100)/100;
+   const numbers=['valorExtraDisponivel','financeiro','noturno','acordo','ajudaCusto'];
+   if(numbers.some(k=>amount(item?.[k])!==amount(saved[k])))return true;
+   if(['status','observacao','tipoDiariaAvulso'].some(k=>String(item?.[k]??'')!==String(saved[k]??'')))return true;
+   const canonical=xs=>JSON.stringify((xs||[]).map(x=>[String(x.obraId||''),String(x.periodo||'Integral')]));
+   if(canonical(item?.servicos)!==canonical(saved.servicos))return true;
+   const extra=extraRecordFor(portalDate,id,supervisorAtual),draftExtra=item?.extraLancamento||{};
+   if(Boolean(draftExtra.enabled)!==Boolean(extra))return true;
+   if(draftExtra.enabled&&extra){
+     if(String(draftExtra.extra)!==String(extra.extra)||
+       String(draftExtra.obraId)!==String(extra.obraId)||
+       amount(draftExtra.valorExtraOriginal)!==amount(extra.valorExtraOriginal)||
+       String(draftExtra.observacao||'').trim()!==String(extra.observacao||'').trim())return true;
+   }
+   return false;
+ };
+ const dayTouchedIds=new Set(Array.isArray(dayDraft?.dirtyIds)?dayDraft.dirtyIds:
+   dayDraft?[...dayDraft.items].filter(([id,item])=>oldDraftChanged(id,item)).map(([id])=>id):[]);
+ for(const id of dayPendingAdds.keys())if(people.has(id))dayTouchedIds.add(id);
  const snapshotDayDraft=()=>{
    const cards=$$('#day-form .person-card'),ids=cards.map(el=>el.dataset.person);
    const items=ids.length?readPersonRows(ids,$('#day-form')):[];
@@ -1966,14 +1991,15 @@ function renderEquipeDia(){
      obs:$('#day-extra-obs')?.value||'',search:$('#day-person-search')?.value||'',
      newName:$('#day-avulso-nome')?.value||'',newFuncao:$('#day-avulso-funcao')?.value||'',
      newPerson:$('#day-add-person')?.value||''};
-   const draft={items:new Map(items.map(item=>[item.colaboradorId,item])),extra,unit:portalUnit};
+   const draft={items:new Map(items.map(item=>[item.colaboradorId,item])),extra,unit:portalUnit,
+     dirtyIds:[...dayTouchedIds]};
    dayUnsavedDrafts.set(dayKey,draft);
    persistDayDraftFromMemory();
  };
  const persistDayDraftFromMemory=()=>{
    const draft=dayUnsavedDrafts.get(dayKey);if(!draft)return false;
    const okay=storeDraft(storageKey,{items:[...draft.items.values()],extra:draft.extra,
-     pending:[...dayPendingAdds.values()].filter(x=>x.dayKey===dayKey&&x.selectedUnit===portalUnit)});
+     dirtyIds:draft.dirtyIds||[],pending:[...dayPendingAdds.values()].filter(x=>x.dayKey===dayKey&&x.selectedUnit===portalUnit)});
    if(okay&&supervisorAtual)storeDraft(draftKey('last',supervisorAtual),{tab:'normal',date:portalDate,unit:portalUnit});
    const indicator=$('#day-draft-status');
    if(indicator)indicator.textContent=okay?'Rascunho armazenado neste navegador · '+formatDateTime(new Date().toISOString()):'Não foi possível armazenar o rascunho neste navegador';
@@ -1993,7 +2019,9 @@ function renderEquipeDia(){
  bindServiceRows();bindPersonSearch($('#day-person-search'),()=>$$('#day-form .person-card'));
  // Cada tecla ou mudança grava instantaneamente no disco do navegador.
  const dayCapture=event=>{
-   if(event.target?.closest('#day-form')||event.target?.id==='day-avulso-nome'||event.target?.id==='day-avulso-funcao'||event.target?.id==='day-add-person')
+   const card=event.target?.closest?.('#day-form .person-card');
+   if(card?.dataset.person)dayTouchedIds.add(card.dataset.person);
+   if(event.target?.closest?.('#day-form')||event.target?.id==='day-avulso-nome'||event.target?.id==='day-avulso-funcao'||event.target?.id==='day-add-person')
      snapshotDayDraft();
  };
  body.addEventListener('input',dayCapture);
@@ -2112,7 +2140,7 @@ function renderEquipeDia(){
    $('#day-person-search').dispatchEvent(new Event('input',{bubbles:true}));
    refreshExternalFields();
  }
- $('#day-all-present').onclick=()=>{if(!people.size)return toast('Adicione pessoas à equipe.',true);const items=readPersonRows([...people.keys()]);if(items.some(i=>i.servicos.some(s=>!s.obraId)))return toast('Selecione primeiro os serviços de todos os colaboradores.',true);$$('#day-form .row-status').forEach(x=>{x.value='Presente (Integral)';x.onchange?.();});snapshotDayDraft();};
+ $('#day-all-present').onclick=()=>{if(!people.size)return toast('Adicione pessoas à equipe.',true);const items=readPersonRows([...people.keys()]);if(items.some(i=>i.servicos.some(s=>!s.obraId)))return toast('Selecione primeiro os serviços de todos os colaboradores.',true);$('#day-form .person-card').forEach(card=>dayTouchedIds.add(card.dataset.person));$('#day-form .row-status').forEach(x=>{x.value='Presente (Integral)';x.onchange?.();});snapshotDayDraft();};
  $('#day-add-button').onclick=()=>{
    if(onlineQueued||onlineSaving)return toast('Aguarde o salvamento atual.',true);
    const unit=portalUnit==='Todas'?(convs[0]?.unidade||adminUnits()[0]):portalUnit;
@@ -2148,10 +2176,15 @@ function renderEquipeDia(){
   try{
     if(portalDate>isoToday())return toast('Não é possível apontar uma data futura.',true);
     snapshotDayDraft();
-    const items=readPersonRows([...people.keys()]);if(!validateAgreementObservations(items,$('#day-form')))return;if(!validateExtraAmounts(items,$('#day-form')))return;for(const i of items)if(!validServices([i],people.get(i.colaboradorId).conv.unidade))return;
+    const allItems=readPersonRows([...people.keys()]);
+   // Somente fichas realmente editadas (ou ainda não apontadas) são enviadas.
+   // Fichas já confirmadas e intactas não consomem autorizações financeiras.
+   const items=allItems.filter(i=>dayTouchedIds.has(i.colaboradorId)||
+     !apForConv(people.get(i.colaboradorId)?.conv?.id)?.itens?.some(saved=>String(saved.colaboradorId)===String(i.colaboradorId)));
+   if(!validateAgreementObservations(items,$('#day-form')))return;if(!validateExtraAmounts(items,$('#day-form')))return;for(const i of items)if(!validServices([i],people.get(i.colaboradorId).conv.unidade))return;
     const selectedExternal=$('#day-extra-person').value,toggleExternal=$('#day-extra-kind').value!=='Não';
     if(toggleExternal&&!selectedExternal)return toast('Selecione o funcionário que realizou a extra.',true);if(toggleExternal){const amount=Number($('#day-extra-amount').value);if(!Number.isFinite(amount)||amount<=0||amount>10000000){$('#day-extra-amount').focus();return toast('Informe um valor da extra maior que R$ 0,00. A opção de extra está diferente de “Não”.',true);}}
-    if(!items.length&&!selectedExternal)return toast('Selecione funcionários para o apontamento normal ou informe uma extra.',true);
+    if(!items.length&&!selectedExternal)return toast('Nenhuma alteração pendente para salvar. Edite a ficha desejada ou selecione um funcionário para a extra.',true);
     const extraBatch=items.slice();
     if(selectedExternal){const day=mainWorkForPersonOnDate(selectedExternal,portalDate);extraBatch.push({colaboradorId:selectedExternal,status:'Extra independente',extra:'Não',servicos:[],extraLancamento:{enabled:toggleExternal,extra:$('#day-extra-kind').value,valorExtraOriginal:Number($('#day-extra-amount').value),obraId:$('#day-extra-work').value,observacao:$('#day-extra-obs').value.trim(),dayWorkId:day.workId}});}
     if(!applyInlineExtras(extraBatch,portalDate,supervisorAtual))return;
