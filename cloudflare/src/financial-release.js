@@ -37,26 +37,47 @@ export function releaseState(events){
  }
  return [...map.values()].reverse();
 }
-export function requireApprovedRelease(events,{supervisor,colaboradorId,dataServico,fields},timestamp,usedIds=new Set()){
- if(!afterFinancialDeadline(dataServico,timestamp)||!fields.length)return null;
- // No mesmo salvamento, uma liberação cobre todas as correções do mesmo
- // colaborador/data que pertençam às colunas já autorizadas. O evento UTILIZADA
- // é gravado uma única vez no banco, mesmo havendo apontamento e extra independentes.
- if(usedIds instanceof Map){
-  const alreadyAuthorized=[...usedIds.values()].some(x=>x.supervisor===supervisor&&
-   x.colaboradorId===String(colaboradorId)&&x.dataServico===dataServico&&
-   fields.every(f=>x.fields.includes(f)));
-  if(alreadyAuthorized)return null;
+// As autorizações são por colaborador, data e coluna. Quando o Financeiro
+// aprova colunas em solicitações separadas, todas podem cobrir um mesmo save.
+export function requireApprovedReleases(events,{supervisor,colaboradorId,dataServico,fields},timestamp,usedIds=new Map()){
+ if(!afterFinancialDeadline(dataServico,timestamp)||!fields.length)return [];
+ const person=String(colaboradorId),requested=[...new Set(fields)];
+ const matches=x=>x.supervisor===supervisor&&x.colaboradorId===person&&x.dataServico===dataServico;
+ const already=usedIds instanceof Map?[...usedIds.values()].filter(matches):[];
+ const covered=new Set(already.flatMap(x=>x.fields||[]));
+ const selected=[];
+ const authorized=releaseState(events||[]).filter(x=>matches(x)&&x.status==='Autorizada'&&!usedIds.has(x.id));
+ for(const grant of authorized){
+  if(!(grant.fields||[]).some(f=>requested.includes(f)&&!covered.has(f)))continue;
+  selected.push(grant);
+  for(const field of grant.fields||[])covered.add(field);
+  if(requested.every(f=>covered.has(f)))break;
  }
- const requests=releaseState(events||[]);
- const valid=requests.find(x=>x.status==='Autorizada'&&x.supervisor===supervisor&&x.colaboradorId===String(colaboradorId)&&x.dataServico===dataServico&&!usedIds.has(x.id)&&fields.every(f=>x.fields.includes(f)));
- if(!valid)throw Object.assign(new Error('Prazo financeiro encerrado às 10h do dia do pagamento. Solicite liberação à Controladoria ou ao Financeiro para alterar: '+fields.join(', ')+'.'),{status:403,details:{dataServico,fields,limitAt:financialDeadline(dataServico).limitAt}});
- if(usedIds instanceof Map)usedIds.set(valid.id,{supervisor,colaboradorId:String(colaboradorId),dataServico,fields:valid.fields.slice()});
- else usedIds.add(valid.id);
- return {table:'auditoria',action:'insert',id:'audit:'+crypto.randomUUID(),data:{
-  entidade:'apontamentos',entidade_id:String(colaboradorId),acao:'LIBERACAO_FINANCEIRA_UTILIZADA',usuario:supervisor,ocorrido_em:timestamp,
-  contexto:{requestId:valid.id,supervisor,colaboradorId:String(colaboradorId),dataServico,fields,approvedBy:valid.approvedBy,approvedAt:valid.approvedAt}
- }};
+ const missing=requested.filter(f=>!covered.has(f));
+ if(missing.length){
+  const permitted=requested.filter(f=>covered.has(f));
+  const note=permitted.length?' As seguintes colunas já possuem autorização e NÃO precisam de nova solicitação: '+permitted.join(', ')+'.':'';
+  throw Object.assign(new Error('Prazo financeiro encerrado às 10h do dia do pagamento. Solicite liberação SOMENTE para: '+missing.join(', ')+'.'+note),
+   {status:403,details:{dataServico,colaboradorId:person,fields:missing,alreadyApproved:permitted,
+     limitAt:financialDeadline(dataServico).limitAt}});
+ }
+ const operations=[];
+ for(const grant of selected){
+  if(usedIds instanceof Map)usedIds.set(grant.id,{supervisor,colaboradorId:person,dataServico,fields:grant.fields.slice()});
+  else usedIds.add(grant.id);
+  operations.push({table:'auditoria',action:'insert',id:'audit:'+crypto.randomUUID(),data:{
+   entidade:'apontamentos',entidade_id:person,acao:'LIBERACAO_FINANCEIRA_UTILIZADA',usuario:supervisor,ocorrido_em:timestamp,
+   contexto:{requestId:grant.id,supervisor,colaboradorId:person,dataServico,
+     fields:requested.filter(field=>grant.fields.includes(field)),approvedBy:grant.approvedBy,approvedAt:grant.approvedAt}
+  }});
+ }
+ return operations;
+}
+// Compatibilidade para usos antigos que solicitam uma única liberação.
+export function requireApprovedRelease(events,scope,timestamp,usedIds=new Set()){
+ const operations=requireApprovedReleases(events,scope,timestamp,usedIds);
+ if(operations.length>1)throw Error('Para múltiplas autorizações, use requireApprovedReleases.');
+ return operations[0]||null;
 }
 export function changedFinancialFields(current,next){
  const n=v=>Math.round((Number(v)||0)*100)/100;
