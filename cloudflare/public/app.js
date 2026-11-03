@@ -1809,6 +1809,42 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
   let financeReleaseRequests=[];
   function isFinancialEditingLocked(date,item){return Boolean(item?.financeAdjusted)&&now()>new Date(financialCycle(date).pagamento+'T10:00:00-03:00');}
   const isApprovedFinancial=(date,id,type)=>financeReleaseRequests.some(x=>x.status==='Autorizada'&&x.supervisor===supervisorAtual&&String(x.colaboradorId)===String(id)&&x.dataServico===date&&x.fields.includes(type));
+  // As aprovações são carregadas ao abrir o apontamento, não apenas
+  // quando o supervisor visita a aba "Solicitar liberação".
+  // Atualizar o atributo readonly sem redesenhar o formulário evita perder rascunhos.
+  async function refreshFinancialReleaseInputs(form,serviceDate,owner){
+    if(perfilAtual!=='SUPERVISOR'||!form)return;
+    try{
+      const response=await api('/api/financial-release');
+      if(!form.isConnected||supervisorAtual!==owner)return;
+      financeReleaseRequests=response.requests||[];
+      for(const card of form.querySelectorAll('.person-card')){
+        const cid=card.dataset.person;
+        const adjusted=card.dataset.financeAdjusted==='true';
+        const locked=adjusted&&isFinancialEditingLocked(serviceDate,{financeAdjusted:true});
+        const passage=card.querySelector('.row-ajuda-custo');
+        if(passage){
+          passage.readOnly=locked&&!isApprovedFinancial(serviceDate,cid,'Passagem / ajuda de custo');
+          passage.title=passage.readOnly?'Valor confirmado pelo Financeiro. Solicite liberação para corrigir.':'Passagens / ajuda de custo editáveis';
+        }
+        const night=card.querySelector('.row-noturno');
+        if(night&&card.dataset.unit==='SEBRAE')
+          night.disabled=locked&&!isApprovedFinancial(serviceDate,cid,'Adicional noturno');
+        const permitted=['Extra','Bonificação','Passagem / ajuda de custo'].every(f=>isApprovedFinancial(serviceDate,cid,f));
+        let notice=card.querySelector('.finance-approved-bundle');
+        if(permitted){
+          if(!notice){
+            notice=document.createElement('div');
+            notice.className='finance-approved-bundle notice success';
+            notice.textContent='Financeiro autorizou: Extra, Bonificações e Passagens / Ajuda de custo. Válido para um salvamento.';
+            card.querySelector('.person-name')?.insertAdjacentElement('afterend',notice);
+          }
+        }else notice?.remove();
+      }
+    }catch(error){
+      console.warn('APROAR: não foi possível consultar liberações do apontamento',String(error?.message||error).slice(0,120));
+    }
+  }
   function cycleControl(){return `<div class="card card-pad section">${field('Ciclo de pagamento',`<select class="control" id="financial-cycle">${Array.from({length:26},(_,index)=>{const c=financialCycle(isoToday(),-index);return `<option value="${-index}" ${String(-index)===selectedCycle?'selected':''}>${formatDate(c.inicio)} a ${formatDate(c.fim)} · pagamento ${formatDate(c.pagamento)}</option>`;}).join('')}<option value="custom" ${selectedCycle==='custom'?'selected':''}>Período personalizado</option></select>`)}<p id="cycle-caption" style="font-size:12px"></p></div>`;}
   function renderFinancialHistory(){
     const today=isoToday(),first=today.slice(0,8)+'01';
@@ -1858,9 +1894,9 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
     if(!supervisor&&!canApprove)return setView('inicio');
     const today=isoToday();
     $('#main-content').innerHTML=head(supervisor?'Solicitar liberação financeira':'Autorizações financeiras',
-      'Após as 10h da terça-feira de pagamento, apenas uma autorização da Controladoria ou do Financeiro permite alterar extras, bonificações, passagens, adicional noturno ou complemento.')
+      'Após as 10h da terça-feira de pagamento, a autorização do Financeiro para Extra, Bonificação ou Passagem / Ajuda de custo libera as três colunas em conjunto para o mesmo colaborador e data, em um único salvamento. Adicional noturno e complemento exigem autorização própria.')
       +(supervisor?'<div class="card card-pad"><h3>Solicitar preenchimento após o prazo</h3>'
-        +'<p>Indique o colaborador, a data do serviço, as colunas a liberar e o motivo. A liberação é válida para um único salvamento.</p>'
+        +'<p>Indique o colaborador, a data do serviço, as colunas a liberar e o motivo. Se o Financeiro autorizar Extra, Bonificação ou Passagem / Ajuda de custo, as três serão liberadas juntas para um único salvamento. Adicional noturno e complemento permanecem separados.</p>'
         +'<form id="fr-form"><div class="form-grid">'
         +field('Data do serviço','<input class="control" type="date" id="fr-date" value="'+today+'" required>')
         +field('Colaborador','<select class="control" id="fr-person" required></select>')
@@ -1894,7 +1930,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
           return '<div class="card card-pad section"><strong>'+escapeHtml(item.colaborador||'')+' · '+escapeHtml(formatDate(item.dataServico))+'</strong>'+
            '<p><strong>Supervisor:</strong> '+escapeHtml(item.supervisor)+' · <strong>Situação:</strong> '+escapeHtml(item.status)+
            ' · <strong>Solicitado:</strong> '+escapeHtml(fmtTime(item.createdAt))+'</p>'+
-           '<p><strong>Campos:</strong> '+escapeHtml((item.fields||[]).join(', '))+'</p>'+
+           '<p><strong>Campos liberados:</strong> '+escapeHtml((item.fields||[]).join(', '))+'</p>'+
            '<p><strong>Motivo:</strong> '+escapeHtml(item.reason||'')+'</p>'+
            (item.approvedBy?'<p><strong>Autorizado por:</strong> '+escapeHtml(item.approvedBy)+' em '+escapeHtml(fmtTime(item.approvedAt))+'</p>':'')+
            (item.usedAt?'<p><strong>Utilizado:</strong> '+escapeHtml(fmtTime(item.usedAt))+'</p>':'')+act+'</div>';
@@ -1902,7 +1938,12 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
         $('#fr-list').innerHTML='<h3>Solicitações ('+items.length+')</h3>'+(cards||'<div class="empty">Nenhuma solicitação registrada.</div>');
         $$('.fr-decision').forEach(btn=>btn.onclick=async()=>{
           const approval=btn.dataset.action==='approve';
-          if(!window.confirm((approval?'Autorizar':'Negar')+' a solicitação?'))return;
+          const current=financeReleaseRequests.find(x=>x.id===btn.dataset.id);
+          const bundle=approval&&perfilAtual==='FINANCEIRO'&&
+            (current?.fields||[]).some(f=>['Extra','Bonificação','Passagem / ajuda de custo'].includes(f));
+          const dialog=(approval?'Autorizar':'Negar')+' a solicitação?'+
+            (bundle?' Esta aprovação liberará Extra, Bonificações e Passagens / Ajuda de custo para este colaborador e data em um único salvamento.':'');
+          if(!window.confirm(dialog))return;
           const reason=approval?'':(window.prompt('Motivo da negativa:')||'');
           if(!approval&&reason.length<10)return showToast('Informe o motivo da negativa.',true);
           btn.disabled=true;
