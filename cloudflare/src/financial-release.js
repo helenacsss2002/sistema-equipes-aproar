@@ -1,15 +1,6 @@
 // Fluxo de liberação do supervisor: auditado e append-only na tabela auditoria.
 // Ciclo do Financeiro: terça-feira a segunda-feira; pagamento terça às 10h (Fortaleza).
 export const releaseFields=['Extra','Bonificação','Adicional noturno','Passagem / ajuda de custo','Complemento financeiro'];
-// Uma aprovação do FINANCEIRO sobre qualquer uma destas três colunas
-// habilita todas as três para o mesmo supervisor, colaborador e data.
-// Noturno e complemento permanecem dependentes de autorização específica.
-export const financialPaymentBundle=['Extra','Bonificação','Passagem / ajuda de custo'];
-export function approvalFields(requested,approver){
- const fields=[...new Set((requested||[]).filter(x=>releaseFields.includes(x)))];
- if(approver!=='FINANCEIRO'||!fields.some(x=>financialPaymentBundle.includes(x)))return fields;
- return [...new Set([...fields,...financialPaymentBundle])];
-}
 export const releaseActions=['SOLICITACAO_LIBERACAO_FINANCEIRA','LIBERACAO_FINANCEIRA_AUTORIZADA','LIBERACAO_FINANCEIRA_NEGADA','LIBERACAO_FINANCEIRA_UTILIZADA'];
 const day=v=>{if(!/^\d{4}-\d{2}-\d{2}$/.test(String(v)))throw Error('Data inválida.');const d=new Date(String(v)+'T12:00:00Z');if(!Number.isFinite(d.valueOf())||d.toISOString().slice(0,10)!==v)throw Error('Data inválida.');return d;};
 export function financialDeadline(serviceDate){
@@ -39,7 +30,7 @@ export function releaseState(events){
    map.set(rid,{id:rid,supervisor:ctx.supervisor,colaboradorId:String(ctx.colaboradorId||''),colaborador:ctx.colaborador||'',dataServico:ctx.dataServico,fields:ctx.fields||[],reason:ctx.reason,createdAt:e.ocorrido_em,status:'Pendente',approvedBy:null,approvedAt:null,usedAt:null,decisionReason:null});
   }else if(map.has(rid)){
    const item=map.get(rid);
-   if(e.acao==='LIBERACAO_FINANCEIRA_AUTORIZADA'&&item.status==='Pendente'){item.status='Autorizada';item.approvedBy=e.usuario;item.approvedAt=e.ocorrido_em;item.requestedFields=item.fields.slice();item.fields=approvalFields(item.fields,e.usuario);}
+   if(e.acao==='LIBERACAO_FINANCEIRA_AUTORIZADA'&&item.status==='Pendente'){item.status='Autorizada';item.approvedBy=e.usuario;item.approvedAt=e.ocorrido_em;}
    if(e.acao==='LIBERACAO_FINANCEIRA_NEGADA'&&item.status==='Pendente'){item.status='Negada';item.decisionReason=ctx.reason||'';}
    if(e.acao==='LIBERACAO_FINANCEIRA_UTILIZADA'&&item.status==='Autorizada'){item.status='Utilizada';item.usedAt=e.ocorrido_em;}
   }
