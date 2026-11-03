@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {webcrypto} from 'node:crypto';
-import {financialDeadline,afterFinancialDeadline,validRequest,requireApprovedRelease,requireApprovedReleases,releaseState,changedFinancialFields} from './financial-release.js';
+import {financialDeadline,afterFinancialDeadline,validRequest,requireApprovedRelease,requireApprovedReleases,releaseState,changedFinancialFields,authorizedFieldsForApproval,financialPaymentBundle} from './financial-release.js';
 
 globalThis.crypto??=webcrypto;
 const worker=fs.readFileSync(new URL('./worker.js',import.meta.url),'utf8');
@@ -65,16 +65,50 @@ test('Liberações independentes de Extra e Bonificação cobrem um salvamento �
  ];
  const used=new Map();
  const operations=requireApprovedReleases(grants,{...scope,fields:['Extra','Bonificação']},timestamp,used);
- assert.equal(operations.length,2);
- assert.equal(used.size,2);
- assert.deepEqual(new Set(operations.map(o=>o.data.contexto.requestId)),new Set([extraId,bonusId]));
+ assert.equal(operations.length,1);
+ assert.equal(used.size,1);
+ assert.ok([extraId,bonusId].includes(operations[0].data.contexto.requestId));
  assert.deepEqual(requireApprovedReleases(grants,{...scope,fields:['Extra']},timestamp,used),[]);
- assert.equal(used.size,2);
+ assert.equal(used.size,1);
  assert.throws(()=>requireApprovedReleases(grants,{...scope,fields:['Adicional noturno','Extra']},timestamp,used),
   e=>e.status===403&&e.details.fields.length===1&&e.details.fields[0]==='Adicional noturno'&&
    e.details.alreadyApproved.includes('Extra')&&/SOMENTE para: Adicional noturno/.test(e.message));
  const consumed=[...grants,...operations.map(o=>({acao:o.data.acao,usuario:o.data.usuario,ocorrido_em:timestamp,contexto:o.data.contexto}))];
+ const remaining=requireApprovedReleases(consumed,{...scope,fields:['Extra','Bonificação','Passagem / ajuda de custo']},timestamp,new Map());
+ assert.equal(remaining.length,1,'A outra autorização aprovada continua disponível para outro salvamento');
+ const consumedBoth=[...consumed,...remaining.map(o=>({acao:o.data.acao,usuario:o.data.usuario,ocorrido_em:timestamp,contexto:o.data.contexto}))];
+ assert.throws(()=>requireApprovedReleases(consumedBoth,{...scope,fields:['Extra']},timestamp,new Map()),/Solicite liberação/);
+});
+test('Aprovação do Financeiro apenas para Extra libera também Bonificação e Passagem/Ajuda de custo',()=>{
+ const fields=['Extra','Bonificação','Passagem / ajuda de custo'];
+ assert.deepEqual(financialPaymentBundle,fields);
+ assert.deepEqual(authorizedFieldsForApproval(['Extra'],'FINANCEIRO'),fields);
+ assert.deepEqual(authorizedFieldsForApproval(['Bonificação'],'FINANCEIRO'),['Bonificação','Extra','Passagem / ajuda de custo']);
+ assert.deepEqual(authorizedFieldsForApproval(['Passagem / ajuda de custo'],'FINANCEIRO'),['Passagem / ajuda de custo','Extra','Bonificação']);
+ assert.deepEqual(authorizedFieldsForApproval(['Extra','Adicional noturno'],'FINANCEIRO'),['Extra','Adicional noturno','Bonificação','Passagem / ajuda de custo']);
+ assert.deepEqual(authorizedFieldsForApproval(['Extra'],'CONTROLADORIA'),['Extra']);
+ assert.deepEqual(authorizedFieldsForApproval(['Adicional noturno'],'FINANCEIRO'),['Adicional noturno']);
+ assert.deepEqual(authorizedFieldsForApproval(['Complemento financeiro'],'FINANCEIRO'),['Complemento financeiro']);
+ const id='44444444-4444-4444-8444-444444444444';
+ const scope={supervisor:'VICTOR',colaboradorId:'71',dataServico:'2026-10-26'};
+ const approved=[
+  {acao:'SOLICITACAO_LIBERACAO_FINANCEIRA',usuario:'VICTOR',ocorrido_em:'2026-10-27T13:00:01Z',
+   contexto:{requestId:id,...scope,fields:['Extra'],reason:'Corrigir pagamento'}},
+  {acao:'LIBERACAO_FINANCEIRA_AUTORIZADA',usuario:'FINANCEIRO',ocorrido_em:'2026-10-27T13:00:02Z',contexto:{requestId:id}}
+ ];
+ const state=releaseState(approved)[0];
+ assert.deepEqual(state.requestedFields,['Extra']);
+ assert.deepEqual(state.fields,fields);
+ const used=new Map();
+ const ops=requireApprovedReleases(approved,{...scope,fields},timestamp,used);
+ assert.equal(ops.length,1);
+ assert.deepEqual(new Set(ops[0].data.contexto.fields),new Set(fields));
+ assert.deepEqual(requireApprovedReleases(approved,{...scope,fields:['Bonificação']},timestamp,used),[]);
+ assert.throws(()=>requireApprovedReleases(approved,{...scope,fields:['Adicional noturno']},timestamp,used),/Adicional noturno/);
+ const consumed=[...approved,{acao:'LIBERACAO_FINANCEIRA_UTILIZADA',usuario:'VICTOR',ocorrido_em:timestamp,contexto:ops[0].data.contexto}];
+ assert.equal(releaseState(consumed)[0].status,'Utilizada');
  assert.throws(()=>requireApprovedReleases(consumed,{...scope,fields:['Extra']},timestamp,new Map()),/Solicite liberação/);
+ assert.throws(()=>requireApprovedReleases(approved,{...scope,colaboradorId:'72',fields:['Extra']},timestamp,new Map()),/Solicite liberação/);
 });
 test('Liberação de outro colaborador, outra data ou outro supervisor nunca é aproveitada',()=>{
  const same={supervisor:'VICTOR',colaboradorId:'71',dataServico:'2026-10-26',fields:['Extra']};
