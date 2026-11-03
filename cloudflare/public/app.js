@@ -996,7 +996,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       };
     });
   }
-  function applyInlineExtras(items,date,supervisor){const pending=items.map(item=>({item,extra:item.extraLancamento||{enabled:false}}));for(const p of pending){if(!p.extra.enabled)continue;if(!colaboradorById(p.item.colaboradorId)){toast('Selecione um funcionário válido para a extra.',true);return false;}if(!OBRAS.some(o=>String(o.id)===String(p.extra.obraId))){toast('Selecione a obra/unidade onde a extra foi realizada.',true);return false;}if(!['Meia diária','Diária','Uma e meia diária','Duas diárias'].includes(p.extra.extra)){toast('Selecione o tipo de extra.',true);return false;}if(date>isoToday()){toast('Extra não aceita data futura.',true);return false;}if(!Number.isFinite(Number(p.extra.valorExtraOriginal))||roundMoney(Number(p.extra.valorExtraOriginal))<=0||Number(p.extra.valorExtraOriginal)>10000000){toast('Digite um Valor da Extra maior que zero antes de salvar o apontamento.',true);return false;}}
+  function applyInlineExtras(items,date,supervisor){const pending=items.filter(item=>item.extraLancamento&&typeof item.extraLancamento.enabled==='boolean').map(item=>({item,extra:item.extraLancamento}));for(const p of pending){if(!p.extra.enabled)continue;if(!colaboradorById(p.item.colaboradorId)){toast('Selecione um funcionário válido para a extra.',true);return false;}if(!OBRAS.some(o=>String(o.id)===String(p.extra.obraId))){toast('Selecione a obra/unidade onde a extra foi realizada.',true);return false;}if(!['Meia diária','Diária','Uma e meia diária','Duas diárias'].includes(p.extra.extra)){toast('Selecione o tipo de extra.',true);return false;}if(date>isoToday()){toast('Extra não aceita data futura.',true);return false;}if(!Number.isFinite(Number(p.extra.valorExtraOriginal))||roundMoney(Number(p.extra.valorExtraOriginal))<=0||Number(p.extra.valorExtraOriginal)>10000000){toast('Digite um Valor da Extra maior que zero antes de salvar o apontamento.',true);return false;}}
  let extras=[...(state.extras||[])];for(const p of pending){const personId=String(p.item.colaboradorId),owner=String(supervisor||supervisorAtual),matches=extras.filter(x=>String(x.dataServico)===String(date)&&String(x.colaboradorId)===personId&&String(x.supervisor)===owner);if(p.extra.enabled){const previous=matches[0],work=obraById(p.extra.obraId),kind=p.extra.extra,workDay=String(p.extra.dayWorkId||p.item.servicos?.find(x=>x.obraId)?.obraId||mainWorkForPersonOnDate(personId,date).workId||previous?.servicoDiaId||'');const record={...(previous||{}),id:previous?.id||uid('extra'),supervisor:owner,dataServico:date,unidade:work.unidade,obraId:String(work.id),colaboradorId:personId,extra:kind,valorExtraOriginal:roundMoney(Number(p.extra.valorExtraOriginal)),observacao:String(p.extra.observacao||'').trim().slice(0,2000),criadoEm:previous?.criadoEm||now().toISOString(),executor:previous?.executor||owner,servicoDiaId:workDay};extras=extras.filter(x=>!matches.includes(x));extras.push(record);}else{if(matches.length){
     const reason=String(window.prompt('Motivo do cancelamento desta extra já registrada (mínimo 10 caracteres):','')||'').trim();
     if(reason.length<10||reason.length>600){toast('Para cancelar uma extra já registrada, informe o motivo de 10 a 600 caracteres. O histórico será preservado.',true);return false;}
@@ -1941,7 +1941,8 @@ function renderEquipeDia(){
    if(!stored||!Array.isArray(stored.items))return;
    const items=new Map(stored.items.filter(i=>i&&typeof i.colaboradorId==='string').map(i=>[i.colaboradorId,i]));
    dayUnsavedDrafts.set(pendingDayKey,{items,extra:stored.extra||{},unit:portalUnit,
-     dirtyIds:Array.isArray(stored.dirtyIds)?stored.dirtyIds:null});
+     dirtyIds:Array.isArray(stored.dirtyIds)?stored.dirtyIds:null,
+     dirtyFinancial:stored.dirtyFinancial||null});
    for(const x of stored.pending||[]){
      if(!x||x.dayKey!==pendingDayKey||x.selectedUnit!==portalUnit||!x.id)continue;
      if(onlineConfirmed?.convocacoes?.some(c=>c.colaboradores?.includes(x.id)))continue;
@@ -1983,6 +1984,68 @@ function renderEquipeDia(){
  const dayTouchedIds=new Set(Array.isArray(dayDraft?.dirtyIds)?dayDraft.dirtyIds:
    dayDraft?[...dayDraft.items].filter(([id,item])=>oldDraftChanged(id,item)).map(([id])=>id):[]);
  for(const id of dayPendingAdds.keys())if(people.has(id))dayTouchedIds.add(id);
+ // Separar a intenção de editar Extras de alterações operacionais e das demais
+ // colunas financeiras, para não gastar autorizações por valores recolocados pelo HTML.
+ const financialKeys=['Extra','Bonificação','Passagem / ajuda de custo','Adicional noturno','Complemento financeiro'];
+ const amount=v=>Math.round((Number(v)||0)*100)/100;
+ const savedItem=id=>apForConv(people.get(id)?.conv?.id)?.itens?.find(i=>String(i.colaboradorId)===String(id));
+ const initialFinanceFields=(id,item)=>{
+   const saved=savedItem(id),fields=new Set();
+   if(!saved)return fields;
+   // A interface antiga preenchia automaticamente "extra disponível" com o
+   // valor da extra independente. Isso NÃO representa uma edição manual e
+   // não deve consumir outra autorização após a aprovação do Financeiro.
+   const currentExtra=extraRecordFor(portalDate,id,supervisorAtual);
+   const enteredExtra=amount(item?.valorExtraDisponivel);
+   if(enteredExtra!==amount(saved.valorExtraDisponivel)&&enteredExtra!==amount(currentExtra?.valorExtraOriginal))fields.add('Extra');
+   if(amount(item?.acordo)!==amount(saved.acordo))fields.add('Bonificação');
+   if(amount(item?.ajudaCusto)!==amount(saved.ajudaCusto))fields.add('Passagem / ajuda de custo');
+   if(amount(item?.noturno)!==amount(saved.noturno))fields.add('Adicional noturno');
+   if(amount(item?.financeiro)!==amount(saved.financeiro))fields.add('Complemento financeiro');
+   const oldExtra=extraRecordFor(portalDate,id,supervisorAtual),x=item?.extraLancamento;
+   const legacyExtra=String(saved.extra||'Não')!=='Não'&&!oldExtra;
+   if(x&&((Boolean(x.enabled)!==Boolean(oldExtra)&&
+      !(legacyExtra&&x.enabled&&String(x.extra)===String(saved.extra)))||
+      (x.enabled&&oldExtra&&(
+       String(x.extra)!==String(oldExtra.extra)||
+       String(x.obraId)!==String(oldExtra.obraId)||
+       amount(x.valorExtraOriginal)!==amount(oldExtra.valorExtraOriginal)||
+       String(x.observacao||'').trim()!==String(oldExtra.observacao||'').trim()
+      ))))fields.add('Extra');
+   return fields;
+ };
+ const dayFinancialEdits=new Map();
+ for(const [id,item] of dayDraft?.items||[]){
+   const stored=dayDraft?.dirtyFinancial?.[id];
+   dayFinancialEdits.set(id,new Set(Array.isArray(stored)?stored.filter(f=>financialKeys.includes(f)):
+      [...initialFinanceFields(id,item)]));
+ }
+ const markFinancial=(id,target)=>{
+   const field=target?.classList,cls=field?.contains('row-extra')||field?.contains('row-extra-value')||
+     field?.contains('row-extra-work')||field?.contains('row-extra-work-search')||field?.contains('row-extra-obs')?'Extra':
+     field?.contains('row-acordo')?'Bonificação':
+     field?.contains('row-ajuda-custo')?'Passagem / ajuda de custo':
+     field?.contains('row-noturno')?'Adicional noturno':null;
+   if(!field||!id||!cls)return;
+   if(!dayFinancialEdits.has(id))dayFinancialEdits.set(id,new Set());
+   dayFinancialEdits.get(id).add(cls);
+ };
+ const isolateFinancialFields=item=>{
+   const id=String(item.colaboradorId),saved=savedItem(id);
+   if(!saved)return item; // Apontamento inicial ainda precisa validar todos os campos.
+   const dirty=dayFinancialEdits.get(id)||new Set();
+   const keep=(label,key)=>{if(!dirty.has(label))item[key]=saved[key];};
+   keep('Extra','extra');
+   keep('Extra','valorExtraOriginal');
+   keep('Extra','valorExtraDisponivel');
+   keep('Bonificação','acordo');
+   keep('Passagem / ajuda de custo','ajudaCusto');
+   keep('Adicional noturno','noturno');
+   // O complemento do Financeiro jamais é convertido em campo editável pelo Supervisor.
+   item.financeiro=saved.financeiro;
+   if(!dirty.has('Extra'))delete item.extraLancamento;
+   return item;
+ };
  const snapshotDayDraft=()=>{
    const cards=$$('#day-form .person-card'),ids=cards.map(el=>el.dataset.person);
    const items=ids.length?readPersonRows(ids,$('#day-form')):[];
@@ -1992,14 +2055,14 @@ function renderEquipeDia(){
      newName:$('#day-avulso-nome')?.value||'',newFuncao:$('#day-avulso-funcao')?.value||'',
      newPerson:$('#day-add-person')?.value||''};
    const draft={items:new Map(items.map(item=>[item.colaboradorId,item])),extra,unit:portalUnit,
-     dirtyIds:[...dayTouchedIds]};
+     dirtyIds:[...dayTouchedIds],dirtyFinancial:Object.fromEntries([...dayFinancialEdits].map(([id,fields])=>[id,[...fields]]))};
    dayUnsavedDrafts.set(dayKey,draft);
    persistDayDraftFromMemory();
  };
  const persistDayDraftFromMemory=()=>{
    const draft=dayUnsavedDrafts.get(dayKey);if(!draft)return false;
    const okay=storeDraft(storageKey,{items:[...draft.items.values()],extra:draft.extra,
-     dirtyIds:draft.dirtyIds||[],pending:[...dayPendingAdds.values()].filter(x=>x.dayKey===dayKey&&x.selectedUnit===portalUnit)});
+     dirtyIds:draft.dirtyIds||[],dirtyFinancial:draft.dirtyFinancial||{},pending:[...dayPendingAdds.values()].filter(x=>x.dayKey===dayKey&&x.selectedUnit===portalUnit)});
    if(okay&&supervisorAtual)storeDraft(draftKey('last',supervisorAtual),{tab:'normal',date:portalDate,unit:portalUnit});
    const indicator=$('#day-draft-status');
    if(indicator)indicator.textContent=okay?'Rascunho armazenado neste navegador · '+formatDateTime(new Date().toISOString()):'Não foi possível armazenar o rascunho neste navegador';
@@ -2020,7 +2083,7 @@ function renderEquipeDia(){
  // Cada tecla ou mudança grava instantaneamente no disco do navegador.
  const dayCapture=event=>{
    const card=event.target?.closest?.('#day-form .person-card');
-   if(card?.dataset.person)dayTouchedIds.add(card.dataset.person);
+   if(card?.dataset.person){dayTouchedIds.add(card.dataset.person);markFinancial(card.dataset.person,event.target);}
    if(event.target?.closest?.('#day-form')||event.target?.id==='day-avulso-nome'||event.target?.id==='day-avulso-funcao'||event.target?.id==='day-add-person')
      snapshotDayDraft();
  };
@@ -2180,7 +2243,7 @@ function renderEquipeDia(){
    // Somente fichas realmente editadas (ou ainda não apontadas) são enviadas.
    // Fichas já confirmadas e intactas não consomem autorizações financeiras.
    const items=allItems.filter(i=>dayTouchedIds.has(i.colaboradorId)||
-     !apForConv(people.get(i.colaboradorId)?.conv?.id)?.itens?.some(saved=>String(saved.colaboradorId)===String(i.colaboradorId)));
+     !apForConv(people.get(i.colaboradorId)?.conv?.id)?.itens?.some(saved=>String(saved.colaboradorId)===String(i.colaboradorId))).map(isolateFinancialFields);
    if(!validateAgreementObservations(items,$('#day-form')))return;if(!validateExtraAmounts(items,$('#day-form')))return;for(const i of items)if(!validServices([i],people.get(i.colaboradorId).conv.unidade))return;
     const selectedExternal=$('#day-extra-person').value,toggleExternal=$('#day-extra-kind').value!=='Não';
     if(toggleExternal&&!selectedExternal)return toast('Selecione o funcionário que realizou a extra.',true);if(toggleExternal){const amount=Number($('#day-extra-amount').value);if(!Number.isFinite(amount)||amount<=0||amount>10000000){$('#day-extra-amount').focus();return toast('Informe um valor da extra maior que R$ 0,00. A opção de extra está diferente de “Não”.',true);}}

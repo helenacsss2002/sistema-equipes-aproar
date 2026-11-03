@@ -117,7 +117,7 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
    if(financeLocked){const labels={noturno:'Adicional noturno',acordo:'Bonificação',ajudaCusto:'Passagem / ajuda de custo'};for(const k of ['noturno','acordo','ajudaCusto'])if(!authorized.includes(labels[k]))i[k]=oldPoint[k];}
   }const p=staff.get(pid),isPresent=present(i.status),ss=normServices(i).filter(s=>s.obraId),hasSebrae=ss.some(s=>clean(works.get(s.obraId)?.unidade)==='SEBRAE'),financialAdjusted=session.role==='FINANCEIRO'||oldPoint?.financeAdjusted===true;
   const extra=isPresent?(i.extra==='Valor específico'?Number(oldPoint.valorExtraOriginal):money(Number(p.custo)*mult(i.extra))):0;
-  const night=isPresent&&hasSebrae?Number(i.noturno??0):0,finance=isPresent?Number(i.financeiro):0,bonus=isPresent?Number(i.acordo):0,ajudaCusto=isPresent?Number(i.ajudaCusto||0):0;
+  const night=isPresent?(hasSebrae?Number(i.noturno??0):Number(oldPoint?.noturno||0)):0,finance=isPresent?Number(i.financeiro):0,bonus=isPresent?Number(i.acordo):0,ajudaCusto=isPresent?Number(i.ajudaCusto||0):0;
   // Avoid recording the same unapproved payment as both complementary finance and
   // agreement/bonus. Existing historical values remain readable and unchanged.
   // A distinct, explicitly approved financial adjustment remains permitted.
