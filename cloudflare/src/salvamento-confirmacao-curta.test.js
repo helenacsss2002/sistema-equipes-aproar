@@ -7,7 +7,7 @@ import {PGlite} from '@electric-sql/pglite';
 
 const app=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
 const worker=fs.readFileSync(new URL('./worker.js',import.meta.url),'utf8');
-const begin=app.indexOf('  function saveData(onSuccess=null){');
+const begin=app.indexOf('  function saveData(onSuccess=null,verifyPersisted=null,onFailure=null){');
 const end=app.indexOf('  async function submitComplementConfirmation(',begin);
 assert(begin>=0&&end>begin,'O fluxo de salvamento deve estar presente');
 const saveSource=app.slice(begin,end);
@@ -95,7 +95,7 @@ test('ACK confirmado, mas bootstrap indisponível não autoriza nova gravação 
  x.ctx.runSave();await wait();
  assert.equal(x.calls.filter(c=>c.path==='/api/save').length,1);
  assert.equal(x.ctx.onlineWritable,false);
- assert(x.alerts.some(a=>/foi SALVO/.test(a.message)));
+ assert(x.alerts.some(a=>/banco confirmou a gravação/.test(a.message)));
  assert(x.alerts.some(a=>/Não lance novamente/.test(a.message)));
 });
 
