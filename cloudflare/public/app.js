@@ -3351,11 +3351,15 @@ function renderEquipeDia(){
       }catch(error){
         console.error('APROAR save failure',JSON.stringify({message:String(error?.message||error).slice(0,240),status:Number(error?.status||0),name:String(error?.name||'Error').slice(0,60)}));
         if(savedOnServer){
-          // Confirmed on Neon, but reloading the full state failed. Do not allow
-          // another write from potentially stale data until the user refreshes.
+          // A confirmação da transação não basta para afirmar que cada retroativo
+          // selecionado foi efetivamente registrado. Manter tela/rascunho intactos.
           onlineWritable=false;onlineSaving=false;
-          const notice='O banco confirmou que o apontamento foi SALVO. A atualização da tela falhou; pressione Ctrl + F5 para consultar o registro. Não lance novamente.';
+          const notice=error?.retroUnverified
+            ?'O Neon confirmou a transação, mas o retroativo selecionado não foi localizado na conferência. Seus dados permanecem no rascunho. Consulte o histórico antes de repetir.'
+            :'O banco confirmou a gravação, mas a atualização da tela falhou. Pressione Ctrl + F5, confira o histórico e não lance novamente.';
+          if(typeof onFailure==='function')onFailure(notice);
           showSaveFeedback(notice,true,60000);
+          showToast(notice,true);
           return;
         }
         const message=String(error?.message||'Não foi possível salvar o apontamento. Confira a conexão e tente novamente.');
@@ -3370,7 +3374,9 @@ function renderEquipeDia(){
         if(preserveRetroDraft)for(const [id,staff] of retroUnsavedAvulsos)if(!COLABORADORES.some(c=>c.id===id))COLABORADORES.push(staff);
         // Restaurar inclusões e rascunho local após rejeição de gravação.
         if(typeof dayPendingAdds!=='undefined'&&dayPendingAdds.size)restoreDayPendingAdds();
-        onlineSaving=false;if(!preserveRetroDraft)render();showSaveFeedback(message,true);
+        onlineSaving=false;if(!preserveRetroDraft)render();
+        if(typeof onFailure==='function')onFailure(message);
+        showSaveFeedback(message,true,60000);showToast(message,true);
       }finally{onlineQueued=false;onlineSaving=false;onlineMessage='';lockOnline(false);}
     });
     return true;
