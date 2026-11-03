@@ -1103,6 +1103,29 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       retroFinancialEdits.clear();
       for(const [id,fields] of Object.entries(stored.dirtyFinancial||{}))
         if(Array.isArray(fields))retroFinancialEdits.set(id,new Set(fields));
+      // Compatibilidade com rascunhos feitos antes desta correção: reter
+      // valores que realmente divergem do Neon, sem confundir extra mostrada
+      // automaticamente com uma nova edição.
+      if(!stored.dirtyFinancial)for(const [id,item] of retroDrafts){
+        const c=state.convocacoes.find(c=>c.dataServico===stored.date&&c.unidade===stored.unit&&
+          c.turno===stored.turn&&c.supervisor===stored.supervisor&&c.colaboradores.includes(id));
+        const saved=c?apForConv(c.id)?.itens.find(i=>String(i.colaboradorId)===String(id)):null;
+        if(!saved)continue;
+        const n=v=>Math.round((Number(v)||0)*100)/100,fields=new Set();
+        const external=extraRecordFor(stored.date,id,stored.supervisor);
+        const entered=n(item.valorExtraDisponivel);
+        if(entered!==n(saved.valorExtraDisponivel)&&entered!==n(external?.valorExtraOriginal))fields.add('Extra');
+        const x=item.extraLancamento;
+        if(x&&x.enabled&&external&&(
+          String(x.extra)!==String(external.extra)||String(x.obraId)!==String(external.obraId)||
+          n(x.valorExtraOriginal)!==n(external.valorExtraOriginal)))fields.add('Extra');
+        if(x&&Boolean(x.enabled)!==Boolean(external)&&
+          !(x.enabled&&!external&&String(x.extra)===String(saved.extra)&&saved.extra!=='Não'))fields.add('Extra');
+        if(n(item.acordo)!==n(saved.acordo))fields.add('Bonificação');
+        if(n(item.ajudaCusto)!==n(saved.ajudaCusto))fields.add('Passagem / ajuda de custo');
+        if(n(item.noturno)!==n(saved.noturno))fields.add('Adicional noturno');
+        if(fields.size)retroFinancialEdits.set(id,fields);
+      }
       connectRetroChoices();refreshRows(true);
       $('#retro-person-search').value=stored.search||'';
       $('#retro-person-search').dispatchEvent(new Event('input',{bubbles:true}));
