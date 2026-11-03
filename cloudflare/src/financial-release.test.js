@@ -74,7 +74,10 @@ test('Liberações independentes de Extra e Bonificação cobrem um salvamento �
   e=>e.status===403&&e.details.fields.length===1&&e.details.fields[0]==='Adicional noturno'&&
    e.details.alreadyApproved.includes('Extra')&&/SOMENTE para: Adicional noturno/.test(e.message));
  const consumed=[...grants,...operations.map(o=>({acao:o.data.acao,usuario:o.data.usuario,ocorrido_em:timestamp,contexto:o.data.contexto}))];
- assert.throws(()=>requireApprovedReleases(consumed,{...scope,fields:['Extra']},timestamp,new Map()),/Solicite liberação/);
+ const secondSave=requireApprovedReleases(consumed,{...scope,fields:['Extra']},timestamp,new Map());
+ assert.equal(secondSave.length,1); // Cada aprovação independente ainda vale para seu próprio salvamento.
+ const consumedAll=[...consumed,...secondSave.map(op=>({acao:op.data.acao,usuario:op.data.usuario,ocorrido_em:timestamp,contexto:op.data.contexto}))];
+ assert.throws(()=>requireApprovedReleases(consumedAll,{...scope,fields:['Extra']},timestamp,new Map()),/Solicite liberação/);
 });
 test('Financeiro amplia automaticamente Extra, Bonificação e Passagem no mesmo pedido',()=>{
  const bundle=['Extra','Bonificação','Passagem / ajuda de custo'];
