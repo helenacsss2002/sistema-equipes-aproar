@@ -1,4 +1,4 @@
-name: APROAR public endpoint diagnosis (non-production)
+name: APROAR public endpoint diagnosis (non-production; after financial fix)
 on:
   push:
     branches:
