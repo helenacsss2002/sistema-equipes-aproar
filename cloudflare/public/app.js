@@ -3383,7 +3383,7 @@ function renderEquipeDia(){
           onlineWritable=false;onlineSaving=false;
           const notice=error?.retroUnverified
             ?'O Neon confirmou a transação, mas o retroativo selecionado não foi localizado na conferência. Seus dados permanecem no rascunho. Consulte o histórico antes de repetir.'
-            :'O banco confirmou a gravação, mas a atualização da tela falhou. Pressione Ctrl + F5, confira o histórico e não lance novamente.';
+            :'O banco confirmou a gravação, mas a atualização da tela falhou. Pressione Ctrl + F5 para conferir o histórico. Não lance novamente.';
           if(typeof onFailure==='function')onFailure(notice);
           showSaveFeedback(notice,true,60000);
           showToast(notice,true);
