@@ -1035,7 +1035,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
               <div class="full"><label class="field-label">Colaboradores a apontar</label><p style="font-size:12px">Não selecionar alguém não registra falta. Para registrar falta, selecione a pessoa e escolha “Falta” no Status. Convocados sem apontamento permanecem pendentes.</p><div class="person-search-wrap"><input id="retro-person-search" class="control" type="search" autocomplete="off" placeholder="Buscar colaborador..." aria-label="Buscar colaboradores para apontamento"></div><div class="checkbox-grid retro-person-list">${alphabeticalPeople(COLABORADORES.filter(c=>!c.inativo)).map(c=>`<label class="check-card"><input type="checkbox" name="retro-colab" value="${c.id}"><span><strong>${c.nome}</strong><br><small>${c.funcao}</small></span></label>`).join('')}</div></div>
               <div class="full" id="retro-rows"></div>
             </div>
-            <div class="form-actions"><button class="btn btn-primary" type="submit">Salvar apontamento retroativo</button></div>
+            <div id="retro-save-status" class="notice info section" role="status" aria-live="polite">O registro será confirmado apenas após verificar o Neon.</div><div class="form-actions"><button class="btn btn-primary" type="submit">Salvar apontamento retroativo</button></div>
           </form>
         </div>
         ${perfilAtual==='SUPERVISOR'?'<aside class="card card-pad"><div class="section-title"><div><h3>Datas com apontamento pendente</h3><p>Selecione uma equipe para regularizar.</p></div></div><div id="retro-pending-list" class="retro-pending-list"></div></aside>':`        <div class="card card-pad">
