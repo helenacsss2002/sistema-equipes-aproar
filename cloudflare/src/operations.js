@@ -95,7 +95,12 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
       &&money(Number(ap.i.noturno??0))!==money(Number(oldPoint.noturno??0))
       &&!(releaseGrant?.data?.contexto?.fields||[]).includes('Adicional noturno'))
     fail('O adicional noturno foi ajustado pelo Financeiro. O valor selecionado NÃO foi salvo; solicite autorização da Controladoria ou do Financeiro para alterá-lo.',403);
-  const i={...ap.i};if(pendingAvulsoInvalid(i,staff.get(pid)))fail('Escolha um tipo válido de diária para o avulso.');if(financeLocked){const authorized=releaseGrant?.data?.contexto?.fields||[];const labels={financeiro:'Complemento financeiro',noturno:'Adicional noturno',acordo:'Bonificação',ajudaCusto:'Passagem / ajuda de custo'};for(const k of ['financeiro','noturno','acordo','ajudaCusto'])if(!authorized.includes(labels[k]))i[k]=oldPoint[k];}const p=staff.get(pid),isPresent=present(i.status),ss=normServices(i).filter(s=>s.obraId),hasSebrae=ss.some(s=>clean(works.get(s.obraId)?.unidade)==='SEBRAE'),financialAdjusted=session.role==='FINANCEIRO'||oldPoint?.financeAdjusted===true;
+  const i={...ap.i};if(pendingAvulsoInvalid(i,staff.get(pid)))fail('Escolha um tipo válido de diária para o avulso.');if(session.role==='SUPERVISOR'&&oldPoint?.financeAdjusted){
+   const authorized=releaseGrant?.data?.contexto?.fields||[];
+   // Valor complementar definido pelo Financeiro nunca é sobrescrito implicitamente por uma revisão operacional.
+   if(!authorized.includes('Complemento financeiro'))i.financeiro=oldPoint.financeiro;
+   if(financeLocked){const labels={noturno:'Adicional noturno',acordo:'Bonificação',ajudaCusto:'Passagem / ajuda de custo'};for(const k of ['noturno','acordo','ajudaCusto'])if(!authorized.includes(labels[k]))i[k]=oldPoint[k];}
+  }const p=staff.get(pid),isPresent=present(i.status),ss=normServices(i).filter(s=>s.obraId),hasSebrae=ss.some(s=>clean(works.get(s.obraId)?.unidade)==='SEBRAE'),financialAdjusted=session.role==='FINANCEIRO'||oldPoint?.financeAdjusted===true;
   const extra=isPresent?(i.extra==='Valor específico'?Number(oldPoint.valorExtraOriginal):money(Number(p.custo)*mult(i.extra))):0;
   const night=isPresent&&hasSebrae?Number(i.noturno??0):0,finance=isPresent?Number(i.financeiro):0,bonus=isPresent?Number(i.acordo):0,ajudaCusto=isPresent?Number(i.ajudaCusto||0):0;
   // Avoid recording the same unapproved payment as both complementary finance and
