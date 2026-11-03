@@ -3256,13 +3256,16 @@ function renderEquipeDia(){
         cents(item[k])===cents(target[k]));
     });
   }
-  function saveData(onSuccess=null){
+  function saveData(onSuccess=null,verifyPersisted=null,onFailure=null){
     if(!onlineSession||!onlineWritable||onlineSession.role==='VISUALIZAR'){
       if(onlineConfirmed){state=copy(onlineConfirmed);OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);}
       const reason=!onlineSession?'Sua sessão não está autenticada. Entre novamente.':onlineSession.role==='VISUALIZAR'?'Este perfil é somente para visualização.':'A gravação está bloqueada no ambiente do Worker. Confira a autorização de escrita da produção.';
-      toast(reason,true);showSaveFeedback(reason,true);queueMicrotask(()=>render());return false;
+      toast(reason,true);showSaveFeedback(reason,true);
+      if(typeof onFailure==='function')onFailure(reason);
+      if(!(viewAtual==='apontamento'&&apontamentoTab==='retroativo'))queueMicrotask(()=>render());
+      return false;
     }
-    if(onlineQueued||onlineSaving){const message='Já existe um salvamento em andamento. Aguarde a confirmação antes de enviar outro apontamento.';showToast(message,true);showSaveFeedback(message,true);return false;}
+    if(onlineQueued||onlineSaving){const message='Já existe um salvamento em andamento. Aguarde a confirmação antes de enviar outro apontamento.';showToast(message,true);showSaveFeedback(message,true);if(typeof onFailure==='function')onFailure(message);return false;}
     showSaveFeedback('Enviando apontamento para gravação no banco…',false,40000);
     const pendingNightChanges=nightChangesToVerify(onlineConfirmed,state);
     state.obras=OBRAS;state.colaboradores=COLABORADORES;onlineQueued=true;lockOnline(true);
@@ -3331,6 +3334,9 @@ function renderEquipeDia(){
         if(!result||!result.state||typeof result.version!=='string'||!result.session)
           throw new Error('O apontamento foi gravado, mas não foi possível atualizar os dados da tela.');
         const nightConfirmed=nightValuesMatch(result.state,pendingNightChanges);
+        if(typeof verifyPersisted==='function'&&!verifyPersisted(result.state)){
+          throw Object.assign(new Error('O servidor confirmou a operação, mas não foi possível localizar no Neon todos os apontamentos retroativos selecionados. Consulte o histórico antes de tentar novamente.'),{retroUnverified:true});
+        }
         applyOnline(result);onlineSaving=false;
         if(!nightConfirmed){
           onlineWritable=false; // Precisa recarregar e conciliar antes de outra escrita.
