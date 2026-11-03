@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {webcrypto} from 'node:crypto';
-import {financialDeadline,afterFinancialDeadline,validRequest,requireApprovedRelease,requireApprovedReleases,releaseState,changedFinancialFields} from './financial-release.js';
+import {financialDeadline,afterFinancialDeadline,validRequest,requireApprovedRelease,requireApprovedReleases,releaseState,changedFinancialFields,approvalFields,financialPaymentBundle} from './financial-release.js';
 
 globalThis.crypto??=webcrypto;
 const worker=fs.readFileSync(new URL('./worker.js',import.meta.url),'utf8');
@@ -28,7 +28,7 @@ const events=[
  {acao:'SOLICITACAO_LIBERACAO_FINANCEIRA',usuario:'VICTOR',ocorrido_em:'2026-10-27T13:00:02Z',contexto:ctx},
  {acao:'LIBERACAO_FINANCEIRA_AUTORIZADA',usuario:'FINANCEIRO',ocorrido_em:'2026-10-27T13:00:10Z',contexto:{requestId}}
 ];
-test('Autorização do Financeiro libera apenas o colaborador/data/campos solicitados e apenas uma vez',()=>{
+test('Autorização do Financeiro libera pacote de pagamento apenas no mesmo colaborador e data, uma vez',()=>{
  assert.equal(releaseState(events)[0].status,'Autorizada');
  const consumed=new Set();
  const params={supervisor:'VICTOR',colaboradorId:'71',dataServico:'2026-10-26',fields:['Extra','Bonificação']};
@@ -65,16 +65,55 @@ test('Liberações independentes de Extra e Bonificação cobrem um salvamento �
  ];
  const used=new Map();
  const operations=requireApprovedReleases(grants,{...scope,fields:['Extra','Bonificação']},timestamp,used);
- assert.equal(operations.length,2);
- assert.equal(used.size,2);
- assert.deepEqual(new Set(operations.map(o=>o.data.contexto.requestId)),new Set([extraId,bonusId]));
+ assert.equal(operations.length,1);
+ assert.equal(used.size,1);
+ assert.ok([extraId,bonusId].includes(operations[0].data.contexto.requestId));
  assert.deepEqual(requireApprovedReleases(grants,{...scope,fields:['Extra']},timestamp,used),[]);
- assert.equal(used.size,2);
+ assert.equal(used.size,1);
  assert.throws(()=>requireApprovedReleases(grants,{...scope,fields:['Adicional noturno','Extra']},timestamp,used),
   e=>e.status===403&&e.details.fields.length===1&&e.details.fields[0]==='Adicional noturno'&&
    e.details.alreadyApproved.includes('Extra')&&/SOMENTE para: Adicional noturno/.test(e.message));
  const consumed=[...grants,...operations.map(o=>({acao:o.data.acao,usuario:o.data.usuario,ocorrido_em:timestamp,contexto:o.data.contexto}))];
  assert.throws(()=>requireApprovedReleases(consumed,{...scope,fields:['Extra']},timestamp,new Map()),/Solicite liberação/);
+});
+test('Financeiro amplia automaticamente Extra, Bonificação e Passagem no mesmo pedido',()=>{
+ const bundle=['Extra','Bonificação','Passagem / ajuda de custo'];
+ assert.deepEqual(financialPaymentBundle,bundle);
+ assert.deepEqual(approvalFields(['Extra'],'FINANCEIRO'),bundle);
+ assert.deepEqual(approvalFields(['Bonificação'],'FINANCEIRO'),['Bonificação','Extra','Passagem / ajuda de custo']);
+ assert.deepEqual(approvalFields(['Passagem / ajuda de custo'],'FINANCEIRO'),['Passagem / ajuda de custo','Extra','Bonificação']);
+ assert.deepEqual(approvalFields(['Extra','Adicional noturno'],'FINANCEIRO'),['Extra','Adicional noturno','Bonificação','Passagem / ajuda de custo']);
+ assert.deepEqual(approvalFields(['Adicional noturno'],'FINANCEIRO'),['Adicional noturno']);
+ assert.deepEqual(approvalFields(['Extra'],'CONTROLADORIA'),['Extra']);
+ assert.deepEqual(approvalFields(['Complemento financeiro'],'FINANCEIRO'),['Complemento financeiro']);
+ const id='44444444-4444-4444-8444-444444444444',scope={supervisor:'VICTOR',colaboradorId:'71',dataServico:'2026-10-26'};
+ const request=[{acao:'SOLICITACAO_LIBERACAO_FINANCEIRA',usuario:'VICTOR',ocorrido_em:'2026-10-27T13:00:01Z',
+  contexto:{requestId:id,...scope,fields:['Extra'],reason:'Ajuste de lançamento'}},
+  {acao:'LIBERACAO_FINANCEIRA_AUTORIZADA',usuario:'FINANCEIRO',ocorrido_em:'2026-10-27T13:00:02Z',contexto:{requestId:id}}];
+ const state=releaseState(request)[0];
+ assert.deepEqual(state.requestedFields,['Extra']);
+ assert.deepEqual(state.fields,bundle);
+ const used=new Map();
+ const actions=requireApprovedReleases(request,{...scope,fields:bundle},timestamp,used);
+ assert.equal(actions.length,1);
+ assert.equal(actions[0].data.contexto.requestId,id);
+ assert.deepEqual(new Set(actions[0].data.contexto.fields),new Set(bundle));
+ assert.deepEqual(requireApprovedReleases(request,{...scope,fields:['Passagem / ajuda de custo']},timestamp,used),[]);
+ assert.throws(()=>requireApprovedReleases(request,{...scope,fields:['Adicional noturno']},timestamp,used),/Adicional noturno/);
+ assert.throws(()=>requireApprovedReleases(request,{...scope,colaboradorId:'72',fields:['Extra']},timestamp,new Map()),/Solicite liberação/);
+ const persisted=[...request,...actions.map(o=>({acao:o.data.acao,usuario:o.data.usuario,
+  ocorrido_em:timestamp,contexto:o.data.contexto}))];
+ assert.equal(releaseState(persisted)[0].status,'Utilizada');
+ assert.throws(()=>requireApprovedReleases(persisted,{...scope,fields:['Extra']},timestamp,new Map()),/Solicite liberação/);
+});
+test('Aprovado pela Controladoria mantém escopo original; aprovação de noturno isolado não libera pacote',()=>{
+ const id='55555555-5555-4555-8555-555555555555',scope={supervisor:'VICTOR',colaboradorId:'71',dataServico:'2026-10-26'};
+ for(const [approver,fields] of [['CONTROLADORIA',['Extra']],['FINANCEIRO',['Adicional noturno']]]){
+  const events=[{acao:'SOLICITACAO_LIBERACAO_FINANCEIRA',usuario:'VICTOR',ocorrido_em:'2026-10-27T13:00:01Z',
+   contexto:{requestId:id,...scope,fields,reason:'Correção operacional'}},
+   {acao:'LIBERACAO_FINANCEIRA_AUTORIZADA',usuario:approver,ocorrido_em:'2026-10-27T13:00:03Z',contexto:{requestId:id}}];
+  assert.throws(()=>requireApprovedReleases(events,{...scope,fields:['Passagem / ajuda de custo']},timestamp,new Map()),/Solicite liberação/);
+ }
 });
 test('Liberação de outro colaborador, outra data ou outro supervisor nunca é aproveitada',()=>{
  const same={supervisor:'VICTOR',colaboradorId:'71',dataServico:'2026-10-26',fields:['Extra']};
