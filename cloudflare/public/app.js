@@ -2711,9 +2711,25 @@ function renderEquipeDia(){
         if(apForConv(x.c.id)?.itens.some(item=>String(item.colaboradorId)===String(x.id)))
           return toast('Este colaborador já possui apontamento. Para regularizar a convocação, utilize a correção administrativa; o histórico deve ser preservado.',true);
         await removeUnpointedAdminConvocation(x.c.id,x.id,{editMode:true});
-      };$('#ae-form').onsubmit=e=>{e.preventDefault();const date=$('#ae-target-date').value,turno=$('#ae-turn').value;if(blocked(x.id,date)||state.convocacoes.some(c=>c.id!==x.c.id&&c.dataServico===date&&c.colaboradores.includes(x.id)&&overlaps(c.turno,turno)))return toast('A realocação geraria conflito.',true);const result=relocateAdminPerson(x,{dataServico:date,supervisor:$('#ae-sup').value,unidade:$('#ae-unit').value,obraId:$('#ae-work').value,turno});
-      if(!result.ok)return toast(result.message,true);
-      audit('Realocação administrativa',x.id);saveData();toast('Realocação solicitada, aguardando confirmação do servidor.');refresh();};};const refresh=()=>{adminEditDate=$('#ae-date').value;rows=operationalRows(state.convocacoes.filter(c=>c.dataServico===adminEditDate)).sort((a,b)=>comparePersonNames(a.p,b.p));$('#ae-record').innerHTML='<option value="">Selecione uma convocação</option>'+rows.map((x,index)=>`<option value="${index}">${escapeHtml(recordLabel(x))}</option>`).join('');$('#ae-bulk').innerHTML=rows.map((x,index)=>`<label class="check-card"><input type="checkbox" class="ae-bulk-person" value="${index}"><span>${escapeHtml(x.p?.nome)} · ${escapeHtml(x.c.unidade)} · ${x.c.turno}</span></label>`).join('');syncRecordSearch(rows.length?0:'');};const syncRecordSearch=index=>{const input=$('#ae-record-search'),select=$('#ae-record'),display=$('#ae-record-selected');const valid=index!==''&&rows[Number(index)];const x=valid?rows[Number(index)]:null;select.value=x?String(index):'';input.value=x?x.p?.nome||'':'';input.title=x?recordLabel(x):'';display.textContent=x?recordLabel(x):'Digite o nome do colaborador e escolha um resultado.';renderEditor();};const searchInput=$('#ae-record-search');searchInput.addEventListener('input',()=>{const select=$('#ae-record');select.value='';$('#ae-record-selected').textContent='Selecione uma opção da busca para confirmar a convocação.';renderEditor();});wireLiveSuggestions(searchInput,()=>rows.map((x,index)=>({id:String(index),label:recordLabel(x),searchText:[x.p?.funcao||'',x.c.dataServico,x.c.id].join(' ')})),choice=>syncRecordSearch(choice.id));$('#ae-date').onchange=refresh;$('#ae-record').onchange=()=>syncRecordSearch($('#ae-record').value);$('#ae-delete-bulk').onclick=async()=>{
+      };$('#ae-form').onsubmit=async e=>{
+        e.preventDefault();
+        if(onlineQueued||onlineSaving)return showToast('Já existe uma gravação em andamento. Confira antes de transferir novamente.',true);
+        const destination={dataServico:$('#ae-target-date').value,turno:$('#ae-turn').value,
+          supervisor:$('#ae-sup').value,unidade:$('#ae-unit').value,obraId:$('#ae-work').value||''};
+        const date=destination.dataServico,turno=destination.turno;
+        if(blocked(x.id,date)||state.convocacoes.some(c=>c.id!==x.c.id&&c.dataServico===date&&c.colaboradores.includes(x.id)&&overlaps(c.turno,turno)))
+          return toast('A realocação geraria conflito.',true);
+        const previousPoint=apForConv(x.c.id)?.itens?.some(i=>String(i.colaboradorId)===String(x.id));
+        if(previousPoint){
+          const result=relocateAdminPerson(x,destination);
+          if(!result.ok)return toast(result.message,true);
+          // Correções de apontamento já confirmado continuam protegidas pelas regras específicas.
+          audit('Realocação administrativa',x.id);
+          saveData();
+          return;
+        }
+        await saveAdministrativeRelocation(x,destination);
+      };};const refresh=()=>{adminEditDate=$('#ae-date').value;rows=operationalRows(state.convocacoes.filter(c=>c.dataServico===adminEditDate)).sort((a,b)=>comparePersonNames(a.p,b.p));$('#ae-record').innerHTML='<option value="">Selecione uma convocação</option>'+rows.map((x,index)=>`<option value="${index}">${escapeHtml(recordLabel(x))}</option>`).join('');$('#ae-bulk').innerHTML=rows.map((x,index)=>`<label class="check-card"><input type="checkbox" class="ae-bulk-person" value="${index}"><span>${escapeHtml(x.p?.nome)} · ${escapeHtml(x.c.unidade)} · ${x.c.turno}</span></label>`).join('');syncRecordSearch(rows.length?0:'');};const syncRecordSearch=index=>{const input=$('#ae-record-search'),select=$('#ae-record'),display=$('#ae-record-selected');const valid=index!==''&&rows[Number(index)];const x=valid?rows[Number(index)]:null;select.value=x?String(index):'';input.value=x?x.p?.nome||'':'';input.title=x?recordLabel(x):'';display.textContent=x?recordLabel(x):'Digite o nome do colaborador e escolha um resultado.';renderEditor();};const searchInput=$('#ae-record-search');searchInput.addEventListener('input',()=>{const select=$('#ae-record');select.value='';$('#ae-record-selected').textContent='Selecione uma opção da busca para confirmar a convocação.';renderEditor();});wireLiveSuggestions(searchInput,()=>rows.map((x,index)=>({id:String(index),label:recordLabel(x),searchText:[x.p?.funcao||'',x.c.dataServico,x.c.id].join(' ')})),choice=>syncRecordSearch(choice.id));$('#ae-date').onchange=refresh;$('#ae-record').onchange=()=>syncRecordSearch($('#ae-record').value);$('#ae-delete-bulk').onclick=async()=>{
         if(!$('#ae-confirm-bulk').checked)return toast('Confirme a exclusão dos selecionados.',true);
         const indices=$$('.ae-bulk-person:checked').map(el=>Number(el.value));
         if(!indices.length)return toast('Selecione os registros.',true);
@@ -2734,6 +2750,76 @@ function renderEquipeDia(){
         if(completed===selected.length)showToast(completed+' convocação(ões) sem apontamento removida(s) e confirmada(s) no banco.');
         else showToast(completed+' de '+selected.length+' convocação(ões) removida(s). Confira o erro apresentado antes de tentar novamente.',true);
       };refresh();}
+  }
+  // Transferir uma pessoa SEM apontamento por API pontual. O estado local
+  // só é atualizado após confirmação do Neon, mesmo quando a resposta se perde.
+  async function saveAdministrativeRelocation(entry,destination){
+    if(!onlineSession||onlineSession.role!=='CONTROLADORIA'||!onlineWritable)
+      return showToast('Somente a Controladoria pode transferir funcionários na produção.',true);
+    if(onlineQueued||onlineSaving)return showToast('Uma gravação está em andamento.',true);
+    const original=entry.c;
+    const requestId=crypto.randomUUID();
+    const payload=JSON.stringify({
+      requestId,convocacaoId:String(original.id),colaboradorId:String(entry.id),
+      source:{dataServico:original.dataServico,unidade:original.unidade,
+        supervisor:original.supervisor,obraId:original.obraId||'',turno:original.turno},
+      destination
+    });
+    let confirmed=false,lastError=null;
+    onlineSaving=true;lockOnline(true);
+    showSaveFeedback('Transferindo funcionário no Neon, sem alterar os colegas…',false,45000);
+    const checkSaved=async()=>{
+      for(let attempt=0;attempt<3;attempt++){
+        if(attempt)await new Promise(resolve=>setTimeout(resolve,450*attempt));
+        try{
+          const check=await api('/api/save-status?requestId='+encodeURIComponent(requestId));
+          if(check?.confirmed===true&&check.requestId===requestId)return true;
+        }catch(error){
+          if(error?.status===401||error?.status===403)throw error;
+        }
+      }
+      return false;
+    };
+    try{
+      for(let attempt=0;attempt<2&&!confirmed;attempt++){
+        if(attempt)showSaveFeedback('Reconectando e verificando a mesma transferência, sem duplicar registros…',false,45000);
+        const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),22000);
+        try{
+          const reply=await api('/api/admin-relocation',{method:'POST',body:payload,signal:controller.signal});
+          if(reply?.ok!==true||reply.requestId!==requestId)throw Object.assign(Error('Resposta incompleta da transferência.'),{status:502});
+          confirmed=true;
+        }catch(error){
+          lastError=error;
+          const status=Number(error?.status||0);
+          // Em caso de timeout e 409, consultar se a PRIMEIRA tentativa já gravou.
+          if(error?.name==='AbortError'||!status||status===409||status>=500){
+            confirmed=await checkSaved();
+            if(confirmed)break;
+          }
+          if(status>=400&&status<500)throw error;
+        }finally{clearTimeout(timeout);}
+      }
+      if(!confirmed){
+        const message='Não foi possível confirmar a transferência. O registro original foi mantido nesta tela. Confira a convocação antes de tentar novamente.';
+        throw Object.assign(Error(message),{status:lastError?.status||503});
+      }
+      try{
+        const updated=await restoreOnlineSession();
+        applyOnline(updated);
+      }catch(error){
+        onlineWritable=false;
+        throw Error('A transferência foi CONFIRMADA no Neon, mas a tela não atualizou. Pressione Ctrl + F5 e não transfira novamente.');
+      }
+      onlineSaving=false;
+      adminEditDate=destination.dataServico;
+      renderAdminConv(true);
+      showSaveFeedback('Transferência confirmada no Neon. Histórico e colegas preservados.');
+      showToast('Funcionário transferido e confirmado no banco de dados.');
+    }catch(error){
+      const message=String(error?.message||'Falha ao transferir. Confira o histórico antes de tentar novamente.');
+      showSaveFeedback(message,true,60000);
+      showToast(message,true);
+    }finally{onlineSaving=false;lockOnline(false);}
   }
   // Realocação administrativa: mantenha os IDs do registro e do apontamento para
   // não simular uma exclusão seguida de inclusão, que é proibida em produção.
