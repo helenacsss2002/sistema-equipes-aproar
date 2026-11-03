@@ -71,10 +71,10 @@ test('Uma autorização do Financeiro cobre Extra, Bonificação e Passagem, sem
   person.acordo=50;
   person.ajudaCusto=11;
   const scope={supervisor:'VICTOR',colaboradorId:'1',dataServico:'2026-10-30'};
-  const grantIds=['77777777-7777-4777-8777-777777777777','88888888-8888-4888-8888-888888888888'];
-  const events=grantIds.flatMap((id,index)=>[
+  const grantIds=['77777777-7777-4777-8777-777777777777'];
+  const events=grantIds.flatMap(id=>[
    {acao:'SOLICITACAO_LIBERACAO_FINANCEIRA',usuario:'VICTOR',ocorrido_em:'2026-11-03T13:00:01Z',
-    contexto:{requestId:id,...scope,fields:[index?'Bonificação':'Extra'],reason:'Revisão já liberada pelo Financeiro'}},
+    contexto:{requestId:id,...scope,fields:['Extra'],reason:'Revisão já liberada pelo Financeiro'}},
    {acao:'LIBERACAO_FINANCEIRA_AUTORIZADA',usuario:'FINANCEIRO',ocorrido_em:'2026-11-03T13:00:02Z',
     contexto:{requestId:id,...scope}}
   ]);
