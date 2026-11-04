@@ -36,7 +36,7 @@ test('avulso pode repetir nome histórico, mas não duplicar o mesmo turno/data'
  assert.match(handler,/retroUnsavedAvulsos\.values\(\)\]\.some/);
  assert.match(handler,/state\.convocacoes\.some\(c=>c\.dataServico===data&&overlaps\(c\.turno,turn\)/);
  assert.doesNotMatch(handler,/if\(jaCadastrado\)/);
- assert.match(handler,/Os dados preenchidos permanecem no formulário/);
+ assert.match(handler,/storeRetroDraft\(\)/);
  const operations=fs.readFileSync(new URL('./operations.js',import.meta.url),'utf8');
  assert.match(operations,/const nomesCadastrados=new Map\(\)/);
  assert.match(operations,/O colaborador.*já possui cadastro/);
