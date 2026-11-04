@@ -28,6 +28,12 @@ const events=[
  {acao:'SOLICITACAO_LIBERACAO_FINANCEIRA',usuario:'VICTOR',ocorrido_em:'2026-10-27T13:00:02Z',contexto:ctx},
  {acao:'LIBERACAO_FINANCEIRA_AUTORIZADA',usuario:'FINANCEIRO',ocorrido_em:'2026-10-27T13:00:10Z',contexto:{requestId}}
 ];
+test('Avulso eventual usa ID virtual na solicitação financeira e mantém escopo do lançamento',()=>{
+ const data={colaboradorId:'avulso-cleandro-11-04',dataServico:'2026-10-26',fields:['Extra'],reason:'Revisar valor de extra do avulso'};
+ assert.equal(validRequest(data).colaboradorId,'avulso-cleandro-11-04');
+ assert.throws(()=>validRequest({...data,colaboradorId:'avulso;;;DELETE'}),/Colaborador inválido/);
+ assert.match(worker,/metadata\(c\.observacao\)\.meta\.avulso_eventual\?\.id/);
+});
 test('Autorização do Financeiro libera apenas o colaborador/data/campos solicitados e apenas uma vez',()=>{
  assert.equal(releaseState(events)[0].status,'Autorizada');
  const consumed=new Set();
