@@ -53,7 +53,7 @@ test('Inicialização reabre aba salva; pageshow não causa reload; logout limpa
   assert.match(logout,/removeItem\(supervisorViewStorageKey\(supervisorAtual\)\)/);
   assert.doesNotMatch(app,/window\.location\.reload\(\)/);
   assert.match(app,/window\.addEventListener\('pagehide',\(\)=>saveSupervisorView\(\)\)/);
-  assert.match(html,/app\.js\?v=aproar-convocacao-recuperada-20261104-10/);
+  assert.match(html,/app\.js\?v=aproar-convocacao-sem-reload-20261104-11/);
 });
 test('Recarregamento recupera os nomes, turno e avulsos sem confirmar automaticamente',()=>{
   const code=app.slice(app.indexOf('  function renderUnitConvocacao()'),app.indexOf('  function operationalRows('));
@@ -68,4 +68,21 @@ test('Recarregamento recupera os nomes, turno e avulsos sem confirmar automatica
   assert.doesNotMatch(code.slice(review,confirm),/state\.convocacoes\.push/);
   assert.match(code.slice(confirm),/confirmed=>convocationRecordsConfirmed\(confirmed,approved\)/);
   assert.doesNotMatch(code.slice(confirm),/setView\('inicio'\)/);
+});
+
+// O navegador nunca pode enviar a Convocação por GET, mesmo quando um erro
+// impede a montagem de componentes auxiliares ou a recuperação do rascunho.
+test('Falha na montagem não provoca recarregamento ou saída da Convocação',()=>{
+  const conv=app.slice(app.indexOf('  function renderUnitConvocacao(){'),app.indexOf('  function operationalRows('));
+  const init=app.slice(app.indexOf('  async function initOnline(){'));
+  assert.match(conv,/<form id="unit-conv-form"[^>]*onsubmit="return false;"/);
+  assert.match(init,/document\\.addEventListener\\('submit',event=>\\{/);
+  assert.match(init,/event\\.preventDefault\\(\\)/);
+  assert.match(init,/event\\.target\\.id==='unit-conv-form'/);
+  assert.match(init,/addEventListener\\('submit',[\\s\\S]+,true\\)/);
+  const handler=conv.indexOf('form.onsubmit=e=>');
+  const restore=conv.lastIndexOf('try{loadConvDraft();}');
+  assert.ok(handler>0&&restore>handler,'Somente recuperar rascunho depois de instalar o submit seguro');
+  assert.match(conv,/form\\.dataset\\.aproarBound='1'/);
+  assert.match(conv,/catch\\(draftError\\)/);
 });
