@@ -165,7 +165,14 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
     supervisor:c.supervisor,actor:session.user,role:session.role,source:'Apontamento',
     timestamp,previous:oldRow,next:values
   }));
-  const oldMeta=clearObsoleteApproval(metadata(raw?.observacao).meta,finance,bonus),first=ss[0],meta={...oldMeta,valor_extra_disponivel:money(Number(i.valorExtraDisponivel??0)),apontado_em:pointTime,apontado_por:executor,custos_separados:true,custo_pago:money(finance),valor_acordo:money(bonus),valor_adicional_noturno:money(night),valor_ajuda_custo:money(ajudaCusto),servico_a_definir:!first,tipo_diaria_avulso:p.avulso==='Sim'?(i.tipoDiariaAvulso||'Diária'):null,periodo_principal:first?.periodo||c.turno,servicos_adicionais:ss.slice(1).map(s=>({servico:works.get(s.obraId)?.nome,obra_id:s.obraId,periodo:s.periodo}))};
+  const oldMeta=clearObsoleteApproval(metadata(raw?.observacao).meta,finance,bonus);
+  // O apontamento atualiza a mesma convocação na transação. Não perder o
+  // snapshot do avulso durante o segundo UPDATE de convocacoes.
+  const eventSnapshot=isEventAvulso(p)?{avulso_eventual:{
+    id:pid,nome:String(p.nome).trim(),funcao:p.funcao,custo:money(p.custo),
+    categoria:p.categoria||'',criado_em:oldMeta.avulso_eventual?.criado_em||timestamp
+  }}:{};
+  const first=ss[0],meta={...oldMeta,...eventSnapshot,valor_extra_disponivel:money(Number(i.valorExtraDisponivel??0)),apontado_em:pointTime,apontado_por:executor,custos_separados:true,custo_pago:money(finance),valor_acordo:money(bonus),valor_adicional_noturno:money(night),valor_ajuda_custo:money(ajudaCusto),servico_a_definir:!first,tipo_diaria_avulso:p.avulso==='Sim'?(i.tipoDiariaAvulso||'Diária'):null,periodo_principal:first?.periodo||c.turno,servicos_adicionais:ss.slice(1).map(s=>({servico:works.get(s.obraId)?.nome,obra_id:s.obraId,periodo:s.periodo}))};
   add('convocacoes','update',key,{...values,obra_id:first?.obraId||work,observacao:'Turno: '+c.turno+(i.observacao?' | Obs: '+i.observacao:'')+' ||APROAR_META|| '+JSON.stringify(meta)});
   if(!same(normServices(oldPoint),ss)){
     const previousServices=(rawServicesByConv.get(key)||[]).slice().sort((a,b)=>Number(b.principal)-Number(a.principal)||Number(a.id)-Number(b.id));
