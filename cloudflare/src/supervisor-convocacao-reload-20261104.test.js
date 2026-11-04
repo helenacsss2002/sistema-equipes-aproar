@@ -19,7 +19,7 @@ function harness(){
   const context={sessionStorage,perfilAtual:'SUPERVISOR',supervisorAtual:'FELIPE',viewAtual:'convocacao'};
   vm.createContext(context);
   vm.runInContext(app.slice(helperStart,helperEnd)+
-    '\\nglobalThis.viewState={saveSupervisorView,restoredSupervisorView};',context);
+    '\nglobalThis.viewState={saveSupervisorView,restoredSupervisorView};',context);
   return {context,storage:data,api:context.viewState};
 }
 test('Ao atualizar a página, supervisor retorna à Convocação, não a Apontamentos',()=>{
@@ -48,24 +48,24 @@ test('Inicialização reabre aba salva; pageshow não causa reload; logout limpa
   const set=app.slice(app.indexOf('  function setView('),app.indexOf('  function render()'));
   const online=app.slice(app.indexOf('  function enterConnectedSession('),app.indexOf('  async function initOnline('));
   const logout=app.slice(app.indexOf('  async function logout('),app.indexOf('  const renderLocal=render;'));
-  assert.match(set,/saveSupervisorView\\(viewAtual\\)/);
-  assert.match(online,/restoredSupervisorView\\(\\)/);
-  assert.match(logout,/removeItem\\(supervisorViewStorageKey\\(supervisorAtual\\)\\)/);
-  assert.doesNotMatch(app,/window\\.location\\.reload\\(\\)/);
-  assert.match(app,/window\\.addEventListener\\('pagehide',\\(\\)=>saveSupervisorView\\(\\)\\)/);
-  assert.match(html,/app\\.js\\?v=aproar-convocacao-recuperada-20261104-10/);
+  assert.match(set,/saveSupervisorView\(viewAtual\)/);
+  assert.match(online,/restoredSupervisorView\(\)/);
+  assert.match(logout,/removeItem\(supervisorViewStorageKey\(supervisorAtual\)\)/);
+  assert.doesNotMatch(app,/window\.location\.reload\(\)/);
+  assert.match(app,/window\.addEventListener\('pagehide',\(\)=>saveSupervisorView\(\)\)/);
+  assert.match(html,/app\.js\?v=aproar-convocacao-recuperada-20261104-10/);
 });
 test('Recarregamento recupera os nomes, turno e avulsos sem confirmar automaticamente',()=>{
   const code=app.slice(app.indexOf('  function renderUnitConvocacao()'),app.indexOf('  function operationalRows('));
-  assert.match(code,/const saved=readStoredDraft\\(activeConvKey\\)/);
-  assert.match(code,/if\\(restoreConvDraft\\(saved\\)\\)\\{/);
-  assert.match(code,/saved\\.version!==onlineVersion/);
-  assert.match(code,/storeDraft\\(activeConvKey,data\\)/);
-  assert.match(code,/form\\.addEventListener\\('input'/);
-  assert.match(code,/form\\.addEventListener\\('change'/);
+  assert.match(code,/const saved=readStoredDraft\(activeConvKey\)/);
+  assert.match(code,/if\(restoreConvDraft\(saved\)\)\{/);
+  assert.match(code,/saved\.version!==onlineVersion/);
+  assert.match(code,/storeDraft\(activeConvKey,data\)/);
+  assert.match(code,/form\.addEventListener\('input'/);
+  assert.match(code,/form\.addEventListener\('change'/);
   const review=code.indexOf('form.onsubmit=e=>'),confirm=code.indexOf("$('#unit-conv-final').onclick=()=>");
   assert.ok(review>0&&confirm>review);
-  assert.doesNotMatch(code.slice(review,confirm),/state\\.convocacoes\\.push/);
-  assert.match(code.slice(confirm),/confirmed=>convocationRecordsConfirmed\\(confirmed,approved\\)/);
-  assert.doesNotMatch(code.slice(confirm),/setView\\('inicio'\\)/);
+  assert.doesNotMatch(code.slice(review,confirm),/state\.convocacoes\.push/);
+  assert.match(code.slice(confirm),/confirmed=>convocationRecordsConfirmed\(confirmed,approved\)/);
+  assert.doesNotMatch(code.slice(confirm),/setView\('inicio'\)/);
 });
