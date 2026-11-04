@@ -45,7 +45,7 @@ function setup(){
   now:()=>new Date('2026-10-20T13:00:00Z'),uid:()=> 'cv_test',
   audit:(...args)=>auditTrail.push(args),
   saveData:(onSuccess)=>{saved.push(true);if(typeof onSuccess==='function')onSuccess();return true;},
-  readStoredDraft:()=>null,clearStoredDraft:()=>{},convLastKey:()=> 'conv-last',
+  readStoredDraft:()=>null,clearStoredDraft:()=>{},convLastKey:()=> 'conv-last',loadConvDraft:()=>{},
   render:()=>{metrics.renders++;}
 
  };
