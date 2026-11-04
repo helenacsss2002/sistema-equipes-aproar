@@ -63,7 +63,7 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
      // linha em colaboradores. Recusar alterações indevidas no snapshot antigo.
      if(old&&!same(field(old,staffFields),field(p,staffFields)))
        fail('Os dados de um avulso histórico não podem ser alterados pelo cadastro.',403);
-     if(!old&&(!String(p.nome||'').trim()||!['Servente','Profissional'].includes(p.funcao)||
+     if(!old&&(!String(p.nome||'').trim()||!String(p.funcao||'').trim()||
         !finite(p.custo)||Number(p.custo)<=0||numericId(String(p.id))))
        fail('Avulso manual inválido.',400);
      continue;
@@ -102,6 +102,7 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
  for(const old of base.convocacoes){if(records.has(old.id))continue;if(session.role==='SUPERVISOR')continue; // Nunca apagar convocações históricas por omissão no estado enviado.
   if(!own(session,old))fail('Sem permissão para excluir esta convocação.',403);for(const s of (rawServicesByConv.get(old.id)||[]))add('servicos_apontamento','delete',s.id);const ap=rawAps.get(old.id);if(ap)add('apontamentos','delete',ap.id);add('convocacoes','delete',old.id);}
  for(const {key,c,pid,old,changed} of records.values()){
+  const person=staff.get(pid);
   const raw=old?rawConvs.get(old.id):null,oldPoint=oldApByConv.get(String(old?.id))?.itens.find(i=>i.colaboradorId===pid),ap=pointed.get(key),pointChanged=ap&&(changed||!same(apView(oldPoint),apView(ap.i)));
   if(oldPoint&&!ap){if(session.role==='SUPERVISOR')continue; // Preservar apontamento existente, mesmo que uma tela antiga o omita.
    if(!own(session,c))fail('Sem permissão para remover apontamento.',403);const row=rawAps.get(key);if(row)add('apontamentos','delete',row.id);for(const s of (rawServicesByConv.get(key)||[]))add('servicos_apontamento','delete',s.id);const {text,meta}=metadata(raw.observacao);delete meta.apontado_em;delete meta.apontado_por;delete meta.apontamento_atrasado;delete meta.valor_ajuda_custo;add('convocacoes','update',key,{status:'Presente (Integral)',valor_extra:0,custo_pago:0,valor_acordo:0,valor_adicional_noturno:0,custos_separados:false,observacao:text+(Object.keys(meta).length?' ||APROAR_META|| '+JSON.stringify(meta):'')});}
