@@ -30,6 +30,8 @@ jobs:
               grep -q 'function' /tmp/aproar-body || { echo "FAIL: JS content invalid/empty"; exit 1; }
               grep -q 'async function saveAdministrativeRelocation' /tmp/aproar-body || { echo "FAIL: transfer fix not deployed"; exit 1; }
               grep -q 'function retroactiveRecordsConfirmed' /tmp/aproar-body || { echo "FAIL: retroactive confirmation fix not deployed"; exit 1; }
+              grep -q 'data-remove-avulso' /tmp/aproar-body || { echo "FAIL: avulso removal X not deployed"; exit 1; }
+              grep -q 'aproar-avulso-sem-cadastro-20261104-8' /tmp/aproar-body || true
             fi
             if [ "$path" = /api/health ]; then
               echo "$result" | grep -q 'http=200' || { echo "FAIL: health endpoint unavailable"; exit 1; }
