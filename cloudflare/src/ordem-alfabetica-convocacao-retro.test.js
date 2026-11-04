@@ -25,8 +25,8 @@ test('Colaboradores aparecem em ordem alfabética em português, incluindo acent
  assert.deepEqual(Array.from(ctx.orderIds(['30','7','9','12','2'])),['12','2','9','7','30']);
 });
 test('Convocação de supervisores e controladoria mantém busca por nome e ordena os resultados filtrados',()=>{
- assert.match(source,/alphabeticalPeople\(COLABORADORES\.filter\(c=>!c\.inativo&&c\.nome\.toLowerCase\(\)\.includes\(term\)/);
- assert.match(source,/alphabeticalPeople\(COLABORADORES\.filter\(c=>!c\.inativo&&clean\(c\.nome\+' '\+c\.funcao\)\.includes\(term\)/);
+ assert.match(source,/alphabeticalPeople\(COLABORADORES\.filter\(c=>!c\.inativo&&c\.avulso!=='Sim'&&!c\.avulsoRegistro&&c\.nome\.toLowerCase\(\)\.includes\(term\)/);
+ assert.match(source,/alphabeticalPeople\(COLABORADORES\.filter\(c=>!c\.inativo&&c\.avulso!=='Sim'&&!c\.avulsoRegistro&&clean\(c\.nome\+' '\+c\.funcao\)\.includes\(term\)/);
  assert.match(source,/\$\('#unit-conv-search'\)\.oninput=refresh/);
  assert.match(source,/\$\('#ac-search'\)\.oninput=people/);
  assert.match(source,/selected\.has\(c\.id\)\?'checked'/);
@@ -34,7 +34,7 @@ test('Convocação de supervisores e controladoria mantém busca por nome e orde
 });
 test('Apontamento retroativo preserva busca e selecionados e mostra fichas em ordem alfabética',()=>{
  const retro=source.slice(source.indexOf('  function renderApontamentoRetroativo()'),source.indexOf('  function renderPendencias()'));
- assert.match(retro,/class="checkbox-grid retro-person-list">\$\{alphabeticalPeople\(COLABORADORES\.filter\(c=>!c\.inativo\)\)/);
+ assert.match(retro,/class="checkbox-grid retro-person-list">\$\{alphabeticalPeople\(COLABORADORES\.filter\(c=>!c\.inativo&&c\.avulso!=='Sim'&&!c\.avulsoRegistro\)\)/);
  assert.match(retro,/bindPersonSearch\(\$\('#retro-person-search'\)/);
  assert.match(retro,/alphabeticalPersonIds\(\$\$\('input\[name="retro-colab"\]:checked'\)/);
  assert.match(retro,/retroDrafts\.get\(id\)\|\|previousItem\(id\)/);
