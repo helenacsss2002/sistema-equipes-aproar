@@ -3346,7 +3346,7 @@ function renderEquipeDia(){
       return false;
     }
     if(onlineQueued||onlineSaving){const message='Já existe um salvamento em andamento. Aguarde a confirmação antes de enviar outro apontamento.';showToast(message,true);showSaveFeedback(message,true);if(typeof onFailure==='function')onFailure(message);return false;}
-    showSaveFeedback('Enviando apontamento para gravação no banco…',false,40000);
+    showSaveFeedback(preserveConvocationForm?'Enviando convocação para gravação no Neon…':'Enviando apontamento para gravação no banco…',false,40000);
     const pendingNightChanges=nightChangesToVerify(onlineConfirmed,state);
     state.obras=OBRAS;state.colaboradores=COLABORADORES;onlineQueued=true;lockOnline(true);
     queueMicrotask(async()=>{
@@ -3415,7 +3415,7 @@ function renderEquipeDia(){
           throw new Error('O apontamento foi gravado, mas não foi possível atualizar os dados da tela.');
         const nightConfirmed=nightValuesMatch(result.state,pendingNightChanges);
         if(typeof verifyPersisted==='function'&&!verifyPersisted(result.state)){
-          throw Object.assign(new Error('O servidor confirmou a operação, mas não foi possível localizar no Neon todos os apontamentos retroativos selecionados. Consulte o histórico antes de tentar novamente.'),{retroUnverified:true});
+          throw Object.assign(new Error(preserveConvocationForm?'O banco confirmou a transação, mas nem todos os participantes da convocação foram localizados na conferência do Neon. Verifique o histórico antes de tentar novamente.':'O servidor confirmou a operação, mas não foi possível localizar no Neon todos os apontamentos retroativos selecionados. Consulte o histórico antes de tentar novamente.'),preserveConvocationForm?{convocationUnverified:true}:{retroUnverified:true});
         }
         applyOnline(result);onlineSaving=false;
         if(!nightConfirmed){
@@ -3434,7 +3434,9 @@ function renderEquipeDia(){
           // A confirmação da transação não basta para afirmar que cada retroativo
           // selecionado foi efetivamente registrado. Manter tela/rascunho intactos.
           onlineWritable=false;onlineSaving=false;
-          const notice=error?.retroUnverified
+          const notice=error?.convocationUnverified
+            ?'O Neon confirmou a transação, mas não foi possível conferir todos os convocados. O espelho permanece aberto. Confira a equipe no histórico antes de reenviar; nenhuma segunda convocação foi gerada automaticamente.'
+            :error?.retroUnverified
             ?'O Neon confirmou a transação, mas o retroativo selecionado não foi localizado na conferência. Seus dados permanecem no rascunho. Consulte o histórico antes de repetir.'
             :'O banco confirmou a gravação, mas a atualização da tela falhou. Pressione Ctrl + F5 para conferir o histórico. Não lance novamente.';
           if(typeof onFailure==='function')onFailure(notice);
