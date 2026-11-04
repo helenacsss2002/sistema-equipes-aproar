@@ -13,7 +13,21 @@ export function mapNeonData(db){
   const services=new Map();for(const s of db.servicos_apontamento||[]){const key=id(s.convocacao_id);if(!services.has(key))services.set(key,[]);services.get(key).push(s);}
   const convocacoes=[],apontamentos=[],extras=[],warnings=[];
   for(const c of db.convocacoes||[]){
-    const key=id(c.id),person=id(c.colaborador_id),work=id(c.obra_id),{text,meta}=metadata(c.observacao),turno=c.turno||text.match(/Turno:\s*(Integral|Manhã|Tarde|Noite)/i)?.[1]||'Integral';
+    const key=id(c.id),work=id(c.obra_id),{text,meta}=metadata(c.observacao);
+    // Avulso eventual tem identidade e diária apenas na convocação daquele dia.
+    // Não há linha desse trabalhador na tabela colaboradores.
+    const eventAvulso=meta.avulso_eventual;
+    const person=eventAvulso?.id?String(eventAvulso.id):id(c.colaborador_id);
+    if(eventAvulso?.id&&!people.has(person)){
+      const temporary={id:person,nome:String(eventAvulso.nome||'Avulso'),
+        funcao:String(eventAvulso.funcao||'Profissional'),custo:amount(eventAvulso.custo),
+        categoria:String(eventAvulso.categoria||''),moradia:'',inativo:true,
+        avulso:'Sim',avulsoRegistro:true};
+      people.set(person,temporary);
+      colaboradores.push(temporary); // Somente projeção de leitura, sem cadastro.
+    }
+    if(!person)continue;
+    const turno=c.turno||text.match(/Turno:\s*(Integral|Manhã|Tarde|Noite)/i)?.[1]||'Integral';
     const a=pointed.get(key);
     // Extra-only entries use the existing tables but stay separate from ordinary attendance.
     if(meta.extra_avulsa===true){

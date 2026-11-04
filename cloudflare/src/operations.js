@@ -44,7 +44,10 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
  // Prevenir erro 23505 de nome unico do Neon, inclusive em avulsos retroativos
  // restaurados de rascunho; nenhum cadastro original deve ser sobrescrito.
  const nomesCadastrados=new Map();
+ const isEventAvulso=p=>p?.avulsoRegistro===true||
+   (p?.avulso==='Sim'&&!oldStaff.has(String(p.id))&&!numericId(String(p.id)));
  for(const p of next.colaboradores){
+   if(isEventAvulso(p))continue; // Um avulso não é um cadastro de colaborador.
    const nome=String(p.nome||'').trim().toUpperCase();
    if(!nome)continue;
    const outro=nomesCadastrados.get(nome);
@@ -53,7 +56,24 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
    nomesCadastrados.set(nome,String(p.id));
  }
  const staffFields=['nome','funcao','custo','moradia','inativo','categoria','avulso'];
- for(const p of next.colaboradores){const old=oldStaff.get(String(p.id));if(old&&same(field(old,staffFields),field(p,staffFields)))continue;if(session.role!=='CONTROLADORIA'&&(old||session.role!=='SUPERVISOR'||p.avulso!=='Sim'))fail('Sem permissão para alterar colaboradores.',403);if(!old&&numericId(p.id))fail('Cadastro novo com identificador inválido.');if(!finite(p.custo)||Number(p.custo)<=0)fail('Custo diário inválido.');add('colaboradores',old?'update':'insert',p.id,{nome:required(p.nome,'Nome'),funcao:required(p.funcao,'Função'),valor_diaria:money(p.custo),local_moradia:String(p.moradia||''),ativo:!p.inativo,categoria_diaria:String(p.categoria||''),avulso:p.avulso==='Sim'?'Sim':'Não'});}
+ for(const p of next.colaboradores){
+   const old=oldStaff.get(String(p.id));
+   if(isEventAvulso(p)){
+     // A identificação do avulso é um snapshot por lançamento, não uma
+     // linha em colaboradores. Recusar alterações indevidas no snapshot antigo.
+     if(old&&!same(field(old,staffFields),field(p,staffFields)))
+       fail('Os dados de um avulso histórico não podem ser alterados pelo cadastro.',403);
+     if(!old&&(!String(p.nome||'').trim()||!String(p.funcao||'').trim()||
+        !finite(p.custo)||Number(p.custo)<=0||numericId(String(p.id))))
+       fail('Avulso manual inválido.',400);
+     continue;
+   }
+   if(old&&same(field(old,staffFields),field(p,staffFields)))continue;if(session.role!=='CONTROLADORIA'&&(old||session.role!=='SUPERVISOR'||p.avulso!=='Sim'))fail('Sem permissão para alterar colaboradores.',403);if(!old&&numericId(p.id))fail('Cadastro novo com identificador inválido.');if(!finite(p.custo)||Number(p.custo)<=0)fail('Custo diário inválido.');add('colaboradores',old?'update':'insert',p.id,{nome:required(p.nome,'Nome'),funcao:required(p.funcao,'Função'),valor_diaria:money(p.custo),local_moradia:String(p.moradia||''),ativo:!p.inativo,categoria_diaria:String(p.categoria||''),avulso:p.avulso==='Sim'?'Sim':'Não'});}
+ // Evitar que a aba de cadastro ou a importação criem avulsos sem evento:
+ // cada avulso manual novo deve estar vinculado a uma convocação real.
+ for(const person of staff.values())if(isEventAvulso(person)&&!oldStaff.has(String(person.id))&&
+   !next.convocacoes.some(c=>c.colaboradores.some(id=>String(id)===String(person.id))))
+   fail('Avulso só pode ser incluído manualmente em Convocação ou Apontamento, sem cadastro.',403);
  if([...oldStaff.keys()].some(k=>!staff.has(k)))fail('Use a inativação para preservar o histórico do colaborador.');
  const oldWorks=new Map(base.obras.map(o=>[o.id,o]));for(const o of next.obras){const old=oldWorks.get(String(o.id));if(old&&same(field(old,['nome','unidade']),field(o,['nome','unidade'])))continue;if(session.role!=='CONTROLADORIA')fail('Sem permissão para alterar obras.',403);if(!old&&numericId(o.id))fail('Obra nova com identificador inválido.');add('obras',old?'update':'insert',o.id,{nome:required(o.nome,'Obra'),unidade:required(o.unidade,'Unidade')});}
  for(const o of base.obras)if(!works.has(o.id)){if(session.role!=='CONTROLADORIA')fail('Sem permissão para excluir obra.',403);if(db.raw.convocacoes.some(c=>String(c.obra_id)===o.id)||db.raw.servicos_apontamento.some(x=>String(x.obra_id)===o.id)||next.convocacoes.some(c=>String(c.obraId)===o.id)||next.apontamentos.some(a=>a.itens.some(i=>normServices(i).some(s=>s.obraId===o.id))))fail('Esta obra possui convocações ou apontamentos vinculados e deve ser preservada.');add('obras','delete',o.id);}
@@ -69,6 +89,12 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
  const pointed=new Map();for(const a of next.apontamentos){if(!Array.isArray(a.itens)||!a.itens.length)fail('Apontamento vazio.');for(const i of a.itens){const key=byGroup.get(String(a.convocacaoId)+'|'+String(i.colaboradorId));if(!key)fail('Apontamento sem convocação correspondente.');if(pointed.has(key))fail('Apontamento duplicado.');pointed.set(key,{a,i});}}
  // Only changes to scheduling are checked; existing historic inconsistencies do not block unrelated edits.
  for(const record of records.values()){const {key,c,pid,changed}=record;if(!changed)continue;
+  // Um avulso novo tem ID exclusivo por lançamento. Mesmo assim impedir
+  // cadastro duplicado de mesmo nome no mesmo turno e dia.
+  if(isEventAvulso(staff.get(pid))&&records.values().some(other=>other.key!==key&&
+    other.c.dataServico===c.dataServico&&overlap(other.c.turno,c.turno)&&
+    clean(staff.get(other.pid)?.nome||'')===clean(staff.get(pid).nome)))
+    fail('Este avulso já foi incluído no mesmo dia e turno. Confira o apontamento existente.',409);
   for(const other of records.values())if(other.key!==key&&other.pid===pid&&other.c.dataServico===c.dataServico&&overlap(other.c.turno,c.turno))fail(`Conflito: ${staff.get(pid).nome} já está convocado por ${other.c.supervisor}, em ${other.c.unidade}, no turno ${other.c.turno}.`,409,{colaboradorId:pid,supervisor:other.c.supervisor,unidade:other.c.unidade,turno:other.c.turno});
   const blocked=db.state.indisponibilidades.find(x=>x.colaboradorId===pid&&x.inicio<=c.dataServico&&x.fim>=c.dataServico);if(blocked&&present(pointed.get(key)?.i.status||'Presente (Integral)'))fail(`${staff.get(pid).nome} está indisponível: ${blocked.motivo}.`,409);
  }
@@ -76,6 +102,7 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
  for(const old of base.convocacoes){if(records.has(old.id))continue;if(session.role==='SUPERVISOR')continue; // Nunca apagar convocações históricas por omissão no estado enviado.
   if(!own(session,old))fail('Sem permissão para excluir esta convocação.',403);for(const s of (rawServicesByConv.get(old.id)||[]))add('servicos_apontamento','delete',s.id);const ap=rawAps.get(old.id);if(ap)add('apontamentos','delete',ap.id);add('convocacoes','delete',old.id);}
  for(const {key,c,pid,old,changed} of records.values()){
+  const person=staff.get(pid);
   const raw=old?rawConvs.get(old.id):null,oldPoint=oldApByConv.get(String(old?.id))?.itens.find(i=>i.colaboradorId===pid),ap=pointed.get(key),pointChanged=ap&&(changed||!same(apView(oldPoint),apView(ap.i)));
   if(oldPoint&&!ap){if(session.role==='SUPERVISOR')continue; // Preservar apontamento existente, mesmo que uma tela antiga o omita.
    if(!own(session,c))fail('Sem permissão para remover apontamento.',403);const row=rawAps.get(key);if(row)add('apontamentos','delete',row.id);for(const s of (rawServicesByConv.get(key)||[]))add('servicos_apontamento','delete',s.id);const {text,meta}=metadata(raw.observacao);delete meta.apontado_em;delete meta.apontado_por;delete meta.apontamento_atrasado;delete meta.valor_ajuda_custo;add('convocacoes','update',key,{status:'Presente (Integral)',valor_extra:0,custo_pago:0,valor_acordo:0,valor_adicional_noturno:0,custos_separados:false,observacao:text+(Object.keys(meta).length?' ||APROAR_META|| '+JSON.stringify(meta):'')});}
@@ -96,7 +123,12 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
   if(!raw||changed||String(old?.obraId||'')!==String(c.obraId||'')){
    if(raw&&!own(session,c)&&session.role!=='FINANCEIRO')fail('Sem permissão para alterar convocação.',403);if(raw&&session.role==='FINANCEIRO')fail('Financeiro não altera convocações.',403);
    const {meta}=metadata(raw?.observacao),created=raw?.criado_em||meta.convocado_em||timestamp;Object.assign(meta,{convocado_em:created,convocado_por:raw?.criado_por||meta.convocado_por||session.user,servico_a_definir:!c.obraId});
-   const data={obra_id:work,colaborador_id:pid,data:c.dataServico,engenheiro:c.supervisor,turno:c.turno,observacao:'Turno: '+c.turno+' ||APROAR_META|| '+JSON.stringify(meta)};if(!raw)Object.assign(data,{status:'Presente (Integral)',valor_extra:0,criado_em:timestamp,criado_por:session.user});add('convocacoes',raw?'update':'insert',key,data);
+   if(isEventAvulso(person)){
+     Object.assign(meta,{avulso_eventual:{id:pid,nome:String(person.nome).trim(),
+       funcao:person.funcao,custo:money(person.custo),categoria:person.categoria||'',
+       criado_em:created}});
+   }
+   const data={obra_id:work,colaborador_id:isEventAvulso(person)?null:pid,data:c.dataServico,engenheiro:c.supervisor,turno:c.turno,observacao:'Turno: '+c.turno+' ||APROAR_META|| '+JSON.stringify(meta)};if(!raw)Object.assign(data,{status:'Presente (Integral)',valor_extra:0,criado_em:timestamp,criado_por:session.user});add('convocacoes',raw?'update':'insert',key,data);
   }
   if(!pointChanged)continue;
   // Nunca aceitar o salvamento e restaurar silenciosamente R$ 90 (ou outro valor)
@@ -133,7 +165,14 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
     supervisor:c.supervisor,actor:session.user,role:session.role,source:'Apontamento',
     timestamp,previous:oldRow,next:values
   }));
-  const oldMeta=clearObsoleteApproval(metadata(raw?.observacao).meta,finance,bonus),first=ss[0],meta={...oldMeta,valor_extra_disponivel:money(Number(i.valorExtraDisponivel??0)),apontado_em:pointTime,apontado_por:executor,custos_separados:true,custo_pago:money(finance),valor_acordo:money(bonus),valor_adicional_noturno:money(night),valor_ajuda_custo:money(ajudaCusto),servico_a_definir:!first,tipo_diaria_avulso:p.avulso==='Sim'?(i.tipoDiariaAvulso||'Diária'):null,periodo_principal:first?.periodo||c.turno,servicos_adicionais:ss.slice(1).map(s=>({servico:works.get(s.obraId)?.nome,obra_id:s.obraId,periodo:s.periodo}))};
+  const oldMeta=clearObsoleteApproval(metadata(raw?.observacao).meta,finance,bonus);
+  // O apontamento atualiza a mesma convocação na transação. Não perder o
+  // snapshot do avulso durante o segundo UPDATE de convocacoes.
+  const eventSnapshot=isEventAvulso(p)?{avulso_eventual:{
+    id:pid,nome:String(p.nome).trim(),funcao:p.funcao,custo:money(p.custo),
+    categoria:p.categoria||'',criado_em:oldMeta.avulso_eventual?.criado_em||timestamp
+  }}:{};
+  const first=ss[0],meta={...oldMeta,...eventSnapshot,valor_extra_disponivel:money(Number(i.valorExtraDisponivel??0)),apontado_em:pointTime,apontado_por:executor,custos_separados:true,custo_pago:money(finance),valor_acordo:money(bonus),valor_adicional_noturno:money(night),valor_ajuda_custo:money(ajudaCusto),servico_a_definir:!first,tipo_diaria_avulso:p.avulso==='Sim'?(i.tipoDiariaAvulso||'Diária'):null,periodo_principal:first?.periodo||c.turno,servicos_adicionais:ss.slice(1).map(s=>({servico:works.get(s.obraId)?.nome,obra_id:s.obraId,periodo:s.periodo}))};
   add('convocacoes','update',key,{...values,obra_id:first?.obraId||work,observacao:'Turno: '+c.turno+(i.observacao?' | Obs: '+i.observacao:'')+' ||APROAR_META|| '+JSON.stringify(meta)});
   if(!same(normServices(oldPoint),ss)){
     const previousServices=(rawServicesByConv.get(key)||[]).slice().sort((a,b)=>Number(b.principal)-Number(a.principal)||Number(a.id)-Number(b.id));

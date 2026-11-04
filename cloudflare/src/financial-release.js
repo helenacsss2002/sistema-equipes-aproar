@@ -24,7 +24,7 @@ export function financialDeadline(serviceDate){
 }
 export const afterFinancialDeadline=(serviceDate,timestamp)=>new Date(timestamp).getTime()>new Date(financialDeadline(serviceDate).limitAt).getTime();
 export function validRequest(input){
- if(!input||typeof input!=='object'||!/^\d{1,18}$/.test(String(input.colaboradorId||'')))throw Error('Colaborador inválido.');
+ if(!input||typeof input!=='object'||!/^(?:\d{1,18}|[a-z][a-z0-9_-]{2,90})$/i.test(String(input.colaboradorId||'')))throw Error('Colaborador inválido.');
  day(input.dataServico);
  if(!Array.isArray(input.fields)||input.fields.length===0||input.fields.length>releaseFields.length||new Set(input.fields).size!==input.fields.length||input.fields.some(x=>!releaseFields.includes(x)))throw Error('Selecione as colunas que precisam de liberação.');
  if(typeof input.reason!=='string'||input.reason.trim().length<10||input.reason.trim().length>600)throw Error('Informe o motivo da solicitação (10 a 600 caracteres).');
