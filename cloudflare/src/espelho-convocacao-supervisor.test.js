@@ -24,12 +24,12 @@ function setup(){
  const fields=new Map([
   ['#unit-conv-form',mockElement()],['#unit-conv-review',mockElement()],['#unit-no-conv-box',mockElement()],
   ['#unit-conv-date',mockElement('2026-10-21')],['#unit-conv-unit',mockElement('BARRA DO CEARÁ')],
-  ['#unit-conv-turn',mockElement('Integral')],['#unit-conv-correct',mockElement()],['#unit-conv-final',mockElement()]
+  ['#unit-conv-turn',mockElement('Integral')],['#unit-conv-correct',mockElement()],['#unit-conv-final',mockElement()],['#unit-conv-save-status',mockElement()]
  ]);
  fields.get('#unit-conv-review').classList.add('hidden');
  const people=[{id:'2',nome:'Zé Carlos',funcao:'Pedreiro'},{id:'1',nome:'Ana Maria',funcao:'Servente'}];
  const select=[{value:'2',checked:true},{value:'1',checked:true}];
- const saved=[],messages=[],auditTrail=[];
+ const saved=[],messages=[],auditTrail=[],metrics={renders:0};
  const ctx={
   $:selector=>fields.get(selector),$$:selector=>selector==='#unit-conv-people input'?select:[],
   selected:new Set(),avulsoDraft:[],supervisorAtual:'EDUARDO',
@@ -46,13 +46,13 @@ function setup(){
   audit:(...args)=>auditTrail.push(args),
   saveData:(onSuccess)=>{saved.push(true);if(typeof onSuccess==='function')onSuccess();return true;},
   readStoredDraft:()=>null,clearStoredDraft:()=>{},convLastKey:()=> 'conv-last',
-  render:()=>{}
+  render:()=>{metrics.renders++;}
 
  };
  vm.createContext(ctx);
  vm.runInContext(source.slice(markupStart,markupEnd),ctx);
  vm.runInContext("const form=$('#unit-conv-form'),reviewBox=$('#unit-conv-review'),noConvBox=$('#unit-no-conv-box');let reviewDraft=null;const activeConvKey='conv-draft';const storeConvDraft=()=>{};"+source.slice(handlerStart,handlerEnd)+'\nglobalThis.getReviewDraft=()=>reviewDraft;',ctx);
- return {ctx,fields,select,saved,messages,auditTrail};
+ return {ctx,fields,select,saved,messages,auditTrail,metrics};
 }
 function review(set){
  set.fields.get('#unit-conv-form').onsubmit({preventDefault(){}});
@@ -97,6 +97,35 @@ test('Somente confirmação definitiva grava a convocação uma vez, incluindo a
  assert.equal(set.ctx.getReviewDraft(),null);
  set.fields.get('#unit-conv-final').onclick();
  assert.equal(set.saved.length,1,'Segundo clique acidental não cria duplicidade');
+});
+test('Confirmação definitiva mantém supervisor na própria tela, sem redirecionamento automático',()=>{
+ const set=setup();review(set);
+ set.fields.get('#unit-conv-final').onclick();
+ assert.equal(set.metrics.renders,0,'O sistema não deve reconstruir a página após salvar');
+ assert.equal(set.fields.get('#unit-conv-form').classList.contains('hidden'),true);
+ assert.equal(set.fields.get('#unit-conv-review').classList.contains('hidden'),false);
+ assert.match(set.fields.get('#unit-conv-review').innerHTML,/Convocação confirmada no Neon/);
+ assert.match(set.fields.get('#unit-conv-review').innerHTML,/Montar outra convocação/);
+ assert.equal(set.ctx.viewAtual,undefined,'Salvar não executa navegação');
+});
+test('Falha de salvamento mantém o espelho e permite corrigir ou reenviar após conferir',()=>{
+ const set=setup();review(set);
+ set.ctx.saveData=(_success,_verify,onFailure)=>{
+   set.saved.push('erro');
+   set.ctx.state.convocacoes=[]; // Simula atualização do estado autoritativo após falha.
+   onFailure('A conexão não confirmou a gravação.');
+   return true;
+ };
+ set.fields.get('#unit-conv-final').onclick();
+ assert.equal(set.metrics.renders,0);
+ assert.equal(set.fields.get('#unit-conv-review').classList.contains('hidden'),false);
+ assert.equal(set.fields.get('#unit-conv-form').classList.contains('hidden'),true);
+ assert.equal(set.ctx.getReviewDraft().ids.length,2,'Seleção da equipe não pode sumir');
+ assert.match(set.fields.get('#unit-conv-save-status').textContent,/não confirmada:/i);
+ assert.match(set.fields.get('#unit-conv-save-status').textContent,/rascunho foram preservados/);
+ set.fields.get('#unit-conv-correct').onclick();
+ assert.equal(set.fields.get('#unit-conv-form').classList.contains('hidden'),false);
+ assert.deepEqual(set.select.map(x=>x.checked),[true,true]);
 });
 test('Conflito surgido depois do espelho bloqueia confirmação e não gera convocação',()=>{
  const set=setup();review(set);
