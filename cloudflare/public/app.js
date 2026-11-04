@@ -39,6 +39,22 @@
   let portalUnit='Todas';
   let viewAtual = 'inicio';
   let apontamentoTab = 'normal';
+  // Uma atualização inesperada não pode devolver a convocação em andamento
+  // para Apontamentos. A aba ativa é guardada por supervisor nesta guia.
+  const SUPERVISOR_VIEW_KEY_PREFIX='aproar:supervisor:active-view:v1:';
+  const RESTORABLE_SUPERVISOR_VIEWS=new Set(['inicio','apontamento','convocacao','disponibilidade','liberacoes-financeiras','pendencias']);
+  const supervisorViewStorageKey=name=>SUPERVISOR_VIEW_KEY_PREFIX+String(name||'');
+  function saveSupervisorView(view=viewAtual){
+    if(perfilAtual!=='SUPERVISOR'||!supervisorAtual||!RESTORABLE_SUPERVISOR_VIEWS.has(view))return;
+    try{sessionStorage.setItem(supervisorViewStorageKey(supervisorAtual),view);}catch{}
+  }
+  function restoredSupervisorView(){
+    if(perfilAtual!=='SUPERVISOR'||!supervisorAtual)return 'apontamento';
+    try{
+      const view=sessionStorage.getItem(supervisorViewStorageKey(supervisorAtual));
+      return RESTORABLE_SUPERVISOR_VIEWS.has(view)?view:'apontamento';
+    }catch{return 'apontamento';}
+  }
   let retroDateSelected='';
 
   const $ = (sel) => document.querySelector(sel);
@@ -235,6 +251,7 @@
       discardRetroUnsavedAvulsos();
     }
     viewAtual = permitidas.includes(view) ? view : 'inicio';
+    saveSupervisorView(viewAtual);
     if(perfilAtual==='CONTROLADORIA'&&viewAtual==='convocacao'&&previousView!=='convocacao')adminConvDate=tomorrowISO();
     renderNav();
     const map = {
@@ -545,9 +562,9 @@
       };
       const bloqueio=colaboradores.find(id=>blocked(id,conv.dataServico)||state.convocacoes.some(c=>c.dataServico===conv.dataServico&&c.colaboradores.includes(id)&&overlaps(c.turno,conv.turno)));
       if(bloqueio) return toast('Colaborador indisponível ou já convocado neste turno: '+colaboradorById(bloqueio)?.nome,true);
-      conv.executor=supervisorAtual||perfilLabel(perfilAtual);state.convocacoes.push(conv); audit('Nova convocação',conv.id); saveData();
-      toast(convocacaoAtrasada(conv) ? 'Convocação salva e registrada como fora do prazo.' : 'Convocação salva com sucesso.');
-      setView('inicio');
+      conv.executor=supervisorAtual||perfilLabel(perfilAtual);state.convocacoes.push(conv); audit('Nova convocação',conv.id);
+      saveData(()=>toast(convocacaoAtrasada(conv) ? 'Convocação salva e registrada como fora do prazo.' : 'Convocação salva com sucesso.'));
+      // Nunca navegar automaticamente ao Início durante um salvamento.
     };
   }
 
@@ -2497,10 +2514,17 @@ function renderEquipeDia(){
     const loadConvDraft=()=>{
       const saved=readStoredDraft(activeConvKey);
       if(!saved){form.inert=false;convStatus.textContent='Preenchimento ainda não confirmado. As alterações serão guardadas neste navegador.';return;}
-      if(saved.version===onlineVersion){
-        if(restoreConvDraft(saved))return;
-        // Rascunho incompatível não é aplicado nem sobrescrito automaticamente.
+      if(restoreConvDraft(saved)){
+        // A versão global do Neon pode mudar por outra equipe. Recuperar o
+        // preenchimento é seguro: não escreve nada, e a disponibilidade é
+        // revalidada antes da confirmação definitiva.
+        if(saved.version!==onlineVersion){
+          convStatus.className='notice warning section';
+          convStatus.textContent='O banco foi atualizado durante a convocação. Os nomes e avulsos foram recuperados; confira a equipe antes de confirmar definitivamente.';
+        }
+        return;
       }
+      // Só rascunhos incompatíveis precisam de recuperação manual.
       unresolvedConvDraft=saved;form.inert=true;
       convStatus.className='notice warning section';
       convStatus.textContent='Existe um rascunho, mas os dados do servidor mudaram. Escolha recuperar ou descartar; nenhum registro será confirmado automaticamente.';
@@ -3531,11 +3555,11 @@ function renderEquipeDia(){
     }finally{onlineSaving=false;lockOnline(false);}
   }
   function resetData(){toast('Restauração automática desativada na versão conectada.',true);}
-  async function logout(){chooseLogin('CONTROLADORIA');if(onlineSaving||onlineQueued)return;try{await api('/api/logout',{method:'POST',body:'{}'});}catch(e){return showToast(e.message,true);}if(supervisorAtual)clearSupervisorDrafts(supervisorAtual);perfilAtual='';supervisorAtual='';onlineSession=null;onlineConfirmed=null;state=seedData();OBRAS.length=0;COLABORADORES.length=0;render();}
+  async function logout(){chooseLogin('CONTROLADORIA');if(onlineSaving||onlineQueued)return;try{await api('/api/logout',{method:'POST',body:'{}'});}catch(e){return showToast(e.message,true);}if(supervisorAtual){clearSupervisorDrafts(supervisorAtual);try{sessionStorage.removeItem(supervisorViewStorageKey(supervisorAtual));}catch{}}perfilAtual='';supervisorAtual='';onlineSession=null;onlineConfirmed=null;state=seedData();OBRAS.length=0;COLABORADORES.length=0;render();}
   const renderLocal=render;
   render=function(){renderLocal();if(!perfilAtual)return;const selector=$('#portal-sup');if(onlineSession?.role==='SUPERVISOR'&&selector){selector.value=onlineSession.user;selector.disabled=true;}const old=$('#live-status');if(old)old.remove();const status=document.createElement('div');status.id='live-status';status.className='notice '+(onlineWritable?'info':'warning');status.innerHTML=`<strong>${onlineStage==='producao'?'Produção':'Homologação'} · ${onlineWritable?'dados conectados ao Neon':'somente leitura'}</strong> <span>${onlineStage==='producao'?'Dados oficiais da APROAR.':'Ambiente de testes.'}</span> <button type="button" class="link-btn" id="sync-online">Atualizar dados</button>`;$('#main-content').prepend(status);$('#sync-online').onclick=async()=>{if(onlineSaving||onlineQueued)return;lockOnline(true);try{applyOnline(await api('/api/bootstrap'));render();showToast('Dados atualizados.');}catch(e){showToast(e.message,true);}finally{lockOnline(false);}};};
   function chooseLogin(role){loginRole=role;const shortcut=['SUPERVISOR','VISUALIZAR'].includes(role);$('#login-access-wrap').classList.toggle('hidden',shortcut);$('#login-shortcut-mode').classList.toggle('hidden',!shortcut);$('#login-shortcut-label').textContent=role==='SUPERVISOR'?'Portal do Supervisor':'Somente visualizar';if(!shortcut)$('#login-access').value=role;$('#login-supervisor-wrap').classList.toggle('hidden',role!=='SUPERVISOR');const passwordRequired=role!=='VISUALIZAR';$('#login-password').required=passwordRequired;$('#login-password').closest('.password-wrap').classList.toggle('hidden',!passwordRequired);document.querySelector('label[for="login-password"]').classList.toggle('hidden',!passwordRequired);$('#login-error').textContent='';$('#login-password').value='';$(role==='SUPERVISOR'?'#login-supervisor':role==='VISUALIZAR'?'#login-button':'#login-password').focus();}
-  function enterConnectedSession(result){applyOnline(result);financeReleaseRequests=[];if(perfilAtual==='SUPERVISOR')api('/api/financial-release').then(x=>{financeReleaseRequests=x.requests||[];if(viewAtual==='apontamento')render();}).catch(()=>{});viewAtual=perfilAtual==='SUPERVISOR'?'apontamento':perfilAtual==='VISUALIZAR'?'dashboard':'inicio';portalUnit=state.convocacoes.find(c=>c.supervisor===supervisorAtual&&c.dataServico===portalDate)?.unidade||OBRAS[0]?.unidade||'Todas';
+  function enterConnectedSession(result){applyOnline(result);financeReleaseRequests=[];if(perfilAtual==='SUPERVISOR')api('/api/financial-release').then(x=>{financeReleaseRequests=x.requests||[];if(viewAtual==='apontamento')render();}).catch(()=>{});viewAtual=perfilAtual==='SUPERVISOR'?restoredSupervisorView():perfilAtual==='VISUALIZAR'?'dashboard':'inicio';portalUnit=state.convocacoes.find(c=>c.supervisor===supervisorAtual&&c.dataServico===portalDate)?.unidade||OBRAS[0]?.unidade||'Todas';
     if(perfilAtual==='SUPERVISOR'){
       const last=readStoredDraft(draftKey('last',supervisorAtual));
       if(last&&last.date&&/^\d{4}-\d{2}-\d{2}$/.test(last.date)&&last.date<=isoToday()&&['normal','retroativo'].includes(last.tab)){
@@ -3550,7 +3574,9 @@ function renderEquipeDia(){
     $('#login-form').onsubmit=async e=>{e.preventDefault();const button=$('#login-button');button.disabled=true;$('#login-error').textContent='';try{await api('/api/login',{method:'POST',body:JSON.stringify({role:loginRole,supervisor:$('#login-supervisor').value,password:$('#login-password').value})});$('#login-password').value='';enterConnectedSession(await api('/api/bootstrap'));}catch(err){$('#login-error').textContent=err.message;}finally{button.disabled=false;}};
     // Preserve a valid signed HttpOnly session across F5; only Sair clears it.
     $('#login-button').disabled=true;try{enterConnectedSession(await restoreOnlineSession());}catch(e){if(e.status!==401)$('#login-error').textContent=e.message+' Sua sessão não foi encerrada automaticamente.';}finally{$('#login-password').value='';$('#login-button').disabled=false;}
-    window.addEventListener('pageshow',event=>{if(event.persisted)window.location.reload();});
+    // Um retorno do histórico (bfcache) NÃO deve forçar reload, apagar o rascunho
+    // ou substituir a Convocação pela tela inicial do supervisor.
+    window.addEventListener('pagehide',()=>saveSupervisorView());
   }
   initOnline();
 

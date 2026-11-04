@@ -56,13 +56,14 @@ test('Mantém rascunhos isolados por unidade, supervisor, dia e modo',()=>{
  for(const i of [0,2,3,4])assert.equal(api.read(keys[i]).marker,i);
 });
 
-test('Mudança da versão exige recuperação explícita antes de editar',()=>{
+test('Mudança de versão mantém recuperação automática segura do rascunho',()=>{
  const {api,context}=localHarness(),key=api.key('convocacao',supervisor,date,unit);
  api.store(key,{selected:['71'],turn:'Integral'});
  context.onlineVersion='neon-v2';
  assert.equal(api.read(key).version,'neon-v1');
  const code=app.slice(app.indexOf('  function renderUnitConvocacao(){'),app.indexOf('  function operationalRows(',app.indexOf('  function renderUnitConvocacao(){')));
- assert.match(code,/saved\.version===onlineVersion/);
+ assert.match(code,/if\(restoreConvDraft\(saved\)\)\{/);
+ assert.match(code,/saved\.version!==onlineVersion/);
  assert.match(code,/unresolvedConvDraft=saved;form\.inert=true/);
  assert.match(code,/Recuperar rascunho para conferência/);
  assert.match(code,/Descartar rascunho local/);
