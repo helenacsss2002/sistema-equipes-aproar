@@ -2381,6 +2381,7 @@ function renderEquipeDia(){
         <small>${escapeHtml(p.funcao||'Não informado')}${review.avulsos.some(a=>a.id===p.id)?' · Avulso':''}</small>
       </div>`).join('')}</div>
       <p class="notice info section">A convocação só será gravada depois que você clicar em <strong>Confirmar convocação definitiva</strong>. Os serviços serão definidos no apontamento.</p>
+      <div id="unit-conv-save-status" class="notice info section" role="status" aria-live="polite">Nenhuma gravação foi confirmada. Revise os dados e confirme quando estiver pronto.</div>
       <div class="form-actions"><button type="button" class="btn btn-secondary" id="unit-conv-correct">Voltar e corrigir</button>
       <button type="button" class="btn btn-primary" id="unit-conv-final">Confirmar convocação definitiva</button></div>`;
   }
@@ -2600,15 +2601,35 @@ function renderEquipeDia(){
           criadoEm:now().toISOString(),origem:'normal',executor:approved.supervisor});
         audit('Convocação da equipe',approved.date);
         const confirmedKey=activeConvKey,confirmedDate=approved.date,confirmedUnit=approved.unit;
+        const statusNode=$('#unit-conv-save-status');
+        if(statusNode){
+          statusNode.className='notice info section';
+          statusNode.textContent='Gravando e conferindo esta convocação no Neon. A página permanecerá aberta até a confirmação.';
+        }
         const queued=saveData(()=>{
           clearStoredDraft(confirmedKey);
           const last=readStoredDraft(convLastKey(supervisorAtual));
           if(last?.date===confirmedDate&&last?.unit===confirmedUnit)clearStoredDraft(convLastKey(supervisorAtual));
-          reviewDraft=null;avulsoDraft=[];unitConvDate='';
-          render();
+          reviewDraft=null;avulsoDraft=[];
+          // Nunca retornar ao menu principal ou reiniciar a tela automaticamente.
+          // O usuário continua nesta convocação até decidir montar outra equipe.
+          const notice='Convocação confirmada no Neon: '+formatDate(confirmedDate)+' · '+confirmedUnit
+            +' · '+approved.turno+' · '+approved.ids.length+' pessoa(s).';
+          reviewBox.innerHTML='<div class="notice success section" role="status" aria-live="polite">'
+            +escapeHtml(notice)+'</div><div class="form-actions"><button type="button" class="btn btn-primary" id="unit-conv-new">Montar outra convocação</button></div>';
+          const newButton=$('#unit-conv-new');
+          if(newButton)newButton.onclick=()=>{if(viewAtual==='convocacao')render();};
+          onlineMessage=notice;
+        },confirmed=>convocationRecordsConfirmed(confirmed,approved),message=>{
+          const node=$('#unit-conv-save-status');
+          if(node){
+            node.className='notice warning section';
+            node.textContent='Convocação não confirmada: '+message
+              +' O espelho e o rascunho foram preservados. Confira os registros antes de tentar novamente.';
+          }
         });
         if(!queued)return;
-        toast('Confirmação enviada. A convocação só será considerada salva após resposta do banco.');
+        toast('Convocação enviada ao Neon. Aguarde a conferência do banco nesta mesma tela.');
       };
     };
   }
@@ -3273,6 +3294,26 @@ function renderEquipeDia(){
     ])));
     return changes.every(x=>actual.has(x.key)&&Number.isFinite(actual.get(x.key))&&Math.abs(actual.get(x.key)-x.expected)<0.005);
   }
+  // Conferir o resultado autoritativo do Neon antes de concluir a convocação.
+  // A equipe pode incluir colaboradores cadastrados e avulsos com ID virtual
+  // restrito ao lançamento, mas todos precisam aparecer no mesmo dia/turno.
+  function convocationRecordsConfirmed(confirmed,review){
+    if(!confirmed||!Array.isArray(confirmed.convocacoes)||!Array.isArray(confirmed.colaboradores)
+      ||!review?.ids?.length||new Set(review.ids.map(String)).size!==review.ids.length)return false;
+    const relevant=confirmed.convocacoes.filter(c=>c.supervisor===review.supervisor&&
+      c.dataServico===review.date&&c.unidade===review.unit&&c.turno===review.turno);
+    const counts=new Map();
+    for(const c of relevant)for(const id of c.colaboradores||[]){
+      const key=String(id);counts.set(key,(counts.get(key)||0)+1);
+    }
+    if(!review.ids.every(id=>counts.get(String(id))===1))return false;
+    return (review.avulsos||[]).every(guest=>{
+      const p=confirmed.colaboradores.find(x=>String(x.id)===String(guest.id));
+      return p&&p.avulso==='Sim'&&p.avulsoRegistro===true&&
+        String(p.nome).trim()===String(guest.nome).trim()&&String(p.funcao)===String(guest.funcao)&&
+        Math.abs(Number(p.custo)-Number(guest.custo))<0.005;
+    });
+  }
   function retroactiveRecordsConfirmed(confirmed,expected){
     if(!confirmed||!Array.isArray(confirmed.convocacoes)||!Array.isArray(confirmed.apontamentos)||!expected?.length)return false;
     const cents=v=>Math.round((Number(v)||0)*100);
@@ -3293,16 +3334,19 @@ function renderEquipeDia(){
     });
   }
   function saveData(onSuccess=null,verifyPersisted=null,onFailure=null){
+    // O formulário de convocação com espelho não pode ser desmontado após
+    // resposta negativa: o supervisor precisa ver a falha e corrigir na mesma tela.
+    const preserveConvocationForm=viewAtual==='convocacao'&&typeof onFailure==='function';
     if(!onlineSession||!onlineWritable||onlineSession.role==='VISUALIZAR'){
       if(onlineConfirmed){state=copy(onlineConfirmed);OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);}
       const reason=!onlineSession?'Sua sessão não está autenticada. Entre novamente.':onlineSession.role==='VISUALIZAR'?'Este perfil é somente para visualização.':'A gravação está bloqueada no ambiente do Worker. Confira a autorização de escrita da produção.';
       toast(reason,true);showSaveFeedback(reason,true);
       if(typeof onFailure==='function')onFailure(reason);
-      if(!(viewAtual==='apontamento'&&apontamentoTab==='retroativo'))queueMicrotask(()=>render());
+      if(!(viewAtual==='apontamento'&&apontamentoTab==='retroativo')&&!preserveConvocationForm)queueMicrotask(()=>render());
       return false;
     }
     if(onlineQueued||onlineSaving){const message='Já existe um salvamento em andamento. Aguarde a confirmação antes de enviar outro apontamento.';showToast(message,true);showSaveFeedback(message,true);if(typeof onFailure==='function')onFailure(message);return false;}
-    showSaveFeedback('Enviando apontamento para gravação no banco…',false,40000);
+    showSaveFeedback(preserveConvocationForm?'Enviando convocação para gravação no Neon…':'Enviando apontamento para gravação no banco…',false,40000);
     const pendingNightChanges=nightChangesToVerify(onlineConfirmed,state);
     state.obras=OBRAS;state.colaboradores=COLABORADORES;onlineQueued=true;lockOnline(true);
     queueMicrotask(async()=>{
@@ -3371,7 +3415,7 @@ function renderEquipeDia(){
           throw new Error('O apontamento foi gravado, mas não foi possível atualizar os dados da tela.');
         const nightConfirmed=nightValuesMatch(result.state,pendingNightChanges);
         if(typeof verifyPersisted==='function'&&!verifyPersisted(result.state)){
-          throw Object.assign(new Error('O servidor confirmou a operação, mas não foi possível localizar no Neon todos os apontamentos retroativos selecionados. Consulte o histórico antes de tentar novamente.'),{retroUnverified:true});
+          throw Object.assign(new Error(preserveConvocationForm?'O banco confirmou a transação, mas nem todos os participantes da convocação foram localizados na conferência do Neon. Verifique o histórico antes de tentar novamente.':'O servidor confirmou a operação, mas não foi possível localizar no Neon todos os apontamentos retroativos selecionados. Consulte o histórico antes de tentar novamente.'),preserveConvocationForm?{convocationUnverified:true}:{retroUnverified:true});
         }
         applyOnline(result);onlineSaving=false;
         if(!nightConfirmed){
@@ -3390,7 +3434,9 @@ function renderEquipeDia(){
           // A confirmação da transação não basta para afirmar que cada retroativo
           // selecionado foi efetivamente registrado. Manter tela/rascunho intactos.
           onlineWritable=false;onlineSaving=false;
-          const notice=error?.retroUnverified
+          const notice=error?.convocationUnverified
+            ?'O Neon confirmou a transação, mas não foi possível conferir todos os convocados. O espelho permanece aberto. Confira a equipe no histórico antes de reenviar; nenhuma segunda convocação foi gerada automaticamente.'
+            :error?.retroUnverified
             ?'O Neon confirmou a transação, mas o retroativo selecionado não foi localizado na conferência. Seus dados permanecem no rascunho. Consulte o histórico antes de repetir.'
             :'O banco confirmou a gravação, mas a atualização da tela falhou. Pressione Ctrl + F5 para conferir o histórico. Não lance novamente.';
           if(typeof onFailure==='function')onFailure(notice);
@@ -3410,7 +3456,7 @@ function renderEquipeDia(){
         if(preserveRetroDraft)for(const [id,staff] of retroUnsavedAvulsos)if(!COLABORADORES.some(c=>c.id===id))COLABORADORES.push(staff);
         // Restaurar inclusões e rascunho local após rejeição de gravação.
         if(typeof dayPendingAdds!=='undefined'&&dayPendingAdds.size)restoreDayPendingAdds();
-        onlineSaving=false;if(!preserveRetroDraft)render();
+        onlineSaving=false;if(!preserveRetroDraft&&!preserveConvocationForm)render();
         if(typeof onFailure==='function')onFailure(message);
         showSaveFeedback(message,true,60000);showToast(message,true);
       }finally{onlineQueued=false;onlineSaving=false;onlineMessage='';lockOnline(false);}

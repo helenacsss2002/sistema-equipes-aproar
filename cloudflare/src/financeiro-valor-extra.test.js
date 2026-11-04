@@ -61,5 +61,5 @@ test('Todos os relatórios financeiros usam Valor da Extra e explicitam valores 
   assert.match(area,/Valores (complementares já registrados|anteriores)/,start);
   assert.doesNotMatch(area,/'Financeiro \(R\$\)'/,start);
  }
- assert.match(html,/app\.js\?v=aproar-avulso-sem-cadastro-20261104-8/);
+ assert.match(html,/app\.js\?v=aproar-convocacao-confirmada-20261104-9/);
 });
