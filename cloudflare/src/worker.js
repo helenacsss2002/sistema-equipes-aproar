@@ -160,9 +160,12 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
     if(!/^[a-f0-9-]{36}$/i.test(body.requestId||''))return json({error:'Identificador de solicitação inválido.'},400);
     if(!afterFinancialDeadline(parsed.dataServico,new Date().toISOString()))
       return json({error:'O prazo financeiro ainda está aberto. Não é necessário solicitar autorização.'},400);
-    const candidates=await sql`SELECT c.id FROM convocacoes c WHERE c.colaborador_id::text=${parsed.colaboradorId}
-      AND c.data=${parsed.dataServico}::date AND c.engenheiro=${session.user} LIMIT 1`;
-    if(!candidates.length)return json({error:'Colaborador sem convocação vinculada a este supervisor e data.'},403);
+    const candidates=await sql`SELECT c.id,c.colaborador_id,c.observacao FROM convocacoes c
+      WHERE (c.colaborador_id::text=${parsed.colaboradorId} OR c.colaborador_id IS NULL)
+      AND c.data=${parsed.dataServico}::date AND c.engenheiro=${session.user}`;
+    const matched=candidates.some(c=>String(c.colaborador_id??'')===parsed.colaboradorId||
+      String(metadata(c.observacao).meta.avulso_eventual?.id||'')===parsed.colaboradorId);
+    if(!matched)return json({error:'Colaborador ou avulso sem convocação vinculada a este supervisor e data.'},403);
     const exists=await sql`SELECT 1 FROM auditoria WHERE acao='SOLICITACAO_LIBERACAO_FINANCEIRA'
       AND contexto->>'supervisor'=${session.user} AND contexto->>'colaboradorId'=${parsed.colaboradorId}
       AND contexto->>'dataServico'=${parsed.dataServico}
