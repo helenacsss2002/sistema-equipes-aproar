@@ -2381,6 +2381,7 @@ function renderEquipeDia(){
         <small>${escapeHtml(p.funcao||'Não informado')}${review.avulsos.some(a=>a.id===p.id)?' · Avulso':''}</small>
       </div>`).join('')}</div>
       <p class="notice info section">A convocação só será gravada depois que você clicar em <strong>Confirmar convocação definitiva</strong>. Os serviços serão definidos no apontamento.</p>
+      <div id="unit-conv-save-status" class="notice info section" role="status" aria-live="polite">Nenhuma gravação foi confirmada. Revise os dados e confirme quando estiver pronto.</div>
       <div class="form-actions"><button type="button" class="btn btn-secondary" id="unit-conv-correct">Voltar e corrigir</button>
       <button type="button" class="btn btn-primary" id="unit-conv-final">Confirmar convocação definitiva</button></div>`;
   }
@@ -2600,15 +2601,35 @@ function renderEquipeDia(){
           criadoEm:now().toISOString(),origem:'normal',executor:approved.supervisor});
         audit('Convocação da equipe',approved.date);
         const confirmedKey=activeConvKey,confirmedDate=approved.date,confirmedUnit=approved.unit;
+        const statusNode=$('#unit-conv-save-status');
+        if(statusNode){
+          statusNode.className='notice info section';
+          statusNode.textContent='Gravando e conferindo esta convocação no Neon. A página permanecerá aberta até a confirmação.';
+        }
         const queued=saveData(()=>{
           clearStoredDraft(confirmedKey);
           const last=readStoredDraft(convLastKey(supervisorAtual));
           if(last?.date===confirmedDate&&last?.unit===confirmedUnit)clearStoredDraft(convLastKey(supervisorAtual));
-          reviewDraft=null;avulsoDraft=[];unitConvDate='';
-          render();
+          reviewDraft=null;avulsoDraft=[];
+          // Nunca retornar ao menu principal ou reiniciar a tela automaticamente.
+          // O usuário continua nesta convocação até decidir montar outra equipe.
+          const notice='Convocação confirmada no Neon: '+formatDate(confirmedDate)+' · '+confirmedUnit
+            +' · '+approved.turno+' · '+approved.ids.length+' pessoa(s).';
+          reviewBox.innerHTML='<div class="notice success section" role="status" aria-live="polite">'
+            +escapeHtml(notice)+'</div><div class="form-actions"><button type="button" class="btn btn-primary" id="unit-conv-new">Montar outra convocação</button></div>';
+          const newButton=$('#unit-conv-new');
+          if(newButton)newButton.onclick=()=>{if(viewAtual==='convocacao')render();};
+          onlineMessage=notice;
+        },confirmed=>convocationRecordsConfirmed(confirmed,approved),message=>{
+          const node=$('#unit-conv-save-status');
+          if(node){
+            node.className='notice warning section';
+            node.textContent='Convocação não confirmada: '+message
+              +' O espelho e o rascunho foram preservados. Confira os registros antes de tentar novamente.';
+          }
         });
         if(!queued)return;
-        toast('Confirmação enviada. A convocação só será considerada salva após resposta do banco.');
+        toast('Convocação enviada ao Neon. Aguarde a conferência do banco nesta mesma tela.');
       };
     };
   }
