@@ -1097,7 +1097,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
         if(!COLABORADORES.some(c=>String(c.id)===String(person.id)))COLABORADORES.push(person);
         retroUnsavedAvulsos.set(person.id,person);
       }
-      list.innerHTML=alphabeticalPeople(COLABORADORES.filter(c=>!c.inativo))
+      list.innerHTML=alphabeticalPeople(COLABORADORES.filter(c=>!c.inativo&&((c.avulso!=='Sim'&&!c.avulsoRegistro)||retroUnsavedAvulsos.has(c.id))))
         .map(c=>'<label class="check-card"><input type="checkbox" name="retro-colab" value="'+escapeHtml(c.id)+'" '+((stored.selected||[]).includes(c.id)?'checked':'')+'><span><strong>'+escapeHtml(c.nome)+'</strong><small>'+escapeHtml(c.funcao)+'</small></span></label>').join('');
       retroDrafts=new Map((stored.items||[]).filter(x=>x&&typeof x.colaboradorId==='string').map(x=>[x.colaboradorId,x]));
       retroFinancialEdits.clear();
@@ -1172,7 +1172,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       const checked=new Set($$('input[name="retro-colab"]:checked').map(x=>x.value));
       const id=uid('c'),novo={id,nome,...avulsoData(funcao)};
       COLABORADORES.push(novo);retroUnsavedAvulsos.set(id,novo);checked.add(id);
-      list.innerHTML=alphabeticalPeople(COLABORADORES.filter(c=>!c.inativo))
+      list.innerHTML=alphabeticalPeople(COLABORADORES.filter(c=>!c.inativo&&((c.avulso!=='Sim'&&!c.avulsoRegistro)||retroUnsavedAvulsos.has(c.id))))
         .map(c=>`<label class="check-card"><input type="checkbox" name="retro-colab" value="${escapeHtml(c.id)}" ${checked.has(c.id)?'checked':''}><span><strong>${escapeHtml(c.nome)}</strong><br><small>${escapeHtml(c.funcao)}</small></span></label>`).join('');
       connectRetroChoices();
       refreshRows();
