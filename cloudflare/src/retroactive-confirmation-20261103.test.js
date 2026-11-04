@@ -104,5 +104,5 @@ test('A interface mantém o retroativo até confirmação de Neon; nunca mostra 
  assert.match(save,/!verifyPersisted\(result\.state\)/);
  assert.ok(save.indexOf('!verifyPersisted(result.state)')<save.indexOf('applyOnline(result)'));
  assert.match(save,/if\(typeof onFailure==='function'\)onFailure\(message\)/);
- assert.match(save,/if\(!preserveRetroDraft\)render\(\)/);
+ assert.match(save,/if\(!preserveRetroDraft&&!preserveConvocationForm\)render\(\)/);
 });
