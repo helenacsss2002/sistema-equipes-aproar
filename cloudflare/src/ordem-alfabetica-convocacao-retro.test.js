@@ -30,7 +30,7 @@ test('Convocação de supervisores e controladoria mantém busca por nome e orde
  assert.match(source,/\$\('#unit-conv-search'\)\.oninput=refresh/);
  assert.match(source,/\$\('#ac-search'\)\.oninput=people/);
  assert.match(source,/selected\.has\(c\.id\)\?'checked'/);
- assert.match(source,/alphabeticalPersonIds\(\[\.\.\.new Set\(source\.flatMap\(c=>c\.colaboradores\)\)\]\)/);
+ assert.match(source,/alphabeticalPersonIds\(\[\.\.\.new Set\(source\.flatMap\(c=>c\.colaboradores\)\)\]\.filter\(id=>/);
 });
 test('Apontamento retroativo preserva busca e selecionados e mostra fichas em ordem alfabética',()=>{
  const retro=source.slice(source.indexOf('  function renderApontamentoRetroativo()'),source.indexOf('  function renderPendencias()'));
