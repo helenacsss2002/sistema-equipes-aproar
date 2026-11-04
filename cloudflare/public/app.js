@@ -3294,6 +3294,26 @@ function renderEquipeDia(){
     ])));
     return changes.every(x=>actual.has(x.key)&&Number.isFinite(actual.get(x.key))&&Math.abs(actual.get(x.key)-x.expected)<0.005);
   }
+  // Conferir o resultado autoritativo do Neon antes de concluir a convocação.
+  // A equipe pode incluir colaboradores cadastrados e avulsos com ID virtual
+  // restrito ao lançamento, mas todos precisam aparecer no mesmo dia/turno.
+  function convocationRecordsConfirmed(confirmed,review){
+    if(!confirmed||!Array.isArray(confirmed.convocacoes)||!Array.isArray(confirmed.colaboradores)
+      ||!review?.ids?.length||new Set(review.ids.map(String)).size!==review.ids.length)return false;
+    const relevant=confirmed.convocacoes.filter(c=>c.supervisor===review.supervisor&&
+      c.dataServico===review.date&&c.unidade===review.unit&&c.turno===review.turno);
+    const counts=new Map();
+    for(const c of relevant)for(const id of c.colaboradores||[]){
+      const key=String(id);counts.set(key,(counts.get(key)||0)+1);
+    }
+    if(!review.ids.every(id=>counts.get(String(id))===1))return false;
+    return (review.avulsos||[]).every(guest=>{
+      const p=confirmed.colaboradores.find(x=>String(x.id)===String(guest.id));
+      return p&&p.avulso==='Sim'&&p.avulsoRegistro===true&&
+        String(p.nome).trim()===String(guest.nome).trim()&&String(p.funcao)===String(guest.funcao)&&
+        Math.abs(Number(p.custo)-Number(guest.custo))<0.005;
+    });
+  }
   function retroactiveRecordsConfirmed(confirmed,expected){
     if(!confirmed||!Array.isArray(confirmed.convocacoes)||!Array.isArray(confirmed.apontamentos)||!expected?.length)return false;
     const cents=v=>Math.round((Number(v)||0)*100);
@@ -3314,12 +3334,15 @@ function renderEquipeDia(){
     });
   }
   function saveData(onSuccess=null,verifyPersisted=null,onFailure=null){
+    // O formulário de convocação com espelho não pode ser desmontado após
+    // resposta negativa: o supervisor precisa ver a falha e corrigir na mesma tela.
+    const preserveConvocationForm=viewAtual==='convocacao'&&typeof onFailure==='function';
     if(!onlineSession||!onlineWritable||onlineSession.role==='VISUALIZAR'){
       if(onlineConfirmed){state=copy(onlineConfirmed);OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);}
       const reason=!onlineSession?'Sua sessão não está autenticada. Entre novamente.':onlineSession.role==='VISUALIZAR'?'Este perfil é somente para visualização.':'A gravação está bloqueada no ambiente do Worker. Confira a autorização de escrita da produção.';
       toast(reason,true);showSaveFeedback(reason,true);
       if(typeof onFailure==='function')onFailure(reason);
-      if(!(viewAtual==='apontamento'&&apontamentoTab==='retroativo'))queueMicrotask(()=>render());
+      if(!(viewAtual==='apontamento'&&apontamentoTab==='retroativo')&&!preserveConvocationForm)queueMicrotask(()=>render());
       return false;
     }
     if(onlineQueued||onlineSaving){const message='Já existe um salvamento em andamento. Aguarde a confirmação antes de enviar outro apontamento.';showToast(message,true);showSaveFeedback(message,true);if(typeof onFailure==='function')onFailure(message);return false;}
@@ -3431,7 +3454,7 @@ function renderEquipeDia(){
         if(preserveRetroDraft)for(const [id,staff] of retroUnsavedAvulsos)if(!COLABORADORES.some(c=>c.id===id))COLABORADORES.push(staff);
         // Restaurar inclusões e rascunho local após rejeição de gravação.
         if(typeof dayPendingAdds!=='undefined'&&dayPendingAdds.size)restoreDayPendingAdds();
-        onlineSaving=false;if(!preserveRetroDraft)render();
+        onlineSaving=false;if(!preserveRetroDraft&&!preserveConvocationForm)render();
         if(typeof onFailure==='function')onFailure(message);
         showSaveFeedback(message,true,60000);showToast(message,true);
       }finally{onlineQueued=false;onlineSaving=false;onlineMessage='';lockOnline(false);}
