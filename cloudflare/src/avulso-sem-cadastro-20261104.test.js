@@ -120,7 +120,7 @@ test('Botão X remove somente avulso ainda não confirmado e preserva rascunho',
  assert.match(ui,/avulsoList\(\);storeConvDraft\(\)/);
  assert.doesNotMatch(ui,/já está cadastrado\. Selecione esse nome na lista do retroativo/);
  assert.match(ui,/c\.avulso!=='Sim'&&!c\.avulsoRegistro/);
- assert.match(ui,/colab-avulso/); // Referências antigas de edição por perfil devem ser protegidas por servidor.
+ assert.doesNotMatch(ui,/id="colab-avulso"/); // Cadastro não oferece opção de criar avulso permanente.
 });
 
 test('Esquema novo é aditivo e mantém a FK para colaboradores cadastrados',()=>{
