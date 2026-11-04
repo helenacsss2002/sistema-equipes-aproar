@@ -1,0 +1,20 @@
+name: Validacao isolada de avulsos sem cadastro
+on:
+  push:
+    branches:
+      - fix/avulsos-apenas-lancamentos-sem-cadastro-20261104
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+        working-directory: cloudflare
+      - run: npm run check
+        working-directory: cloudflare
+      - run: npm test
+        working-directory: cloudflare
