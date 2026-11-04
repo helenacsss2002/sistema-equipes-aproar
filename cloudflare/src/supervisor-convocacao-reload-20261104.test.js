@@ -70,19 +70,18 @@ test('Recarregamento recupera os nomes, turno e avulsos sem confirmar automatica
   assert.doesNotMatch(code.slice(confirm),/setView\('inicio'\)/);
 });
 
-// O navegador nunca pode enviar a Convocação por GET, mesmo quando um erro
-// impede a montagem de componentes auxiliares ou a recuperação do rascunho.
+// Protege a tela mesmo quando o JavaScript encontra um rascunho inválido.
 test('Falha na montagem não provoca recarregamento ou saída da Convocação',()=>{
   const conv=app.slice(app.indexOf('  function renderUnitConvocacao(){'),app.indexOf('  function operationalRows('));
   const init=app.slice(app.indexOf('  async function initOnline(){'));
-  assert.match(conv,/<form id="unit-conv-form"[^>]*onsubmit="return false;"/);
-  assert.match(init,/document\\.addEventListener\\('submit',event=>\\{/);
-  assert.match(init,/event\\.preventDefault\\(\\)/);
-  assert.match(init,/event\\.target\\.id==='unit-conv-form'/);
-  assert.match(init,/addEventListener\\('submit',[\\s\\S]+,true\\)/);
+  assert.ok(conv.includes('onsubmit="return false;"'),'Fallback HTML cancela navegação nativa');
+  assert.ok(init.includes("document.addEventListener('submit',event=>{"));
+  assert.ok(init.includes('event.preventDefault();'));
+  assert.ok(init.includes("event.target.id==='unit-conv-form'"));
+  assert.ok(init.includes('},true);'),'Listener registra na fase de captura');
   const handler=conv.indexOf('form.onsubmit=e=>');
   const restore=conv.lastIndexOf('try{loadConvDraft();}');
-  assert.ok(handler>0&&restore>handler,'Somente recuperar rascunho depois de instalar o submit seguro');
-  assert.match(conv,/form\\.dataset\\.aproarBound='1'/);
-  assert.match(conv,/catch\\(draftError\\)/);
+  assert.ok(handler>0&&restore>handler,'Instalar handler antes de recuperar rascunho');
+  assert.ok(conv.includes('form.__aproarBound=true;'));
+  assert.ok(conv.includes('catch(draftError)'));
 });

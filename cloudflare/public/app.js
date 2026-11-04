@@ -2657,7 +2657,7 @@ function renderEquipeDia(){
         toast('Convocação enviada ao Neon. Aguarde a conferência do banco nesta mesma tela.');
       };
     };
-    form.dataset.aproarBound='1';
+    form.__aproarBound=true;
     try{loadConvDraft();}
     catch(draftError){
       console.error('APROAR draft recovery failure',String(draftError?.message||draftError).slice(0,220));
@@ -3584,7 +3584,7 @@ function renderEquipeDia(){
     document.addEventListener('submit',event=>{
       if(!event.target?.closest?.('#app-view, #login-view'))return;
       event.preventDefault();
-      if(event.target.id==='unit-conv-form'&&event.target.dataset.aproarBound!=='1'){
+      if(event.target.id==='unit-conv-form'&&event.target.__aproarBound!==true){
         showToast('A convocação não foi enviada: o formulário não terminou de carregar. Seus registros locais foram preservados. Abra Convocação novamente.',true);
       }
     },true);
