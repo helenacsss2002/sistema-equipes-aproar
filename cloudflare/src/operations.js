@@ -69,6 +69,11 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
      continue;
    }
    if(old&&same(field(old,staffFields),field(p,staffFields)))continue;if(session.role!=='CONTROLADORIA'&&(old||session.role!=='SUPERVISOR'||p.avulso!=='Sim'))fail('Sem permissão para alterar colaboradores.',403);if(!old&&numericId(p.id))fail('Cadastro novo com identificador inválido.');if(!finite(p.custo)||Number(p.custo)<=0)fail('Custo diário inválido.');add('colaboradores',old?'update':'insert',p.id,{nome:required(p.nome,'Nome'),funcao:required(p.funcao,'Função'),valor_diaria:money(p.custo),local_moradia:String(p.moradia||''),ativo:!p.inativo,categoria_diaria:String(p.categoria||''),avulso:p.avulso==='Sim'?'Sim':'Não'});}
+ // Evitar que a aba de cadastro ou a importação criem avulsos sem evento:
+ // cada avulso manual novo deve estar vinculado a uma convocação real.
+ for(const person of staff.values())if(isEventAvulso(person)&&!oldStaff.has(String(person.id))&&
+   !next.convocacoes.some(c=>c.colaboradores.some(id=>String(id)===String(person.id))))
+   fail('Avulso só pode ser incluído manualmente em Convocação ou Apontamento, sem cadastro.',403);
  if([...oldStaff.keys()].some(k=>!staff.has(k)))fail('Use a inativação para preservar o histórico do colaborador.');
  const oldWorks=new Map(base.obras.map(o=>[o.id,o]));for(const o of next.obras){const old=oldWorks.get(String(o.id));if(old&&same(field(old,['nome','unidade']),field(o,['nome','unidade'])))continue;if(session.role!=='CONTROLADORIA')fail('Sem permissão para alterar obras.',403);if(!old&&numericId(o.id))fail('Obra nova com identificador inválido.');add('obras',old?'update':'insert',o.id,{nome:required(o.nome,'Obra'),unidade:required(o.unidade,'Unidade')});}
  for(const o of base.obras)if(!works.has(o.id)){if(session.role!=='CONTROLADORIA')fail('Sem permissão para excluir obra.',403);if(db.raw.convocacoes.some(c=>String(c.obra_id)===o.id)||db.raw.servicos_apontamento.some(x=>String(x.obra_id)===o.id)||next.convocacoes.some(c=>String(c.obraId)===o.id)||next.apontamentos.some(a=>a.itens.some(i=>normServices(i).some(s=>s.obraId===o.id))))fail('Esta obra possui convocações ou apontamentos vinculados e deve ser preservada.');add('obras','delete',o.id);}
@@ -84,6 +89,12 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
  const pointed=new Map();for(const a of next.apontamentos){if(!Array.isArray(a.itens)||!a.itens.length)fail('Apontamento vazio.');for(const i of a.itens){const key=byGroup.get(String(a.convocacaoId)+'|'+String(i.colaboradorId));if(!key)fail('Apontamento sem convocação correspondente.');if(pointed.has(key))fail('Apontamento duplicado.');pointed.set(key,{a,i});}}
  // Only changes to scheduling are checked; existing historic inconsistencies do not block unrelated edits.
  for(const record of records.values()){const {key,c,pid,changed}=record;if(!changed)continue;
+  // Um avulso novo tem ID exclusivo por lançamento. Mesmo assim impedir
+  // cadastro duplicado de mesmo nome no mesmo turno e dia.
+  if(isEventAvulso(staff.get(pid))&&records.values().some(other=>other.key!==key&&
+    other.c.dataServico===c.dataServico&&overlap(other.c.turno,c.turno)&&
+    clean(staff.get(other.pid)?.nome||'')===clean(staff.get(pid).nome)))
+    fail('Este avulso já foi incluído no mesmo dia e turno. Confira o apontamento existente.',409);
   for(const other of records.values())if(other.key!==key&&other.pid===pid&&other.c.dataServico===c.dataServico&&overlap(other.c.turno,c.turno))fail(`Conflito: ${staff.get(pid).nome} já está convocado por ${other.c.supervisor}, em ${other.c.unidade}, no turno ${other.c.turno}.`,409,{colaboradorId:pid,supervisor:other.c.supervisor,unidade:other.c.unidade,turno:other.c.turno});
   const blocked=db.state.indisponibilidades.find(x=>x.colaboradorId===pid&&x.inicio<=c.dataServico&&x.fim>=c.dataServico);if(blocked&&present(pointed.get(key)?.i.status||'Presente (Integral)'))fail(`${staff.get(pid).nome} está indisponível: ${blocked.motivo}.`,409);
  }
