@@ -44,7 +44,10 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
  // Prevenir erro 23505 de nome unico do Neon, inclusive em avulsos retroativos
  // restaurados de rascunho; nenhum cadastro original deve ser sobrescrito.
  const nomesCadastrados=new Map();
+ const isEventAvulso=p=>p?.avulsoRegistro===true||
+   (p?.avulso==='Sim'&&!oldStaff.has(String(p.id))&&!numericId(String(p.id)));
  for(const p of next.colaboradores){
+   if(isEventAvulso(p))continue; // Um avulso não é um cadastro de colaborador.
    const nome=String(p.nome||'').trim().toUpperCase();
    if(!nome)continue;
    const outro=nomesCadastrados.get(nome);
@@ -53,7 +56,19 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
    nomesCadastrados.set(nome,String(p.id));
  }
  const staffFields=['nome','funcao','custo','moradia','inativo','categoria','avulso'];
- for(const p of next.colaboradores){const old=oldStaff.get(String(p.id));if(old&&same(field(old,staffFields),field(p,staffFields)))continue;if(session.role!=='CONTROLADORIA'&&(old||session.role!=='SUPERVISOR'||p.avulso!=='Sim'))fail('Sem permissão para alterar colaboradores.',403);if(!old&&numericId(p.id))fail('Cadastro novo com identificador inválido.');if(!finite(p.custo)||Number(p.custo)<=0)fail('Custo diário inválido.');add('colaboradores',old?'update':'insert',p.id,{nome:required(p.nome,'Nome'),funcao:required(p.funcao,'Função'),valor_diaria:money(p.custo),local_moradia:String(p.moradia||''),ativo:!p.inativo,categoria_diaria:String(p.categoria||''),avulso:p.avulso==='Sim'?'Sim':'Não'});}
+ for(const p of next.colaboradores){
+   const old=oldStaff.get(String(p.id));
+   if(isEventAvulso(p)){
+     // A identificação do avulso é um snapshot por lançamento, não uma
+     // linha em colaboradores. Recusar alterações indevidas no snapshot antigo.
+     if(old&&!same(field(old,staffFields),field(p,staffFields)))
+       fail('Os dados de um avulso histórico não podem ser alterados pelo cadastro.',403);
+     if(!old&&(!String(p.nome||'').trim()||!['Servente','Profissional'].includes(p.funcao)||
+        !finite(p.custo)||Number(p.custo)<=0||numericId(String(p.id))))
+       fail('Avulso manual inválido.',400);
+     continue;
+   }
+   if(old&&same(field(old,staffFields),field(p,staffFields)))continue;if(session.role!=='CONTROLADORIA'&&(old||session.role!=='SUPERVISOR'||p.avulso!=='Sim'))fail('Sem permissão para alterar colaboradores.',403);if(!old&&numericId(p.id))fail('Cadastro novo com identificador inválido.');if(!finite(p.custo)||Number(p.custo)<=0)fail('Custo diário inválido.');add('colaboradores',old?'update':'insert',p.id,{nome:required(p.nome,'Nome'),funcao:required(p.funcao,'Função'),valor_diaria:money(p.custo),local_moradia:String(p.moradia||''),ativo:!p.inativo,categoria_diaria:String(p.categoria||''),avulso:p.avulso==='Sim'?'Sim':'Não'});}
  if([...oldStaff.keys()].some(k=>!staff.has(k)))fail('Use a inativação para preservar o histórico do colaborador.');
  const oldWorks=new Map(base.obras.map(o=>[o.id,o]));for(const o of next.obras){const old=oldWorks.get(String(o.id));if(old&&same(field(old,['nome','unidade']),field(o,['nome','unidade'])))continue;if(session.role!=='CONTROLADORIA')fail('Sem permissão para alterar obras.',403);if(!old&&numericId(o.id))fail('Obra nova com identificador inválido.');add('obras',old?'update':'insert',o.id,{nome:required(o.nome,'Obra'),unidade:required(o.unidade,'Unidade')});}
  for(const o of base.obras)if(!works.has(o.id)){if(session.role!=='CONTROLADORIA')fail('Sem permissão para excluir obra.',403);if(db.raw.convocacoes.some(c=>String(c.obra_id)===o.id)||db.raw.servicos_apontamento.some(x=>String(x.obra_id)===o.id)||next.convocacoes.some(c=>String(c.obraId)===o.id)||next.apontamentos.some(a=>a.itens.some(i=>normServices(i).some(s=>s.obraId===o.id))))fail('Esta obra possui convocações ou apontamentos vinculados e deve ser preservada.');add('obras','delete',o.id);}
@@ -96,7 +111,12 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
   if(!raw||changed||String(old?.obraId||'')!==String(c.obraId||'')){
    if(raw&&!own(session,c)&&session.role!=='FINANCEIRO')fail('Sem permissão para alterar convocação.',403);if(raw&&session.role==='FINANCEIRO')fail('Financeiro não altera convocações.',403);
    const {meta}=metadata(raw?.observacao),created=raw?.criado_em||meta.convocado_em||timestamp;Object.assign(meta,{convocado_em:created,convocado_por:raw?.criado_por||meta.convocado_por||session.user,servico_a_definir:!c.obraId});
-   const data={obra_id:work,colaborador_id:pid,data:c.dataServico,engenheiro:c.supervisor,turno:c.turno,observacao:'Turno: '+c.turno+' ||APROAR_META|| '+JSON.stringify(meta)};if(!raw)Object.assign(data,{status:'Presente (Integral)',valor_extra:0,criado_em:timestamp,criado_por:session.user});add('convocacoes',raw?'update':'insert',key,data);
+   if(isEventAvulso(person)){
+     Object.assign(meta,{avulso_eventual:{id:pid,nome:String(person.nome).trim(),
+       funcao:person.funcao,custo:money(person.custo),categoria:person.categoria||'',
+       criado_em:created}});
+   }
+   const data={obra_id:work,colaborador_id:isEventAvulso(person)?null:pid,data:c.dataServico,engenheiro:c.supervisor,turno:c.turno,observacao:'Turno: '+c.turno+' ||APROAR_META|| '+JSON.stringify(meta)};if(!raw)Object.assign(data,{status:'Presente (Integral)',valor_extra:0,criado_em:timestamp,criado_por:session.user});add('convocacoes',raw?'update':'insert',key,data);
   }
   if(!pointChanged)continue;
   // Nunca aceitar o salvamento e restaurar silenciosamente R$ 90 (ou outro valor)
