@@ -1763,10 +1763,13 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
   // O Financeiro considera o valor informado pelo supervisor, independentemente
   // de "Houve extra?". O custo operacional continua com extras por categoria.
   function financialEntries(){
-    const map=new Map();
+    const map=new Map(),extrasIndependentes=new Map();
     for(const x of entries()){
       const key=x.c.dataServico+'|'+x.i.colaboradorId+'|'+x.c.supervisor;
       const valorExtraFinanceiro=x.c.extraAvulsa?roundMoney(Math.max(0,Number(x.i.valorExtraOriginal)||0)):0;
+      // O cartão azul prioriza a extra independente já registrada. Guardar
+      // seu valor uma única vez, sem estimar pagamento a partir de categoria.
+      if(x.c.extraAvulsa&&!extrasIndependentes.has(key))extrasIndependentes.set(key,valorExtraFinanceiro);
       const diariaAvulso=x.p?.avulso==='Sim'&&presence(x.i.status)?roundMoney(x.daily):0;
       if(!map.has(key)){
         map.set(key,{...x,extra:valorExtraFinanceiro,extraServico:x.extra,diariaAvulso,
@@ -1779,38 +1782,30 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
         previous.refs=[...new Set([...previous.refs,...x.refs])];
       }
     }
-    // O valor disponível na presença normal substitui eventual extra independente
-    // do mesmo dia (evita pagar o mesmo lançamento duas vezes).
-    // Para avulsos, se "Houve extra?" = "Não", esse valor é o PAGAMENTO DA
-    // DIÁRIA informado pelo supervisor, e NÃO um acréscimo à diária cadastral.
-    // A diária cadastral permanece na apuração de custo operacional.
-    const valoresDisponiveis=new Map(),avulsosComExtraConfirmada=new Set();
+    // Fonte de pagamento: exatamente os campos que formam o cartão azul
+    // TOTAL A PAGAR AO COLABORADOR no apontamento dos supervisores.
+    // Custo operacional (entry.daily, periculosidade e extraServico) não
+    // integra o valor pago: serve exclusivamente aos relatórios de serviço.
+    const valoresDisponiveis=new Map();
     for(const ap of state.apontamentos){
       if(ap.dataServico<reportFilters.inicio||ap.dataServico>reportFilters.fim)continue;
       if(reportFilters.supervisor!=='Todos'&&ap.supervisor!==reportFilters.supervisor)continue;
       for(const i of ap.itens||[]){
         if(!presence(i.status))continue;
         const amount=roundMoney(Math.max(0,Number(i.valorExtraDisponivel)||0));
-        if(!amount)continue;
         const key=ap.dataServico+'|'+i.colaboradorId+'|'+ap.supervisor;
+        // Guardar até o zero: ausência de lançamento financeiro não implica
+        // autorizar o custo cadastral como pagamento ao colaborador.
         valoresDisponiveis.set(key,roundMoney((valoresDisponiveis.get(key)||0)+amount));
-        // Uma extra expressamente confirmada é diferente da diária do avulso.
-        if(i.extra&&i.extra!=='Não')avulsosComExtraConfirmada.add(key);
       }
     }
     for(const [key,entry] of map){
-      const available=valoresDisponiveis.get(key);
-      const isAvulso=entry.p?.avulso==='Sim';
-      if(available>0){
-        // Sem extra confirmada: o valor explícito substitui a diária do avulso.
-        // Com extra confirmada: somam-se diária e extra, uma vez cada.
-        entry.extra=roundMoney(available+(isAvulso&&avulsosComExtraConfirmada.has(key)?entry.diariaAvulso:0));
-      }else{
-        // Sem valor explícito, mantém-se a diária configurada e eventuais
-        // extras confirmadas; não se inventa valor pago.
-        if(entry.extra<=0&&entry.extraServico>0)entry.extra=roundMoney(entry.extraServico);
-        entry.extra=roundMoney(entry.extra+entry.diariaAvulso);
-      }
+      // personRow usa existingExtra?.valorExtraOriginal antes do valor disponível.
+      // Reproduzir essa precedência para a tela e os relatórios financeiros.
+      const payment=extrasIndependentes.has(key)
+        ?extrasIndependentes.get(key)
+        :(valoresDisponiveis.get(key)||0);
+      entry.extra=roundMoney(payment);
     }
     return [...map.values()];
   }

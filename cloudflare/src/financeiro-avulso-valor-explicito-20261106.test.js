@@ -58,14 +58,15 @@ test('Avulsos de dias anteriores: passagem continua somada uma única vez',()=>{
  assert.equal(summary.ajudaCusto,21);
  assert.equal(summary.total,171);
 });
-test('Avulso sem valor explícito mantém sua diária, inclusive meia diária',()=>{
+test('Avulso sem valor no quadro azul não recebe diária automaticamente no Financeiro',()=>{
  const ctx=mock({available:0,daily:120.87});
- assert.equal(ctx.compute()[0].extra,120.87);
+ assert.equal(ctx.compute()[0].extra,0);
+ assert.equal(ctx.compute()[0].daily,120.87,'O custo operacional mantém meia diária');
 });
-test('Extra explicitamente confirmada é somada à diária do avulso sem misturar os campos',()=>{
+test('Extra expressamente confirmada mantém Financeiro igual ao quadro azul, sem adicionar diária',()=>{
  const ctx=mock({available:80,extraLabel:'Meia diária'});
  const [row]=ctx.compute();
- assert.equal(row.extra,321.74);
+ assert.equal(row.extra,80);
  assert.equal(row.daily,241.74);
 });
 test('Extra independente registrada com valor disponível igual não é duplicada',()=>{
@@ -93,4 +94,25 @@ test('Todas as saídas do Financeiro dependem do mesmo cálculo corrigido',()=>{
  assert.match(pay,/financialEntries\(\)/);
  assert.match(excel,/financialEntries\(\)/);
  assert.match(app,/function financialSummaryRows\(rows=financialEntries\(\)\)/);
+});
+
+test('Valor independente já registrado prevalece igual ao cartão azul do supervisor',()=>{
+ const ctx=mock({available:80,extraLabel:'Meia diária',extraAvulsa:true,extraOriginal:95});
+ assert.equal(ctx.compute()[0].extra,95);
+ const [summary]=ctx.APROARFinanceConsolidado.summarize(ctx.compute());
+ assert.equal(summary.total,95);
+});
+test('Sem valor no cartão azul nem extra independente, custo de serviço não gera pagamento para colaborador regular',()=>{
+ const ctx=mock({avulso:'Não',available:0,daily:182.34,extraServico:91.17});
+ assert.equal(ctx.compute()[0].extra,0);
+ assert.equal(ctx.compute()[0].daily,182.34);
+ assert.equal(ctx.compute()[0].extraServico,91.17);
+});
+test('Custo avulso de ajudante R$ 182,34 fica no serviço; quadro azul R$ 150,00 fica no Financeiro',()=>{
+ const ctx=mock({daily:182.34,available:150,passagem:11});
+ const [result]=ctx.compute();
+ assert.equal(result.daily,182.34);
+ assert.equal(result.extra,150);
+ const [summary]=ctx.APROARFinanceConsolidado.summarize(ctx.compute());
+ assert.equal(summary.total,161);
 });

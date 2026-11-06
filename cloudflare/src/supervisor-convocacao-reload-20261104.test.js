@@ -53,7 +53,7 @@ test('Inicialização reabre aba salva; pageshow não causa reload; logout limpa
   assert.match(logout,/removeItem\(supervisorViewStorageKey\(supervisorAtual\)\)/);
   assert.doesNotMatch(app,/window\.location\.reload\(\)/);
   assert.match(app,/window\.addEventListener\('pagehide',\(\)=>saveSupervisorView\(\)\)/);
-  assert.match(html,/app\.js\?v=aproar-financeiro-avulso-20261106-13/);
+  assert.match(html,/app\.js\?v=aproar-financeiro-quadro-azul-20261106-14/);
 });
 test('Recarregamento recupera os nomes, turno e avulsos sem confirmar automaticamente',()=>{
   const code=app.slice(app.indexOf('  function renderUnitConvocacao()'),app.indexOf('  function operationalRows('));
