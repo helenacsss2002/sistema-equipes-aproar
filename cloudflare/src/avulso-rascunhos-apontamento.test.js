@@ -66,7 +66,10 @@ test('Avulso segue na gravação do apontamento e na apropriação operacional e
  assert.match(normal,/conv\.colaboradores\.push\(id\)/);
  assert.match(js,/p\?\.avulso==='Sim'&&AVULSO_DIARIA_OPTIONS\.includes\(i\.tipoDiariaAvulso\)/);
  assert.match(js,/const diariaAvulso=x\.p\?\.avulso==='Sim'&&presence\(x\.i\.status\)\?roundMoney\(x\.daily\):0/);
- assert.match(js,/entry\.extra=roundMoney\(entry\.extra\+entry\.diariaAvulso\)/);
+ const finance=section('  function financialEntries(){','  function financialSummaryRows(');
+ assert.match(finance,/const payment=extrasIndependentes\.has\(key\)/);
+ assert.match(finance,/entry\.extra=roundMoney\(payment\)/);
+ assert.doesNotMatch(finance,/entry\.extra=roundMoney\(entry\.extra\+entry\.diariaAvulso\)/,'Diária avulsa não pode virar pagamento automático no Financeiro');
 });
 test('Abandonar o retroativo descarta avulsos provisórios e falha de gravação conserva os rascunhos',()=>{
  assert.match(js,/function discardRetroUnsavedAvulsos\(\)/);
