@@ -1779,9 +1779,12 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
         previous.refs=[...new Set([...previous.refs,...x.refs])];
       }
     }
-    // O valor disponível é o pagamento informado na presença normal e substitui,
-    // não soma novamente, um eventual registro de extra independente no mesmo dia.
-    const valoresDisponiveis=new Map();
+    // O valor disponível na presença normal substitui eventual extra independente
+    // do mesmo dia (evita pagar o mesmo lançamento duas vezes).
+    // Para avulsos, se "Houve extra?" = "Não", esse valor é o PAGAMENTO DA
+    // DIÁRIA informado pelo supervisor, e NÃO um acréscimo à diária cadastral.
+    // A diária cadastral permanece na apuração de custo operacional.
+    const valoresDisponiveis=new Map(),avulsosComExtraConfirmada=new Set();
     for(const ap of state.apontamentos){
       if(ap.dataServico<reportFilters.inicio||ap.dataServico>reportFilters.fim)continue;
       if(reportFilters.supervisor!=='Todos'&&ap.supervisor!==reportFilters.supervisor)continue;
@@ -1791,13 +1794,23 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
         if(!amount)continue;
         const key=ap.dataServico+'|'+i.colaboradorId+'|'+ap.supervisor;
         valoresDisponiveis.set(key,roundMoney((valoresDisponiveis.get(key)||0)+amount));
+        // Uma extra expressamente confirmada é diferente da diária do avulso.
+        if(i.extra&&i.extra!=='Não')avulsosComExtraConfirmada.add(key);
       }
     }
     for(const [key,entry] of map){
       const available=valoresDisponiveis.get(key);
-      if(available>0)entry.extra=available;
-      else if(entry.extra<=0&&entry.extraServico>0)entry.extra=roundMoney(entry.extraServico);
-      entry.extra=roundMoney(entry.extra+entry.diariaAvulso);
+      const isAvulso=entry.p?.avulso==='Sim';
+      if(available>0){
+        // Sem extra confirmada: o valor explícito substitui a diária do avulso.
+        // Com extra confirmada: somam-se diária e extra, uma vez cada.
+        entry.extra=roundMoney(available+(isAvulso&&avulsosComExtraConfirmada.has(key)?entry.diariaAvulso:0));
+      }else{
+        // Sem valor explícito, mantém-se a diária configurada e eventuais
+        // extras confirmadas; não se inventa valor pago.
+        if(entry.extra<=0&&entry.extraServico>0)entry.extra=roundMoney(entry.extraServico);
+        entry.extra=roundMoney(entry.extra+entry.diariaAvulso);
+      }
     }
     return [...map.values()];
   }

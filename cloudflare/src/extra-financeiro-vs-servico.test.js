@@ -83,7 +83,9 @@ test('Diária do avulso entra no financeiro e preserva os custos operacionais se
  assert.equal(result.extra,241.74,'O custo do avulso compõe o valor a pagar ao financeiro');
  assert.equal(ctx.currentEntries[0].daily,241.74,'Custo do serviço permanece como diária original');
  ctx.state.apontamentos[0].itens[0].valorExtraDisponivel=80;
- assert.equal(ctx.calcFinance()[0].extra,321.74,'Diária do avulso e extra adicional são contabilizadas separadamente');
+ assert.equal(ctx.calcFinance()[0].extra,80,'Sem extra confirmada, pagamento explícito substitui a diária cadastral');
+ ctx.state.apontamentos[0].itens[0].extra='Diária';
+ assert.equal(ctx.calcFinance()[0].extra,321.74,'Quando houve extra confirmada, diária e extra são distintas');
 });
 test('Colaborador regular não tem diária adicionada ao financeiro',()=>{
  ctx.state.apontamentos=[{supervisor:'EDUARDO',dataServico:'2026-10-16',itens:[
