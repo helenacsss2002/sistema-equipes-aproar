@@ -61,5 +61,5 @@ test('Todos os relatórios financeiros usam Valor da Extra e explicitam valores 
   assert.match(area,/Valores (complementares já registrados|anteriores)/,start);
   assert.doesNotMatch(area,/'Financeiro \(R\$\)'/,start);
  }
- assert.match(html,/app\.js\?v=aproar-estabilidade-acesso-financeiro-20261110-19/);
+ assert.match(html,/app\.js\?v=aproar-passagem-rateio-centavos-20261110-20/);
 });

@@ -1730,6 +1730,15 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
   function nocturnal(i,c){if(!presence(i.status)||!hasSebrae(i,c))return 0;return roundMoney(Math.max(0,Number(i.noturno)||0));}
   function periodBlocks(p){return p==='Manhã'?{M:.5}:p==='Tarde'?{T:.5}:p==='Noite'?{N:1}:{M:.5,T:.5};}
   function presenceBlocks(i,c){if(!presence(i.status))return {};if(i.status==='Presente (Só Manhã)')return {M:.5};if(i.status==='Presente (Só Tarde)')return {T:.5};if(i.status==='Saída Antecipada')return c.turno==='Noite'?{N:.5}:c.turno==='Tarde'?{T:.5}:{M:.5};return periodBlocks(c.turno);}
+  // Distribui valores monetários por obra sem criar ou perder centavos.
+  // Ex.: R$ 11,00 em três serviços -> 3,67 + 3,67 + 3,66 = 11,00.
+  // Apenas o rateio é afetado: o valor originalmente lançado permanece intacto.
+  function splitMoneyExactly(value,parts){
+    if(!parts||parts<1)return [];
+    const cents=Math.round(Math.max(0,Number(value)||0)*100);
+    const base=Math.floor(cents/parts),remainder=cents%parts;
+    return Array.from({length:parts},(_,idx)=>(base+(idx<remainder?1:0))/100);
+  }
   function entries(){
     const groups=new Map();for(const c of state.convocacoes){if(c.dataServico<reportFilters.inicio||c.dataServico>reportFilters.fim||(reportFilters.supervisor!=='Todos'&&c.supervisor!==reportFilters.supervisor))continue;for(const i of apForConv(c.id)?.itens||[]){const k=c.dataServico+'|'+i.colaboradorId;if(!groups.has(k))groups.set(k,[]);groups.get(k).push({c,i});}}
     const out=[];
@@ -1743,7 +1752,21 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
         const dailyWeights=Object.entries(dailyBlocks),weightSum=dailyWeights.reduce((sum,[,w])=>sum+w,0);
         for(const [b,w] of dailyWeights)blocks.daily[b]=Math.max(blocks.daily[b]||0,roundMoney(dayCost(p)*(avulsoDiaria===null?w:avulsoDiaria*w/(weightSum||1))));
         const sb=ss.filter(s=>clean(obraById(s.obraId)?.unidade||c.unidade)==='SEBRAE');
-        for(const s of ss){const key=s.obraId||'unassigned_'+c.unidade;let row=services.get(key);if(!row){row={c:{...c,obraId:s.obraId,unidade:obraById(s.obraId)?.unidade||c.unidade},i,p,refs,blocks:new Set(),periods:new Set(),supervisors:new Set(),statuses:new Set(),extras:new Set(),daily:0,extra:0,finance:0,night:0,bonus:0,ajudaCusto:0,danger:0,share:1};services.set(key,row);}Object.keys(periodBlocks(s.periodo)).forEach(b=>row.blocks.add(b));row.periods.add(s.periodo);row.supervisors.add(c.supervisor);row.statuses.add(i.status);row.extras.add(i.extra||'Não');if(sb.includes(s))row.night+=nocturnal(i,c)/sb.length;row.bonus+=(isPresent?Math.max(0,Number(i.acordo)||0):0)/ss.length;row.ajudaCusto+=(isPresent?Math.max(0,Number(i.ajudaCusto)||0):0)/ss.length;}
+        const nightParts=splitMoneyExactly(isPresent?nocturnal(i,c):0,sb.length);
+        const bonusParts=splitMoneyExactly(isPresent?i.acordo:0,ss.length);
+        const travelParts=splitMoneyExactly(isPresent?i.ajudaCusto:0,ss.length);
+        for(const [serviceIndex,s] of ss.entries()){
+          const key=s.obraId||'unassigned_'+c.unidade;
+          let row=services.get(key);
+          if(!row){row={c:{...c,obraId:s.obraId,unidade:obraById(s.obraId)?.unidade||c.unidade},i,p,refs,blocks:new Set(),periods:new Set(),supervisors:new Set(),statuses:new Set(),extras:new Set(),daily:0,extra:0,finance:0,night:0,bonus:0,ajudaCusto:0,danger:0,share:1};services.set(key,row);}
+          Object.keys(periodBlocks(s.periodo)).forEach(b=>row.blocks.add(b));
+          row.periods.add(s.periodo);row.supervisors.add(c.supervisor);
+          row.statuses.add(i.status);row.extras.add(i.extra||'Não');
+          const nightIndex=sb.indexOf(s);
+          if(nightIndex>=0)row.night+=nightParts[nightIndex];
+          row.bonus+=bonusParts[serviceIndex];
+          row.ajudaCusto+=travelParts[serviceIndex];
+        }
       }
       for(const b of new Set([...Object.keys(blocks.daily),...Object.keys(blocks.extra),...Object.keys(blocks.finance)])){let participants=[...services.values()].filter(x=>x.blocks.has(b));if(!participants.length)participants=[...services.values()];for(const row of participants)for(const field of ['daily','extra','finance'])row[field]+=(blocks[field][b]||0)/participants.length;}
       for(const row of services.values()){row.daily=roundMoney(row.daily);row.extra=roundMoney(row.extra);row.finance=roundMoney(row.finance);row.night=roundMoney(row.night);row.bonus=roundMoney(row.bonus);row.ajudaCusto=roundMoney(row.ajudaCusto);if(dangerEligible(p))row.danger=roundMoney(row.daily*1.3)-row.daily+roundMoney(row.extra*1.3)-row.extra;row.danger=roundMoney(row.danger);row.service={obraId:row.c.obraId,periodo:[...row.periods].join(' + ')};row.c.supervisor=[...row.supervisors].join(' / ');row.displayStatus=[...row.statuses].join(' / ')+(p?.avulso==='Sim'&&AVULSO_DIARIA_OPTIONS.includes(row.i?.tipoDiariaAvulso)?' · '+row.i.tipoDiariaAvulso:'');row.displayExtra=[...row.extras].join(' / ');if(reportFilters.obra==='Todas'||row.c.obraId===reportFilters.obra)out.push(row);}
