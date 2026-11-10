@@ -3291,19 +3291,50 @@ function renderEquipeDia(){
   function indicatorWorkbook(){const d=indicatorReportData(),make=(name,title,headers,rows,widths)=>({name,rows:[[title],['Período: '+reportPeriod()+' | Unidade: '+indicatorUnit],[],headers,...rows],headers:[3],titles:[],blue:true,merges:['A1:F1','A2:F2'],freeze:4,center:[1,2,3,4,5],widths});const sheets=[make('Resumo','INDICADOR DE CUMPRIMENTO DE PRAZOS',['Supervisor','Convocações feitas','Convocações atrasadas','Apontamentos feitos','Apontamentos atrasados','No prazo (%)'],d.summary,[18,21,24,22,25,15]),make('Ocorrências','OCORRÊNCIAS DE CONVOCAÇÃO E APONTAMENTO',['Supervisor','Data do serviço','Colaborador','Tipo','Registrado em','Atrasado'],d.events,[18,18,42,18,24,11])];sheets[1].center=[1,3,4,5];sheets.forEach(s=>s.rows[0][0]={value:s.rows[0][0],style:4});return sheets;}
   function financialWorkNumber(id){const name=obraById(id)?.nome||'';const obra=name.match(/\bOBRA\s*(?:N[º°.]*\s*)?(\d+(?:[.,/-]\d+)*)/i),code=name.match(/\b(APR[A-Z]*\s*[-.]?\s*\d+(?:[./-]\d+)*)/i),number=name.match(/^\s*(\d+(?:[.,/-]\d+)*)(?=\s|$|\s*-)/);return obra?obra[1]:code?code[1].replace(/\s+/g,'').toUpperCase():number?number[1]:'Sem número cadastrado';}
   function exportFinancialSummaryExcel(){
+    // Exatamente a mesma consolidação por colaborador usada no PDF.
     const people=financialSummaryRows(),columns=['Colaborador','Função','Supervisor(es)','Unidade(s)','Dias','Extra / Diária avulso (R$)','Valores complementares já registrados (R$)','Adicional noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total (R$)'];
     const rows=[['APROAR | CONSOLIDADO FINANCEIRO POR COLABORADOR'],['Período: '+reportPeriod()],[],columns];
     for(const p of people){
       const line=rows.length+1;
-      rows.push([p.nome,p.funcao,p.supervisores,p.unidades,p.dias,p.extra,p.finance,p.night,p.bonus,p.ajudaCusto,{formula:'F'+line+'+G'+line+'+H'+line+'+I'+line+'+J'+line,value:p.total}]);
+      // ROUND evita diferenças de centavos após o recálculo nativo do Excel.
+      rows.push([p.nome,p.funcao,p.supervisores,p.unidades,p.dias,p.extra,p.finance,p.night,p.bonus,p.ajudaCusto,
+        {formula:'ROUND(F'+line+'+G'+line+'+H'+line+'+I'+line+'+J'+line+',2)',value:p.total}]);
     }
     const last=rows.length,summary=Array(11).fill('');summary[0]='TOTAL GERAL';
     for(const [index,key] of [[5,'extra'],[6,'finance'],[7,'night'],[8,'bonus'],[9,'ajudaCusto'],[10,'total']]){
       const column=excelCol(index);
-      summary[index]={formula:people.length?'SUM('+column+'5:'+column+last+')':'0',value:roundMoney(people.reduce((sum,p)=>sum+p[key],0)),style:6};
+      summary[index]={formula:people.length?'ROUND(SUM('+column+'5:'+column+last+'),2)':'0',
+        value:roundMoney(people.reduce((sum,p)=>sum+p[key],0)),style:6};
     }
     rows.push(summary);
-    exportWorkbook([{name:'CONSOLIDADO POR PESSOA',rows,headers:[3],titles:[0,1],sections:[rows.length-1],blue:true,freeze:4,merges:['A1:K1','A2:K2'],center:[4],money:[5,6,7,8,9,10],widths:[38,24,30,28,11,23,23,23,20,31,22]}],'financeiro_consolidado_colaboradores_'+reportFilters.inicio+'_a_'+reportFilters.fim);
+    // Rastreabilidade: uma linha por dia e lançamento. Não confundir
+    // data de serviço com a data de cadastro do apontamento retroativo.
+    const detailColumns=['Data de serviço','Colaborador','Supervisor','Unidade(s)','Obra(s)','Status','Origem','Extra / Diária avulso (R$)','Valores complementares (R$)','Noturno (R$)','Acordos (R$)','Passagens/Ajuda (R$)','Total do dia (R$)'];
+    const daily=[['APROAR | DETALHAMENTO FINANCEIRO POR DIA'],['Período: '+reportPeriod()],[],detailColumns];
+    const dailyEntries=financialEntries().filter(x=>presence(x.i.status)&&x.extra+x.finance+x.night+x.bonus+x.ajudaCusto>0.005)
+      .sort((a,b)=>a.c.dataServico.localeCompare(b.c.dataServico)||
+        (a.p?.nome||'').localeCompare(b.p?.nome||'','pt-BR',{sensitivity:'base'})||
+        (a.c.supervisor||'').localeCompare(b.c.supervisor||''));
+    for(const x of dailyEntries){
+      const line=daily.length+1,dayTotal=roundMoney(x.extra+x.finance+x.night+x.bonus+x.ajudaCusto);
+      const units=x.units?[...x.units].join(', '):x.c.unidade;
+      const works=x.works?[...x.works].map(financialWorkNumber).join(', '):financialWorkNumber(x.c.obraId);
+      daily.push([formatDate(x.c.dataServico),x.p?.nome||'',x.c.supervisor,units,works,
+        x.displayStatus||x.i.status,x.p?.avulso==='Sim'?'Avulso':'Cadastrado',
+        x.extra,x.finance,x.night,x.bonus,x.ajudaCusto,
+        {formula:'ROUND(H'+line+'+I'+line+'+J'+line+'+K'+line+'+L'+line+',2)',value:dayTotal}]);
+    }
+    const detailTotal=roundMoney(dailyEntries.reduce((sum,x)=>sum+x.extra+x.finance+x.night+x.bonus+x.ajudaCusto,0));
+    const detailSummary=Array(13).fill('');detailSummary[0]='TOTAL DOS LANÇAMENTOS';
+    detailSummary[12]={formula:dailyEntries.length?'ROUND(SUM(M5:M'+daily.length+'),2)':'0',value:detailTotal,style:6};
+    daily.push(detailSummary);
+    exportWorkbook([
+      {name:'CONSOLIDADO POR PESSOA',rows,headers:[3],titles:[0,1],sections:[rows.length-1],blue:true,freeze:4,
+       merges:['A1:K1','A2:K2'],center:[4],money:[5,6,7,8,9,10],widths:[38,24,30,28,11,23,23,23,20,31,22]},
+      {name:'DETALHAMENTO POR DIA',rows:daily,headers:[3],titles:[0,1],sections:[daily.length-1],blue:true,freeze:4,
+       merges:['A1:M1','A2:M2'],center:[0,5,6],money:[7,8,9,10,11,12],
+       widths:[19,38,24,26,24,24,18,24,26,18,18,25,22]}
+    ],'financeiro_consolidado_colaboradores_'+reportFilters.inicio+'_a_'+reportFilters.fim);
   }
   function financialWorkbook(){
     const data=financialEntries().filter(x=>presence(x.i.status)&&x.extra+x.finance+x.night+x.bonus+x.ajudaCusto>0.005);
