@@ -203,7 +203,7 @@
   function navConfig() {
     const item=(view,label,icon,group='')=>({view,label,icon,group});
     if(perfilAtual==='CONTROLADORIA') return [item('inicio','Início','⌂'),item('convocacao','Convocação','▤','OPERAÇÃO'),item('liberacoes-financeiras','Autorizações financeiras','◌'),item('conflitos','Conflitos','!'),item('apontamento','Apontamento','✓'),item('whatsapp','WhatsApp','◌'),item('disponibilidade','Disponibilidade','♙'),item('indisponibilidade','Indisponibilidade','⊘'),item('dashboard','Dashboard','▦','ANÁLISE E FECHAMENTO'),item('relatorios','Relatórios','▥'),item('indicadores','Indicadores','↗'),item('configuracoes','Configurações','⚙','SISTEMA')];
-    if(perfilAtual==='VISUALIZAR') return [item('dashboard','Dashboard','▦'),item('relatorios','Relatórios','▥'),item('indicadores','Indicadores','↗'),item('conflitos','Conflitos','!'),item('disponibilidade','Disponibilidade','♙'),item('indisponibilidade','Indisponibilidade','⊘')];
+    if(perfilAtual==='VISUALIZAR') return [item('dashboard','Dashboard','▦'),item('financeiro','Pagamentos · somente leitura','$'),item('relatorios','Relatórios','▥'),item('indicadores','Indicadores','↗'),item('conflitos','Conflitos','!'),item('disponibilidade','Disponibilidade','♙'),item('indisponibilidade','Indisponibilidade','⊘')];
     if(perfilAtual==='FINANCEIRO') return [item('inicio','Início','⌂'),item('financeiro','Pagamentos','$'),item('liberacoes-financeiras','Autorizações financeiras','◌'),item('historico-financeiro','Histórico de registros','▤'),item('ausencias','Faltas / Atestados','⊘'),item('relatorios','Relatório','▥')];
     return [item('inicio','Início','⌂'),item('convocacao','Convocação','▤'),item('apontamento','Apontamento','✓'),item('liberacoes-financeiras','Solicitar liberação','◌'),item('disponibilidade','Disponibilidade','♙'),item('pendencias','Pendências','!')];
   }
@@ -277,7 +277,7 @@
 
     showApp();
     if(perfilAtual==='VISUALIZAR'){
-      const pages={dashboard:renderDashboard,relatorios:renderReports,indicadores:renderIndicators,conflitos:renderConflitos,disponibilidade:renderDisponibilidade,indisponibilidade:renderIndisponibilidade};
+      const pages={dashboard:renderDashboard,financeiro:renderPayments,relatorios:renderReports,indicadores:renderIndicators,conflitos:renderConflitos,disponibilidade:renderDisponibilidade,indisponibilidade:renderIndisponibilidade};
       (pages[viewAtual]||renderDashboard)();
       // Acesso adicional permanente às três consultas, sem retirar as abas do menu.
       // O perfil VISUALIZAR usa as versões somente leitura das páginas.
@@ -1514,7 +1514,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
   function localDownload(name,content,mime='text/plain'){downloadBlob(name,new Blob([content],{type:mime}));}
   function exportTable(){
     let rows,filename='aproar_relatorio.csv';
-    if(perfilAtual==='FINANCEIRO'&&viewAtual==='pagamentos'){
+    if(['FINANCEIRO','VISUALIZAR'].includes(perfilAtual)&&viewAtual==='financeiro'){
       const details=financialEntries().filter(x=>presence(x.i.status)&&x.extra+x.finance+x.night+x.bonus+x.ajudaCusto>0.005);
       if(!details.length)return showToast('Não há pagamentos neste período para exportar.',true);
       const people=financialSummaryRows(details);
@@ -1553,7 +1553,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
   function bindExports(){
     bindExportAction($('#export-csv'),exportTable);
     bindExportAction($('#export-excel'),()=>['relatorios','pagamentos','financeiro'].includes(viewAtual)?exportReportsExcel():exportVisibleWorkbook('aproar_relatorio'));
-    bindExportAction($('#export-pdf'),()=>reportPDF(perfilAtual==='FINANCEIRO'?'financial':'control'));
+    bindExportAction($('#export-pdf'),()=>reportPDF(perfilAtual==='FINANCEIRO'||(perfilAtual==='VISUALIZAR'&&viewAtual==='financeiro')?'financial':'control'));
   }
   function financialSummaryButtons(){return '<div class="inline-actions section"><button type="button" class="btn btn-secondary" id="export-fin-summary-excel">Consolidado por colaborador · Excel</button><button type="button" class="btn btn-secondary" id="export-fin-summary-pdf">Consolidado por colaborador · PDF</button></div>';}
   function bindFinancialSummaryExports(){
@@ -1997,8 +1997,10 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
     load();
   }
   function renderPayments(){
+    const somenteLeitura=perfilAtual==='VISUALIZAR';
+    if(!somenteLeitura&&perfilAtual!=='FINANCEIRO')return setView('inicio');
     if(selectedCycle!=='custom'){const cycle=financialCycle(financialCycleReference(),Number(selectedCycle));reportFilters.inicio=cycle.inicio;reportFilters.fim=cycle.fim;}
-    $('#main-content').innerHTML=head('Pagamentos','Ciclo de segunda a domingo, com pagamento na terça seguinte e lançamentos até 10h.')+cycleControl()+filterControls('combined')+'<div class="section" id="pay-body"></div>'+exportButtons()+financialSummaryButtons();
+    $('#main-content').innerHTML=head('Pagamentos','Ciclo de segunda a domingo, com pagamento na terça seguinte e lançamentos até 10h.')+(somenteLeitura?'<div class="notice info section" role="status"><strong>Somente visualizar:</strong> dados de pagamento idênticos aos recebidos pelo Financeiro, sem permissão para alterar valores ou confirmar pagamentos.</div>':'')+cycleControl()+filterControls('combined')+'<div class="section" id="pay-body"></div>'+exportButtons()+financialSummaryButtons();
     const refresh=()=>{
       const e=financialEntries().filter(x=>x.extra>0.005||x.finance>0.005||x.night>0.005||x.bonus>0.005||x.ajudaCusto>0.005)
         .sort((a,b)=>a.c.dataServico.localeCompare(b.c.dataServico)||(a.p?.nome||'').localeCompare(b.p?.nome||'','pt-BR',{sensitivity:'base'})||(a.p?.id||'').localeCompare(b.p?.id||''));
@@ -2009,10 +2011,12 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       $('#pay-body').innerHTML=metric('TOTAL A PAGAR',money(e.reduce((v,x)=>v+total(x),0)),'sem periculosidade')
         +'<div class="section"><h3>Consolidado por colaborador · ordem alfabética</h3>'+table(['Colaborador','Extra / Diária avulso (R$)','Total a Pagar'],consolidated.map(x=>[escapeHtml(x.nome),money(x.extra),'<strong class="pay-total-display">'+money(x.total)+'</strong>']))+'</div>'
         +'<section class="pay-detail-section" aria-labelledby="pay-detail-heading"><h3 id="pay-detail-heading">Detalhamento por dia</h3>'
-        +'<p class="help-text">Passagens/Ajuda de custo: Fortaleza R$ 11, Caucaia R$ 10, Maracanaú R$ 12 e Horizonte R$ 25. Selecione um valor sugerido ou digite outro. Sem lançamento, o valor é R$ 0.</p>'
-        +table(['Data','Colaborador','Status','Extra / Diária avulso (R$)','Valores complementares já registrados (R$)','Noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total a Pagar (R$)'],e.map((x,index)=>[formatDate(x.c.dataServico),escapeHtml(x.p?.nome),escapeHtml(x.i.status),money(x.extra),money(x.finance),...fields.map(k=>`<input aria-label="${k==='ajudaCusto'?'Passagens/Ajuda de custo':k}" class="control pay-input" type="number" min="0" step="0.01" ${k==='ajudaCusto'?'list="passagens-ajuda-valores"':''} data-index="${index}" data-field="${k}" value="${k==='noturno'?x.night:k==='acordo'?x.bonus:x.ajudaCusto}" ${(!x.refs?.length||(k==='noturno'&&!x.units.has('SEBRAE')))?'disabled':''}>`),'<strong class="pay-total-display">'+money(total(x))+'</strong>']))
-        +predefinidos+'</section>'
-        +'<section class="card card-pad section" id="financial-duplicate-review"><h3>Confirmação de valores complementares</h3>'
+        +(somenteLeitura?'<p class="help-text">Valores de passagens e ajuda de custo já registrados pelo Financeiro, exclusivamente para conferência.</p>':'<p class="help-text">Passagens/Ajuda de custo: Fortaleza R$ 11, Caucaia R$ 10, Maracanaú R$ 12 e Horizonte R$ 25. Selecione um valor sugerido ou digite outro. Sem lançamento, o valor é R$ 0.</p>')
+        +table(['Data','Colaborador','Status','Extra / Diária avulso (R$)','Valores complementares já registrados (R$)','Noturno (R$)','Acordos (R$)','Passagens/Ajuda de custo (R$)','Total a Pagar (R$)'],e.map((x,index)=>[formatDate(x.c.dataServico),escapeHtml(x.p?.nome),escapeHtml(x.i.status),money(x.extra),money(x.finance),...fields.map(k=>somenteLeitura
+           ?`<span class="pay-total-display" aria-label="${k==='ajudaCusto'?'Passagens/Ajuda de custo':k}">${money(k==='noturno'?x.night:k==='acordo'?x.bonus:x.ajudaCusto)}</span>`
+           :`<input aria-label="${k==='ajudaCusto'?'Passagens/Ajuda de custo':k}" class="control pay-input" type="number" min="0" step="0.01" ${k==='ajudaCusto'?'list="passagens-ajuda-valores"':''} data-index="${index}" data-field="${k}" value="${k==='noturno'?x.night:k==='acordo'?x.bonus:x.ajudaCusto}" ${(!x.refs?.length||(k==='noturno'&&!x.units.has('SEBRAE')))?'disabled':''}>`),'<strong class="pay-total-display">'+money(total(x))+'</strong>']))
+        +(somenteLeitura?'':predefinidos)+'</section>'
+        +(somenteLeitura?'':'<section class="card card-pad section" id="financial-duplicate-review"><h3>Confirmação de valores complementares</h3>'
         +'<p>Use apenas quando o complemento financeiro e o acordo/bonificação forem dois pagamentos distintos, ainda que tenham o mesmo valor. Informe o motivo; a confirmação fica registrada com data e responsável.</p>'
         +e.map((x,index)=>{
           if(!(x.bonus>0&&x.refs?.length===1&&presence(x.i.status)))return '';
@@ -2026,7 +2030,8 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
             <div class="form-grid">${field('Valor complementar distinto (R$)',`<input class="control" type="number" min="0.01" step="0.01" id="approve-finance-${index}" value="${x.finance>0?x.finance:''}" placeholder="Informe o valor a confirmar">`)}
               ${field('Motivo de serem dois pagamentos distintos',`<textarea class="control" rows="2" id="approve-reason-${index}" placeholder="Explique o motivo para auditoria"></textarea>`)}</div>
             <div class="form-actions"><button type="button" class="btn btn-secondary confirm-finance-duplicate" data-index="${index}">Confirmar valores complementares</button></div></div>`;
-        }).join('')+'</section>';
+        }).join('')+'</section>');
+      if(somenteLeitura)return; // O perfil VISUALIZAR nunca registra callbacks de alteração.
       $$('.pay-input').forEach(inp=>inp.onchange=()=>{adjustPayment(e[Number(inp.dataset.index)],inp.dataset.field,inp.value);refresh();});
       $$('.confirm-finance-duplicate').forEach(button=>button.onclick=()=>{
         const index=Number(button.dataset.index),entry=e[index];
@@ -3244,7 +3249,7 @@ function renderEquipeDia(){
     }
     return [sheet('GERAL',data),...[...new Set(data.map(x=>x.c.dataServico))].sort().map(d=>sheet(d,data.filter(x=>x.c.dataServico===d)))];
   }
-  function exportReportsExcel(){exportWorkbook(perfilAtual==='FINANCEIRO'?financialWorkbook():controlWorkbook(),(perfilAtual==='FINANCEIRO'?'financeiro':'controladoria_rateada')+'_'+reportFilters.inicio+'_a_'+reportFilters.fim);}
+  function exportReportsExcel(){const finance=perfilAtual==='FINANCEIRO'||(perfilAtual==='VISUALIZAR'&&viewAtual==='financeiro');exportWorkbook(finance?financialWorkbook():controlWorkbook(),(finance?'financeiro':'controladoria_rateada')+'_'+reportFilters.inicio+'_a_'+reportFilters.fim);}
   async function reportPDF(kind){try{const {PDFDocument,StandardFonts,rgb}=PDFLib,doc=await PDFDocument.create(),regular=await doc.embedFont(StandardFonts.Helvetica),bold=await doc.embedFont(StandardFonts.HelveticaBold),W=841.89,H=595.28,margin=36;let page,y;const navy=rgb(.118,.161,.231),blue=rgb(.145,.388,.922),gray=rgb(.94,.96,.98),black=rgb(.08,.09,.11);const safe=v=>String(v??'').replace(/[\u2014\u2013]/g,'-').replace(/[^\x20-\x7e\xa0-\xff\n]/g,'');
     const text=(v,x,yy,size=9,font=regular,color=black)=>page.drawText(safe(v),{x,y:yy,size,font,color});const title=kind==='absences'?'APROAR | FALTAS E ATESTADOS':kind==='executive'?'APROAR | RELATÓRIO DE RESULTADOS':kind==='financial-consolidated'?'APROAR | FINANCEIRO POR COLABORADOR':kind==='financial'?'APROAR - RELATÓRIO FINANCEIRO':'APROAR | APONTAMENTO DIÁRIO DE EQUIPES';
     function newPage(){page=doc.addPage([W,H]);y=H-40;text(title,['financial','financial-consolidated'].includes(kind)?(W-bold.widthOfTextAtSize(title,16))/2:margin,y,16,bold,['financial','financial-consolidated'].includes(kind)?black:navy);y-=21;text('Período: '+reportPeriod()+(kind==='executive'?' | Unidade: '+indicatorUnit:''),margin,y,9);y-=25;}
