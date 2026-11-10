@@ -26,7 +26,8 @@ function renderPerson(extra=null){
     allocationRow:()=>'<div class="allocation-row"></div>',
     extraWorkOptions:id=>'<option value="'+id+'">Unidade teste</option>',
     extraWorkSearchMarkup:id=>'<input class="row-extra-work-search"><select class="row-extra-work" hidden><option value="'+id+'">Unidade teste</option></select>',
-    presence:status=>status?.startsWith('Presente')
+    presence:status=>status?.startsWith('Presente'),
+    isFinancialEditingLocked:()=>false,isApprovedFinancial:()=>false
   };
   ctx.globalThis=ctx;
   vm.createContext(ctx);

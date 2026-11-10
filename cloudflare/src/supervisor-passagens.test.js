@@ -85,7 +85,7 @@ test('Interface: detalhamento diario ordenado por data e nome e espacado do cons
  assert.match(html,/#pay-body \.pay-detail-section\s*\{[^}]*margin-top:\s*38px/);
  assert.match(js,/class="control row-ajuda-custo"/);
  assert.match(js,/row\.querySelector\('\.row-ajuda-custo'\)\?\.value/);
- assert(js.includes("item?.financeAdjusted&&isFinancialEditingLocked(serviceDate,item)&&!isApprovedFinancial(serviceDate,cid,'Passagem / ajuda de custo')?'readonly"));
+ assert(js.includes("isFinancialEditingLocked(serviceDate,item)&&!isApprovedFinancial(serviceDate,cid,'Passagem / ajuda de custo')?'readonly"));
  assert.match(js,/value="11" label="Fortaleza/);
  assert.match(js,/retroDrafts\.get\(id\)\|\|previousItem\(id\)/);
 });

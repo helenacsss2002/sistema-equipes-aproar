@@ -42,7 +42,7 @@ test('Controladoria pode escolher valor em apontamento previamente ajustado pelo
  const start=ui.indexOf('  function personRow('),end=ui.indexOf('  // Busca viva independente',start);
  const body=ui.slice(start,end);
  assert.match(body,/String\(unit\|\|''\)\.trim\(\)\.toUpperCase\(\)==='SEBRAE'/);
- assert.match(body,/perfilAtual!=='SUPERVISOR'\|\|!item\?\.financeAdjusted\|\|!isFinancialEditingLocked\(serviceDate,item\)\|\|isApprovedFinancial/);
+ assert.match(body,/perfilAtual!=='SUPERVISOR'\|\|!isFinancialEditingLocked\(serviceDate,item\)\|\|isApprovedFinancial/);
  const defaultContext={
   colaboradorById:()=>({nome:'TESTE SEBRAE',funcao:'Pedreiro',avulso:'Não'}),
   itemServices:()=>[{obraId:'1',periodo:'Integral'}],extraRecordFor:()=>null,
