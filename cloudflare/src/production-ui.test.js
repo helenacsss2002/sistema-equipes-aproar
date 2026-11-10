@@ -60,7 +60,7 @@ test('Unit list scrolls independently and work deletion buttons stay on works',(
 test('Reload restores a valid server session without logging out',()=>{
  const ui=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
  const init=ui.slice(ui.indexOf('async function initOnline(){'));
- assert.match(init,/enterConnectedSession\(await api\('\/api\/bootstrap'\)\)/);
+ assert.match(init,/enterConnectedSession\(await restoreOnlineSession\(\)\)/);
  assert.doesNotMatch(init,/api\('\/api\/logout'/);
  assert.match(ui,/async function logout\(\).*?api\('\/api\/logout'/s);
  const auth=fs.readFileSync(new URL('./auth.js',import.meta.url),'utf8');

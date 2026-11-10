@@ -3362,7 +3362,7 @@ function renderEquipeDia(){
         if(!data||typeof data!=='object'){
           const saving=path==='/api/save';
           throw Object.assign(new Error(saving
-            ?'A resposta do servidor não chegou completa. O sistema verificará se o apontamento foi registrado, sem duplicá-lo.'
+            ?'A resposta do servidor não chegou completa. O sistema verificará automaticamente se o apontamento já foi registrado, sem criar outro.'
             :'O servidor do APROAR respondeu com uma página inválida ou ficou temporariamente indisponível (HTTP '+response.status+'). A conexão pode ser recuperada sem apagar seus dados.'),
             {status:response.ok?502:response.status||502,nonJson:true});
         }
