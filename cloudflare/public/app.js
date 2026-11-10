@@ -1768,7 +1768,14 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
           row.ajudaCusto+=travelParts[serviceIndex];
         }
       }
-      for(const b of new Set([...Object.keys(blocks.daily),...Object.keys(blocks.extra),...Object.keys(blocks.finance)])){let participants=[...services.values()].filter(x=>x.blocks.has(b));if(!participants.length)participants=[...services.values()];for(const row of participants)for(const field of ['daily','extra','finance'])row[field]+=(blocks[field][b]||0)/participants.length;}
+      for(const b of new Set([...Object.keys(blocks.daily),...Object.keys(blocks.extra),...Object.keys(blocks.finance)])){
+        let participants=[...services.values()].filter(x=>x.blocks.has(b));
+        if(!participants.length)participants=[...services.values()];
+        for(const field of ['daily','extra','finance']){
+          const shares=splitMoneyExactly(blocks[field][b]||0,participants.length);
+          participants.forEach((row,index)=>row[field]+=shares[index]);
+        }
+      }
       for(const row of services.values()){row.daily=roundMoney(row.daily);row.extra=roundMoney(row.extra);row.finance=roundMoney(row.finance);row.night=roundMoney(row.night);row.bonus=roundMoney(row.bonus);row.ajudaCusto=roundMoney(row.ajudaCusto);if(dangerEligible(p))row.danger=roundMoney(row.daily*1.3)-row.daily+roundMoney(row.extra*1.3)-row.extra;row.danger=roundMoney(row.danger);row.service={obraId:row.c.obraId,periodo:[...row.periods].join(' + ')};row.c.supervisor=[...row.supervisors].join(' / ');row.displayStatus=[...row.statuses].join(' / ')+(p?.avulso==='Sim'&&AVULSO_DIARIA_OPTIONS.includes(row.i?.tipoDiariaAvulso)?' · '+row.i.tipoDiariaAvulso:'');row.displayExtra=[...row.extras].join(' / ');if(reportFilters.obra==='Todas'||row.c.obraId===reportFilters.obra)out.push(row);}
     }
     for(const x of state.extras||[]){
