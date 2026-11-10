@@ -30,7 +30,7 @@ test('VISUALIZAR não consegue gravar pela API mesmo ao falsificar a tela',()=>{
 });
 test('Pagamentos somente leitura não monta inputs, botões ou confirmações financeiras',()=>{
  assert.match(paymentSource,/const somenteLeitura=perfilAtual==='VISUALIZAR'/);
- assert.match(paymentSource,/somenteLeitura\?\x60<span class="pay-total-display"/);
+ assert.match(paymentSource,/somenteLeitura\s*\?\x60<span class="pay-total-display"/);
  assert.match(paymentSource,/somenteLeitura\?'':'<section class="card card-pad section" id="financial-duplicate-review"/);
  assert.match(paymentSource,/if\(somenteLeitura\)return; \/\/ O perfil VISUALIZAR nunca registra callbacks/);
  assert.match(paymentSource,/if\(!somenteLeitura&&perfilAtual!=='FINANCEIRO'\)return setView\('inicio'\)/);
@@ -42,6 +42,6 @@ test('Conferência oferece mesmos filtros, total e relatórios exportados do Fin
  assert.match(paymentSource,/cycleControl\(\)\+filterControls\('combined'\)/);
  assert.match(paymentSource,/bindFilters\(\(\)=>\{selectedCycle='custom'/);
  assert.match(paymentSource,/bindExports\(\);bindFinancialSummaryExports\(\)/);
- assert.match(app,/if\(\['FINANCEIRO','VISUALIZAR'\]\.includes\(perfilAtual\)&&viewAtual==='financeiro'\)/);
+ assert.match(app,/if\(\['FINANCEIRO','VISUALIZAR'\]\.includes\(perfilAtual\)&&\['financeiro','pagamentos'\]\.includes\(viewAtual\)\)/);
  assert.match(app,/const finance=perfilAtual==='FINANCEIRO'\|\|\(perfilAtual==='VISUALIZAR'&&viewAtual==='financeiro'\)/);
 });

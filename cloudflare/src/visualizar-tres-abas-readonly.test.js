@@ -23,7 +23,7 @@ function menu(role){
 
 test('Somente visualizar inclui tres abas sem retirar Dashboard, Relatorios e Indicadores',()=>{
  assert.deepEqual(menu('VISUALIZAR'),[
-  'dashboard','relatorios','indicadores','conflitos','disponibilidade','indisponibilidade'
+  'dashboard','financeiro','relatorios','indicadores','conflitos','disponibilidade','indisponibilidade'
  ]);
 });
 test('Menus existentes da Controladoria, Supervisor e Financeiro foram preservados',()=>{

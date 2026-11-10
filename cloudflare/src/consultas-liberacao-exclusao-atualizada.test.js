@@ -9,7 +9,7 @@ const html=fs.readFileSync(new URL('../public/index.html',import.meta.url),'utf8
 test('Somente visualizar tem acesso adicional permanente a consultas, sem remover menu atual',()=>{
  const start=ui.indexOf('  function render() {'),end=ui.indexOf('  function showLogin() {',start);
  const code=ui.slice(start,end);
- assert.match(code,/const pages=\{dashboard:renderDashboard,relatorios:renderReports,indicadores:renderIndicators,conflitos:renderConflitos,disponibilidade:renderDisponibilidade,indisponibilidade:renderIndisponibilidade\}/);
+ assert.match(code,/const pages=\{dashboard:renderDashboard,financeiro:renderPayments,relatorios:renderReports,indicadores:renderIndicators,conflitos:renderConflitos,disponibilidade:renderDisponibilidade,indisponibilidade:renderIndisponibilidade\}/);
  assert.match(code,/class="viewer-query-tabs"/);
  assert.match(code,/data-viewer-query/);
  for(const view of ['conflitos','disponibilidade','indisponibilidade'])assert(code.includes("['"+view+"'"),view);

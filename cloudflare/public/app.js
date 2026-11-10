@@ -1514,7 +1514,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
   function localDownload(name,content,mime='text/plain'){downloadBlob(name,new Blob([content],{type:mime}));}
   function exportTable(){
     let rows,filename='aproar_relatorio.csv';
-    if(['FINANCEIRO','VISUALIZAR'].includes(perfilAtual)&&viewAtual==='financeiro'){
+    if(['FINANCEIRO','VISUALIZAR'].includes(perfilAtual)&&['financeiro','pagamentos'].includes(viewAtual)){
       const details=financialEntries().filter(x=>presence(x.i.status)&&x.extra+x.finance+x.night+x.bonus+x.ajudaCusto>0.005);
       if(!details.length)return showToast('Não há pagamentos neste período para exportar.',true);
       const people=financialSummaryRows(details);
