@@ -61,3 +61,11 @@ test('Datas sobrepostas em dois visores financeiros não são pagas duas vezes',
  assert.match(src,/financialCycle\(x\.c\.dataServico\)\.pagamento!==paymentCycle\)continue/);
  assert.match(app,/financialCycle\(financialCycleReference\(\),Number\(selectedCycle\)\)/);
 });
+
+test('Passagem e noturno vencidos são bloqueados na interface, mesmo sem ajuste financeiro anterior',()=>{
+ const from=app.indexOf('  function personRow('),to=app.indexOf('  function wireLiveSuggestions(',from);
+ const person=app.slice(from,to);
+ assert.match(person,/isFinancialEditingLocked\(serviceDate,item\)&&!isApprovedFinancial\(serviceDate,cid,'Passagem \/ ajuda de custo'\)/);
+ assert.match(person,/!isFinancialEditingLocked\(serviceDate,item\)\|\|isApprovedFinancial\(serviceDate,cid,'Adicional noturno'\)/);
+ assert.doesNotMatch(person,/item\?\.financeAdjusted&&isFinancialEditingLocked\(/);
+});
