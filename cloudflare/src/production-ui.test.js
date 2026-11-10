@@ -213,7 +213,8 @@ test('Passagens/Ajuda de custo: quatro precos sugeridos e campo editavel com per
  assert.ok(payments.includes("adjustPayment(e[Number(inp.dataset.index)],inp.dataset.field,inp.value)"));
  assert.ok(payments.includes('x.extra+x.finance+x.night+x.bonus+x.ajudaCusto'),'Total de pagamentos inclui extra e passagem');
  assert.ok(ui.includes('i.ajudaCusto=index===0?roundMoney(data.ajudaCusto):0'));
- assert.ok(ui.includes('row.ajudaCusto+=(isPresent?Math.max(0,Number(i.ajudaCusto)||0):0)/ss.length'),'Rateio único por serviço');
+ assert.ok(ui.includes('const travelParts=splitMoneyExactly(isPresent?i.ajudaCusto:0,ss.length)'),'Rateio exato por centavos entre serviços');
+ assert.ok(ui.includes('row.ajudaCusto+=travelParts[serviceIndex]'),'Valor de passagem não deve crescer por arredondamento');
  assert.ok(ui.includes("['daily','danger','night','bonus','finance','ajudaCusto']"),'Consolidado separa extra de serviço e pagamento financeiro');
  assert.ok(reports.includes("fin?['Passagens/Ajuda de custo']:['Periculosidade 30%']"),'Campo aparece só Financeiro');
  assert.ok(reports.includes('x.extra+x.finance+x.night+x.bonus+x.ajudaCusto'),'Total do relatório inclui extra');
