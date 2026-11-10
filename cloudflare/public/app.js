@@ -1925,6 +1925,15 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
     $('#fh-search').oninput=show;$('#fh-type').onchange=show;$('#fh-load').onclick=load;load();
   }
 
+  // A API só libera valores de quem tem convocação vinculada a este supervisor
+  // na data escolhida. O filtro é apenas visual e jamais cria cadastro avulso.
+  function financialReleasePeopleFor(date,query='',who=supervisorAtual){
+    const ids=new Set(state.convocacoes
+      .filter(c=>c.supervisor===who&&c.dataServico===date)
+      .flatMap(c=>(c.colaboradores||[]).map(String)));
+    const term=clean(query);
+    return alphabeticalPeople(COLABORADORES.filter(p=>ids.has(String(p.id))&&clean(p.nome).includes(term)));
+  }
   function renderFinancialReleases(){
     const supervisor=perfilAtual==='SUPERVISOR',canApprove=['CONTROLADORIA','FINANCEIRO'].includes(perfilAtual);
     if(!supervisor&&!canApprove)return setView('inicio');
@@ -1935,12 +1944,34 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
         +'<p>Indique o colaborador, a data do serviço, as colunas a liberar e o motivo. A liberação é válida para um único salvamento.</p>'
         +'<form id="fr-form"><div class="form-grid">'
         +field('Data do serviço','<input class="control" type="date" id="fr-date" value="'+today+'" required>')
-        +field('Colaborador','<select class="control" id="fr-person" required></select>')
+        +field('Colaborador','<div class="fr-person-picker"><input class="control" id="fr-person-search" type="search" autocomplete="off" placeholder="Digite o nome para buscar..." aria-label="Pesquisar colaboradores da data selecionada" aria-controls="fr-person"><select class="control" id="fr-person" aria-label="Selecione o colaborador" required><option value="">Selecione o colaborador</option></select><p id="fr-person-info" class="help-text" aria-live="polite">Escolha a data e digite para filtrar os colaboradores.</p></div>')
         +'</div><p id="fr-deadline" class="help-text"></p><strong>Colunas a liberar</strong><div id="fr-fields" class="section">'
         +['Extra','Bonificação','Adicional noturno','Passagem / ajuda de custo','Complemento financeiro'].map((x,i)=>'<label style="display:inline-flex;align-items:center;gap:6px;margin:8px 18px 8px 0"><input type="checkbox" class="fr-field" value="'+escapeHtml(x)+'">'+escapeHtml(x)+'</label>').join('')
         +'</div>'+field('Motivo','<textarea class="control" id="fr-reason" rows="3" minlength="10" maxlength="600" placeholder="Descreva a necessidade do lançamento..." required></textarea>')
         +'<div class="form-actions"><button class="btn btn-primary" type="submit">Solicitar autorização</button></div></form></div>':'')
       +'<div class="section" id="fr-list"><div class="notice info">Carregando solicitações...</div></div>';
+    const updatePeople=()=>{
+      const date=$('#fr-date')?.value||'',search=$('#fr-person-search'),select=$('#fr-person'),info=$('#fr-person-info');
+      if(!search||!select||!info)return;
+      const all=financialReleasePeopleFor(date),matches=financialReleasePeopleFor(date,search.value);
+      const selected=select.value;
+      select.innerHTML='<option value="">'+(matches.length?'Selecione o colaborador':'Nenhum colaborador encontrado')+'</option>'+
+        matches.map(p=>'<option value="'+escapeHtml(String(p.id))+'">'+escapeHtml(p.nome)+'</option>').join('');
+      if(matches.some(p=>String(p.id)===selected))select.value=selected;
+      select.disabled=!matches.length;
+      // Ao digitar, apresentar a lista imediatamente; com muitos nomes,
+      // limitar a altura e permitir rolagem.
+      select.size=search.value.trim()?Math.min(8,Math.max(2,matches.length+1)):1;
+      if(!all.length){
+        const dates=[...new Set(state.convocacoes.filter(c=>c.supervisor===supervisorAtual&&c.dataServico<=isoToday()).map(c=>c.dataServico))]
+          .sort().reverse().slice(0,3);
+        info.textContent='Nenhum colaborador convocado por '+supervisorAtual+' em '+formatDate(date)+
+          '. Selecione outra data'+(dates.length?' (últimas datas com equipe: '+dates.map(formatDate).join(', ')+').':'.');
+      }else{
+        info.textContent=matches.length+' de '+all.length+' colaborador(es) em ordem alfabética. '+
+          (matches.length?'Escolha o nome na lista para solicitar liberação.':'Nenhum nome corresponde à busca.');
+      }
+    };
     const showDate=()=>{
       const date=$('#fr-date')?.value;
       if(!date)return;
@@ -1948,13 +1979,31 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       $('#fr-deadline').textContent='Ciclo de '+formatDate(cycle.inicio)+' a '+formatDate(cycle.fim)+
         ' · pagamento '+formatDate(cycle.pagamento)+' · prazo até 10h (Fortaleza).'+
         (now()>new Date(deadline)?' Prazo encerrado; solicite autorização.':' O prazo ainda está aberto.');
-      const ids=[...new Set(state.convocacoes.filter(c=>c.supervisor===supervisorAtual&&c.dataServico===date).flatMap(c=>c.colaboradores||[]))];
-      const select=$('#fr-person'),current=select.value;
-      select.innerHTML='<option value="">Selecione o colaborador</option>'+
-        alphabeticalPeople(COLABORADORES.filter(p=>ids.includes(p.id))).map(p=>'<option value="'+escapeHtml(p.id)+'">'+escapeHtml(p.nome)+'</option>').join('');
-      if(ids.includes(current))select.value=current;
+      // A seleção não pode ficar associada à data anterior.
+      $('#fr-person-search').value='';
+      $('#fr-person').value='';
+      updatePeople();
     };
-    if(supervisor){$('#fr-date').onchange=showDate;showDate();}
+    if(supervisor){
+      $('#fr-date').onchange=showDate;
+      $('#fr-person-search').oninput=()=>{
+        $('#fr-person').value=''; // Digitação não confirma o nome antigo.
+        updatePeople();
+      };
+      $('#fr-person-search').onfocus=()=>{
+        const select=$('#fr-person');
+        if(select&&!select.disabled)select.size=Math.min(8,select.options.length);
+      };
+      $('#fr-person').onchange=()=>{
+        const select=$('#fr-person'),person=COLABORADORES.find(p=>String(p.id)===select.value);
+        if(person){
+          $('#fr-person-search').value=person.nome;
+          $('#fr-person-info').textContent='Selecionado: '+person.nome+' · '+formatDate($('#fr-date').value);
+        }
+        select.size=1;
+      };
+      showDate();
+    }
     const fmtTime=t=>t?new Date(t).toLocaleString('pt-BR',{timeZone:'America/Fortaleza',dateStyle:'short',timeStyle:'medium'}):'—';
     const load=async()=>{
       try{
@@ -1987,7 +2036,9 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
     if(supervisor)$('#fr-form').onsubmit=async e=>{
       e.preventDefault();
       const date=$('#fr-date').value,id=$('#fr-person').value,fields=$$('.fr-field:checked').map(x=>x.value),reason=$('#fr-reason').value.trim();
-      if(!id||!fields.length)return showToast('Selecione colaborador e colunas para liberação.',true);
+      if(!id||!financialReleasePeopleFor(date).some(p=>String(p.id)===id))
+        return showToast('Escolha um colaborador convocado por você na data selecionada.',true);
+      if(!fields.length)return showToast('Selecione as colunas para liberação.',true);
       const button=$('#fr-form button[type=submit]');button.disabled=true;
       try{
         await api('/api/financial-release/request',{method:'POST',body:JSON.stringify({requestId:crypto.randomUUID(),colaboradorId:id,dataServico:date,fields,reason})});

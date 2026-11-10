@@ -5,7 +5,7 @@ import fs from 'node:fs';
 test('Index HTML references current APROAR frontend to refresh browser cache',()=>{
  const html=fs.readFileSync(new URL('../public/index.html',import.meta.url),'utf8');
  const js=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
- assert.match(html,/src="\/app\.js\?v=aproar-visualizar-pagamentos-20261110-17"/);
+ assert.match(html,/src="\/app\.js\?v=aproar-liberacao-busca-colaboradores-20261110-18"/);
  assert.match(js,/document\.querySelectorAll\('\[data-trello-card\]'\)\.forEach/);
  assert.doesNotMatch(js,/\$\('\[data-trello-card\]'\)\.forEach/);
 });
