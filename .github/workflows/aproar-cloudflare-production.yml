@@ -59,3 +59,7 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: deploy
           workingDirectory: cloudflare
+
+      - name: Verify production API and assets after deploy
+        run: node scripts/smoke-production.mjs
+        working-directory: cloudflare

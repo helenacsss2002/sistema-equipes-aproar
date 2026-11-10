@@ -3345,28 +3345,45 @@ function renderEquipeDia(){
   
   let onlineVersion='',onlineSession=null,onlineWritable=false,onlineStage='homologacao',onlineConfirmed=null,onlineQueued=false,onlineSaving=false,onlineMessage='';
   const copy=v=>JSON.parse(JSON.stringify(v));
+  // Repetir apenas consultas. POSTs (login, salvamentos e solicitações) nunca
+  // são enviados automaticamente duas vezes quando a resposta se perde.
   async function api(path,options={}){
-    const response=await fetch(path,{credentials:'same-origin',...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});
-    const contentType=response.headers.get('content-type')||'';
-    let data;
-    if(contentType.toLowerCase().includes('application/json')){
-      try{data=await response.json();}catch{/* Incomplete or interrupted API response. */}
+    const method=String(options.method||'GET').toUpperCase();
+    const readOnly=method==='GET'||method==='HEAD';
+    const attempts=readOnly?3:1;
+    for(let attempt=0;attempt<attempts;attempt++){
+      try{
+        const response=await fetch(path,{credentials:'same-origin',...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});
+        const contentType=response.headers.get('content-type')||'';
+        let data;
+        if(contentType.toLowerCase().includes('application/json')){
+          try{data=await response.json();}catch{/* Resposta cortada ou incompleta. */}
+        }
+        if(!data||typeof data!=='object'){
+          const saving=path==='/api/save';
+          throw Object.assign(new Error(saving
+            ?'A resposta do servidor não chegou completa. O sistema verificará se o apontamento foi registrado, sem duplicá-lo.'
+            :'O servidor do APROAR respondeu com uma página inválida ou ficou temporariamente indisponível (HTTP '+response.status+'). A conexão pode ser recuperada sem apagar seus dados.'),
+            {status:response.ok?502:response.status||502,nonJson:true});
+        }
+        if(!response.ok)throw Object.assign(new Error(data.error||'Falha na comunicação com o APROAR.'),{status:response.status,code:data.code||''});
+        return data;
+      }catch(error){
+        const status=Number(error?.status||0);
+        const canRetry=readOnly&&error?.code!=='NEON_QUOTA_EXCEEDED'
+          &&(!status||[408,425,429,500,502,503,504,520,521,522,523,524,525,526,530].includes(status));
+        if(!canRetry||attempt===attempts-1)throw error;
+        console.warn('APROAR read retry',JSON.stringify({route:path,status,attempt:attempt+1}));
+        await new Promise(resolve=>setTimeout(resolve,400*(attempt+1)));
+      }
     }
-    if(!data||typeof data!=='object'){
-      const saving=path==='/api/save';
-      throw Object.assign(new Error(saving
-        ?'A resposta do servidor não chegou completa. O sistema verificará automaticamente se o apontamento já foi registrado, sem criar outro.'
-        :'O servidor da APROAR respondeu com uma página inválida ou ficou temporariamente indisponível. Aguarde e tente novamente.'),{status:response.ok?502:response.status||502,nonJson:true});
-    }
-    if(!response.ok)throw Object.assign(new Error(data.error||'Falha na comunicação.'),{status:response.status});
-    return data;
   }
   async function restoreOnlineSession(){
     try{return await api('/api/bootstrap');}
     catch(error){
-      if(error.status===401||error.status===403)return Promise.reject(error);
-      // Only retry a read: never repeat a write merely because a response was interrupted.
-      await new Promise(resolve=>setTimeout(resolve,1500));
+      if(error.status===401||error.status===403||error.code==='NEON_QUOTA_EXCEEDED')throw error;
+      // Somente recuperar a consulta; nunca repetir login ou gravação por conta própria.
+      await new Promise(resolve=>setTimeout(resolve,1800));
       return api('/api/bootstrap');
     }
   }
@@ -3651,7 +3668,8 @@ function renderEquipeDia(){
   async function logout(){chooseLogin('CONTROLADORIA');if(onlineSaving||onlineQueued)return;try{await api('/api/logout',{method:'POST',body:'{}'});}catch(e){return showToast(e.message,true);}if(supervisorAtual)clearSupervisorDrafts(supervisorAtual);if(supervisorAtual){try{sessionStorage.removeItem(supervisorViewStorageKey(supervisorAtual));}catch{}}perfilAtual='';supervisorAtual='';onlineSession=null;onlineConfirmed=null;state=seedData();OBRAS.length=0;COLABORADORES.length=0;render();}
   const renderLocal=render;
   render=function(){renderLocal();if(!perfilAtual)return;const selector=$('#portal-sup');if(onlineSession?.role==='SUPERVISOR'&&selector){selector.value=onlineSession.user;selector.disabled=true;}const old=$('#live-status');if(old)old.remove();const status=document.createElement('div');status.id='live-status';status.className='notice '+(onlineWritable?'info':'warning');status.innerHTML=`<strong>${onlineStage==='producao'?'Produção':'Homologação'} · ${onlineWritable?'dados conectados ao Neon':'somente leitura'}</strong> <span>${onlineStage==='producao'?'Dados oficiais da APROAR.':'Ambiente de testes.'}</span> <button type="button" class="link-btn" id="sync-online">Atualizar dados</button>`;$('#main-content').prepend(status);$('#sync-online').onclick=async()=>{if(onlineSaving||onlineQueued)return;lockOnline(true);try{applyOnline(await api('/api/bootstrap'));render();showToast('Dados atualizados.');}catch(e){showToast(e.message,true);}finally{lockOnline(false);}};};
-  function chooseLogin(role){loginRole=role;const shortcut=['SUPERVISOR','VISUALIZAR'].includes(role);$('#login-access-wrap').classList.toggle('hidden',shortcut);$('#login-shortcut-mode').classList.toggle('hidden',!shortcut);$('#login-shortcut-label').textContent=role==='SUPERVISOR'?'Portal do Supervisor':'Somente visualizar';if(!shortcut)$('#login-access').value=role;$('#login-supervisor-wrap').classList.toggle('hidden',role!=='SUPERVISOR');const passwordRequired=role!=='VISUALIZAR';$('#login-password').required=passwordRequired;$('#login-password').closest('.password-wrap').classList.toggle('hidden',!passwordRequired);document.querySelector('label[for="login-password"]').classList.toggle('hidden',!passwordRequired);$('#login-error').textContent='';$('#login-password').value='';$(role==='SUPERVISOR'?'#login-supervisor':role==='VISUALIZAR'?'#login-button':'#login-password').focus();}
+  let pendingLoginBootstrapRole='';
+  function chooseLogin(role){pendingLoginBootstrapRole='';loginRole=role;const shortcut=['SUPERVISOR','VISUALIZAR'].includes(role);$('#login-access-wrap').classList.toggle('hidden',shortcut);$('#login-shortcut-mode').classList.toggle('hidden',!shortcut);$('#login-shortcut-label').textContent=role==='SUPERVISOR'?'Portal do Supervisor':'Somente visualizar';if(!shortcut)$('#login-access').value=role;$('#login-supervisor-wrap').classList.toggle('hidden',role!=='SUPERVISOR');const passwordRequired=role!=='VISUALIZAR';$('#login-password').required=passwordRequired;$('#login-password').closest('.password-wrap').classList.toggle('hidden',!passwordRequired);document.querySelector('label[for="login-password"]').classList.toggle('hidden',!passwordRequired);$('#login-error').textContent='';$('#login-password').value='';$(role==='SUPERVISOR'?'#login-supervisor':role==='VISUALIZAR'?'#login-button':'#login-password').focus();}
   function enterConnectedSession(result){applyOnline(result);financeReleaseRequests=[];if(perfilAtual==='SUPERVISOR')api('/api/financial-release').then(x=>{financeReleaseRequests=x.requests||[];if(viewAtual==='apontamento')render();}).catch(()=>{});viewAtual=perfilAtual==='SUPERVISOR'?restoredSupervisorView():perfilAtual==='VISUALIZAR'?'dashboard':'inicio';portalUnit=state.convocacoes.find(c=>c.supervisor===supervisorAtual&&c.dataServico===portalDate)?.unidade||OBRAS[0]?.unidade||'Todas';
     if(perfilAtual==='SUPERVISOR'){
       const last=readStoredDraft(draftKey('last',supervisorAtual));
@@ -3674,7 +3692,27 @@ function renderEquipeDia(){
       }
     },true);
     init();$('#reset-demo').classList.add('hidden');$('#login-access').onchange=()=>chooseLogin($('#login-access').value);$('#enter-supervisor').onclick=()=>chooseLogin('SUPERVISOR');$('#enter-viewer').onclick=()=>chooseLogin('VISUALIZAR');$('#login-back').onclick=()=>chooseLogin($('#login-access').value);
-    $('#login-form').onsubmit=async e=>{e.preventDefault();const button=$('#login-button');button.disabled=true;$('#login-error').textContent='';try{await api('/api/login',{method:'POST',body:JSON.stringify({role:loginRole,supervisor:$('#login-supervisor').value,password:$('#login-password').value})});$('#login-password').value='';enterConnectedSession(await api('/api/bootstrap'));}catch(err){$('#login-error').textContent=err.message;}finally{button.disabled=false;}};
+    $('#login-form').onsubmit=async e=>{
+      e.preventDefault();
+      const button=$('#login-button');
+      button.disabled=true;
+      $('#login-error').textContent='';
+      try{
+        // Se o servidor validou o login mas interrompeu o bootstrap, recuperar
+        // a sessão já autenticada sem repetir senha, cookie ou tentativa de login.
+        if(pendingLoginBootstrapRole!==loginRole){
+          await api('/api/login',{method:'POST',body:JSON.stringify({role:loginRole,supervisor:$('#login-supervisor').value,password:$('#login-password').value})});
+          pendingLoginBootstrapRole=loginRole;
+          $('#login-password').value='';
+        }
+        enterConnectedSession(await restoreOnlineSession());
+        pendingLoginBootstrapRole='';
+      }catch(err){
+        if(err.status===401||err.status===403)pendingLoginBootstrapRole='';
+        $('#login-error').textContent=err.message+
+          (pendingLoginBootstrapRole===loginRole?' Clique em ENTRAR novamente para reconectar sem digitar outra senha.':'');
+      }finally{button.disabled=false;}
+    };
     // Preserve a valid signed HttpOnly session across F5; only Sair clears it.
     $('#login-button').disabled=true;try{enterConnectedSession(await restoreOnlineSession());}catch(e){if(e.status!==401)$('#login-error').textContent=e.message+' Sua sessão não foi encerrada automaticamente.';}finally{$('#login-password').value='';$('#login-button').disabled=false;}
     // Um retorno do histórico (bfcache) NÃO deve forçar reload, apagar o rascunho
