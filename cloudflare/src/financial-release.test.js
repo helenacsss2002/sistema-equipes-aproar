@@ -9,10 +9,10 @@ const worker=fs.readFileSync(new URL('./worker.js',import.meta.url),'utf8');
 const operations=fs.readFileSync(new URL('./operations.js',import.meta.url),'utf8');
 const ui=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
 
-test('Ciclo terça a segunda vence terça seguinte às 10h, horário de Fortaleza',()=>{
+test('Ciclo visual domingo a segunda fecha terça às 10h, com datas não duplicadas de pagamento',()=>{
  const dates=['2026-10-20','2026-10-21','2026-10-26'];
  for(const date of dates){
-  assert.deepEqual(financialDeadline(date),{start:'2026-10-20',end:'2026-10-26',payment:'2026-10-27',limitAt:'2026-10-27T10:00:00-03:00'});
+  assert.deepEqual(financialDeadline(date),{start:'2026-10-18',end:'2026-10-26',payment:'2026-10-27',limitAt:'2026-10-27T10:00:00-03:00'});
   assert.equal(afterFinancialDeadline(date,'2026-10-27T12:59:59.999Z'),false);
   assert.equal(afterFinancialDeadline(date,'2026-10-27T13:00:00.000Z'),false);
   assert.equal(afterFinancialDeadline(date,'2026-10-27T13:00:01.000Z'),true);
@@ -168,4 +168,20 @@ test('Supervisor solicita e Controladoria ou Financeiro aprova no menu',()=>{
  assert.match(ui,/api\/financial-release\/decide/);
  assert.match(ui,/isApprovedFinancial\(serviceDate,cid,'Adicional noturno'\)/);
  assert.match(ui,/isApprovedFinancial\(serviceDate,cid,'Passagem \/ ajuda de custo'\)/);
+});
+
+test('Mesmo no visor sobreposto, domingo e segunda pertencem a uma única terça',()=>{
+ assert.equal(financialDeadline('2026-11-01').payment,'2026-11-03');
+ assert.equal(financialDeadline('2026-11-02').payment,'2026-11-03');
+ assert.deepEqual(financialDeadline('2026-11-03'),{
+  start:'2026-11-01',end:'2026-11-09',
+  payment:'2026-11-10',limitAt:'2026-11-10T10:00:00-03:00'
+ });
+ assert.equal(financialDeadline('2026-11-08').payment,'2026-11-10');
+ assert.equal(financialDeadline('2026-11-09').payment,'2026-11-10');
+ assert.equal(financialDeadline('2026-11-10').payment,'2026-11-17');
+ assert.equal(afterFinancialDeadline('2026-11-09','2026-11-10T12:59:59.999Z'),false);
+ assert.equal(afterFinancialDeadline('2026-11-09','2026-11-10T13:00:01.000Z'),true);
+ assert.equal(afterFinancialDeadline('2026-11-02','2026-11-10T12:00:00.000Z'),true);
+ assert.equal(afterFinancialDeadline('2026-11-16','2026-11-16T13:00:00.000Z'),false);
 });

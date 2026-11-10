@@ -1763,8 +1763,14 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
   // O Financeiro considera o valor informado pelo supervisor, independentemente
   // de "Houve extra?". O custo operacional continua com extras por categoria.
   function financialEntries(){
+    // Domingo a segunda é a janela de consulta; os dois dias sobrepostos
+    // com o visor seguinte pertencem apenas ao pagamento da primeira
+    // terça após o serviço, impedindo reaparecimento e pagamento duplo.
+    const paymentCycle=typeof selectedCycle==='string'&&selectedCycle!=='custom'
+      ?financialCycle(financialCycleReference(),Number(selectedCycle)).pagamento:null;
     const map=new Map(),extrasIndependentes=new Map();
     for(const x of entries()){
+      if(paymentCycle&&financialCycle(x.c.dataServico).pagamento!==paymentCycle)continue;
       const key=x.c.dataServico+'|'+x.i.colaboradorId+'|'+x.c.supervisor;
       const valorExtraFinanceiro=x.c.extraAvulsa?roundMoney(Math.max(0,Number(x.i.valorExtraOriginal)||0)):0;
       // O cartão azul prioriza a extra independente já registrada. Guardar
@@ -1811,7 +1817,24 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
   }
   function financialSummaryRows(rows=financialEntries()){return globalThis.APROARFinanceConsolidado.summarize(rows);}
   function adjustPayment(row,field,value){if(onlineSaving||onlineQueued)return showToast('Aguarde a gravação em andamento.',true);const data={financeiro:row.finance,noturno:row.night,acordo:row.bonus,ajudaCusto:row.ajudaCusto};data[field]=Math.max(0,Number(value)||0);for(const [index,i] of row.refs.entries()){i.financeiro=index===0?roundMoney(data.financeiro):0;i.noturno=index===0&&row.units.has('SEBRAE')?roundMoney(data.noturno):0;i.acordo=index===0?roundMoney(data.acordo):0;i.ajudaCusto=index===0?roundMoney(data.ajudaCusto):0;i.financeAdjusted=true;}saveFinancialUpdates(row.refs);}
-  function financialCycle(ref=isoToday(),offset=0){const d=dateLocal(ref),n=(d.getDay()-2+7)%7;d.setDate(d.getDate()-n+offset*7);const end=new Date(d);end.setDate(end.getDate()+6);const pay=new Date(end);pay.setDate(pay.getDate()+1);return {inicio:calendarISO(d),fim:calendarISO(end),pagamento:calendarISO(pay)};}
+  function financialCycle(ref=isoToday(),offset=0){
+    const d=dateLocal(ref),n=(d.getDay()-2+7)%7;
+    d.setDate(d.getDate()-n+offset*7);
+    const inicio=new Date(d);inicio.setDate(inicio.getDate()-2); // Domingo de referência
+    const fim=new Date(d);fim.setDate(fim.getDate()+6);         // Segunda de fechamento
+    const pay=new Date(fim);pay.setDate(pay.getDate()+1);       // Terça do pagamento
+    return {inicio:calendarISO(inicio),fim:calendarISO(fim),pagamento:calendarISO(pay)};
+  }
+  function financialCycleReference(){
+    // Até terça às 10h o ciclo que acaba de fechar na segunda ainda é
+    // editável e deve aparecer por padrão no Financeiro.
+    const today=isoToday(),current=dateLocal(today);
+    if(current.getDay()===2&&now()<=new Date(today+'T10:00:00-03:00')){
+      current.setDate(current.getDate()-1);
+      return calendarISO(current);
+    }
+    return today;
+  }
   function reminder(c){const today=isoToday(),p=brazilParts(now()),hh=Number(p.hour)+Number(p.minute)/60;if(c.dataServico>today)return 'Ainda não iniciou';if(clean(c.unidade)==='SEBRAE')return c.dataServico===today?(hh<21?'Hoje · 21:00':'Lembrete de 21:00 já passou'):'Somente manual';if(c.dataServico===today)return hh<16?'Hoje · 16:00':'Próximo dia · 09:30';const d=dateLocal(c.dataServico);d.setDate(d.getDate()+1);return calendarISO(d)===today?(hh<9.5?'Hoje · 09:30':'Lembrete de 09:30 já passou'):'Somente manual';}
 
   function personCount(e,test){return new Set(e.filter(test).map(x=>x.c.id+'|'+x.i.colaboradorId)).size;}
@@ -1836,9 +1859,9 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
     table.prepend(group);
   }
   function renderReports(){
-    const financial=perfilAtual==='FINANCEIRO';if(financial&&selectedCycle!=='custom'){const cycle=financialCycle(isoToday(),Number(selectedCycle));reportFilters.inicio=cycle.inicio;reportFilters.fim=cycle.fim;}
+    const financial=perfilAtual==='FINANCEIRO';if(financial&&selectedCycle!=='custom'){const cycle=financialCycle(financialCycleReference(),Number(selectedCycle));reportFilters.inicio=cycle.inicio;reportFilters.fim=cycle.fim;}
     $('#main-content').innerHTML=head('Relatórios','Dados por período, com consolidado e detalhamento por dia.')+(financial?cycleControl():'')+filterControls(financial?true:'combined')+'<div class="section report-toolbar"><div class="report-view" id="report-tabs"></div>'+exportButtons()+(financial?financialSummaryButtons():'')+'</div><div class="section" id="report-body"></div>';let day='Todos';
-    const refresh=()=>{const rows=(financial?financialEntries():entries()).filter(x=>!financial||(x.c.extraAvulsa||(presence(x.i.status)&&x.extra+x.finance+x.night+x.bonus+x.ajudaCusto>0.005))),dates=[...new Set(filteredConvs().map(c=>c.dataServico))].sort();if(!dates.includes(day))day='Todos';$('#report-tabs').innerHTML=field('Visualização',`<select id="report-day-select" class="control"><option value="Todos">Consolidado do período</option>${dates.map(d=>`<option value="${d}">${formatDate(d)}</option>`).join('')}</select>`);$('#report-day-select').value=day;const selected=rows.filter(x=>day==='Todos'||x.c.dataServico===day);const fin=perfilAtual==='FINANCEIRO';$('#report-body').innerHTML=table(['Data','Supervisor','Unidade','Obra','Colaborador','Período','Status',fin?'Extra / Diária avulso (R$)':'Custo normal',fin?'Valores complementares já registrados (R$)':'Extra','Adic. noturno','Acordos / Bonificações',...(fin?['Passagens/Ajuda de custo']:['Periculosidade 30%']),'Total'],selected.map(x=>[formatDate(x.c.dataServico),x.c.supervisor,escapeHtml(x.c.unidade),escapeHtml(fin?financialWorkNumber(x.c.obraId):obraById(x.c.obraId)?.nome),escapeHtml(x.p?.nome),escapeHtml(x.service.periodo),escapeHtml(x.displayStatus||x.i.status),money(fin?x.extra:x.daily),fin?money(x.finance):escapeHtml(x.displayExtra||x.i.extra),money(x.night),money(x.bonus),...(fin?[money(x.ajudaCusto)]:[money(x.danger)]),money(fin?x.extra+x.finance+x.night+x.bonus+x.ajudaCusto:x.daily+x.extra+x.danger+x.night+x.bonus)]))+`<div class="notice info section">Valores de demonstração. ${fin?'Financeiro sem adicional de periculosidade.':'Periculosidade de 30% para eletricista e auxiliar de eletricista, somente na Controladoria.'} Convocações sem apontamento ficam fora dos custos.</div>`;configureReportTable(fin);$('#report-day-select').onchange=()=>{day=$('#report-day-select').value;refresh();};};bindFilters(()=>{if(financial){selectedCycle='custom';$('#financial-cycle').value='custom';}refresh();});if(financial){$('#financial-cycle').onchange=()=>{selectedCycle=$('#financial-cycle').value;renderReports();};if(selectedCycle!=='custom')$('#cycle-caption').textContent='Pagamento em '+formatDate(financialCycle(isoToday(),Number(selectedCycle)).pagamento);}refresh();bindExports();if(financial)bindFinancialSummaryExports();
+    const refresh=()=>{const rows=(financial?financialEntries():entries()).filter(x=>!financial||(x.c.extraAvulsa||(presence(x.i.status)&&x.extra+x.finance+x.night+x.bonus+x.ajudaCusto>0.005))),dates=[...new Set(filteredConvs().map(c=>c.dataServico))].sort();if(!dates.includes(day))day='Todos';$('#report-tabs').innerHTML=field('Visualização',`<select id="report-day-select" class="control"><option value="Todos">Consolidado do período</option>${dates.map(d=>`<option value="${d}">${formatDate(d)}</option>`).join('')}</select>`);$('#report-day-select').value=day;const selected=rows.filter(x=>day==='Todos'||x.c.dataServico===day);const fin=perfilAtual==='FINANCEIRO';$('#report-body').innerHTML=table(['Data','Supervisor','Unidade','Obra','Colaborador','Período','Status',fin?'Extra / Diária avulso (R$)':'Custo normal',fin?'Valores complementares já registrados (R$)':'Extra','Adic. noturno','Acordos / Bonificações',...(fin?['Passagens/Ajuda de custo']:['Periculosidade 30%']),'Total'],selected.map(x=>[formatDate(x.c.dataServico),x.c.supervisor,escapeHtml(x.c.unidade),escapeHtml(fin?financialWorkNumber(x.c.obraId):obraById(x.c.obraId)?.nome),escapeHtml(x.p?.nome),escapeHtml(x.service.periodo),escapeHtml(x.displayStatus||x.i.status),money(fin?x.extra:x.daily),fin?money(x.finance):escapeHtml(x.displayExtra||x.i.extra),money(x.night),money(x.bonus),...(fin?[money(x.ajudaCusto)]:[money(x.danger)]),money(fin?x.extra+x.finance+x.night+x.bonus+x.ajudaCusto:x.daily+x.extra+x.danger+x.night+x.bonus)]))+`<div class="notice info section">Valores de demonstração. ${fin?'Financeiro sem adicional de periculosidade.':'Periculosidade de 30% para eletricista e auxiliar de eletricista, somente na Controladoria.'} Convocações sem apontamento ficam fora dos custos.</div>`;configureReportTable(fin);$('#report-day-select').onchange=()=>{day=$('#report-day-select').value;refresh();};};bindFilters(()=>{if(financial){selectedCycle='custom';$('#financial-cycle').value='custom';}refresh();});if(financial){$('#financial-cycle').onchange=()=>{selectedCycle=$('#financial-cycle').value;renderReports();};if(selectedCycle!=='custom')$('#cycle-caption').textContent='Pagamento em '+formatDate(financialCycle(financialCycleReference(),Number(selectedCycle)).pagamento);}refresh();bindExports();if(financial)bindFinancialSummaryExports();
   }
   function renderDashboard(){
     $('#main-content').innerHTML=head('Dashboard','Presença, faltas e custos confirmados por unidade e responsável.')+filterControls(true)+'<div class="section" id="dash-body"></div>';
@@ -1858,9 +1881,9 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
   }
   let selectedCycle='0';
   let financeReleaseRequests=[];
-  function isFinancialEditingLocked(date,item){return Boolean(item?.financeAdjusted)&&now()>new Date(financialCycle(date).pagamento+'T10:00:00-03:00');}
+  function isFinancialEditingLocked(date,item){return now()>new Date(financialCycle(date).pagamento+'T10:00:00-03:00');}
   const isApprovedFinancial=(date,id,type)=>financeReleaseRequests.some(x=>x.status==='Autorizada'&&x.supervisor===supervisorAtual&&String(x.colaboradorId)===String(id)&&x.dataServico===date&&x.fields.includes(type));
-  function cycleControl(){return `<div class="card card-pad section">${field('Ciclo de pagamento',`<select class="control" id="financial-cycle">${Array.from({length:26},(_,index)=>{const c=financialCycle(isoToday(),-index);return `<option value="${-index}" ${String(-index)===selectedCycle?'selected':''}>${formatDate(c.inicio)} a ${formatDate(c.fim)} · pagamento ${formatDate(c.pagamento)}</option>`;}).join('')}<option value="custom" ${selectedCycle==='custom'?'selected':''}>Período personalizado</option></select>`)}<p id="cycle-caption" style="font-size:12px"></p></div>`;}
+  function cycleControl(){return `<div class="card card-pad section">${field('Ciclo de pagamento',`<select class="control" id="financial-cycle">${Array.from({length:26},(_,index)=>{const c=financialCycle(financialCycleReference(),-index);return `<option value="${-index}" ${String(-index)===selectedCycle?'selected':''}>${formatDate(c.inicio)} a ${formatDate(c.fim)} · pagamento ${formatDate(c.pagamento)}</option>`;}).join('')}<option value="custom" ${selectedCycle==='custom'?'selected':''}>Período personalizado</option></select>`)}<p id="cycle-caption" style="font-size:12px"></p></div>`;}
   function renderFinancialHistory(){
     const today=isoToday(),first=today.slice(0,8)+'01';
     $('#main-content').innerHTML=head('Histórico de registros financeiros','Confira inclusões e alterações de extras, bonificações e adicional noturno. Horários de Fortaleza.')
@@ -1909,7 +1932,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
     if(!supervisor&&!canApprove)return setView('inicio');
     const today=isoToday();
     $('#main-content').innerHTML=head(supervisor?'Solicitar liberação financeira':'Autorizações financeiras',
-      'Após as 10h da terça-feira de pagamento, apenas uma autorização da Controladoria ou do Financeiro permite alterar extras, bonificações, passagens, adicional noturno ou complemento.')
+      'Extras da semana a pagar: segunda-feira livre para lançar e terça-feira até 10h (Fortaleza). Para datas de ciclos anteriores ou após o prazo, solicite autorização ao Financeiro. A Controladoria também pode autorizar conforme permissões do sistema.')
       +(supervisor?'<div class="card card-pad"><h3>Solicitar preenchimento após o prazo</h3>'
         +'<p>Indique o colaborador, a data do serviço, as colunas a liberar e o motivo. A liberação é válida para um único salvamento.</p>'
         +'<form id="fr-form"><div class="form-grid">'
@@ -1976,8 +1999,8 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
     load();
   }
   function renderPayments(){
-    if(selectedCycle!=='custom'){const cycle=financialCycle(isoToday(),Number(selectedCycle));reportFilters.inicio=cycle.inicio;reportFilters.fim=cycle.fim;}
-    $('#main-content').innerHTML=head('Pagamentos','Ciclo de terça a segunda, com pagamento na terça seguinte.')+cycleControl()+filterControls('combined')+'<div class="section" id="pay-body"></div>'+exportButtons()+financialSummaryButtons();
+    if(selectedCycle!=='custom'){const cycle=financialCycle(financialCycleReference(),Number(selectedCycle));reportFilters.inicio=cycle.inicio;reportFilters.fim=cycle.fim;}
+    $('#main-content').innerHTML=head('Pagamentos','Ciclo acompanhado de domingo a segunda, com pagamento na terça e fechamento às 10h.')+cycleControl()+filterControls('combined')+'<div class="section" id="pay-body"></div>'+exportButtons()+financialSummaryButtons();
     const refresh=()=>{
       const e=financialEntries().filter(x=>x.extra>0.005||x.finance>0.005||x.night>0.005||x.bonus>0.005||x.ajudaCusto>0.005)
         .sort((a,b)=>a.c.dataServico.localeCompare(b.c.dataServico)||(a.p?.nome||'').localeCompare(b.p?.nome||'','pt-BR',{sensitivity:'base'})||(a.p?.id||'').localeCompare(b.p?.id||''));
@@ -2020,13 +2043,13 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
     };
     bindFilters(()=>{selectedCycle='custom';$('#financial-cycle').value='custom';refresh();});
     $('#financial-cycle').onchange=()=>{selectedCycle=$('#financial-cycle').value;renderPayments();};
-    if(selectedCycle!=='custom')$('#cycle-caption').textContent='Pagamento em '+formatDate(financialCycle(isoToday(),Number(selectedCycle)).pagamento);
+    if(selectedCycle!=='custom')$('#cycle-caption').textContent='Pagamento em '+formatDate(financialCycle(financialCycleReference(),Number(selectedCycle)).pagamento);
     refresh();bindExports();bindFinancialSummaryExports();
   }
   function absenceRecords(){const groups=new Map();for(const x of operationalRows(filteredConvs()).filter(x=>['Falta','Atestado'].includes(x.i?.status))){const key=[x.c.dataServico,x.i.colaboradorId,x.c.supervisor,x.i.status].join('|');if(!groups.has(key))groups.set(key,{...x,units:new Set(),notes:new Set()});const r=groups.get(key);r.units.add(x.c.unidade);if(x.i.observacao)r.notes.add(x.i.observacao);}return [...groups.values()].sort((a,b)=>a.c.dataServico.localeCompare(b.c.dataServico)||(a.p?.nome||'').localeCompare(b.p?.nome||'','pt-BR'));}
   function absenceReportRows(){return absenceRecords().map(x=>[formatDate(x.c.dataServico),x.c.supervisor,x.p?.nome||'',x.p?.funcao||'',[...x.units].join(', '),x.i.status,[...x.notes].join(' · ')]);}
   const absenceHeaders=['Data','Supervisor','Colaborador','Função','Unidade(s)','Status','Observação'];
-  function renderAbsences(){if(selectedCycle!=='custom'){const cycle=financialCycle(isoToday(),Number(selectedCycle));reportFilters.inicio=cycle.inicio;reportFilters.fim=cycle.fim;}$('#main-content').innerHTML=head('Faltas / Atestados','Ausências do ciclo de terça a segunda, separadas dos pagamentos de extras.')+cycleControl()+filterControls()+'<div class="section" id="abs-body"></div>'+exportButtons();const refresh=()=>$('#abs-body').innerHTML=table(absenceHeaders,absenceReportRows().map(r=>r.map(escapeHtml)));bindFilters(()=>{selectedCycle='custom';$('#financial-cycle').value='custom';refresh();});$('#financial-cycle').onchange=()=>{selectedCycle=$('#financial-cycle').value;renderAbsences();};if(selectedCycle!=='custom')$('#cycle-caption').textContent='Ciclo de terça a segunda · pagamento em '+formatDate(financialCycle(isoToday(),Number(selectedCycle)).pagamento);refresh();$('#export-csv').onclick=()=>{const csv=[absenceHeaders,...absenceReportRows()].map(r=>r.map(v=>'"'+String(v??'').replaceAll('"','""')+'"').join(';')).join('\r\n');localDownload('faltas_atestados_'+reportFilters.inicio+'_a_'+reportFilters.fim+'.csv','\uFEFF'+csv,'text/csv;charset=utf-8');};$('#export-excel').onclick=()=>exportWorkbook([{name:'Faltas e Atestados',headers:[3],titles:[0,1],freeze:4,merges:['A1:G1','A2:G2'],widths:[14,20,38,26,26,16,48],center:[0,5],rows:[['APROAR | FALTAS E ATESTADOS'],['Período: '+reportPeriod()],[],absenceHeaders,...absenceReportRows()]}],'faltas_atestados_'+reportFilters.inicio+'_a_'+reportFilters.fim);$('#export-pdf').onclick=()=>reportPDF('absences');}
+  function renderAbsences(){if(selectedCycle!=='custom'){const cycle=financialCycle(financialCycleReference(),Number(selectedCycle));reportFilters.inicio=cycle.inicio;reportFilters.fim=cycle.fim;}$('#main-content').innerHTML=head('Faltas / Atestados','Ausências do ciclo consultado (domingo a segunda), separadas dos pagamentos de extras.')+cycleControl()+filterControls()+'<div class="section" id="abs-body"></div>'+exportButtons();const refresh=()=>$('#abs-body').innerHTML=table(absenceHeaders,absenceReportRows().map(r=>r.map(escapeHtml)));bindFilters(()=>{selectedCycle='custom';$('#financial-cycle').value='custom';refresh();});$('#financial-cycle').onchange=()=>{selectedCycle=$('#financial-cycle').value;renderAbsences();};if(selectedCycle!=='custom')$('#cycle-caption').textContent='Ciclo de domingo a segunda · pagamento em '+formatDate(financialCycle(financialCycleReference(),Number(selectedCycle)).pagamento);refresh();$('#export-csv').onclick=()=>{const csv=[absenceHeaders,...absenceReportRows()].map(r=>r.map(v=>'"'+String(v??'').replaceAll('"','""')+'"').join(';')).join('\r\n');localDownload('faltas_atestados_'+reportFilters.inicio+'_a_'+reportFilters.fim+'.csv','\uFEFF'+csv,'text/csv;charset=utf-8');};$('#export-excel').onclick=()=>exportWorkbook([{name:'Faltas e Atestados',headers:[3],titles:[0,1],freeze:4,merges:['A1:G1','A2:G2'],widths:[14,20,38,26,26,16,48],center:[0,5],rows:[['APROAR | FALTAS E ATESTADOS'],['Período: '+reportPeriod()],[],absenceHeaders,...absenceReportRows()]}],'faltas_atestados_'+reportFilters.inicio+'_a_'+reportFilters.fim);$('#export-pdf').onclick=()=>reportPDF('absences');}
 
   let settingsTab='Obras';
   function renderSettingsBase(){
@@ -3237,7 +3260,7 @@ function renderEquipeDia(){
       const people=financialSummaryRows();
       const total=people.reduce((sum,p)=>sum+p.total,0);
       paragraph('Consolidado do período: uma linha por colaborador, em ordem alfabética.',10,bold);
-      if(viewAtual==='pagamentos'&&selectedCycle!=='custom')paragraph('Pagamento previsto: '+formatDate(financialCycle(isoToday(),Number(selectedCycle)).pagamento));
+      if(viewAtual==='pagamentos'&&selectedCycle!=='custom')paragraph('Pagamento previsto: '+formatDate(financialCycle(financialCycleReference(),Number(selectedCycle)).pagamento));
       paragraph('COLABORADORES: '+people.length+' | TOTAL A PAGAR: '+money(total),11,bold);
       grid(['Colaborador','Dias','Supervisor(es)','Valor da Extra','Valores anteriores','Noturno','Acordos','Passagens/Ajuda','Total'],people.map(p=>[p.nome,p.dias,p.supervisores,money(p.extra),money(p.finance),money(p.night),money(p.bonus),money(p.ajudaCusto),money(p.total)]),[2.9,.55,1.9,1.1,1.3,1.1,1.2,1.7,1.3],true);
     }else if(kind==='financial'){
@@ -3250,7 +3273,7 @@ function renderEquipeDia(){
         g.extra+=x.extra;g.finance+=x.finance;g.night+=x.night;g.bonus+=x.bonus;g.ajudaCusto+=x.ajudaCusto;
       }
       const values=[...groups.values()],amount=x=>x.extra+x.finance+x.night+x.bonus+x.ajudaCusto;
-      if(viewAtual==='pagamentos'&&selectedCycle!=='custom')paragraph('Pagamento previsto: '+formatDate(financialCycle(isoToday(),Number(selectedCycle)).pagamento));
+      if(viewAtual==='pagamentos'&&selectedCycle!=='custom')paragraph('Pagamento previsto: '+formatDate(financialCycle(financialCycleReference(),Number(selectedCycle)).pagamento));
       paragraph('TOTAL A PAGAR: '+money(values.reduce((a,x)=>a+amount(x),0)),12,bold);
       for(const sup of [...new Set(values.map(x=>x.sup))]){
         const xs=values.filter(x=>x.sup===sup);

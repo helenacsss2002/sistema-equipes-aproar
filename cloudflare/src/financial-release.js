@@ -1,5 +1,6 @@
 // Fluxo de liberação do supervisor: auditado e append-only na tabela auditoria.
-// Ciclo do Financeiro: terça-feira a segunda-feira; pagamento terça às 10h (Fortaleza).
+// Consulta financeira: domingo anterior até segunda de fechamento; pagamento terça às 10h (Fortaleza).
+// Os dias sobrepostos no visor pertencem somente à sua primeira terça de pagamento, sem cobrança duplicada.
 export const releaseFields=['Extra','Bonificação','Adicional noturno','Passagem / ajuda de custo','Complemento financeiro'];
 // Regra institucional: ao aprovar uma das colunas de pagamento, o FINANCEIRO
 // autoriza o mesmo pacote de 3 colunas (para o mesmo colaborador e data).
@@ -18,8 +19,11 @@ export function financialDeadline(serviceDate){
  const start=new Date(d);start.setUTCDate(start.getUTCDate()-sinceTuesday);
  const pay=new Date(start);pay.setUTCDate(pay.getUTCDate()+7);
  const payment=pay.toISOString().slice(0,10);
+ // O visor mostra domingo a segunda (9 dias). Os domingos/segundas que
+ // constam em dois visores são faturados apenas na primeira terça seguinte.
+ const displayStart=new Date(start);displayStart.setUTCDate(displayStart.getUTCDate()-2);
  // Fortaleza não utiliza horário de verão. 10:00 -03 equivale a 13:00 UTC.
- return {start:start.toISOString().slice(0,10),end:new Date(pay.valueOf()-86400000).toISOString().slice(0,10),
+ return {start:displayStart.toISOString().slice(0,10),end:new Date(pay.valueOf()-86400000).toISOString().slice(0,10),
    payment,limitAt:payment+'T10:00:00-03:00'};
 }
 export const afterFinancialDeadline=(serviceDate,timestamp)=>new Date(timestamp).getTime()>new Date(financialDeadline(serviceDate).limitAt).getTime();
