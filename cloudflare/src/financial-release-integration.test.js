@@ -18,8 +18,8 @@ test('Apontamento mantém valor e presença; pós-prazo só altera bonificação
   await pg.exec(fs.readFileSync(new URL('../migracao_homologacao.sql',import.meta.url),'utf8'));
   await pg.exec("INSERT INTO colaboradores(nome,funcao,valor_diaria) VALUES('QA VICTOR','Pintor',200)");
   await pg.exec("INSERT INTO obras(unidade,nome) VALUES('CENTRO','QA SERVIÇO')");
-  await pg.exec("INSERT INTO convocacoes(obra_id,colaborador_id,data,engenheiro,turno,observacao) VALUES(1,1,'2026-10-26','VICTOR','Integral','Turno: Integral')");
-  await pg.exec("INSERT INTO apontamentos(convocacao_id,data_servico,colaborador_id,engenheiro,status,valor_acordo,apontado_por,apontado_em,custo_encargos_base) VALUES('1','2026-10-26','1','VICTOR','Presente (Integral)',30,'VICTOR','2026-10-26T20:00:00Z',200)");
+  await pg.exec("INSERT INTO convocacoes(obra_id,colaborador_id,data,engenheiro,turno,observacao) VALUES(1,1,'2026-10-25','VICTOR','Integral','Turno: Integral')");
+  await pg.exec("INSERT INTO apontamentos(convocacao_id,data_servico,colaborador_id,engenheiro,status,valor_acordo,apontado_por,apontado_em,custo_encargos_base) VALUES('1','2026-10-25','1','VICTOR','Presente (Integral)',30,'VICTOR','2026-10-25T20:00:00Z',200)");
   await pg.exec("INSERT INTO servicos_apontamento(convocacao_id,obra_id,unidade_snapshot,obra_nome_snapshot,periodo,principal) VALUES('1','1','CENTRO','QA SERVIÇO','Integral',true)");
   const sql=driver(pg),db=await readDatabase(sql);
   const next=structuredClone(db.state);
@@ -29,7 +29,7 @@ test('Apontamento mantém valor e presença; pós-prazo só altera bonificação
   assert.equal((await pg.query('SELECT valor_acordo FROM apontamentos WHERE id=1')).rows[0].valor_acordo,'30');
   const requestId='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
   db.releaseEvents=[
-   {acao:'SOLICITACAO_LIBERACAO_FINANCEIRA',usuario:'VICTOR',ocorrido_em:'2026-10-27T13:01:00Z',contexto:{requestId,supervisor:'VICTOR',colaboradorId:'1',dataServico:'2026-10-26',fields:['Bonificação'],reason:'Correção testada'}},
+   {acao:'SOLICITACAO_LIBERACAO_FINANCEIRA',usuario:'VICTOR',ocorrido_em:'2026-10-27T13:01:00Z',contexto:{requestId,supervisor:'VICTOR',colaboradorId:'1',dataServico:'2026-10-25',fields:['Bonificação'],reason:'Correção testada'}},
    {acao:'LIBERACAO_FINANCEIRA_AUTORIZADA',usuario:'FINANCEIRO',ocorrido_em:'2026-10-27T13:02:00Z',contexto:{requestId}}
   ];
   const ops=buildOperations(db,next,supervisor,timestamp);

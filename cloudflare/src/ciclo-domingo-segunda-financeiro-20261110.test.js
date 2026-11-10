@@ -50,7 +50,8 @@ test('A tela e o servidor compartilham a terça de pagamento e hora de corte',()
   assert.equal(server.payment,ui.pagamento,date);
  }
  assert.equal(afterFinancialDeadline('2026-11-09','2026-11-10T12:59:59Z'),false);
- assert.equal(afterFinancialDeadline('2026-11-09','2026-11-10T13:00:01Z'),true);
+ assert.equal(afterFinancialDeadline('2026-11-09','2026-11-10T13:00:01Z'),false);
+ assert.equal(afterFinancialDeadline('2026-11-08','2026-11-10T13:00:01Z'),true);
 });
 test('A tela só permite edição financeira sem autorização antes do prazo, mesmo sem ajuste prévio',()=>{
  assert.match(app,/function isFinancialEditingLocked\(date,item\)\{return now\(\)>new Date\(financialCycle\(date\)\.pagamento\+'T10:00:00-03:00'\);\}/);

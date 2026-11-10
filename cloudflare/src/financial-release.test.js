@@ -119,7 +119,7 @@ test('Aprovação do Financeiro apenas para Extra libera também Bonificação e
 test('Liberação de outro colaborador, outra data ou outro supervisor nunca é aproveitada',()=>{
  const same={supervisor:'VICTOR',colaboradorId:'71',dataServico:'2026-10-25',fields:['Extra']};
  const used=new Map();
- for(const changed of [{colaboradorId:'72'},{dataServico:'2026-10-25'},{supervisor:'FELIPE'}]){
+ for(const changed of [{colaboradorId:'72'},{dataServico:'2026-10-24'},{supervisor:'FELIPE'}]){
   assert.throws(()=>requireApprovedReleases(events,{...same,...changed},timestamp,used),/Solicite liberação/);
  }
  assert.equal(used.size,0);
