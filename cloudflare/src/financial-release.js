@@ -1,6 +1,6 @@
 // Fluxo de liberação do supervisor: auditado e append-only na tabela auditoria.
-// Consulta financeira: domingo anterior até segunda de fechamento; pagamento terça às 10h (Fortaleza).
-// Os dias sobrepostos no visor pertencem somente à sua primeira terça de pagamento, sem cobrança duplicada.
+// Ciclo financeiro: segunda-feira a domingo, sem sobreposição.
+// O supervisor pode lançar esse ciclo até terça-feira seguinte às 10h (Fortaleza).
 export const releaseFields=['Extra','Bonificação','Adicional noturno','Passagem / ajuda de custo','Complemento financeiro'];
 // Regra institucional: ao aprovar uma das colunas de pagamento, o FINANCEIRO
 // autoriza o mesmo pacote de 3 colunas (para o mesmo colaborador e data).
@@ -15,15 +15,13 @@ export const releaseActions=['SOLICITACAO_LIBERACAO_FINANCEIRA','LIBERACAO_FINAN
 const day=v=>{if(!/^\d{4}-\d{2}-\d{2}$/.test(String(v)))throw Error('Data inválida.');const d=new Date(String(v)+'T12:00:00Z');if(!Number.isFinite(d.valueOf())||d.toISOString().slice(0,10)!==v)throw Error('Data inválida.');return d;};
 export function financialDeadline(serviceDate){
  const d=day(serviceDate);
- const sinceTuesday=(d.getUTCDay()+5)%7;
- const start=new Date(d);start.setUTCDate(start.getUTCDate()-sinceTuesday);
- const pay=new Date(start);pay.setUTCDate(pay.getUTCDate()+7);
+ const sinceMonday=(d.getUTCDay()+6)%7;
+ const start=new Date(d);start.setUTCDate(start.getUTCDate()-sinceMonday);
+ const end=new Date(start);end.setUTCDate(end.getUTCDate()+6);
+ const pay=new Date(start);pay.setUTCDate(pay.getUTCDate()+8);
  const payment=pay.toISOString().slice(0,10);
- // O visor mostra domingo a segunda (9 dias). Os domingos/segundas que
- // constam em dois visores são faturados apenas na primeira terça seguinte.
- const displayStart=new Date(start);displayStart.setUTCDate(displayStart.getUTCDate()-2);
- // Fortaleza não utiliza horário de verão. 10:00 -03 equivale a 13:00 UTC.
- return {start:displayStart.toISOString().slice(0,10),end:new Date(pay.valueOf()-86400000).toISOString().slice(0,10),
+ // Terça 10h -03:00 (Fortaleza) = terça 13h UTC.
+ return {start:start.toISOString().slice(0,10),end:end.toISOString().slice(0,10),
    payment,limitAt:payment+'T10:00:00-03:00'};
 }
 export const afterFinancialDeadline=(serviceDate,timestamp)=>new Date(timestamp).getTime()>new Date(financialDeadline(serviceDate).limitAt).getTime();

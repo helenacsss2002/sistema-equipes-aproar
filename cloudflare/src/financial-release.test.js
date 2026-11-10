@@ -9,27 +9,27 @@ const worker=fs.readFileSync(new URL('./worker.js',import.meta.url),'utf8');
 const operations=fs.readFileSync(new URL('./operations.js',import.meta.url),'utf8');
 const ui=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
 
-test('Ciclo visual domingo a segunda fecha terça às 10h, com datas não duplicadas de pagamento',()=>{
- const dates=['2026-10-20','2026-10-21','2026-10-26'];
+test('Ciclo segunda a domingo fecha na terça seguinte às 10h, Fortaleza',()=>{
+ const dates=['2026-10-19','2026-10-20','2026-10-25'];
  for(const date of dates){
-  assert.deepEqual(financialDeadline(date),{start:'2026-10-18',end:'2026-10-26',payment:'2026-10-27',limitAt:'2026-10-27T10:00:00-03:00'});
+  assert.deepEqual(financialDeadline(date),{start:'2026-10-19',end:'2026-10-25',payment:'2026-10-27',limitAt:'2026-10-27T10:00:00-03:00'});
   assert.equal(afterFinancialDeadline(date,'2026-10-27T12:59:59.999Z'),false);
   assert.equal(afterFinancialDeadline(date,'2026-10-27T13:00:00.000Z'),false);
   assert.equal(afterFinancialDeadline(date,'2026-10-27T13:00:01.000Z'),true);
  }
  assert.equal(financialDeadline('2026-10-27').payment,'2026-11-03');
- assert.equal(financialDeadline('2026-11-02').payment,'2026-11-03');
+ assert.equal(financialDeadline('2026-11-02').payment,'2026-11-10');
 });
 const timestamp='2026-10-27T13:01:00.000Z';
 const requestId='11111111-1111-4111-8111-111111111111';
-const ctx={requestId,supervisor:'VICTOR',colaboradorId:'71',dataServico:'2026-10-26',
+const ctx={requestId,supervisor:'VICTOR',colaboradorId:'71',dataServico:'2026-10-25',
  fields:['Extra','Bonificação','Passagem / ajuda de custo'],reason:'Correção de pagamento comprovada'};
 const events=[
  {acao:'SOLICITACAO_LIBERACAO_FINANCEIRA',usuario:'VICTOR',ocorrido_em:'2026-10-27T13:00:02Z',contexto:ctx},
  {acao:'LIBERACAO_FINANCEIRA_AUTORIZADA',usuario:'FINANCEIRO',ocorrido_em:'2026-10-27T13:00:10Z',contexto:{requestId}}
 ];
 test('Avulso eventual usa ID virtual na solicitação financeira e mantém escopo do lançamento',()=>{
- const data={colaboradorId:'avulso-cleandro-11-04',dataServico:'2026-10-26',fields:['Extra'],reason:'Revisar valor de extra do avulso'};
+ const data={colaboradorId:'avulso-cleandro-11-04',dataServico:'2026-10-25',fields:['Extra'],reason:'Revisar valor de extra do avulso'};
  assert.equal(validRequest(data).colaboradorId,'avulso-cleandro-11-04');
  assert.throws(()=>validRequest({...data,colaboradorId:'avulso;;;DELETE'}),/Colaborador inválido/);
  assert.match(worker,/metadata\(c\.observacao\)\.meta\.avulso_eventual\?\.id/);
@@ -37,7 +37,7 @@ test('Avulso eventual usa ID virtual na solicitação financeira e mantém escop
 test('Autorização do Financeiro libera apenas o colaborador/data/campos solicitados e apenas uma vez',()=>{
  assert.equal(releaseState(events)[0].status,'Autorizada');
  const consumed=new Set();
- const params={supervisor:'VICTOR',colaboradorId:'71',dataServico:'2026-10-26',fields:['Extra','Bonificação']};
+ const params={supervisor:'VICTOR',colaboradorId:'71',dataServico:'2026-10-25',fields:['Extra','Bonificação']};
  const op=requireApprovedRelease(events,params,timestamp,consumed);
  assert.equal(op.data.acao,'LIBERACAO_FINANCEIRA_UTILIZADA');
  assert.equal(op.data.contexto.approvedBy,'FINANCEIRO');
@@ -50,7 +50,7 @@ test('Autorização do Financeiro libera apenas o colaborador/data/campos solici
  assert.equal(requireApprovedRelease([],params,'2026-10-27T12:59:00Z'),null);
 });
 test('Uma autorização no mesmo salvamento pode cobrir extra e apontamento do mesmo colaborador uma única vez',()=>{
- const used=new Map(),params={supervisor:'VICTOR',colaboradorId:'71',dataServico:'2026-10-26',fields:['Extra']};
+ const used=new Map(),params={supervisor:'VICTOR',colaboradorId:'71',dataServico:'2026-10-25',fields:['Extra']};
  const first=requireApprovedRelease(events,params,timestamp,used);
  const second=requireApprovedRelease(events,params,timestamp,used);
  assert.equal(first.data.acao,'LIBERACAO_FINANCEIRA_UTILIZADA');
@@ -62,7 +62,7 @@ test('Uma autorização no mesmo salvamento pode cobrir extra e apontamento do m
 test('Liberações independentes de Extra e Bonificação cobrem um salvamento único, sem solicitar novamente',()=>{
  const extraId='22222222-2222-4222-8222-222222222222';
  const bonusId='33333333-3333-4333-8333-333333333333';
- const scope={supervisor:'VICTOR',colaboradorId:'71',dataServico:'2026-10-26'};
+ const scope={supervisor:'VICTOR',colaboradorId:'71',dataServico:'2026-10-25'};
  const grants=[
   {acao:'SOLICITACAO_LIBERACAO_FINANCEIRA',usuario:'VICTOR',ocorrido_em:'2026-10-27T13:00:01Z',contexto:{requestId:extraId,...scope,fields:['Extra']}},
   {acao:'LIBERACAO_FINANCEIRA_AUTORIZADA',usuario:'FINANCEIRO',ocorrido_em:'2026-10-27T13:00:02Z',contexto:{requestId:extraId}},
@@ -96,7 +96,7 @@ test('Aprovação do Financeiro apenas para Extra libera também Bonificação e
  assert.deepEqual(authorizedFieldsForApproval(['Adicional noturno'],'FINANCEIRO'),['Adicional noturno']);
  assert.deepEqual(authorizedFieldsForApproval(['Complemento financeiro'],'FINANCEIRO'),['Complemento financeiro']);
  const id='44444444-4444-4444-8444-444444444444';
- const scope={supervisor:'VICTOR',colaboradorId:'71',dataServico:'2026-10-26'};
+ const scope={supervisor:'VICTOR',colaboradorId:'71',dataServico:'2026-10-25'};
  const approved=[
   {acao:'SOLICITACAO_LIBERACAO_FINANCEIRA',usuario:'VICTOR',ocorrido_em:'2026-10-27T13:00:01Z',
    contexto:{requestId:id,...scope,fields:['Extra'],reason:'Corrigir pagamento'}},
@@ -117,7 +117,7 @@ test('Aprovação do Financeiro apenas para Extra libera também Bonificação e
  assert.throws(()=>requireApprovedReleases(approved,{...scope,colaboradorId:'72',fields:['Extra']},timestamp,new Map()),/Solicite liberação/);
 });
 test('Liberação de outro colaborador, outra data ou outro supervisor nunca é aproveitada',()=>{
- const same={supervisor:'VICTOR',colaboradorId:'71',dataServico:'2026-10-26',fields:['Extra']};
+ const same={supervisor:'VICTOR',colaboradorId:'71',dataServico:'2026-10-25',fields:['Extra']};
  const used=new Map();
  for(const changed of [{colaboradorId:'72'},{dataServico:'2026-10-25'},{supervisor:'FELIPE'}]){
   assert.throws(()=>requireApprovedReleases(events,{...same,...changed},timestamp,used),/Solicite liberação/);
@@ -130,7 +130,7 @@ test('Solicitação negada ou consumida não pode mais ser utilizada',()=>{
   const e=action==='LIBERACAO_FINANCEIRA_NEGADA'?[events[0],event]:[...events,event];
   const state=releaseState(e)[0];
   assert.notEqual(state.status,'Autorizada');
-  assert.throws(()=>requireApprovedRelease(e,{supervisor:'VICTOR',colaboradorId:'71',dataServico:'2026-10-26',fields:['Extra']},timestamp),/Solicite liberação/);
+  assert.throws(()=>requireApprovedRelease(e,{supervisor:'VICTOR',colaboradorId:'71',dataServico:'2026-10-25',fields:['Extra']},timestamp),/Solicite liberação/);
  }
 });
 test('Mudanças de extra, bonificação, passagem, noturno e complemento são detectadas separadamente',()=>{
@@ -140,7 +140,7 @@ test('Mudanças de extra, bonificação, passagem, noturno e complemento são de
  assert.deepEqual(changedFinancialFields(current,{...current}),[]);
 });
 test('Solicitações exigem justificativa e campos válidos',()=>{
- const valid={colaboradorId:'71',dataServico:'2026-10-26',fields:['Extra','Bonificação'],reason:'Apontamento precisa de correção'};
+ const valid={colaboradorId:'71',dataServico:'2026-10-25',fields:['Extra','Bonificação'],reason:'Apontamento precisa de correção'};
  assert.deepEqual(validRequest(valid),valid);
  assert.throws(()=>validRequest({...valid,reason:'x'}),/motivo/);
  assert.throws(()=>validRequest({...valid,fields:['Extra','Extra']}),/colunas/);
@@ -170,18 +170,16 @@ test('Supervisor solicita e Controladoria ou Financeiro aprova no menu',()=>{
  assert.match(ui,/isApprovedFinancial\(serviceDate,cid,'Passagem \/ ajuda de custo'\)/);
 });
 
-test('Mesmo no visor sobreposto, domingo e segunda pertencem a uma única terça',()=>{
+test('Ciclo 02 a 08/11 é pago exatamente em 10/11, sem datas duplicadas',()=>{
+ const expected={start:'2026-11-02',end:'2026-11-08',payment:'2026-11-10',limitAt:'2026-11-10T10:00:00-03:00'};
+ for(const date of ['2026-11-02','2026-11-03','2026-11-04','2026-11-05','2026-11-06','2026-11-07','2026-11-08']){
+  assert.deepEqual(financialDeadline(date),expected,date);
+ }
  assert.equal(financialDeadline('2026-11-01').payment,'2026-11-03');
- assert.equal(financialDeadline('2026-11-02').payment,'2026-11-03');
- assert.deepEqual(financialDeadline('2026-11-03'),{
-  start:'2026-11-01',end:'2026-11-09',
-  payment:'2026-11-10',limitAt:'2026-11-10T10:00:00-03:00'
- });
- assert.equal(financialDeadline('2026-11-08').payment,'2026-11-10');
- assert.equal(financialDeadline('2026-11-09').payment,'2026-11-10');
- assert.equal(financialDeadline('2026-11-10').payment,'2026-11-17');
- assert.equal(afterFinancialDeadline('2026-11-09','2026-11-10T12:59:59.999Z'),false);
- assert.equal(afterFinancialDeadline('2026-11-09','2026-11-10T13:00:01.000Z'),true);
- assert.equal(afterFinancialDeadline('2026-11-02','2026-11-10T12:00:00.000Z'),true);
- assert.equal(afterFinancialDeadline('2026-11-16','2026-11-16T13:00:00.000Z'),false);
+ assert.deepEqual(financialDeadline('2026-11-09'),{start:'2026-11-09',end:'2026-11-15',payment:'2026-11-17',limitAt:'2026-11-17T10:00:00-03:00'});
+ assert.equal(afterFinancialDeadline('2026-11-02','2026-11-10T12:59:59Z'),false);
+ assert.equal(afterFinancialDeadline('2026-11-08','2026-11-10T13:00:00Z'),false);
+ assert.equal(afterFinancialDeadline('2026-11-02','2026-11-10T13:00:01Z'),true);
+ assert.equal(afterFinancialDeadline('2026-11-01','2026-11-10T12:00:00Z'),true);
+ assert.equal(afterFinancialDeadline('2026-11-09','2026-11-10T13:01:00Z'),false);
 });

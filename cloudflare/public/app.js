@@ -1763,9 +1763,8 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
   // O Financeiro considera o valor informado pelo supervisor, independentemente
   // de "Houve extra?". O custo operacional continua com extras por categoria.
   function financialEntries(){
-    // Domingo a segunda é a janela de consulta; os dois dias sobrepostos
-    // com o visor seguinte pertencem apenas ao pagamento da primeira
-    // terça após o serviço, impedindo reaparecimento e pagamento duplo.
+    // A semana de segunda a domingo pertence a um único pagamento na terça.
+    // O filtro abaixo impede que uma data entre em outro ciclo.
     const paymentCycle=typeof selectedCycle==='string'&&selectedCycle!=='custom'
       ?financialCycle(financialCycleReference(),Number(selectedCycle)).pagamento:null;
     const map=new Map(),extrasIndependentes=new Map();
@@ -1818,19 +1817,18 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
   function financialSummaryRows(rows=financialEntries()){return globalThis.APROARFinanceConsolidado.summarize(rows);}
   function adjustPayment(row,field,value){if(onlineSaving||onlineQueued)return showToast('Aguarde a gravação em andamento.',true);const data={financeiro:row.finance,noturno:row.night,acordo:row.bonus,ajudaCusto:row.ajudaCusto};data[field]=Math.max(0,Number(value)||0);for(const [index,i] of row.refs.entries()){i.financeiro=index===0?roundMoney(data.financeiro):0;i.noturno=index===0&&row.units.has('SEBRAE')?roundMoney(data.noturno):0;i.acordo=index===0?roundMoney(data.acordo):0;i.ajudaCusto=index===0?roundMoney(data.ajudaCusto):0;i.financeAdjusted=true;}saveFinancialUpdates(row.refs);}
   function financialCycle(ref=isoToday(),offset=0){
-    const d=dateLocal(ref),n=(d.getDay()-2+7)%7;
-    d.setDate(d.getDate()-n+offset*7);
-    const inicio=new Date(d);inicio.setDate(inicio.getDate()-2); // Domingo de referência
-    const fim=new Date(d);fim.setDate(fim.getDate()+6);         // Segunda de fechamento
-    const pay=new Date(fim);pay.setDate(pay.getDate()+1);       // Terça do pagamento
-    return {inicio:calendarISO(inicio),fim:calendarISO(fim),pagamento:calendarISO(pay)};
+    const d=dateLocal(ref),n=(d.getDay()+6)%7;
+    d.setDate(d.getDate()-n+offset*7);                    // Segunda
+    const fim=new Date(d);fim.setDate(fim.getDate()+6);  // Domingo
+    const pay=new Date(d);pay.setDate(pay.getDate()+8);  // Terça após o domingo
+    return {inicio:calendarISO(d),fim:calendarISO(fim),pagamento:calendarISO(pay)};
   }
   function financialCycleReference(){
-    // Até terça às 10h o ciclo que acaba de fechar na segunda ainda é
-    // editável e deve aparecer por padrão no Financeiro.
+    // Até terça às 10h o Financeiro acompanha a semana fechada no domingo
+    // anterior, que será paga nessa terça. Depois mostra a semana corrente.
     const today=isoToday(),current=dateLocal(today);
     if(current.getDay()===2&&now()<=new Date(today+'T10:00:00-03:00')){
-      current.setDate(current.getDate()-1);
+      current.setDate(current.getDate()-2);
       return calendarISO(current);
     }
     return today;
@@ -1932,7 +1930,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
     if(!supervisor&&!canApprove)return setView('inicio');
     const today=isoToday();
     $('#main-content').innerHTML=head(supervisor?'Solicitar liberação financeira':'Autorizações financeiras',
-      'Extras da semana a pagar: segunda-feira livre para lançar e terça-feira até 10h (Fortaleza). Para datas de ciclos anteriores ou após o prazo, solicite autorização ao Financeiro. A Controladoria também pode autorizar conforme permissões do sistema.')
+      'Extras de segunda a domingo: a segunda-feira seguinte está livre para lançamento e a terça-feira seguinte até 10h (Fortaleza). Para ciclos anteriores ou após o prazo, solicite autorização ao Financeiro. A Controladoria também pode autorizar conforme permissões do sistema.')
       +(supervisor?'<div class="card card-pad"><h3>Solicitar preenchimento após o prazo</h3>'
         +'<p>Indique o colaborador, a data do serviço, as colunas a liberar e o motivo. A liberação é válida para um único salvamento.</p>'
         +'<form id="fr-form"><div class="form-grid">'
@@ -2000,7 +1998,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
   }
   function renderPayments(){
     if(selectedCycle!=='custom'){const cycle=financialCycle(financialCycleReference(),Number(selectedCycle));reportFilters.inicio=cycle.inicio;reportFilters.fim=cycle.fim;}
-    $('#main-content').innerHTML=head('Pagamentos','Ciclo acompanhado de domingo a segunda, com pagamento na terça e fechamento às 10h.')+cycleControl()+filterControls('combined')+'<div class="section" id="pay-body"></div>'+exportButtons()+financialSummaryButtons();
+    $('#main-content').innerHTML=head('Pagamentos','Ciclo de segunda a domingo, com pagamento na terça seguinte e lançamentos até 10h.')+cycleControl()+filterControls('combined')+'<div class="section" id="pay-body"></div>'+exportButtons()+financialSummaryButtons();
     const refresh=()=>{
       const e=financialEntries().filter(x=>x.extra>0.005||x.finance>0.005||x.night>0.005||x.bonus>0.005||x.ajudaCusto>0.005)
         .sort((a,b)=>a.c.dataServico.localeCompare(b.c.dataServico)||(a.p?.nome||'').localeCompare(b.p?.nome||'','pt-BR',{sensitivity:'base'})||(a.p?.id||'').localeCompare(b.p?.id||''));
@@ -2049,7 +2047,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
   function absenceRecords(){const groups=new Map();for(const x of operationalRows(filteredConvs()).filter(x=>['Falta','Atestado'].includes(x.i?.status))){const key=[x.c.dataServico,x.i.colaboradorId,x.c.supervisor,x.i.status].join('|');if(!groups.has(key))groups.set(key,{...x,units:new Set(),notes:new Set()});const r=groups.get(key);r.units.add(x.c.unidade);if(x.i.observacao)r.notes.add(x.i.observacao);}return [...groups.values()].sort((a,b)=>a.c.dataServico.localeCompare(b.c.dataServico)||(a.p?.nome||'').localeCompare(b.p?.nome||'','pt-BR'));}
   function absenceReportRows(){return absenceRecords().map(x=>[formatDate(x.c.dataServico),x.c.supervisor,x.p?.nome||'',x.p?.funcao||'',[...x.units].join(', '),x.i.status,[...x.notes].join(' · ')]);}
   const absenceHeaders=['Data','Supervisor','Colaborador','Função','Unidade(s)','Status','Observação'];
-  function renderAbsences(){if(selectedCycle!=='custom'){const cycle=financialCycle(financialCycleReference(),Number(selectedCycle));reportFilters.inicio=cycle.inicio;reportFilters.fim=cycle.fim;}$('#main-content').innerHTML=head('Faltas / Atestados','Ausências do ciclo consultado (domingo a segunda), separadas dos pagamentos de extras.')+cycleControl()+filterControls()+'<div class="section" id="abs-body"></div>'+exportButtons();const refresh=()=>$('#abs-body').innerHTML=table(absenceHeaders,absenceReportRows().map(r=>r.map(escapeHtml)));bindFilters(()=>{selectedCycle='custom';$('#financial-cycle').value='custom';refresh();});$('#financial-cycle').onchange=()=>{selectedCycle=$('#financial-cycle').value;renderAbsences();};if(selectedCycle!=='custom')$('#cycle-caption').textContent='Ciclo de domingo a segunda · pagamento em '+formatDate(financialCycle(financialCycleReference(),Number(selectedCycle)).pagamento);refresh();$('#export-csv').onclick=()=>{const csv=[absenceHeaders,...absenceReportRows()].map(r=>r.map(v=>'"'+String(v??'').replaceAll('"','""')+'"').join(';')).join('\r\n');localDownload('faltas_atestados_'+reportFilters.inicio+'_a_'+reportFilters.fim+'.csv','\uFEFF'+csv,'text/csv;charset=utf-8');};$('#export-excel').onclick=()=>exportWorkbook([{name:'Faltas e Atestados',headers:[3],titles:[0,1],freeze:4,merges:['A1:G1','A2:G2'],widths:[14,20,38,26,26,16,48],center:[0,5],rows:[['APROAR | FALTAS E ATESTADOS'],['Período: '+reportPeriod()],[],absenceHeaders,...absenceReportRows()]}],'faltas_atestados_'+reportFilters.inicio+'_a_'+reportFilters.fim);$('#export-pdf').onclick=()=>reportPDF('absences');}
+  function renderAbsences(){if(selectedCycle!=='custom'){const cycle=financialCycle(financialCycleReference(),Number(selectedCycle));reportFilters.inicio=cycle.inicio;reportFilters.fim=cycle.fim;}$('#main-content').innerHTML=head('Faltas / Atestados','Ausências do ciclo de segunda a domingo, separadas dos pagamentos de extras.')+cycleControl()+filterControls()+'<div class="section" id="abs-body"></div>'+exportButtons();const refresh=()=>$('#abs-body').innerHTML=table(absenceHeaders,absenceReportRows().map(r=>r.map(escapeHtml)));bindFilters(()=>{selectedCycle='custom';$('#financial-cycle').value='custom';refresh();});$('#financial-cycle').onchange=()=>{selectedCycle=$('#financial-cycle').value;renderAbsences();};if(selectedCycle!=='custom')$('#cycle-caption').textContent='Ciclo de segunda a domingo · pagamento em '+formatDate(financialCycle(financialCycleReference(),Number(selectedCycle)).pagamento);refresh();$('#export-csv').onclick=()=>{const csv=[absenceHeaders,...absenceReportRows()].map(r=>r.map(v=>'"'+String(v??'').replaceAll('"','""')+'"').join(';')).join('\r\n');localDownload('faltas_atestados_'+reportFilters.inicio+'_a_'+reportFilters.fim+'.csv','\uFEFF'+csv,'text/csv;charset=utf-8');};$('#export-excel').onclick=()=>exportWorkbook([{name:'Faltas e Atestados',headers:[3],titles:[0,1],freeze:4,merges:['A1:G1','A2:G2'],widths:[14,20,38,26,26,16,48],center:[0,5],rows:[['APROAR | FALTAS E ATESTADOS'],['Período: '+reportPeriod()],[],absenceHeaders,...absenceReportRows()]}],'faltas_atestados_'+reportFilters.inicio+'_a_'+reportFilters.fim);$('#export-pdf').onclick=()=>reportPDF('absences');}
 
   let settingsTab='Obras';
   function renderSettingsBase(){

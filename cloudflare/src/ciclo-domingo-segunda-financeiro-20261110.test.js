@@ -21,21 +21,22 @@ function context(time='2026-11-10T11:59:59Z'){
  vm.runInContext(source+'\nglobalThis.cycle=financialCycle;globalThis.anchor=financialCycleReference;',ctx);
  return ctx;
 }
-test('O painel do Financeiro acompanha domingo a segunda com pagamento terça seguinte',()=>{
+test('O painel do Financeiro mostra 02 a 08/11 pagos em 10/11',()=>{
  const ctx=context();
- const cycle=ctx.cycle('2026-11-09');
- assert.equal(cycle.inicio,'2026-11-01');
- assert.equal(cycle.fim,'2026-11-09');
+ const cycle=ctx.cycle('2026-11-08');
+ assert.equal(cycle.inicio,'2026-11-02');
+ assert.equal(cycle.fim,'2026-11-08');
  assert.equal(cycle.pagamento,'2026-11-10');
- assert.equal(ctx.cycle('2026-11-10').inicio,'2026-11-08');
- assert.equal(ctx.cycle('2026-11-10').fim,'2026-11-16');
+ assert.equal(ctx.cycle('2026-11-09').inicio,'2026-11-09');
+ assert.equal(ctx.cycle('2026-11-09').fim,'2026-11-15');
+ assert.equal(ctx.cycle('2026-11-09').pagamento,'2026-11-17');
 });
 test('Terça até 10h abre por padrão o ciclo ainda não pago; depois mostra a semana seguinte',()=>{
  const before=context('2026-11-10T12:59:59Z');
- assert.equal(before.anchor(),'2026-11-09');
+ assert.equal(before.anchor(),'2026-11-08');
  assert.equal(before.cycle(before.anchor()).pagamento,'2026-11-10');
  const at=context('2026-11-10T13:00:00Z');
- assert.equal(at.anchor(),'2026-11-09');
+ assert.equal(at.anchor(),'2026-11-08');
  const after=context('2026-11-10T13:00:01Z');
  assert.equal(after.anchor(),'2026-11-10');
  assert.equal(after.cycle(after.anchor()).pagamento,'2026-11-17');
@@ -55,11 +56,14 @@ test('A tela só permite edição financeira sem autorização antes do prazo, m
  assert.match(app,/function isFinancialEditingLocked\(date,item\)\{return now\(\)>new Date\(financialCycle\(date\)\.pagamento\+'T10:00:00-03:00'\);\}/);
  assert.doesNotMatch(app,/Boolean\(item\?\.financeAdjusted\)&&now\(\)/);
 });
-test('Datas sobrepostas em dois visores financeiros não são pagas duas vezes',()=>{
+test('Semanas consecutivas são disjuntas e não há pagamentos duplicados',()=>{
  const src=app.slice(app.indexOf('  function financialEntries(){'),app.indexOf('  function financialSummaryRows('));
  assert.match(src,/const paymentCycle=typeof selectedCycle==='string'/);
  assert.match(src,/financialCycle\(x\.c\.dataServico\)\.pagamento!==paymentCycle\)continue/);
  assert.match(app,/financialCycle\(financialCycleReference\(\),Number\(selectedCycle\)\)/);
+ const ctx=context();
+ assert.equal(ctx.cycle('2026-11-08').fim,'2026-11-08');
+ assert.equal(ctx.cycle('2026-11-09').inicio,'2026-11-09');
 });
 
 test('Passagem e noturno vencidos são bloqueados na interface, mesmo sem ajuste financeiro anterior',()=>{
