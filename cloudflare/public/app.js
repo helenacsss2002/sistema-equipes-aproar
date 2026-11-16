@@ -1052,7 +1052,33 @@
   
   let onlineVersion='',onlineSession=null,onlineWritable=false,onlineConfirmed=null,onlineQueued=false,onlineSaving=false,onlineMessage='';
   const copy=v=>JSON.parse(JSON.stringify(v));
-  async function api(path,options={}){const response=await fetch(path,{credentials:'same-origin',...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});const data=await response.json();if(!response.ok)throw Object.assign(new Error(data.error||'Falha na comunicação.'),{status:response.status});return data;}
+  async function api(path,options={}){
+    // Apenas GET e /api/save podem ser repetidos com segurança. O salvamento
+    // reutiliza o mesmo requestId, permitindo deduplicação pelo servidor.
+    const method=String(options.method||'GET').toUpperCase();
+    const retryable=method==='GET'||(method==='POST'&&path==='/api/save');
+    const delays=[300,750,1500];
+    let lastError;
+    for(let attempt=0;attempt<=delays.length;attempt++){
+      try{
+        const response=await fetch(path,{credentials:'same-origin',...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});
+        const data=await response.json().catch(()=>null);
+        if(response.ok){
+          if(data===null)throw Object.assign(new Error('Resposta inválida do servidor.'),{status:response.status});
+          return data;
+        }
+        const error=Object.assign(new Error(data?.error||'Falha de comunicação com o servidor.'),{status:response.status});
+        if(!retryable||![429,502,503,504].includes(response.status))throw error;
+        lastError=error;
+      }catch(error){
+        if(!retryable||error?.status||error?.name==='AbortError')throw error;
+        lastError=error;
+      }
+      if(attempt===delays.length)break;
+      await new Promise(resolve=>setTimeout(resolve,delays[attempt]));
+    }
+    throw lastError||new Error('Falha de conexão após novas tentativas.');
+  }
   function applyOnline(result){state=result.state;OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);onlineVersion=result.version;onlineSession=result.session;onlineWritable=result.writesEnabled;onlineConfirmed=copy(state);perfilAtual=result.session.role;supervisorAtual=result.session.role==='SUPERVISOR'?result.session.user:'';}
   function lockOnline(locked){$('#app-view').inert=locked;$('#online-saving').classList.toggle('hidden',!locked);}
   function toast(message,error=false){if((onlineQueued||onlineSaving)&&!error){onlineMessage=message;return;}showToast(message,error);}
@@ -1060,7 +1086,7 @@
     if(!onlineSession||!onlineWritable||onlineSession.role==='VISUALIZAR'){if(onlineConfirmed){state=copy(onlineConfirmed);OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);}toast('Gravação não autorizada nesta sessão.',true);queueMicrotask(()=>render());return;}
     state.obras=OBRAS;state.colaboradores=COLABORADORES;if(onlineQueued)return;if(onlineSaving){showToast('Aguarde a gravação em andamento.',true);return;}onlineQueued=true;lockOnline(true);
     queueMicrotask(async()=>{onlineQueued=false;onlineSaving=true;const payload=JSON.stringify({requestId:crypto.randomUUID(),version:onlineVersion,state:copy(state)});try{
-      let result;for(let attempt=0;attempt<2;attempt++){try{result=await api('/api/save',{method:'POST',body:payload});break;}catch(e){if(e.status||attempt===1)throw e;}}
+      const result=await api('/api/save',{method:'POST',body:payload});
       applyOnline(result);onlineSaving=false;render();showToast(onlineMessage||'Alterações salvas no Neon.');
     }catch(e){try{applyOnline(await api('/api/bootstrap'));}catch{if(onlineConfirmed){state=copy(onlineConfirmed);OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);}}onlineSaving=false;render();showToast(e.message,true);
     }finally{onlineQueued=false;onlineSaving=false;onlineMessage='';lockOnline(false);}});
