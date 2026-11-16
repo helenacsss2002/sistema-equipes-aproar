@@ -43,7 +43,7 @@ test('Paulo is available only to Controladoria, never supervisor portal',()=>{
  assert.match(js,/id="ac-sup">\$\{options\(RESPONSAVEIS_CONTROLADORIA\)\}/);
  assert.match(js,/id="ae-sup">\$\{options\(RESPONSAVEIS_CONTROLADORIA\)\}/);
  assert.match(js,/id="retro-sup">\$\{options\(RESPONSAVEIS_CONTROLADORIA\)\}/);
- assert.match(js,/const SUPERVISORES = \['EDUARDO', 'FELIPE', 'GABRIEL', 'JOEL', 'NETO', 'SOARES', 'VICTOR'\]/);
+ assert.match(js,/const SUPERVISORES = \['EDUARDO', 'FELIPE', 'GABRIEL', 'JOEL', 'NETO', 'SOARES', 'VICTOR', 'DJOUNE XAVIER'\]/);
  assert.doesNotMatch(js,/const SUPERVISORES = \[[^\]]*'PAULO'/);
 });
 
@@ -313,7 +313,7 @@ test('Extras are launched from daily attendance and remain available to reports 
  assert.match(ui,/Valor da Extra \(R\$\)/);
  assert.match(ui,/Extra independente/);
  assert.doesNotMatch(ui,/item\('extras','Extras'/);
- assert.match(html,/aproar-passagem-rateio-centavos-20261110-20/);
+ assert.match(html,/aproar-djoune-xavier-20261116-1/);
 });
 
 test('Login do supervisor exige chave individual; visualizar permanece sem senha',()=>{

@@ -4,7 +4,7 @@
   const PROFILE_KEY = 'aproar_v2_perfil';
   const SESSION_KEY = 'aproar_v1_supervisor';
 
-  const SUPERVISORES = ['EDUARDO', 'FELIPE', 'GABRIEL', 'JOEL', 'NETO', 'SOARES', 'VICTOR'];
+  const SUPERVISORES = ['EDUARDO', 'FELIPE', 'GABRIEL', 'JOEL', 'NETO', 'SOARES', 'VICTOR', 'DJOUNE XAVIER'];
   const COLABORADORES=[];
   const OBRAS=[];
 
