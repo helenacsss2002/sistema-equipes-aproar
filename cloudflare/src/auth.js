@@ -7,7 +7,12 @@ export async function login(body,env){if(!secretKey(env))throw Object.assign(Err
  if(role==='CONTROLADORIA')pass=env.ADMIN_PASSWORD;
  else if(role==='FINANCEIRO')pass=env.FINANCE_PASSWORD;
  else if(role==='VISUALIZAR')pass=env.VIEWER_PASSWORD;
- else if(role==='SUPERVISOR'){user=String(body.supervisor||'').trim().toUpperCase();if(!['EDUARDO','FELIPE','GABRIEL','JOEL','NETO','SOARES','VICTOR'].includes(user))throw Object.assign(Error('Selecione um supervisor válido.'),{status:401});}
+ else if(role==='SUPERVISOR'){user=String(body.supervisor||'').trim().toUpperCase();if(!['EDUARDO','FELIPE','GABRIEL','JOEL','NETO','SOARES','VICTOR','DJOUNE XAVIER'].includes(user))throw Object.assign(Error('Selecione um supervisor válido.'),{status:401});
+  if(user==='DJOUNE XAVIER'){
+   if(typeof env.DJOUNE_XAVIER_PASSWORD!=='string'||!env.DJOUNE_XAVIER_PASSWORD.length)throw Object.assign(Error('Senha do supervisor Djoune não configurada.'),{status:503});
+   if(!await equalSecret(String(body.password||''),env.DJOUNE_XAVIER_PASSWORD))throw Object.assign(Error('Acesso ou senha inválidos.'),{status:401});
+  }
+ }
  
 if(role==='CONTROLADORIA'||role==='FINANCEIRO'){
   if(typeof pass!=='string'||!pass.length)
