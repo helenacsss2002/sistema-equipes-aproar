@@ -1,6 +1,6 @@
 import { mapNeonData } from './neon-adapter.js';
 import { isSafeUnitName } from './unit-label.js';
-export const supervisors=['EDUARDO','FELIPE','GABRIEL','JOEL','NETO','SOARES','VICTOR'];
+export const supervisors=['EDUARDO','FELIPE','GABRIEL','JOEL','NETO','SOARES','VICTOR','DJOUNE XAVIER'];
 export async function readDatabase(sql,{auditUser=null,includeAudit=true}={}){
  const names=['colaboradores','obras','convocacoes','apontamentos','servicos_apontamento','indisponibilidades','conflitos_convocacao','auditoria','engenheiros_teams','cobrancas_teams','settings','version'];
  const auditQuery=!includeAudit?sql`SELECT id,entidade,entidade_id,acao,usuario,ocorrido_em FROM auditoria WHERE false`:auditUser?sql`SELECT id,entidade,entidade_id,acao,usuario,ocorrido_em FROM auditoria WHERE usuario=${auditUser} ORDER BY id`:sql`SELECT id,entidade,entidade_id,acao,usuario,ocorrido_em FROM auditoria ORDER BY id`;

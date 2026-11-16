@@ -38,7 +38,7 @@ test('Não soma falta, atestado nem linhas sem pagamento, e não mistura IDs igu
  ];
  const out=summarize(rows);
  assert.equal(out.length,2);
- assert.deepEqual(Array.from(out,x=>x.id),['11','12']);
+ assert.deepEqual(Array.from(out,x=>x.id),['cadastro|11','cadastro|12']);
  assert.deepEqual(Array.from(out,x=>x.total),[31.2,2]);
 });
 

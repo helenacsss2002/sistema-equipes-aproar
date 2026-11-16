@@ -1,0 +1,71 @@
+name: APROAR read-only production comparison
+
+on:
+  workflow_dispatch:
+    inputs:
+      baseline_ref:
+        description: Fixed GitHub revision matching the inspected production assets
+        required: true
+        type: choice
+        default: 14707beaf33b07586985167b184980f88899f21c
+        options:
+          - 14707beaf33b07586985167b184980f88899f21c
+  push:
+    branches:
+      - codex/djoune-preservar-producao-20261116
+    paths:
+      - 'cloudflare/**'
+      - '.github/workflows/aproar-cloudflare-audit.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aproar-production-read-only-audit
+  cancel-in-progress: false
+
+jobs:
+  compare-production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out the review branch
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check out the fixed production baseline
+        uses: actions/checkout@v4
+        with:
+          ref: 14707beaf33b07586985167b184980f88899f21c
+          path: .audit-baseline
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: .audit-baseline/cloudflare/package-lock.json
+
+      - name: Verify the baseline revision and install its locked build tools
+        working-directory: .audit-baseline/cloudflare
+        run: |
+          test "$(git rev-parse HEAD)" = '14707beaf33b07586985167b184980f88899f21c'
+          npm ci
+
+      - name: Build the baseline locally without deploying or using Cloudflare credentials
+        working-directory: .audit-baseline/cloudflare
+        env:
+          WRANGLER_SEND_METRICS: 'false'
+          WRANGLER_LOG_PATH: ${{ runner.temp }}/aproar-audit-build.log
+        run: node node_modules/wrangler/bin/wrangler.js deploy --dry-run --outdir "${{ runner.temp }}/aproar-audit-bundle" --config wrangler.jsonc
+
+      - name: Compare active Worker, assets and required configuration using GET requests only
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          APROAR_BASELINE_ROOT: ${{ github.workspace }}/.audit-baseline
+          APROAR_BASELINE_BUNDLE: ${{ runner.temp }}/aproar-audit-bundle
+          APROAR_BASELINE_SHA: 14707beaf33b07586985167b184980f88899f21c
+        run: node cloudflare/scripts/audit-production.mjs
