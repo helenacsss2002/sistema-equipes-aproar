@@ -3,18 +3,19 @@ import {mapNeonData} from './neon-adapter.js';
 import {readDatabase,visibleState,supervisors} from './data.js';
 import {buildOperations} from './operations.js';
 import {login,identity,sameOrigin,equalSecret,logoutCookie} from './auth.js';
+import {writesEnabled} from './deploy-guards.js';
 import {consultarTrello,sincronizarTrello,unidadeCard} from './trello.js';
 const common={'cache-control':'no-store','x-content-type-options':'nosniff','referrer-policy':'same-origin'};
 const json=(data,status=200,extra={})=>new Response(JSON.stringify(data),{status,headers:{...common,'content-type':'application/json; charset=utf-8',...extra}});
 const sha=async v=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(v)))].map(x=>x.toString(16).padStart(2,'0')).join('');
-const writes=env=>{try{return env.WRITES_ENABLED==='true'&&env.APP_ENV==='homologacao'&&Boolean(env.HOMOLOGATION_EXPECTED_HOST)&&new URL(env.DATABASE_URL).hostname.toLowerCase()===env.HOMOLOGATION_EXPECTED_HOST.toLowerCase();}catch{return false;}};
+const writes=writesEnabled;
 const failedLogins=new Map();
 function limit(request){const ip=request.headers.get('cf-connecting-ip')||'unknown',time=Date.now(),entry=failedLogins.get(ip);if(entry&&entry.until>time&&entry.n>=10)return false;if(!entry||entry.until<time)failedLogins.set(ip,{n:0,until:time+60000});failedLogins.get(ip).n++;if(failedLogins.size>5000)failedLogins.clear();return true;}
 async function bodyJSON(request){if(Number(request.headers.get('content-length')||0)>8e6)throw Object.assign(Error('Dados muito grandes. Divida a operação.'),{status:413});const text=await request.text();if(text.length>8e6)throw Object.assign(Error('Dados muito grandes.'),{status:413});try{return JSON.parse(text);}catch{throw Object.assign(Error('Requisição inválida.'),{status:400});}}
 function summary(db,session,env){return {state:visibleState(db,session),version:db.version,session:{role:session.role,user:session.user},supervisors,writesEnabled:writes(env)};}
 export default {async fetch(request,env){const url=new URL(request.url),path=url.pathname;
  try{
-  if(path==='/api/health'&&request.method==='GET')return json({application:'APROAR',stage:'homologacao',databaseConfigured:Boolean(env.DATABASE_URL),writesEnabled:writes(env)});
+  if(path==='/api/health'&&request.method==='GET')return json({application:'APROAR',stage:env.APP_ENV||'nao_configurado',databaseConfigured:Boolean(env.DATABASE_URL),writesEnabled:writes(env)});
   if(path==='/api/login'&&request.method==='POST'){if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);if(!limit(request))return json({error:'Muitas tentativas. Aguarde um minuto.'},429);const result=await login(await bodyJSON(request),env);return json({session:result.session},200,{'set-cookie':result.cookie});}
   if(path==='/api/logout'&&request.method==='POST'){if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);return json({ok:true},200,{'set-cookie':logoutCookie});}
   if(path==='/api/check-database'||path==='/api/preview-data'){
@@ -63,7 +64,7 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
    }
    if(path==='/api/bootstrap'&&request.method==='GET')return json(summary(await readDatabase(sql),session,env));
    if(path==='/api/save'&&request.method==='POST'){
-    if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);if(!writes(env))return json({error:'Gravação desativada. Configure APP_ENV=homologacao e WRITES_ENABLED=true para a branch de testes.'},403);
+    if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);if(!writes(env))return json({error:'Gravação bloqueada pelas proteções deste ambiente. Confira a autorização e o host do banco de dados.'},403);
     const body=await bodyJSON(request);if(!/^[a-f0-9-]{36}$/i.test(body.requestId||'')||typeof body.version!=='string')return json({error:'Identificador de requisição inválido.'},400);
     const digest=await sha(JSON.stringify(body)),previous=await sql`SELECT actor,payload_hash FROM aproar_web_requests WHERE id=${body.requestId}`;
     if(previous.length){if(previous[0].actor!==session.user||previous[0].payload_hash!==digest)return json({error:'Identificador de requisição reutilizado.'},409);return json({...summary(await readDatabase(sql),session,env),ok:true,replayed:true});}
