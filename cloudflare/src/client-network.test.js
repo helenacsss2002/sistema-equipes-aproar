@@ -32,10 +32,25 @@ test('Conflito de versão 409 não é repetido',async()=>{
   assert.equal(calls,1);
 });
 
-test('Login e outros POST nunca têm repetição automática',async()=>{
+test('Login recupera um 503 temporário com no máximo uma repetição',async()=>{
+  let calls=0;
+  const api=apiWith(async()=>++calls===1?reply(503,{error:'Serviço temporariamente indisponível'}):reply(200,{session:{role:'CONTROLADORIA'}}));
+  const result=await api('/api/login',{method:'POST',body:'{}'});
+  assert.equal(result.session.role,'CONTROLADORIA');
+  assert.equal(calls,2);
+});
+
+test('Senha errada 401 não gera novas tentativas de login',async()=>{
+  let calls=0;
+  const api=apiWith(async()=>{calls++;return reply(401,{error:'Senha inválida'});});
+  await assert.rejects(api('/api/login',{method:'POST',body:'{}'}),/Senha inválida/);
+  assert.equal(calls,1);
+});
+
+test('Outros POST nunca têm repetição automática',async()=>{
   let calls=0;
   const api=apiWith(async()=>{calls++;throw new TypeError('offline');});
-  await assert.rejects(api('/api/login',{method:'POST',body:'{}'}),/offline/);
+  await assert.rejects(api('/api/trello/sync',{method:'POST',body:'{}'}),/offline/);
   assert.equal(calls,1);
 });
 
