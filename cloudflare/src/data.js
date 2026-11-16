@@ -1,5 +1,5 @@
 import { mapNeonData } from './neon-adapter.js';
-export const supervisors=['EDUARDO','FELIPE','GABRIEL','JOEL','NETO','SOARES','VICTOR'];
+export const supervisors=['EDUARDO','FELIPE','GABRIEL','JOEL','NETO','SOARES','VICTOR','DJOUNE XAVIER'];
 export async function readDatabase(sql){
  const names=['colaboradores','obras','convocacoes','apontamentos','servicos_apontamento','indisponibilidades','conflitos_convocacao','auditoria','engenheiros_teams','cobrancas_teams','settings','version'];
  const result=await sql.transaction([sql`SELECT * FROM colaboradores ORDER BY id`,sql`SELECT * FROM obras ORDER BY id`,sql`SELECT * FROM convocacoes ORDER BY id`,sql`SELECT * FROM apontamentos ORDER BY id`,sql`SELECT * FROM servicos_apontamento ORDER BY id`,sql`SELECT * FROM indisponibilidades ORDER BY id`,sql`SELECT * FROM conflitos_convocacao ORDER BY id`,sql`SELECT * FROM auditoria ORDER BY id`,sql`SELECT * FROM engenheiros_teams ORDER BY engenheiro`,sql`SELECT * FROM cobrancas_teams ORDER BY id`,sql`SELECT data FROM aproar_web_settings WHERE id=1`,sql`SELECT aproar_web_fingerprint() AS version`],{isolationLevel:'RepeatableRead',readOnly:true});
