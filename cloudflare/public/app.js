@@ -1056,8 +1056,10 @@
     // Apenas GET e /api/save podem ser repetidos com segurança. O salvamento
     // reutiliza o mesmo requestId, permitindo deduplicação pelo servidor.
     const method=String(options.method||'GET').toUpperCase();
-    const retryable=method==='GET'||(method==='POST'&&path==='/api/save');
-    const delays=[300,750,1500];
+    const retryable=method==='GET'||(method==='POST'&&['/api/save','/api/login'].includes(path));
+    // Login não grava dados operacionais: uma única repetição é suficiente
+    // para recuperar um 503 transitório sem amplificar limite de tentativas.
+    const delays=path==='/api/login'?[500]:[300,750,1500];
     let lastError;
     for(let attempt=0;attempt<=delays.length;attempt++){
       try{
