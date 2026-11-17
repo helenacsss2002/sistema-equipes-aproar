@@ -1,0 +1,11 @@
+{
+  "name": "sistema-equipes-aproar",
+  "main": "worker.js",
+  "compatibility_date": "2026-10-08",
+  "workers_dev": true,
+  "no_bundle": true,
+  "keep_vars": true,
+  "observability": {
+    "enabled": true
+  }
+}
