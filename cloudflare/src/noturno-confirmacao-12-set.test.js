@@ -41,7 +41,7 @@ test('O valor 90 também permanece após ser alterado de 0 ou 50',()=>{
 });
 test('O app só mostra confirmação depois de recuperar o adicional noturno do Neon',()=>{
  assert.match(ui,/const pendingNightChanges=nightChangesToVerify\(onlineConfirmed,state\)/);
- assert.match(ui,/pendingNightChanges\.length\?await restoreOnlineSession/);
+ assert.match(ui,/pendingNightChanges\.length\?await refresh\(\)/);
  assert.match(ui,/nightValuesMatch\(result\.state,pendingNightChanges\)/);
  assert.match(ui,/if\(!nightConfirmed\)/);
  assert.match(ui,/onlineWritable=false; \/\/ Precisa recarregar/);

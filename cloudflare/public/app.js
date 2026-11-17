@@ -776,8 +776,10 @@
 
   let serviceListSeq=0;
   function allocationRow(unit,service={},index=0){
-    const works=OBRAS.filter(o=>o.unidade===unit),listId='service-works-'+(++serviceListSeq);
-    return `<div class="allocation-row"><div>${field(index?'Obra / Serviço adicional '+index:'Obra / Serviço',`<input class="control service-work" list="${listId}" value="${escapeHtml(works.find(o=>o.id===service.obraId)?.nome||'')}" placeholder="Selecione ou digite para buscar a obra..." autocomplete="off"><datalist id="${listId}">${works.map(o=>`<option value="${escapeHtml(o.nome)}"></option>`).join('')}</datalist>`)}</div><div>${field('Período',`<select class="control service-period">${['Integral','Manhã','Tarde','Noite'].map(x=>`<option ${x===(service.periodo||'Integral')?'selected':''}>${x}</option>`).join('')}</select>`)}</div></div>`;
+    const additional=index>0,works=additional?[...OBRAS].sort((a,b)=>String(a.unidade).localeCompare(String(b.unidade),'pt-BR')||String(a.nome).localeCompare(String(b.nome),'pt-BR')):OBRAS.filter(o=>o.unidade===unit),listId='service-works-'+(++serviceListSeq);
+    const label=work=>additional?work.unidade+' · '+work.nome:work.nome;
+    const selected=works.find(o=>String(o.id)===String(service.obraId||''));
+    return `<div class="allocation-row"><div>${field(index?'Obra / Serviço adicional '+index:'Obra / Serviço',`<input class="control service-work" list="${listId}" value="${escapeHtml(selected?label(selected):'')}" placeholder="Selecione ou digite para buscar a obra..." autocomplete="off"><datalist id="${listId}">${works.map(o=>`<option value="${escapeHtml(label(o))}"></option>`).join('')}</datalist>`)}</div><div>${field('Período',`<select class="control service-period">${['Integral','Manhã','Tarde','Noite'].map(x=>`<option ${x===(service.periodo||'Integral')?'selected':''}>${x}</option>`).join('')}</select>`)}</div></div>`;
   }
   function itemServices(item,defaultObra){
     if(item?.servicos?.length)return item.servicos;
@@ -909,7 +911,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
   }
   function bindServiceRows(){
     $$('.person-card .service-work').forEach(input=>{
-      wireLiveSuggestions(input,()=>OBRAS.filter(o=>o.unidade===input.closest('.person-card')?.dataset.unit).map(o=>({label:o.nome,id:o.id})),()=>input.dispatchEvent(new Event('change',{bubbles:true})));
+      wireLiveSuggestions(input,()=>{const additional=Boolean(input.closest('.additional-services'));return OBRAS.filter(o=>additional||o.unidade===input.closest('.person-card')?.dataset.unit).map(o=>({label:additional?o.unidade+' · '+o.nome:o.nome,id:o.id,searchText:String(o.id)}));},()=>input.dispatchEvent(new Event('change',{bubbles:true})));
     });
     $$('.person-card').forEach(card=>{
       bindExtraWorkSearch(card);
@@ -937,7 +939,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       field('.add-service').onclick=()=>{
         field('.additional-services').insertAdjacentHTML('beforeend',allocationRow(card.dataset.unit,{},card.querySelectorAll('.allocation-row').length));
         const added=card.querySelector('.additional-services .allocation-row:last-child .service-work');
-        wireLiveSuggestions(added,()=>OBRAS.filter(o=>o.unidade===card.dataset.unit).map(o=>({label:o.nome,id:o.id})),()=>added.dispatchEvent(new Event('change',{bubbles:true})));
+        wireLiveSuggestions(added,()=>OBRAS.map(o=>({label:o.unidade+' · '+o.nome,id:o.id,searchText:String(o.id)})),()=>added.dispatchEvent(new Event('change',{bubbles:true})));
         countServices();card.dispatchEvent(new Event('change',{bubbles:true}));
       };
       field('.remove-last-service').onclick=()=>{field('.additional-services .allocation-row:last-child')?.remove();countServices();card.dispatchEvent(new Event('change',{bubbles:true}));};
@@ -989,8 +991,11 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
   function readPersonRows(ids,scope=document){
     return ids.map(cid=>{
       const row=scope.querySelector(`[data-person="${cid}"]`),
-            servicos=[...row.querySelectorAll('.allocation-row')].map(r=>({
-              obraId:OBRAS.find(o=>o.unidade===row.dataset.unit&&clean(o.nome)===clean(r.querySelector('.service-work').value))?.id||'',
+            servicos=[...row.querySelectorAll('.allocation-row')].map((r,index)=>({
+              // O principal fica na unidade convocada; adicionais usam unidade e nome real no rótulo.
+              obraId:OBRAS.find(o=>index===0
+                ?o.unidade===row.dataset.unit&&clean(o.nome)===clean(r.querySelector('.service-work').value)
+                :clean(o.unidade+' · '+o.nome)===clean(r.querySelector('.service-work').value))?.id||'',
               periodo:r.querySelector('.service-period').value
             })),
             category=row.querySelector('.row-extra')?.value||'Não',
@@ -1030,7 +1035,8 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
   }
   function validServices(items,unit){
     for(const i of items){if(!presence(i.status))continue;const ss=i.servicos;
-      if(!ss.length||ss.some(x=>!x.obraId||obraById(x.obraId)?.unidade!==unit)){toast('Escolha os serviços de cada colaborador dentro da unidade selecionada.',true);return false;}
+      if(!ss.length||!ss[0].obraId||obraById(ss[0].obraId)?.unidade!==unit){toast('O serviço principal deve pertencer à unidade selecionada.',true);return false;}
+      if(ss.slice(1).some(x=>!x.obraId||!obraById(x.obraId))){toast('Escolha um serviço adicional válido de qualquer unidade.',true);return false;}
       if(new Set(ss.map(x=>x.obraId+'|'+x.periodo)).size!==ss.length){toast('Há um serviço repetido no mesmo período para o colaborador.',true);return false;}
     }return true;
   }
@@ -1603,7 +1609,24 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       return;
     }
     $('#main-content').innerHTML=head('Indisponibilidade','Férias, atestados e afastamentos bloqueiam novas convocações nas datas cadastradas.')+`<form id="ind-form" class="card card-pad"><div class="form-grid">${field('Colaborador',`<select class="control" id="ind-colab">${options(COLABORADORES.filter(c=>!c.inativo&&c.avulso!=='Sim'&&!c.avulsoRegistro))}</select>`)}${field('Motivo',`<select class="control" id="ind-motivo">${options(['Férias','Atestado','Afastamento','Outro'])}</select>`)}${field('Início',`<input class="control" type="date" id="ind-ini" value="${perfilAtual==='SUPERVISOR'?portalDate:isoToday()}" required>`)}${field('Fim',`<input class="control" type="date" id="ind-fim" value="${perfilAtual==='SUPERVISOR'?portalDate:isoToday()}" required>`)}${field('Observação','<input class="control" id="ind-obs">')}</div><div class="form-actions"><button class="btn btn-primary">Registrar indisponibilidade</button></div></form><div class="section">${table(['Colaborador','Motivo','Início','Fim','Observação','Ação'],state.indisponibilidades.map(x=>[escapeHtml(colaboradorById(x.colaboradorId)?.nome),x.motivo,formatDate(x.inicio),formatDate(x.fim),escapeHtml(x.obs),`<button class="link-btn" data-remove-ind="${x.id}">Excluir</button>`]))}</div>`;
-    $('#ind-form').onsubmit=e=>{e.preventDefault();if($('#ind-fim').value<$('#ind-ini').value)return toast('O fim deve ser igual ou posterior ao início.',true);state.indisponibilidades.push({id:uid('ind'),colaboradorId:$('#ind-colab').value,motivo:$('#ind-motivo').value,inicio:$('#ind-ini').value,fim:$('#ind-fim').value,obs:$('#ind-obs').value});audit('Registro de indisponibilidade');saveData();renderIndisponibilidade();};$$('[data-remove-ind]').forEach(b=>b.onclick=()=>{state.indisponibilidades=state.indisponibilidades.filter(x=>x.id!==b.dataset.removeInd);audit('Exclusão de indisponibilidade');saveData();renderIndisponibilidade();});
+    const canSave=()=>{
+      if(pendingSaveRecovery){showPendingSaveRecovery('Verifique o salvamento anterior antes de registrar outra indisponibilidade.');return false;}
+      if(onlineSaving||onlineQueued){showToast('Aguarde a confirmação do salvamento em andamento.',true);return false;}
+      if(!onlineWritable||onlineSession?.role!=='CONTROLADORIA'){showToast('Registro de indisponibilidade requer acesso da Controladoria e gravação habilitada.',true);return false;}
+      return true;
+    };
+    $('#ind-form').onsubmit=e=>{
+      e.preventDefault();if(!canSave())return;
+      if($('#ind-fim').value<$('#ind-ini').value)return toast('O fim deve ser igual ou posterior ao início.',true);
+      const entry={id:uid('ind'),colaboradorId:$('#ind-colab').value,motivo:$('#ind-motivo').value,inicio:$('#ind-ini').value,fim:$('#ind-fim').value,obs:$('#ind-obs').value};
+      state.indisponibilidades.push(entry);audit('Registro de indisponibilidade');
+      saveData(()=>renderIndisponibilidade(),null,()=>{});
+    };
+    $$('[data-remove-ind]').forEach(b=>b.onclick=()=>{
+      if(!canSave())return;
+      state.indisponibilidades=state.indisponibilidades.filter(x=>x.id!==b.dataset.removeInd);audit('Exclusão de indisponibilidade');
+      saveData(()=>renderIndisponibilidade(),null,()=>{});
+    });
   }
   function registerConvocationConflicts(ids,date,turno,unit,supervisor){
     state.conflitosTentados??=[];
@@ -2908,7 +2931,55 @@ function renderEquipeDia(){
   function unitLabelIsSafe(label){return typeof label==='string'&&label.trim().length>0&&label.trim().length<=80&&!/(?:https?:\/\/|www\.|sharepoint|link\s+para\s+acesso)/i.test(label);}
   function adminUnits(){return [...new Set([...(state.units||[]),...OBRAS.map(o=>o.unidade)])].filter(unitLabelIsSafe).sort();}
   function renderAdminConv(edit){const content=$('#main-content');content.innerHTML=head('Convocação','Monte a equipe e faça correções administrativas quando necessário. Os serviços são definidos no apontamento.')+`<div class="tabs"><button id="admin-new" class="tab-btn ${!edit?'active':''}">Nova convocação</button><button id="admin-edit" class="tab-btn ${edit?'active':''}">Correção / Exclusão administrativa</button></div><div id="admin-conv-body" class="section"></div>`;$('#admin-new').onclick=()=>renderAdminConv(false);$('#admin-edit').onclick=()=>renderAdminConv(true);const body=$('#admin-conv-body');
-    if(!edit){body.innerHTML=`<form id="admin-conv-form"><div class="reference-filters">${field('Supervisor responsável',`<select class="control" id="ac-sup">${options(RESPONSAVEIS_CONTROLADORIA)}</select>`)}${field('Data da convocação',`<input class="control" type="date" id="ac-date" value="${adminConvDate}" required>`)}${field('Turno',`<select class="control" id="ac-turn">${options(['Integral','Manhã','Tarde','Noite'])}</select>`)}</div>${field('Unidade',`<select class="control" id="ac-unit">${options(adminUnits())}</select>`)}${field('Filtrar por função (opcional)',`<select class="control" id="ac-function">${options(['Todas',...[...new Set(COLABORADORES.filter(c=>!c.inativo&&c.avulso!=='Sim'&&!c.avulsoRegistro).map(c=>c.funcao))]])}</select>`)}${field('Buscar colaboradores cadastrados','<input class="control" id="ac-search" placeholder="Nome ou função">')}<div id="ac-people" class="rect-list section"></div><details class="card card-pad section"><summary>Incluir nome digitado</summary><div class="form-grid">${field('Nome','<input class="control" id="ac-name">')}${field('Função','<input class="control" id="ac-role">')}</div><label><input type="checkbox" id="ac-loose"> É avulso?</label></details><div id="ac-panorama" class="card card-pad section"></div><div class="form-actions"><button class="btn btn-primary">Confirmar convocação</button></div></form>`;const selected=new Set();const people=()=>{$$('#ac-people input').forEach(x=>x.checked?selected.add(x.value):selected.delete(x.value));const term=clean($('#ac-search').value),role=$('#ac-function').value;$('#ac-people').innerHTML=alphabeticalPeople(COLABORADORES.filter(c=>!c.inativo&&c.avulso!=='Sim'&&!c.avulsoRegistro&&clean(c.nome+' '+c.funcao).includes(term)&&(role==='Todas'||c.funcao===role))).map(c=>`<label class="check-card"><input type="checkbox" value="${c.id}" ${selected.has(c.id)?'checked':''}><span>${escapeHtml(c.nome)}<small style="display:block">${escapeHtml(c.funcao)}</small></span></label>`).join('');};const panorama=()=>{const cv=state.convocacoes.filter(c=>c.dataServico===$('#ac-date').value&&c.supervisor===$('#ac-sup').value);$('#ac-panorama').innerHTML='<strong>Panorama de '+$('#ac-sup').value+' · '+formatDate($('#ac-date').value)+' · '+$('#ac-turn').value+'</strong>'+table(['Colaborador','Unidade','Turno'],operationalRows(cv).sort((a,b)=>comparePersonNames(a.p,b.p)).map(x=>[escapeHtml(x.p?.nome),escapeHtml(x.c.unidade),x.c.turno]));};$('#ac-search').oninput=people;$('#ac-function').onchange=people;['ac-date','ac-sup','ac-turn'].forEach(id=>$('#'+id).onchange=()=>{if(id==='ac-date')adminConvDate=$('#ac-date').value;panorama();});people();panorama();$('#admin-conv-form').onsubmit=e=>{e.preventDefault();$$('#ac-people input').forEach(x=>x.checked?selected.add(x.value):selected.delete(x.value));const date=$('#ac-date').value,turno=$('#ac-turn').value,unit=$('#ac-unit').value,sup=$('#ac-sup').value;const ids=[...selected];const name=$('#ac-name').value.trim();let manual;if(name){manual=COLABORADORES.find(c=>clean(c.nome)===clean(name)&&!c.inativo)||{id:uid('c'),nome:name,funcao:$('#ac-role').value.trim()||'Avulso',avulso:$('#ac-loose').checked?'Sim':'Não',custo:0};if(!ids.includes(manual.id))ids.push(manual.id);}if(!ids.length)return toast('Selecione pelo menos um colaborador.',true);if(!OBRAS.some(o=>o.unidade===unit))return toast('Cadastre uma obra nesta unidade antes de confirmar a convocação.',true);const conflict=ids.find(id=>blocked(id,date)||state.convocacoes.some(c=>c.dataServico===date&&c.colaboradores.includes(id)&&overlaps(c.turno,turno)));if(conflict){registerConvocationConflicts(ids,date,turno,unit,sup);return toast('Convocação bloqueada por conflito ou indisponibilidade: '+(colaboradorById(conflict)?.nome||name),true);}if(manual&&!colaboradorById(manual.id))COLABORADORES.push(manual);state.convocacoes.push({id:uid('cv'),supervisor:sup,dataServico:date,unidade:unit,obraId:'',turno,colaboradores:ids,criadoEm:now().toISOString(),executor:'CONTROLADORIA',origem:'administrativa'});adminConvDate=date;audit('Convocação administrativa',date);saveData();toast('Equipe convocada.');renderAdminConv(false);};
+    if(!edit){body.innerHTML=`<form id="admin-conv-form"><div class="reference-filters">${field('Supervisor responsável',`<select class="control" id="ac-sup">${options(RESPONSAVEIS_CONTROLADORIA)}</select>`)}${field('Data da convocação',`<input class="control" type="date" id="ac-date" value="${adminConvDate}" required>`)}${field('Turno',`<select class="control" id="ac-turn">${options(['Integral','Manhã','Tarde','Noite'])}</select>`)}</div>${field('Unidade',`<select class="control" id="ac-unit">${options(adminUnits())}</select>`)}${field('Filtrar por função (opcional)',`<select class="control" id="ac-function">${options(['Todas',...[...new Set(COLABORADORES.filter(c=>!c.inativo&&c.avulso!=='Sim'&&!c.avulsoRegistro).map(c=>c.funcao))]])}</select>`)}${field('Buscar colaboradores cadastrados','<input class="control" id="ac-search" placeholder="Nome ou função">')}<div id="ac-people" class="rect-list section"></div><details class="card card-pad section"><summary>Incluir nome digitado</summary><div class="form-grid">${field('Nome','<input class="control" id="ac-name">')}${field('Função','<input class="control" id="ac-role">')}</div><label><input type="checkbox" id="ac-loose"> É avulso?</label></details><div id="ac-panorama" class="card card-pad section"></div><div class="form-actions"><button class="btn btn-primary">Confirmar convocação</button></div></form>`;const selected=new Set();const people=()=>{$$('#ac-people input').forEach(x=>x.checked?selected.add(x.value):selected.delete(x.value));const term=clean($('#ac-search').value),role=$('#ac-function').value;$('#ac-people').innerHTML=alphabeticalPeople(COLABORADORES.filter(c=>!c.inativo&&c.avulso!=='Sim'&&!c.avulsoRegistro&&clean(c.nome+' '+c.funcao).includes(term)&&(role==='Todas'||c.funcao===role))).map(c=>`<label class="check-card"><input type="checkbox" value="${c.id}" ${selected.has(c.id)?'checked':''}><span>${escapeHtml(c.nome)}<small style="display:block">${escapeHtml(c.funcao)}</small></span></label>`).join('');};const panorama=()=>{const cv=state.convocacoes.filter(c=>c.dataServico===$('#ac-date').value&&c.supervisor===$('#ac-sup').value);$('#ac-panorama').innerHTML='<strong>Panorama de '+$('#ac-sup').value+' · '+formatDate($('#ac-date').value)+' · '+$('#ac-turn').value+'</strong>'+table(['Colaborador','Unidade','Turno'],operationalRows(cv).sort((a,b)=>comparePersonNames(a.p,b.p)).map(x=>[escapeHtml(x.p?.nome),escapeHtml(x.c.unidade),x.c.turno]));};$('#ac-search').oninput=people;$('#ac-function').onchange=people;['ac-date','ac-sup','ac-turn'].forEach(id=>$('#'+id).onchange=()=>{if(id==='ac-date')adminConvDate=$('#ac-date').value;panorama();});people();panorama();$('#admin-conv-form').onsubmit=async e=>{
+  e.preventDefault();
+  // A conferência precisa ser feita no estado real do Neon, não numa convocação antiga mantida na aba.
+  if(onlineSaving||onlineQueued||pendingSaveRecovery)
+    return toast('Há um salvamento ainda não confirmado. Confira o histórico antes de convocar novamente.',true);
+  if(!onlineWritable||onlineSession?.role!=='CONTROLADORIA')return toast('Convocação requer acesso da Controladoria e gravação habilitada.',true);
+  const form=e.currentTarget,submit=form.querySelector('button:not([type]),button[type="submit"]');
+  if(form.dataset.submitting==='true')return;
+  form.dataset.submitting='true';if(submit)submit.disabled=true;
+  try{
+    $$('#ac-people input').forEach(x=>x.checked?selected.add(x.value):selected.delete(x.value));
+    const date=$('#ac-date').value,turno=$('#ac-turn').value,unit=$('#ac-unit').value,sup=$('#ac-sup').value;
+    const ids=[...selected],name=$('#ac-name').value.trim(),manualRole=$('#ac-role').value.trim(),loose=$('#ac-loose').checked;
+    if(!ids.length&&!name)return toast('Selecione pelo menos um colaborador.',true);
+    // Evita falso conflito após o apontamento/turno ser corrigido por outra aba ou supervisor.
+    // Não substitui a validação transacional de sobreposição existente no servidor.
+    let refreshed;
+    try{refreshed=await api('/api/bootstrap');applyOnline(refreshed);}
+    catch(error){
+      return toast('Não foi possível consultar as convocações atualizadas no Neon. Nenhuma convocação foi enviada. Verifique a conexão: '+error.message,true);
+    }
+    if(form.isConnected===false)return;
+    if(!OBRAS.some(o=>o.unidade===unit))return toast('Cadastre uma obra nesta unidade antes de confirmar a convocação.',true);
+    let manual;
+    if(name){
+      manual=COLABORADORES.find(c=>clean(c.nome)===clean(name)&&!c.inativo)
+        ||{id:uid('c'),nome:name,funcao:manualRole||'Avulso',avulso:loose?'Sim':'Não',custo:0};
+      if(!ids.includes(manual.id))ids.push(manual.id);
+    }
+    const unavailable=ids.find(id=>blocked(id,date));
+    if(unavailable)return toast('O colaborador está indisponível nesta data: '+(colaboradorById(unavailable)?.nome||name),true);
+    const collisions=ids.flatMap(id=>state.convocacoes
+      .filter(c=>c.dataServico===date&&c.colaboradores.some(pid=>String(pid)===String(id))&&overlaps(c.turno,turno))
+      .map(c=>({id,conv:c})));
+    if(collisions.length){
+      const conflict=collisions[0];
+      registerConvocationConflicts(ids,date,turno,unit,sup);
+      return toast('Turnos sobrepostos: '+(colaboradorById(conflict.id)?.nome||name)+' já está convocado para '+conflict.conv.turno+' com '+conflict.conv.supervisor+' em '+conflict.conv.unidade+'. Se trabalhou só meio período, primeiro confirme o turno correto da convocação anterior. Manhã e Tarde podem coexistir.',true);
+    }
+    // Uma convocação da Manhã com apontamento já concluído NÃO impede outra na Tarde.
+    if(manual&&!colaboradorById(manual.id))COLABORADORES.push(manual);
+    state.convocacoes.push({id:uid('cv'),supervisor:sup,dataServico:date,unidade:unit,obraId:'',turno,colaboradores:ids,criadoEm:now().toISOString(),executor:'CONTROLADORIA',origem:'administrativa'});
+    adminConvDate=date;audit('Convocação administrativa',date);
+    saveData(()=>{renderAdminConv(false);showToast('Convocação confirmada no Neon. Turno '+turno+' cadastrado sem alterar outro apontamento.');},
+      null,message=>{showToast(message||'Não foi possível confirmar a convocação. Confira a equipe antes de tentar novamente.',true);});
+  }finally{
+    form.dataset.submitting='false';if(submit)submit.disabled=false;
+  }
+};
     }else{body.innerHTML=`<h3>Correção / Exclusão administrativa</h3><p>Realocar um colaborador para outra unidade ou excluir uma convocação lançada incorretamente.</p><div class="form-grid">${field('Data da convocação para corrigir',`<input class="control" id="ae-date" type="date" value="${adminEditDate}">`)}${field('Selecione o colaborador / convocação','<div class="ae-record-search-wrap"><input class="control" type="search" id="ae-record-search" autocomplete="off" placeholder="Digite o nome do colaborador..." aria-label="Pesquisar colaborador ou convocação"><select id="ae-record" hidden tabindex="-1" aria-hidden="true"></select><div id="ae-record-selected" class="ae-record-selected" aria-live="polite"></div></div>')}</div><details class="card card-pad section"><summary>Excluir várias convocações de uma vez</summary><div id="ae-bulk" class="rect-list section"></div><label><input id="ae-confirm-bulk" type="checkbox"> Confirmo a exclusão dos registros selecionados</label><div class="form-actions"><button class="btn btn-secondary" id="ae-delete-bulk">Excluir selecionadas</button></div></details><div id="ae-editor" class="section"></div>`;let rows=[];const recordLabel=x=>[x.p?.nome||'Colaborador',x.c.unidade,x.c.turno,'Supervisor: '+x.c.supervisor,obraById(x.c.obraId)?.nome||'Obra/Serviço a definir'].join(' · ');const renderEditor=()=>{const selected=$('#ae-record').value,x=selected===''?null:rows[Number(selected)];if(!x){$('#ae-editor').innerHTML='<div class="empty">'+(rows.length?'Digite e selecione um colaborador para corrigir a convocação.':'Nenhuma convocação nesta data.')+'</div>';return;}$('#ae-editor').innerHTML=`<form id="ae-form"><p>Colaborador: <strong>${escapeHtml(x.p?.nome)}</strong></p><div class="reference-filters">${field('Unidade de destino',`<select class="control" id="ae-unit">${options(adminUnits())}</select>`)}${field('Obra / Serviço de destino','<select class="control" id="ae-work"></select>')}${field('Supervisor responsável',`<select class="control" id="ae-sup">${options(RESPONSAVEIS_CONTROLADORIA)}</select>`)}</div><div class="form-grid">${field('Data',`<input class="control" id="ae-target-date" type="date" value="${x.c.dataServico}" required>`)}${field('Turno',`<select class="control" id="ae-turn">${options(['Integral','Manhã','Tarde','Noite'])}</select>`)}</div><div class="form-actions"><button class="btn btn-primary">Salvar realocação</button><button type="button" id="ae-delete" class="btn btn-secondary">Excluir convocação deste colaborador</button></div></form>`;$('#ae-unit').value=x.c.unidade;$('#ae-sup').value=x.c.supervisor;$('#ae-turn').value=x.c.turno;const works=()=>{$('#ae-work').innerHTML='<option value="">A definir no apontamento</option>'+options(OBRAS.filter(o=>o.unidade===$('#ae-unit').value));};$('#ae-unit').onchange=works;works();$('#ae-work').value=x.c.obraId||'';$('#ae-delete').onclick=async()=>{
         // Remoção individual é transação própria, nunca /api/save.
         // Apontamentos e vínculos financeiros já confirmados ficam protegidos.
@@ -3409,46 +3480,87 @@ function renderEquipeDia(){
   // Repetir apenas consultas. POSTs (login, salvamentos e solicitações) nunca
   // são enviados automaticamente duas vezes quando a resposta se perde.
   async function api(path,options={}){
-    const method=String(options.method||'GET').toUpperCase();
+    const {timeoutMs:requestedTimeout,maxAttempts:requestedAttempts,signal:externalSignal,...fetchOptions}=options;
+    const method=String(fetchOptions.method||'GET').toUpperCase();
     const readOnly=method==='GET'||method==='HEAD';
-    const attempts=readOnly?3:1;
+    if(!readOnly&&typeof pendingSaveRecovery!=='undefined'&&pendingSaveRecovery&&
+      !['/api/login','/api/logout'].includes(path)&&
+      !(path==='/api/save'&&fetchOptions.body===pendingSaveRecovery.payload))
+      throw Object.assign(new Error('Verifique o salvamento pendente antes de enviar outras alterações.'),{status:409,code:'APROAR_PENDING_SAVE'});
+    const statusCheck=path.split('?')[0]==='/api/save-status';
+    const attempts=readOnly&&!statusCheck?Math.min(3,Math.max(1,Math.floor(Number(requestedAttempts)||3))):1;
+    const defaultTimeout=readOnly?(path.split('?')[0]==='/api/bootstrap'?12000:6000):30000;
+    const timeoutMs=Number.isFinite(Number(requestedTimeout))&&Number(requestedTimeout)>0?Number(requestedTimeout):defaultTimeout;
+    const cancelled=()=>Object.assign(new Error('Operação cancelada.'),{name:'AbortError',code:'ABORT_ERR'});
+    const pause=ms=>new Promise((resolve,reject)=>{
+      let timer;
+      const cleanup=()=>{clearTimeout(timer);externalSignal?.removeEventListener('abort',abort);};
+      const abort=()=>{cleanup();reject(cancelled());};
+      if(externalSignal?.aborted){abort();return;}
+      externalSignal?.addEventListener('abort',abort,{once:true});
+      timer=setTimeout(()=>{cleanup();resolve();},ms);
+    });
     for(let attempt=0;attempt<attempts;attempt++){
+      if(externalSignal?.aborted)throw cancelled();
+      const controller=new AbortController();
+      let timer,rejectAttempt,failure;
+      const deadline=new Promise((_,reject)=>{rejectAttempt=reject;});
+      const abort=()=>{const error=cancelled();rejectAttempt(error);controller.abort(error);};
+      externalSignal?.addEventListener('abort',abort,{once:true});
+      timer=setTimeout(()=>{
+        const error=Object.assign(new Error('O servidor excedeu o tempo de resposta. A confirmação poderá ser consultada sem repetir a operação.'),
+          {name:'TimeoutError',status:504,code:'APROAR_TIMEOUT'});
+        rejectAttempt(error);controller.abort(error);
+      },timeoutMs);
       try{
-        const response=await fetch(path,{credentials:'same-origin',...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});
-        const contentType=response.headers.get('content-type')||'';
-        let data;
-        if(contentType.toLowerCase().includes('application/json')){
-          try{data=await response.json();}catch{/* Resposta cortada ou incompleta. */}
-        }
-        if(!data||typeof data!=='object'){
-          const saving=path==='/api/save';
-          throw Object.assign(new Error(saving
-            ?'A resposta do servidor não chegou completa. O sistema verificará automaticamente se o apontamento já foi registrado, sem criar outro.'
-            :'O servidor do APROAR respondeu com uma página inválida ou ficou temporariamente indisponível (HTTP '+response.status+'). A conexão pode ser recuperada sem apagar seus dados.'),
-            {status:response.ok?502:response.status||502,nonJson:true});
-        }
-        if(!response.ok)throw Object.assign(new Error(data.error||'Falha na comunicação com o APROAR.'),{status:response.status,code:data.code||''});
-        return data;
+        return await Promise.race([(async()=>{
+          const response=await fetch(path,{credentials:'same-origin',...fetchOptions,signal:controller.signal,headers:{'Content-Type':'application/json',...(fetchOptions.headers||{})}});
+          if(controller.signal.aborted)throw controller.signal.reason||cancelled();
+          const contentType=response.headers.get('content-type')||'';
+          let data;
+          if(contentType.toLowerCase().includes('application/json')){
+            try{data=await response.json();}catch(error){if(controller.signal.aborted)throw error;/* Resposta cortada ou incompleta. */}
+          }
+          if(controller.signal.aborted)throw controller.signal.reason||cancelled();
+          if(!data||typeof data!=='object'){
+            const saving=path==='/api/save';
+            throw Object.assign(new Error(saving
+              ?'A resposta do servidor não chegou completa. O sistema verificará automaticamente se o apontamento já foi registrado, sem criar outro.'
+              :'O servidor do APROAR respondeu com uma página inválida ou ficou temporariamente indisponível (HTTP '+response.status+'). A conexão pode ser recuperada sem apagar seus dados.'),
+              {status:response.ok?502:response.status||502,nonJson:true});
+          }
+          if(!response.ok)throw Object.assign(new Error(data.error||'Falha na comunicação com o APROAR.'),{status:response.status,code:data.code||''});
+          return data;
+        })(),deadline]);
       }catch(error){
-        const status=Number(error?.status||0);
-        const canRetry=readOnly&&error?.code!=='NEON_QUOTA_EXCEEDED'
-          &&(!status||[408,425,429,500,502,503,504,520,521,522,523,524,525,526,530].includes(status));
-        if(!canRetry||attempt===attempts-1)throw error;
-        console.warn('APROAR read retry',JSON.stringify({route:path,status,attempt:attempt+1}));
-        await new Promise(resolve=>setTimeout(resolve,400*(attempt+1)));
-      }
+        failure=error;
+      }finally{clearTimeout(timer);externalSignal?.removeEventListener('abort',abort);}
+      if(externalSignal?.aborted)throw cancelled();
+      const status=Number(failure?.status||0);
+      const canRetry=readOnly&&failure?.code!=='NEON_QUOTA_EXCEEDED'
+        &&(!status||[408,425,429,500,502,503,504,520,521,522,523,524,525,526,530].includes(status));
+      if(!canRetry||attempt===attempts-1)throw failure;
+      console.warn('APROAR read retry',JSON.stringify({route:path,status,attempt:attempt+1}));
+      await pause(400*(attempt+1));
     }
   }
-  async function restoreOnlineSession(){
-    try{return await api('/api/bootstrap');}
+  async function restoreOnlineSession(options={}){
+    try{return await api('/api/bootstrap',options);}
     catch(error){
-      if(error.status===401||error.status===403||error.code==='NEON_QUOTA_EXCEEDED')throw error;
+      if(options.signal?.aborted||error.name==='AbortError'||error.status===401||error.status===403||error.code==='NEON_QUOTA_EXCEEDED'||options.maxAttempts!=null)throw error;
       // Somente recuperar a consulta; nunca repetir login ou gravação por conta própria.
-      await new Promise(resolve=>setTimeout(resolve,1800));
-      return api('/api/bootstrap');
+      await new Promise((resolve,reject)=>{
+        let timer;
+        const cleanup=()=>{clearTimeout(timer);options.signal?.removeEventListener('abort',abort);};
+        const abort=()=>{cleanup();reject(Object.assign(new Error('Operação cancelada.'),{name:'AbortError',code:'ABORT_ERR'}));};
+        if(options.signal?.aborted){abort();return;}
+        options.signal?.addEventListener('abort',abort,{once:true});
+        timer=setTimeout(()=>{cleanup();resolve();},1800);
+      });
+      return api('/api/bootstrap',options);
     }
   }
-  function applyOnline(result){state=result.state;OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);onlineVersion=result.version;onlineSession=result.session;onlineWritable=result.writesEnabled;onlineStage=result.stage||'homologacao';onlineConfirmed=copy(state);perfilAtual=result.session.role;supervisorAtual=result.session.role==='SUPERVISOR'?result.session.user:'';}
+  function applyOnline(result){state=result.state;OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);onlineVersion=result.version;onlineSession=result.session;onlineWritable=result.writesEnabled&&!pendingSaveRecovery;onlineStage=result.stage||'homologacao';onlineConfirmed=copy(state);perfilAtual=result.session.role;supervisorAtual=result.session.role==='SUPERVISOR'?result.session.user:'';}
   function lockOnline(locked){$('#app-view').inert=locked;$('#online-saving').classList.toggle('hidden',!locked);}
   function toast(message,error=false){if((onlineQueued||onlineSaving)&&!error){onlineMessage=message;return;}showToast(message,error);}
   function showSaveFeedback(message,error=false,duration=null){
@@ -3528,7 +3640,23 @@ function renderEquipeDia(){
         cents(item[k])===cents(target[k]));
     });
   }
+  let pendingSaveRecovery=null;
+  function showPendingSaveRecovery(message){
+    showSaveFeedback(message,true,60000);
+    const node=$('#online-save-feedback');
+    if(!node)return;
+    clearTimeout(showSaveFeedback._timer);
+    const button=document.createElement('button');
+    button.type='button';button.className='btn btn-secondary';
+    button.textContent='Verificar salvamento';button.style.marginTop='12px';
+    button.onclick=()=>pendingSaveRecovery?.run();
+    node.appendChild(document.createElement('br'));node.appendChild(button);
+  }
   function saveData(onSuccess=null,verifyPersisted=null,onFailure=null){
+    if(pendingSaveRecovery){
+      showPendingSaveRecovery('Há um salvamento aguardando confirmação. Verifique o resultado antes de enviar outras alterações.');
+      return false;
+    }
     // O formulário de convocação com espelho não pode ser desmontado após
     // resposta negativa: o supervisor precisa ver a falha e corrigir na mesma tela.
     const preserveConvocationForm=viewAtual==='convocacao'&&typeof onFailure==='function';
@@ -3537,48 +3665,65 @@ function renderEquipeDia(){
       const reason=!onlineSession?'Sua sessão não está autenticada. Entre novamente.':onlineSession.role==='VISUALIZAR'?'Este perfil é somente para visualização.':'A gravação está bloqueada no ambiente do Worker. Confira a autorização de escrita da produção.';
       toast(reason,true);showSaveFeedback(reason,true);
       if(typeof onFailure==='function')onFailure(reason);
-      if(!(viewAtual==='apontamento'&&apontamentoTab==='retroativo')&&!preserveConvocationForm)queueMicrotask(()=>render());
+      if(!(viewAtual==='apontamento'&&apontamentoTab==='retroativo')&&!preserveConvocationForm&&viewAtual!=='indisponibilidade')queueMicrotask(()=>render());
       return false;
     }
     if(onlineQueued||onlineSaving){const message='Já existe um salvamento em andamento. Aguarde a confirmação antes de enviar outro apontamento.';showToast(message,true);showSaveFeedback(message,true);if(typeof onFailure==='function')onFailure(message);return false;}
-    showSaveFeedback(preserveConvocationForm?'Enviando convocação para gravação no Neon…':'Enviando apontamento para gravação no banco…',false,40000);
+    showSaveFeedback(preserveConvocationForm?'Enviando convocação para gravação…':'Salvando alterações…',false,40000);
     const pendingNightChanges=nightChangesToVerify(onlineConfirmed,state);
     state.obras=OBRAS;state.colaboradores=COLABORADORES;onlineQueued=true;lockOnline(true);
-    queueMicrotask(async()=>{
+    const actor={role:onlineSession.role,user:onlineSession.user};
+    let savedOnServer=false,requestId='',payload='',resume=false,wasSent=false,confirmationUnresolved=false;
+    const run=async()=>{
       onlineQueued=false;onlineSaving=true;
-      let savedOnServer=false;
+      // Um prazo cobre envio, confirmação e atualização; nenhuma consulta pode
+      // manter toda a interface bloqueada sem limite.
+      const deadline=new AbortController(),deadlineTimer=setTimeout(()=>deadline.abort(),45000);
+      const pauseRetry=ms=>new Promise((resolve,reject)=>{
+        let timer;
+        const cleanup=()=>{clearTimeout(timer);deadline.signal.removeEventListener('abort',abort);};
+        const abort=()=>{cleanup();reject(Object.assign(new Error('Tempo de confirmação excedido.'),{name:'AbortError'}));};
+        if(deadline.signal.aborted){abort();return;}
+        deadline.signal.addEventListener('abort',abort,{once:true});
+        timer=setTimeout(()=>{cleanup();resolve();},ms);
+      });
       try{
-        const requestId=typeof crypto!=='undefined'&&typeof crypto.randomUUID==='function'
+        if(!requestId)requestId=typeof crypto!=='undefined'&&typeof crypto.randomUUID==='function'
           ?crypto.randomUUID()
           :'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return(c==='x'?r:(r&0x3|0x8)).toString(16);});
-        const payload=JSON.stringify({requestId,version:onlineVersion,state:copy(state)});
+        if(!payload)payload=JSON.stringify({requestId,version:onlineVersion,state:copy(state)});
         if(typeof payload!=='string')throw new Error('Não foi possível preparar os dados para salvar.');
         // Reenviar EXATAMENTE o mesmo requestId e payload é seguro: aproar_web_apply
         // é idempotente e registra o ID atomicamente na mesma transação.
         // Sempre consultar o banco após erro de rede antes de tentar reenviar.
-        let reply=null,lastTransient=null;
+        let reply=null,lastTransient=null,absenceConfirmed=false;
         const confirmById=async()=>{
+          absenceConfirmed=false;
+          let absentChecks=0;
           for(let checkAttempt=0;checkAttempt<3;checkAttempt++){
-            if(checkAttempt)await new Promise(resolve=>setTimeout(resolve,700*checkAttempt));
+            if(checkAttempt)await pauseRetry(700*checkAttempt);
             try{
-              const check=await api('/api/save-status?requestId='+encodeURIComponent(requestId));
+              const check=await api('/api/save-status?requestId='+encodeURIComponent(requestId),{
+                signal:deadline.signal,timeoutMs:4000,maxAttempts:1});
               if(check?.confirmed===true&&check.requestId===requestId)return true;
-              if(check?.confirmed===false)continue;
+              if(check?.confirmed===false&&check.requestId===requestId){absentChecks++;continue;}
             }catch(checkError){
-              if(checkError?.status===401||checkError?.status===403)throw checkError;
+              if(deadline.signal.aborted||checkError?.status===401||checkError?.status===403||checkError?.code==='NEON_QUOTA_EXCEEDED')throw checkError;
               console.warn('APROAR consulta de salvamento temporariamente indisponível',String(checkError?.message||checkError).slice(0,120));
             }
           }
+          absenceConfirmed=absentChecks===3;
           return false;
         };
+        if(resume&&!savedOnServer)savedOnServer=await confirmById();
         for(let sendAttempt=0;sendAttempt<2&&!savedOnServer;sendAttempt++){
           if(sendAttempt){
-            showSaveFeedback('Conexão instável. Recuperando o mesmo salvamento, sem duplicar apontamentos…',false,45000);
-            await new Promise(resolve=>setTimeout(resolve,900*sendAttempt));
+            showSaveFeedback('Verificando o mesmo salvamento. Seus dados estão preservados…',false,45000);
+            await pauseRetry(900*sendAttempt);
           }
-          const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),sendAttempt?22000:30000);
           try{
-            reply=await api('/api/save',{method:'POST',body:payload,signal:controller.signal,
+            wasSent=true;
+            reply=await api('/api/save',{method:'POST',body:payload,signal:deadline.signal,timeoutMs:sendAttempt?15000:20000,
               headers:{'X-APROAR-Save-Ack':'1'}});
             if(!reply?.ok||!(reply.requestId===requestId||reply.state))
               throw Object.assign(new Error('O servidor respondeu sem a confirmação do apontamento.'),{status:502});
@@ -3590,28 +3735,38 @@ function renderEquipeDia(){
               // 409 pode ocorrer quando o primeiro POST salvou, mas o segundo
               // encontrou uma versão antiga; conferir o ID antes de informar erro.
               if(status===409&&await confirmById()){savedOnServer=true;break;}
+              // Uma rejeição de versão com três leituras válidas sem o ID permite
+              // conciliar a base. Falha de consulta nunca prova que nada foi salvo.
+              if(status===409&&!error?.nonJson&&absenceConfirmed)confirmationUnresolved=false;
               throw error;
             }
+            // A resposta seguinte pode ser 401/403 por sessão expirada, sem
+            // esclarecer se este POST já foi aplicado. Conservar o mesmo recibo.
+            confirmationUnresolved=true;
+            if(error?.code==='NEON_QUOTA_EXCEEDED')throw error;
             lastTransient=error;
             if(await confirmById()){savedOnServer=true;break;}
-          }finally{clearTimeout(timeout);}
+          }
         }
         if(!savedOnServer){
           throw Object.assign(new Error(
             'Não foi possível confirmar o salvamento após recuperar a conexão. Confira as pendências e o histórico antes de lançar novamente. Nenhum segundo apontamento foi criado automaticamente.'
           ),{status:lastTransient?.status||503,unconfirmed:true});
         }
+        confirmationUnresolved=false;
         // A gravação já está confirmada pelo banco. Nunca tratar a falha de
         // atualização da tela como uma falha do próprio apontamento.
         // A resposta compacta apenas confirma a transação; para adicional noturno
         // buscamos o valor efetivo no banco antes de dar a operação como concluída.
-        const result=pendingNightChanges.length?await restoreOnlineSession():(reply?.state?reply:await restoreOnlineSession());
+        const refresh=()=>restoreOnlineSession({signal:deadline.signal,timeoutMs:10000,maxAttempts:1});
+        const result=pendingNightChanges.length?await refresh():(reply?.state?reply:await refresh());
         if(!result||!result.state||typeof result.version!=='string'||!result.session)
           throw new Error('O apontamento foi gravado, mas não foi possível atualizar os dados da tela.');
         const nightConfirmed=nightValuesMatch(result.state,pendingNightChanges);
         if(typeof verifyPersisted==='function'&&!verifyPersisted(result.state)){
           throw Object.assign(new Error(preserveConvocationForm?'O banco confirmou a transação, mas nem todos os participantes da convocação foram localizados na conferência do Neon. Verifique o histórico antes de tentar novamente.':'O servidor confirmou a operação, mas não foi possível localizar no Neon todos os apontamentos retroativos selecionados. Consulte o histórico antes de tentar novamente.'),preserveConvocationForm?{convocationUnverified:true}:{retroUnverified:true});
         }
+        pendingSaveRecovery=null;
         applyOnline(result);onlineSaving=false;
         if(!nightConfirmed){
           onlineWritable=false; // Precisa recarregar e conciliar antes de outra escrita.
@@ -3621,11 +3776,12 @@ function renderEquipeDia(){
         }
         if(typeof onSuccess==='function'){try{onSuccess(result);}catch(callbackError){console.error('APROAR post-save callback failure',String(callbackError?.message||callbackError));}}
         else render();
-        showSaveFeedback(onlineMessage||'Apontamento confirmado e gravado no Neon.');
-        showToast(onlineMessage||'Apontamento salvo com sucesso.');
+        showSaveFeedback(onlineMessage||'Alterações confirmadas e salvas.');
+        showToast(onlineMessage||'Alterações salvas com sucesso.');
       }catch(error){
         console.error('APROAR save failure',JSON.stringify({message:String(error?.message||error).slice(0,240),status:Number(error?.status||0),name:String(error?.name||'Error').slice(0,60)}));
-        if(savedOnServer){
+        const uncertain=wasSent&&(confirmationUnresolved||deadline.signal.aborted||error?.unconfirmed||error?.name==='AbortError'||!Number(error?.status||0)||Number(error?.status)>=500);
+        if(savedOnServer||uncertain){
           // A confirmação da transação não basta para afirmar que cada retroativo
           // selecionado foi efetivamente registrado. Manter tela/rascunho intactos.
           onlineWritable=false;onlineSaving=false;
@@ -3633,14 +3789,26 @@ function renderEquipeDia(){
             ?'O Neon confirmou a transação, mas não foi possível conferir todos os convocados. O espelho permanece aberto. Confira a equipe no histórico antes de reenviar; nenhuma segunda convocação foi gerada automaticamente.'
             :error?.retroUnverified
             ?'O Neon confirmou a transação, mas o retroativo selecionado não foi localizado na conferência. Seus dados permanecem no rascunho. Consulte o histórico antes de repetir.'
-            :'O banco confirmou a gravação, mas a atualização da tela falhou. Pressione Ctrl + F5 para conferir o histórico. Não lance novamente.';
+            :savedOnServer
+            ?'O banco confirmou a gravação, mas a atualização da tela demorou. Verifique o salvamento para continuar. Não lance novamente.'
+            :'A confirmação do salvamento demorou. Seus dados estão preservados nesta aba. Verifique o resultado antes de enviar outras alterações.';
+          pendingSaveRecovery={payload,run:()=>{
+            if(onlineSaving||onlineQueued)return;
+            if(onlineSession?.role!==actor.role||onlineSession?.user!==actor.user){
+              showPendingSaveRecovery('Entre com o mesmo perfil que iniciou o salvamento para conferir o resultado.');return;
+            }
+            resume=true;onlineQueued=true;lockOnline(true);
+            showSaveFeedback('Verificando o salvamento anterior…',false,45000);
+            queueMicrotask(run);
+          }};
           if(typeof onFailure==='function')onFailure(notice);
-          showSaveFeedback(notice,true,60000);
+          showPendingSaveRecovery(notice);
           showToast(notice,true);
           return;
         }
         const message=String(error?.message||'Não foi possível salvar o apontamento. Confira a conexão e tente novamente.');
-        try{applyOnline(await restoreOnlineSession());}
+        pendingSaveRecovery=null;
+        try{applyOnline(await restoreOnlineSession({signal:deadline.signal,timeoutMs:6000,maxAttempts:1}));}
         catch(refreshError){
           console.error('APROAR state refresh after save failure',String(refreshError?.message||refreshError).slice(0,240));
           if(onlineConfirmed){state=copy(onlineConfirmed);OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);}
@@ -3651,11 +3819,12 @@ function renderEquipeDia(){
         if(preserveRetroDraft)for(const [id,staff] of retroUnsavedAvulsos)if(!COLABORADORES.some(c=>c.id===id))COLABORADORES.push(staff);
         // Restaurar inclusões e rascunho local após rejeição de gravação.
         if(typeof dayPendingAdds!=='undefined'&&dayPendingAdds.size)restoreDayPendingAdds();
-        onlineSaving=false;if(!preserveRetroDraft&&!preserveConvocationForm)render();
+        onlineSaving=false;if(!preserveRetroDraft&&!preserveConvocationForm&&viewAtual!=='indisponibilidade')render();
         if(typeof onFailure==='function')onFailure(message);
         showSaveFeedback(message,true,60000);showToast(message,true);
-      }finally{onlineQueued=false;onlineSaving=false;onlineMessage='';lockOnline(false);}
-    });
+      }finally{clearTimeout(deadlineTimer);onlineQueued=false;onlineSaving=false;onlineMessage='';lockOnline(false);}
+    };
+    queueMicrotask(run);
     return true;
   }
   async function submitComplementConfirmation(row,amount,justificativa){

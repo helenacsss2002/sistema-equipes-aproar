@@ -45,7 +45,7 @@ await probe('/?i=1',200,(body,type)=>{
   throw Error('Interface da produção está ausente ou incompleta');
 });
 await probe('/app.js',200,(body,type)=>{
- if(!body.includes('async function restoreOnlineSession()')||!body.includes('APROAR read retry'))
+ if(!body.includes('async function restoreOnlineSession(')||!body.includes('APROAR read retry'))
   throw Error('JavaScript novo ainda não foi publicado');
 });
 console.log('APROAR smoke de produção: API JSON, sessão, HTML e JavaScript verificados.');

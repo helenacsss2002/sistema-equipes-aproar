@@ -31,7 +31,7 @@ test('todas as inclusões de avulso exigem Profissional ou Servente',()=>{
 test('extra exige valor e gravacao depende da resposta do Neon',()=>{
  assert.match(ui,/function validateExtraAmounts\(items,scope=document\)/);
  assert.match(ui,/amount<=0/);
- assert.match(ui,/showSaveFeedback\(onlineMessage\|\|'Apontamento confirmado e gravado no Neon\.'/);
+ assert.match(ui,/showSaveFeedback\(onlineMessage\|\|'Alterações confirmadas e salvas\.'/);
  assert.match(ui,/showSaveFeedback\(message,true\)/);
  assert.match(ui,/AbortController\(\)/);
  assert.match(ui,/Confira as pendências e o histórico antes de lançar novamente/);
