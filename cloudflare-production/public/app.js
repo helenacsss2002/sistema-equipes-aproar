@@ -926,7 +926,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
     });
   }
   function bindServiceRows(){
-    $('.person-card .service-work').forEach(bindServiceWork);
+    $$('.person-card .service-work').forEach(bindServiceWork);
     $$('.person-card').forEach(card=>{
       bindExtraWorkSearch(card);
       const field=selector=>card.querySelector(selector),extraChoice=field('.row-extra'),
