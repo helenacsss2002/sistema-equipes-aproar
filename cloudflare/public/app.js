@@ -734,9 +734,12 @@
   function overlaps(a,b){return a===b||(a==='Integral'&&b!=='Noite')||(b==='Integral'&&a!=='Noite')||a==='Outro'||b==='Outro';}
   function effectiveTurno(c,id){
     const item=apForConv(c.id)?.itens?.find(i=>i.colaboradorId===id);
-    if(c.turno==='Integral'&&item?.status==='Presente (Só Manhã)')return 'Manhã';
-    if(c.turno==='Integral'&&item?.status==='Presente (Só Tarde)')return 'Tarde';
-    return c.turno;
+    if(c.turno!=='Integral')return c.turno;
+    if(item?.status==='Presente (Só Manhã)')return 'Manhã';
+    if(item?.status==='Presente (Só Tarde)')return 'Tarde';
+    // A sessão de um supervisor não recebe os apontamentos de outro.
+    if(item)return c.turno;
+    return ['Manhã','Tarde'].includes(c.turnoEfetivo)?c.turnoEfetivo:c.turno;
   }
   function overlapsConv(c,id,turno){return overlaps(effectiveTurno(c,id),turno);}
   function localDownload(name,content,mime='text/plain'){const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([content],{type:mime}));a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
