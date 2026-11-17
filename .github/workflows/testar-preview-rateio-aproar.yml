@@ -21,7 +21,7 @@ jobs:
         run: |
           python3 - <<'PY'
           import urllib.request,urllib.error,json
-          root='https://525a55e5-sistema-equipes-aproar.helenacsss2002.workers.dev'
+          root='https://363ed96f-sistema-equipes-aproar.helenacsss2002.workers.dev'
           paths=['/','/index.html','/app.js?v=aproar-rateio-interunidades-20261117-1','/financeiro-consolidado.js','/pdf-lib.min.js','/construction-background-hq.webp','/aproar-favicon.ico','/api/health']
           for p in paths:
             try:
@@ -67,7 +67,7 @@ jobs:
             const page=await browser.newPage();
             const errors=[];
             page.on('pageerror',e=>errors.push(e.message));
-            const response=await page.goto('https://525a55e5-sistema-equipes-aproar.helenacsss2002.workers.dev/',{waitUntil:'networkidle',timeout:30000});
+            const response=await page.goto('https://363ed96f-sistema-equipes-aproar.helenacsss2002.workers.dev/',{waitUntil:'networkidle',timeout:30000});
             console.log('BROWSER_STATUS',response.status());
             console.log('BROWSER_TITLE',await page.title());
             console.log('BROWSER_HAS_SUPERVISOR',await page.getByText('Portal do Supervisor').count());
