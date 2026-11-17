@@ -5270,20 +5270,30 @@ def obras_reais_da_unidade(unidade):
     return [o for o in obras if o.get("unidade") == unidade and not eh_obra_placeholder(o)]
 
 
-def mapa_obras_para_rateio_entre_unidades(obras_disponiveis):
+def mapa_obras_para_rateio_entre_unidades(
+    obras_disponiveis, lista_em_execucao_id="", ids_preservar=()
+):
     """
-    Obras reais de todas as unidades para o serviço ADICIONAL no apontamento.
-    O rótulo inclui a unidade e evita misturar obras com o mesmo nome.
-    A seleção retorna o ID real da obra, usado pelo rateio já existente.
-    Não muda o filtro da obra principal nem a unidade da convocação.
+    Obras de qualquer unidade disponíveis para rateio do serviço ADICIONAL.
+    Quando o snapshot Trello está disponível, prioriza a lista EM EXECUÇÃO.
+    Obras manuais e serviços já lançados permanecem acessíveis.
+    Não altera o serviço principal nem a convocação.
     """
     mapa = {}
+    preservados = {str(x) for x in ids_preservar if x is not None}
     candidatas = sorted(
         (
             o for o in obras_disponiveis
             if o.get("id") is not None
             and str(o.get("nome") or "").strip()
             and not eh_obra_placeholder(o)
+            and (
+                not lista_em_execucao_id
+                or not o.get("trello_card_id")
+                or str(o.get("trello_list_id") or "")
+                == str(lista_em_execucao_id)
+                or str(o.get("id")) in preservados
+            )
         ),
         key=lambda o: (
             normalizar(o.get("unidade") or ""),
@@ -5300,6 +5310,31 @@ def mapa_obras_para_rateio_entre_unidades(obras_disponiveis):
             rotulo += f" (ID {obra.get('id')})"
         mapa[rotulo] = obra.get("id")
     return mapa
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _id_lista_em_execucao_para_rateio():
+    """Consulta leve e somente-leitura ao snapshot já existente no Neon."""
+    try:
+        dados = (
+            supabase.table("trello_snapshot")
+            .select("listas")
+            .eq("snapshot_id", 1)
+            .limit(1)
+            .execute().data or []
+        )
+        listas = dados[0].get("listas") or [] if dados else []
+        alvo = normalizar(TRELLO_LISTA_PRINCIPAL)
+        for lista in listas:
+            if (
+                not lista.get("closed", False)
+                and normalizar(lista.get("name") or "") == alvo
+            ):
+                return str(lista.get("id") or "")
+    except Exception:
+        pass
+    # Sem snapshot, continua oferecendo obras reais, sem travar o apontamento.
+    return ""
 
 
 OBS_META_MARKER = " ||APROAR_META|| "
@@ -18538,8 +18573,13 @@ elif modo_campo:
 
                     # Só o serviço adicional pode pertencer a outra unidade.
                     # Obra principal/convocação permanecem na unidade original.
-                    mapa_obras_rateio = (
-                        mapa_obras_para_rateio_entre_unidades(obras)
+                    mapa_obras_rateio = mapa_obras_para_rateio_entre_unidades(
+                        obras,
+                        _id_lista_em_execucao_para_rateio(),
+                        ids_preservar=(
+                            adic.get("obra_id")
+                            for adic in todos_adicionais_atuais
+                        ),
                     )
 
                     adicionais_unidade_atual = []
