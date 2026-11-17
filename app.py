@@ -6456,15 +6456,29 @@ def normalizar_turno_convocacao(turno):
 
 
 def turno_da_convocacao(registro):
-    """Prefere a coluna de produção e mantém compatibilidade com a observação legada."""
-    turno_coluna = str((registro or {}).get("turno") or "").strip()
+    """Turno ocupado após apontamento, preservando o turno original cadastrado.
+
+    Uma convocação integral que já foi apontada como só manhã/só tarde
+    libera o turno complementar para outra unidade/supervisor. Ausências
+    e apontamentos sem correção explícita não liberam a jornada.
+    """
+    registro = registro or {}
+    turno_coluna = str(registro.get("turno") or "").strip()
     if turno_coluna:
-        return normalizar_turno_convocacao(turno_coluna)
-    try:
-        turno, _ = decompor_observacao_operacional((registro or {}).get("observacao") or "")
-    except Exception:
-        turno = "Integral"
-    return normalizar_turno_convocacao(turno)
+        turno = normalizar_turno_convocacao(turno_coluna)
+    else:
+        try:
+            turno_legado, _ = decompor_observacao_operacional(registro.get("observacao") or "")
+        except Exception:
+            turno_legado = "Integral"
+        turno = normalizar_turno_convocacao(turno_legado)
+    if turno == "Integral":
+        status = normalizar(registro.get("status") or "")
+        if status == "PRESENTE (SO MANHA)":
+            return "Manhã"
+        if status == "PRESENTE (SO TARDE)":
+            return "Tarde"
+    return turno
 
 
 def turnos_se_sobrepoem(turno_a, turno_b):
