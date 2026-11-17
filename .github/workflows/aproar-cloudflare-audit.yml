@@ -4,15 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       baseline_ref:
-        description: Fixed GitHub revision matching the inspected production assets
+        description: Full 40-character GitHub commit SHA to compare with active production
         required: true
-        type: choice
-        default: 14707beaf33b07586985167b184980f88899f21c
-        options:
-          - 14707beaf33b07586985167b184980f88899f21c
+        type: string
+        default: a8865738902d3dbaa5a9b001b75532c7878f1e70
   push:
     branches:
       - codex/djoune-preservar-producao-20261116
+      - codex/corrigir-salvamento-conexao-20261116
     paths:
       - 'cloudflare/**'
       - '.github/workflows/aproar-cloudflare-audit.yml'
@@ -28,16 +27,25 @@ jobs:
   compare-production:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      APROAR_BASELINE_SHA: ${{ inputs.baseline_ref || 'a8865738902d3dbaa5a9b001b75532c7878f1e70' }}
     steps:
       - name: Check out the review branch
         uses: actions/checkout@v4
         with:
           persist-credentials: false
 
-      - name: Check out the fixed production baseline
+      - name: Validate the explicit baseline SHA before checkout
+        run: |
+          if [[ ! "$APROAR_BASELINE_SHA" =~ ^[a-fA-F0-9]{40}$ ]]; then
+            echo 'The production baseline must be a full 40-character commit SHA.'
+            exit 1
+          fi
+
+      - name: Check out the explicit production baseline
         uses: actions/checkout@v4
         with:
-          ref: 14707beaf33b07586985167b184980f88899f21c
+          ref: ${{ env.APROAR_BASELINE_SHA }}
           path: .audit-baseline
           persist-credentials: false
 
@@ -51,7 +59,7 @@ jobs:
       - name: Verify the baseline revision and install its locked build tools
         working-directory: .audit-baseline/cloudflare
         run: |
-          test "$(git rev-parse HEAD)" = '14707beaf33b07586985167b184980f88899f21c'
+          test "$(git rev-parse HEAD)" = "${APROAR_BASELINE_SHA,,}"
           npm ci
 
       - name: Build the baseline locally without deploying or using Cloudflare credentials
@@ -67,5 +75,4 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           APROAR_BASELINE_ROOT: ${{ github.workspace }}/.audit-baseline
           APROAR_BASELINE_BUNDLE: ${{ runner.temp }}/aproar-audit-bundle
-          APROAR_BASELINE_SHA: 14707beaf33b07586985167b184980f88899f21c
         run: node cloudflare/scripts/audit-production.mjs

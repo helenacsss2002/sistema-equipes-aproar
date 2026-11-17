@@ -5,7 +5,6 @@ import {readdir, readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
-const BASELINE = '14707beaf33b07586985167b184980f88899f21c';
 const WORKER = 'sistema-equipes-aproar';
 const ORIGIN = 'https://sistema-equipes-aproar.helenacsss2002.workers.dev';
 const apiRoot = 'https://api.cloudflare.com/client/v4';
@@ -31,10 +30,11 @@ export async function auditProduction(options = {}) {
   const account = process.env.CLOUDFLARE_ACCOUNT_ID;
   const baselineRoot = options.baselineRoot || process.env.APROAR_BASELINE_ROOT;
   const bundleRoot = options.bundleRoot || process.env.APROAR_BASELINE_BUNDLE;
+  const baselineSha = options.baselineSha || process.env.APROAR_BASELINE_SHA;
   ensure(token && account, 'Cloudflare repository credentials are unavailable.');
   ensure(/^[a-f0-9]{32}$/i.test(account), 'Cloudflare account ID is invalid.');
-  ensure(baselineRoot && bundleRoot && (options.baselineSha || process.env.APROAR_BASELINE_SHA) === BASELINE,
-    'The fixed production baseline was not supplied.');
+  ensure(baselineRoot && bundleRoot && typeof baselineSha === 'string' && /^[a-f0-9]{40}$/i.test(baselineSha),
+    'An explicit 40-character production baseline SHA was not supplied.');
 
   // This is the only authenticated transport. No caller can choose a method or host.
   async function api(suffix, kind = 'json') {
@@ -66,7 +66,7 @@ export async function auditProduction(options = {}) {
   }
 
   const active = activeDeployment(await api('/deployments'));
-  emit({baseline: BASELINE, activeVersion: active.version});
+  emit({baseline: baselineSha.toLowerCase(), activeVersion: active.version});
   const version = await api(`/versions/${active.version}`);
   const settings = await api('/settings');
   ensure(version.id === active.version, 'Version metadata does not match the active deployment.');

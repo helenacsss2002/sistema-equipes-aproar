@@ -74,7 +74,7 @@ test('Somente o botão montar outra convocação reconstrói o formulário, sem 
  assert.match(handler,/Convocação não confirmada:/);
  const save=app.slice(app.indexOf('  function saveData('),app.indexOf('  async function submitComplementConfirmation('));
  assert.match(save,/const preserveConvocationForm=viewAtual==='convocacao'&&typeof onFailure==='function'/);
- assert.match(save,/onlineSaving=false;if\(!preserveRetroDraft&&!preserveConvocationForm\)render\(\)/);
+ assert.match(save,/onlineSaving=false;if\(!preserveRetroDraft&&!preserveConvocationForm&&viewAtual!=='indisponibilidade'\)render\(\)/);
  assert.ok(save.indexOf('!verifyPersisted(result.state)')<save.indexOf('applyOnline(result)'));
  assert.match(save,/if\(typeof onFailure==='function'\)onFailure\(message\)/);
 });

@@ -23,7 +23,8 @@ function harness(responses){
  const ctx={
   fetch:async()=>{calls++;const value=responses[Math.min(calls-1,responses.length-1)];if(value instanceof Error)throw value;return value;},
   console:{warn(){}},
-  setTimeout:fn=>{delays++;fn();}
+  AbortController,clearTimeout,
+  setTimeout:(fn,ms)=>{if(ms<2000){delays++;return setTimeout(fn,0);}return setTimeout(fn,ms);}
  };
  vm.createContext(ctx);
  vm.runInContext(source+'\nglobalThis.aproarApi=api;globalThis.restore=restoreOnlineSession;',ctx);

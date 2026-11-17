@@ -532,7 +532,7 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
     const body=await bodyJSON(request);if(!/^[a-f0-9-]{36}$/i.test(body.requestId||'')||typeof body.version!=='string')return json({error:'Identificador de requisição inválido.'},400);
     const digest=await sha(JSON.stringify(body)),previous=await sql`SELECT actor,payload_hash FROM aproar_web_requests WHERE id=${body.requestId}`;
     if(previous.length){if(previous[0].actor!==session.user||previous[0].payload_hash!==digest)return json({error:'Identificador de requisição reutilizado.'},409);return compactAck?json({ok:true,requestId:body.requestId,replayed:true}):json({...summary(await readDatabase(sql,readOptions),session,env),ok:true,replayed:true});}
-    const db=await readDatabase(sql,readOptions);if(body.version!==db.version)return json({error:'Outro usuário atualizou os dados. Suas alterações não foram gravadas; recarregue e confira os registros.'},409);
+    const db=await readDatabase(sql,{includeAudit:false});if(body.version!==db.version)return json({error:'Outro usuário atualizou os dados. Suas alterações não foram gravadas; recarregue e confira os registros.'},409);
     if(session.role==='SUPERVISOR'){
       db.releaseEvents=await sql`SELECT acao,usuario,ocorrido_em,contexto FROM auditoria
        WHERE acao IN ('SOLICITACAO_LIBERACAO_FINANCEIRA','LIBERACAO_FINANCEIRA_AUTORIZADA',

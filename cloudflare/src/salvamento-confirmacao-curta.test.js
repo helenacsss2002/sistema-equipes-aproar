@@ -19,7 +19,6 @@ function setup({post,check,bootstrap}){
  const state={obras:[{id:'w1'}],colaboradores:[{id:'a1'}],convocacoes:[],apontamentos:[]};
  const calls=[],alerts=[],ui={render:0,synced:0};
  let resolveDone;const done=new Promise(resolve=>resolveDone=resolve);
- let onlineWritable=true;
  const ctx={
   state,OBRAS:state.obras,COLABORADORES:state.colaboradores,
   onlineVersion:'v1',onlineSession:{role:'SUPERVISOR',user:'EDUARDO'},
@@ -28,7 +27,7 @@ function setup({post,check,bootstrap}){
   setTimeout,clearTimeout,console,
   copy:v=>structuredClone(v),
   document:{querySelector:()=>null},
-  lockOnline:()=>{},
+  lockOnline:locked=>{ui.locked=locked;if(!locked)resolveDone();},
   render:()=>{ui.render++;resolveDone();},
   showSaveFeedback:(message,error)=>alerts.push({message,error}),
   showToast:(message,error)=>alerts.push({message,error}),
@@ -46,10 +45,9 @@ function setup({post,check,bootstrap}){
   },
  };
  vm.createContext(ctx);
- vm.runInContext(nightHelperSource+saveSource+'\nglobalThis.runSave=saveData;',ctx,{timeout:2000});
+ vm.runInContext(nightHelperSource+saveSource+'\nglobalThis.runSave=saveData;globalThis.hasPending=()=>Boolean(pendingSaveRecovery);',ctx,{timeout:2000});
  return {ctx,calls,alerts,ui,done};
 }
-const wait=()=>new Promise(resolve=>setTimeout(resolve,35));
 test('O servidor devolve ACK curto, com leitura do resultado feita em requisição separada',()=>{
  assert.match(worker,/const compactAck=request\.headers\.get\('x-aproar-save-ack'\)==='1'/);
  assert.match(worker,/return compactAck\?json\(\{ok:true,requestId:body\.requestId\}\):json\(\{\.\.\.summary/);
@@ -70,7 +68,7 @@ test('Salvamento normal envia um único POST, sincroniza pelo bootstrap e mostra
  assert.equal(x.calls.filter(c=>c.path==='/api/save').length,1);
  assert.equal(x.calls.filter(c=>c.path.includes('save-status')).length,0);
  assert.equal(x.ui.synced,1);
- assert(x.alerts.some(a=>/gravado no Neon/.test(a.message)));
+ assert(x.alerts.some(a=>/Alterações confirmadas e salvas/.test(a.message)));
 });
 
 test('Resposta interrompida após commit é resolvida pelo identificador sem outro POST',async()=>{
@@ -86,13 +84,13 @@ test('Resposta interrompida após commit é resolvida pelo identificador sem out
  assert.equal(x.calls.filter(c=>c.path==='/api/save').length,1,'Não repetir POST');
  assert.equal(x.calls.filter(c=>c.path.startsWith('/api/save-status')).length,1);
  assert.equal(x.ui.synced,1);
- assert(x.alerts.some(a=>/gravado no Neon/.test(a.message)));
+ assert(x.alerts.some(a=>/Alterações confirmadas e salvas/.test(a.message)));
 });
 
 test('ACK confirmado, mas bootstrap indisponível não autoriza nova gravação nem acusa perda dos dados',async()=>{
  const x=setup({post:async(_path,opts)=>({ok:true,requestId:JSON.parse(opts.body).requestId}),
  check:()=>({confirmed:false}),bootstrap:async()=>{throw Error('GET indisponível')}});
- x.ctx.runSave();await wait();
+ x.ctx.runSave();await x.done;
  assert.equal(x.calls.filter(c=>c.path==='/api/save').length,1);
  assert.equal(x.ctx.onlineWritable,false);
  assert(x.alerts.some(a=>/banco confirmou a gravação/.test(a.message)));
@@ -132,7 +130,7 @@ test('Falha temporária 502 recupera gravando com MESMO ID e sem duplicar regist
  assert.equal(x.calls.filter(c=>c.path==='/api/save').length,2);
  assert.equal(checks,3,'Verifica antes do reenvio');
  assert.equal(x.ui.synced,1);
- assert(x.alerts.some(x=>/gravado no Neon/.test(x.message)));
+ assert(x.alerts.some(x=>/Alterações confirmadas e salvas/.test(x.message)));
 });
 
 test('Após 2 respostas 502 sem confirmação, nenhum pedido novo é criado automaticamente',async()=>{
@@ -145,8 +143,11 @@ test('Após 2 respostas 502 sem confirmação, nenhum pedido novo é criado auto
  await x.done;
  assert.equal(ids.length,2,'Tentativas limitadas a duas para não sobrecarregar o servidor');
  assert.equal(new Set(ids).size,1,'Nunca cria outra operação para a mesma confirmação');
- assert.equal(x.ui.synced,1,'Falha atualiza base para não insistir cegamente');
- assert(x.alerts.some(a=>/Nenhum segundo apontamento foi criado automaticamente/.test(a.message)));
+ assert.equal(x.ui.synced,0,'Uma confirmação incerta mantém o formulário e não substitui o rascunho');
+ assert.equal(x.ctx.onlineWritable,false);
+ assert.equal(x.ctx.hasPending(),true);
+ assert.equal(x.ui.locked,false);
+ assert(x.alerts.some(a=>/Seus dados estão preservados nesta aba/.test(a.message)));
 });
 
 test('Reenvio com 409 de versão antiga identifica gravação do envio anterior',async()=>{
@@ -162,7 +163,7 @@ test('Reenvio com 409 de versão antiga identifica gravação do envio anterior'
  x.ctx.runSave();await x.done;
  assert.equal(calls,2);
  assert.equal(x.ui.synced,1);
- assert(x.alerts.some(a=>/gravado no Neon/.test(a.message)));
+ assert(x.alerts.some(a=>/Alterações confirmadas e salvas/.test(a.message)));
 });
 
 test('Falha HTTP não mostra aviso antigo e nunca duplica a gravação ao confirmar o envio',async()=>{
@@ -171,5 +172,5 @@ test('Falha HTTP não mostra aviso antigo e nunca duplica a gravação ao confir
  assert.match(original,/O sistema verificará automaticamente se o apontamento já foi registrado/);
  assert.match(original,/for\(let sendAttempt=0;sendAttempt<2&&!savedOnServer;sendAttempt\+\+\)/);
  assert.match(original,/if\(status===409&&await confirmById\(\)\)/);
- assert.match(original,/pendingNightChanges\.length\?await restoreOnlineSession\(\)/);
+ assert.match(original,/pendingNightChanges\.length\?await refresh\(\)/);
 });
