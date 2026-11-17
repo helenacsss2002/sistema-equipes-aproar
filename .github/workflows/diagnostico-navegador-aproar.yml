@@ -42,6 +42,26 @@ jobs:
               });
               console.log('PORTAL_INFO',JSON.stringify(info));
               console.log('BROWSER_ERRORS',JSON.stringify(errors.slice(0,7)));
+              const js=await page.evaluate(async()=>{const u=[...document.querySelectorAll('script[src]')].map(x=>x.src).find(x=>x.includes('/app.js')); if(!u)return {error:'app.js not found'};const s=await(await fetch(u)).text();const p=['página inválida','temporariamente indisponível','HTTP 503','reconectar sem digitar','Obra / Serviço adicional'];return {bytes:s.length,locations:p.map(phrase=>({phrase,index:s.indexOf(phrase),excerpt:s.indexOf(phrase)>=0?s.slice(s.indexOf(phrase)-120,s.indexOf(phrase)+340):''})),apiMatches:(s.match(/\/api\/[a-z\-]+/g)||[]).slice(0,25)}})
+              console.log('PRODUCTION_APP',JSON.stringify(js).slice(0,4000));
+              const loginResp=[];
+              page.on('response',r=>{if(r.url().includes('/api/login'))loginResp.push({status:r.status(),url:r.url()})});
+              try {
+                await page.getByText('Portal do Supervisor',{exact:true}).first().click({timeout:5000});
+                console.log('SUPERVISOR_SCREEN',JSON.stringify((await page.locator('body').innerText()).slice(0,500)));
+                const sels=await page.locator('select').count();
+                const pw=await page.locator('input[type=password]').count();
+                console.log('SUPERVISOR_INPUTS',sels,pw);
+                if(sels&&pw) {
+                   await page.locator('select').first().selectOption({label:'JOEL'});
+                   await page.locator('input[type=password]').first().fill('DIAGNOSTICO-INVALIDO-SEM-DADOS');
+                   await page.getByRole('button',{name:'ENTRAR'}).first().click();
+                   await page.waitForTimeout(3500);
+                   console.log('LOGIN_REQUESTS',JSON.stringify(loginResp));
+                   console.log('LOGIN_UI_RESULT',JSON.stringify((await page.locator('body').innerText()).slice(0,650)));
+                }
+              }catch(e){console.log('LOGIN_UI_PROBE_ERROR',String(e).slice(0,360))}
+
             }catch(e){console.log('PORTAL_ERROR',String(e.message).slice(0,250));}
             await browser.close();
           })().catch(e=>{console.log('BROWSER_RUN_ERROR',String(e).slice(0,200));});
