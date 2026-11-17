@@ -1052,20 +1052,51 @@
 
   const extendedRenderers={convocacao:renderConvCompleta,apontamento:renderApCompleto,disponibilidade:renderDisponibilidade,indisponibilidade:renderIndisponibilidade,conflitos:renderConflitos,whatsapp:renderWhatsApp,dashboard:renderDashboard,relatorios:renderReports,financeiro:renderPayments,ausencias:renderAbsences,configuracoes:renderSettings,indicadores:renderIndicators};
   
-  let onlineVersion='',onlineSession=null,onlineWritable=false,onlineConfirmed=null,onlineQueued=false,onlineSaving=false,onlineMessage='';
+  let onlineVersion='',onlineSession=null,onlineWritable=false,onlineConfirmed=null,onlineQueued=false,onlineSaving=false,onlineMessage='',pendingSave=null;
   const copy=v=>JSON.parse(JSON.stringify(v));
-  async function api(path,options={}){const response=await fetch(path,{credentials:'same-origin',...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});const data=await response.json();if(!response.ok)throw Object.assign(new Error(data.error||'Falha na comunicação.'),{status:response.status});return data;}
+  async function api(path,options={}){
+    const response=await fetch(path,{credentials:'same-origin',...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});
+    const raw=await response.text();let data;
+    try{data=raw?JSON.parse(raw):{};}
+    catch{throw Object.assign(new Error('Resposta inválida do servidor (HTTP '+response.status+'). Confira a conexão.'),{status:response.status});}
+    if(!response.ok)throw Object.assign(new Error(data.error||'Falha na comunicação (HTTP '+response.status+').'),{status:response.status});
+    return data;
+  }
   function applyOnline(result){state=result.state;OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);onlineVersion=result.version;onlineSession=result.session;onlineWritable=result.writesEnabled;onlineConfirmed=copy(state);perfilAtual=result.session.role;supervisorAtual=result.session.role==='SUPERVISOR'?result.session.user:'';}
   function lockOnline(locked){$('#app-view').inert=locked;$('#online-saving').classList.toggle('hidden',!locked);}
   function toast(message,error=false){if((onlineQueued||onlineSaving)&&!error){onlineMessage=message;return;}showToast(message,error);}
   function saveData(){
     if(!onlineSession||!onlineWritable||onlineSession.role==='VISUALIZAR'){if(onlineConfirmed){state=copy(onlineConfirmed);OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);}toast('Gravação não autorizada nesta sessão.',true);queueMicrotask(()=>render());return;}
-    state.obras=OBRAS;state.colaboradores=COLABORADORES;if(onlineQueued)return;if(onlineSaving){showToast('Aguarde a gravação em andamento.',true);return;}onlineQueued=true;lockOnline(true);
-    queueMicrotask(async()=>{onlineQueued=false;onlineSaving=true;const payload=JSON.stringify({requestId:crypto.randomUUID(),version:onlineVersion,state:copy(state)});try{
-      let result;for(let attempt=0;attempt<2;attempt++){try{result=await api('/api/save',{method:'POST',body:payload});break;}catch(e){if(e.status||attempt===1)throw e;}}
-      applyOnline(result);onlineSaving=false;render();showToast(onlineMessage||'Alterações salvas no Neon.');
-    }catch(e){try{applyOnline(await api('/api/bootstrap'));}catch{if(onlineConfirmed){state=copy(onlineConfirmed);OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);}}onlineSaving=false;render();showToast(e.message,true);
-    }finally{onlineQueued=false;onlineSaving=false;onlineMessage='';lockOnline(false);}});
+    state.obras=OBRAS;state.colaboradores=COLABORADORES;
+    if(onlineQueued)return;
+    if(onlineSaving){showToast('Aguarde a gravação em andamento.',true);return;}
+    const snapshot=JSON.stringify(copy(state));
+    if(pendingSave&&pendingSave.snapshot!==snapshot){showToast('Há um salvamento anterior sem confirmação. Confira o histórico e a equipe antes de alterar outros registros.',true);return;}
+    if(!pendingSave){const requestId=crypto.randomUUID();pendingSave={requestId,snapshot,payload:JSON.stringify({requestId,version:onlineVersion,state:copy(state)})};}
+    const attemptSave=pendingSave;
+    onlineQueued=true;lockOnline(true);
+    queueMicrotask(async()=>{
+      onlineQueued=false;onlineSaving=true;
+      try{
+        let result;
+        for(let attempt=0;attempt<2;attempt++){
+          try{result=await api('/api/save',{method:'POST',body:attemptSave.payload});break;}
+          catch(e){if((e.status&&![408,429,500,502,503,504].includes(e.status))||attempt===1)throw e;}
+        }
+        applyOnline(result);pendingSave=null;onlineSaving=false;render();showToast(onlineMessage||'Alterações salvas no Neon.');
+      }catch(e){
+        // A resposta pode ter se perdido depois do COMMIT. Verificar o mesmo requestId evita uma segunda gravação.
+        let confirmation;
+        try{confirmation=await api('/api/save-status?requestId='+encodeURIComponent(attemptSave.requestId));}catch{}
+        if(confirmation?.applied){pendingSave=null;applyOnline(confirmation);onlineSaving=false;render();showToast('Salvamento confirmado no banco após a reconexão.');}
+        else{
+          const definitive=Boolean(e.status&&e.status>=400&&e.status<500&&![408,429].includes(e.status));
+          if(definitive)pendingSave=null;
+          onlineSaving=false;render();
+          showToast(definitive?e.message:'Não foi possível confirmar o salvamento após recuperar a conexão. O rascunho permanece na tela. Confira o histórico antes de lançar novamente; uma segunda gravação não foi criada automaticamente.',true);
+        }
+      }finally{onlineQueued=false;onlineSaving=false;onlineMessage='';lockOnline(false);}
+    });
   }
   function resetData(){toast('A restauração de dados de homologação está desativada na versão conectada.',true);}
   async function logout(){chooseLogin('CONTROLADORIA');if(onlineSaving||onlineQueued)return;try{await api('/api/logout',{method:'POST',body:'{}'});}catch(e){return showToast(e.message,true);}perfilAtual='';supervisorAtual='';onlineSession=null;onlineConfirmed=null;state=seedData();OBRAS.length=0;COLABORADORES.length=0;render();}
