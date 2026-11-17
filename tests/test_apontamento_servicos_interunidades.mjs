@@ -28,6 +28,7 @@ function extract(start, end) {
 vm.runInContext(extract('  let serviceListSeq=0;', '  function itemServices('), ctx);
 vm.runInContext(extract('  function readPersonRows(', '  function applyInlineExtras('), ctx);
 vm.runInContext(extract('  function validServices(', '  function renderApontamentoRetroativo('), ctx);
+vm.runInContext(extract('  function splitMoneyExactly(', '  function entries('), ctx);
 
 const principal = ctx.allocationRow('ESCRITORIO', { obraId: '1', periodo: 'Integral' }, 0);
 assert(principal.includes('2100 - Escritório'));
@@ -74,6 +75,14 @@ assert.equal(ctx.validServices([{ ...item, servicos: [{ obraId: '1', periodo: 'I
 assert(source.includes("const additional=Boolean(input.closest('.additional-services'));"));
 assert(source.includes("$$('.person-card .service-work').forEach(bindServiceWork);"));
 assert(source.includes("bindServiceWork(added);"));
-const share = 300 / item.servicos.length;
-assert.equal(share, 100, '3 obras -> rateio igual já existente; frontend não recalcula custos');
-console.log('OK: obra principal restrita; 2 adicionais de outras unidades; seleção pelo ID; rateio original inalterado.');
+assert.deepEqual(Array.from(ctx.splitMoneyExactly(125,3)),[41.67,41.67,41.66]);
+assert.deepEqual(Array.from(ctx.splitMoneyExactly(11,3)),[3.67,3.67,3.66]);
+assert.equal(ctx.splitMoneyExactly(125,3).reduce((a,b)=>a+b,0),125);
+assert(source.includes("if(regs.length===1&&services.size>1)"), 'rateio de um apontamento deve dividir pelo total de obras');
+assert(source.includes("const expectedPoints=items.map("), 'apontamento normal deve capturar vínculos esperados');
+assert(source.includes("},verifyDayServices))return;"), 'salvar deve verificar os vínculos após o POST');
+assert(source.includes("typeof verifyPersisted==='function'"), 'verificação deve consultar o estado confirmado');
+const worker = readFileSync(new URL('../cloudflare-production/worker.js', import.meta.url), 'utf8');
+assert(worker.includes('const samePersistedServices = previousServices.length === ss.length'));
+assert(worker.includes('|| !samePersistedServices'), 'worker deve corrigir vínculos faltantes mesmo quando metadados coincidirem');
+console.log('OK: interface real, serviços entre unidades, confirmação pós-Neon e divisão exata entre obras.');
