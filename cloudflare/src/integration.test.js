@@ -26,6 +26,7 @@ test('Apontamento só manhã libera tarde para outro supervisor e preserva custo
   const outro={role:'SUPERVISOR',user:'FELIPE'};
   next=structuredClone(visibleState(db,outro));
   assert.equal(next.apontamentos.length,0,'O segundo supervisor não vê o apontamento alheio');
+  assert.equal(next.convocacoes.find(c=>c.supervisor==='EDUARDO').turnoEfetivo,'Manhã','Mas enxerga que a tarde está livre');
   next.convocacoes.push({id:'tarde-outro-supervisor',supervisor:'FELIPE',dataServico:'2026-10-07',unidade:'SEBRAE',obraId:'',turno:'Tarde',colaboradores:['1']});
   const ops=buildOperations(db,next,outro,now);
   assert.equal(ops.filter(x=>x.table==='convocacoes'&&x.action==='insert').length,1);
