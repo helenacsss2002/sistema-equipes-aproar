@@ -1796,6 +1796,16 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
           participants.forEach((row,index)=>row[field]+=shares[index]);
         }
       }
+      // Um apontamento contendo N serviços rateia os custos por N obras,
+      // independentemente dos períodos selecionados. Não multiplicar custos.
+      // Em convocações separadas no mesmo dia, conservar proteção por jornada.
+      if(regs.length===1&&services.size>1){
+        for(const field of ['daily','extra','finance']){
+          const total=roundMoney([...services.values()].reduce((sum,row)=>sum+(Number(row[field])||0),0));
+          const shares=splitMoneyExactly(total,services.size);
+          [...services.values()].forEach((row,index)=>{row[field]=shares[index];});
+        }
+      }
       for(const row of services.values()){row.daily=roundMoney(row.daily);row.extra=roundMoney(row.extra);row.finance=roundMoney(row.finance);row.night=roundMoney(row.night);row.bonus=roundMoney(row.bonus);row.ajudaCusto=roundMoney(row.ajudaCusto);if(dangerEligible(p))row.danger=roundMoney(row.daily*1.3)-row.daily+roundMoney(row.extra*1.3)-row.extra;row.danger=roundMoney(row.danger);row.service={obraId:row.c.obraId,periodo:[...row.periods].join(' + ')};row.c.supervisor=[...row.supervisors].join(' / ');row.displayStatus=[...row.statuses].join(' / ')+(p?.avulso==='Sim'&&AVULSO_DIARIA_OPTIONS.includes(row.i?.tipoDiariaAvulso)?' · '+row.i.tipoDiariaAvulso:'');row.displayExtra=[...row.extras].join(' / ');if(reportFilters.obra==='Todas'||row.c.obraId===reportFilters.obra)out.push(row);}
     }
     for(const x of state.extras||[]){
@@ -2499,13 +2509,40 @@ function renderEquipeDia(){
     if(selectedExternal){const day=mainWorkForPersonOnDate(selectedExternal,portalDate);extraBatch.push({colaboradorId:selectedExternal,status:'Extra independente',extra:'Não',servicos:[],extraLancamento:{enabled:toggleExternal,extra:$('#day-extra-kind').value,valorExtraOriginal:Number($('#day-extra-amount').value),obraId:$('#day-extra-work').value,observacao:$('#day-extra-obs').value.trim(),dayWorkId:day.workId}});}
     if(!applyInlineExtras(extraBatch,portalDate,supervisorAtual))return;
     for(const c of convs){const selected=items.filter(i=>c.colaboradores.includes(i.colaboradorId));if(!selected.length)continue;let ap=apForConv(c.id);if(ap){ap.itens=[...ap.itens.filter(i=>!selected.some(x=>x.colaboradorId===i.colaboradorId)),...selected];ap.atualizadoEm=now().toISOString();}else state.apontamentos.push({executor:supervisorAtual||perfilLabel(perfilAtual),id:uid('ap'),convocacaoId:c.id,supervisor:c.supervisor,dataServico:c.dataServico,apontadoEm:now().toISOString(),retroativo:false,itens:selected});}
+    // Conferir os vínculos já gravados no Neon (e não apenas o aceite
+    // genérico da transação) ANTES de descartar o rascunho local.
+    const expectedPoints=items.map(item=>{
+      const conv=people.get(item.colaboradorId)?.conv;
+      return {
+        colaboradorId:String(item.colaboradorId),
+        supervisor:String(conv?.supervisor||''),
+        dataServico:String(conv?.dataServico||''),
+        unidade:String(conv?.unidade||''),
+        turno:String(conv?.turno||''),
+        servicos:(item.servicos||[]).map(x=>String(x.obraId)+'|'+String(x.periodo||'Integral')).sort()
+      };
+    });
+    const verifyDayServices=confirmed=>expectedPoints.every(target=>{
+      const conv=(confirmed?.convocacoes||[]).find(c=>
+        String(c.supervisor)===target.supervisor&&
+        String(c.dataServico)===target.dataServico&&
+        String(c.unidade)===target.unidade&&
+        String(c.turno)===target.turno&&
+        (c.colaboradores||[]).some(id=>String(id)===target.colaboradorId));
+      if(!conv)return false;
+      const ap=(confirmed?.apontamentos||[]).find(a=>String(a.convocacaoId)===String(conv.id));
+      const saved=ap?.itens?.find(i=>String(i.colaboradorId)===target.colaboradorId);
+      if(!saved)return false;
+      const services=(saved.servicos||[]).map(x=>String(x.obraId)+'|'+String(x.periodo||'Integral')).sort();
+      return JSON.stringify(services)===JSON.stringify(target.servicos);
+    });
     audit('Apontamento da equipe',portalDate);if(!saveData(()=>{
       dayUnsavedDrafts.delete(dayKey);
       clearStoredDraft(storageKey);
       if(supervisorAtual)clearStoredDraft(draftKey('last',supervisorAtual));
       dayPendingAdds.clear();
       render();
-    }))return;toast('Apontamento do dia e extras salvos.');
+    },verifyDayServices))return;toast('Apontamento do dia e extras enviados para confirmação.');
   }catch(error){
     console.error('APROAR day-form submit failure',String(error?.message||error).slice(0,240));
     showToast('Não foi possível preparar o apontamento. Confira os campos e tente novamente.',true);showSaveFeedback('Não foi possível preparar o apontamento. Confira os campos e tente novamente.',true);
@@ -3625,12 +3662,21 @@ function renderEquipeDia(){
         // atualização da tela como uma falha do próprio apontamento.
         // A resposta compacta apenas confirma a transação; para adicional noturno
         // buscamos o valor efetivo no banco antes de dar a operação como concluída.
-        const result=pendingNightChanges.length?await restoreOnlineSession():(reply?.state?reply:await restoreOnlineSession());
+        // Se houver verificação específica de serviços, reler do banco
+        // para não confiar apenas no eco do POST.
+        const result=(pendingNightChanges.length||typeof verifyPersisted==='function')
+          ?await restoreOnlineSession():(reply?.state?reply:await restoreOnlineSession());
         if(!result||!result.state||typeof result.version!=='string'||!result.session)
           throw new Error('O apontamento foi gravado, mas não foi possível atualizar os dados da tela.');
         const nightConfirmed=nightValuesMatch(result.state,pendingNightChanges);
         if(typeof verifyPersisted==='function'&&!verifyPersisted(result.state)){
-          throw Object.assign(new Error(preserveConvocationForm?'O banco confirmou a transação, mas nem todos os participantes da convocação foram localizados na conferência do Neon. Verifique o histórico antes de tentar novamente.':'O servidor confirmou a operação, mas não foi possível localizar no Neon todos os apontamentos retroativos selecionados. Consulte o histórico antes de tentar novamente.'),preserveConvocationForm?{convocationUnverified:true}:{retroUnverified:true});
+          const normalUnverified=viewAtual==='apontamento'&&apontamentoTab==='normal';
+          const error=preserveConvocationForm
+            ?'A transação foi registrada, mas nem todos os convocados foram encontrados no Neon.'
+            :normalUnverified
+            ?'O Neon não confirmou todos os serviços adicionais do apontamento. O rascunho foi preservado; confira o histórico e os vínculos antes de reenviar.'
+            :'O Neon não confirmou todos os apontamentos retroativos selecionados. Confira o histórico antes de reenviar.';
+          throw Object.assign(new Error(error),preserveConvocationForm?{convocationUnverified:true}:normalUnverified?{normalUnverified:true}:{retroUnverified:true});
         }
         applyOnline(result);onlineSaving=false;
         if(!nightConfirmed){
@@ -3653,6 +3699,8 @@ function renderEquipeDia(){
             ?'O Neon confirmou a transação, mas não foi possível conferir todos os convocados. O espelho permanece aberto. Confira a equipe no histórico antes de reenviar; nenhuma segunda convocação foi gerada automaticamente.'
             :error?.retroUnverified
             ?'O Neon confirmou a transação, mas o retroativo selecionado não foi localizado na conferência. Seus dados permanecem no rascunho. Consulte o histórico antes de repetir.'
+            :error?.normalUnverified
+            ?'O Neon confirmou a transação, mas algum serviço do rateio não apareceu na releitura do banco. O rascunho foi preservado. Confira o histórico antes de reenviar para evitar duplicidade.'
             :'O banco confirmou a gravação, mas a atualização da tela falhou. Pressione Ctrl + F5 para conferir o histórico. Não lance novamente.';
           if(typeof onFailure==='function')onFailure(notice);
           showSaveFeedback(notice,true,60000);
