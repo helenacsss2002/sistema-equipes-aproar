@@ -41,6 +41,54 @@ test('Stale write rolls back all operations',async()=>{const {pg,sql}=await fixt
 test('Invalid statement after a valid insert rolls back the entire transaction',async()=>{const {pg,sql}=await fixture();try{const db=await readDatabase(sql),ops=[{table:'obras',action:'insert',id:'temp',data:{nome:'New',unidade:'FIEC'}},{table:'obras',action:'insert',id:'bad',data:{nome:null,unidade:'FIEC'}}];await assert.rejects(async()=>await sql`SELECT aproar_web_apply(${db.version},${crypto.randomUUID()},${admin.user},${'hash'},${JSON.stringify(ops)}::jsonb)`);assert.equal((await pg.query('SELECT count(*)::int n FROM obras')).rows[0].n,3);}finally{await pg.close();}});
 test('Retries of the same request cannot create duplicate convocations',async()=>{const {pg,sql}=await fixture();try{const db=await readDatabase(sql),next=structuredClone(db.state);conv(next);const ops=buildOperations(db,next,actor,now),id=crypto.randomUUID();await sql`SELECT aproar_web_apply(${db.version},${id},${actor.user},${'hash'},${JSON.stringify(ops)}::jsonb)`;await sql`SELECT aproar_web_apply(${db.version},${id},${actor.user},${'hash'},${JSON.stringify(ops)}::jsonb)`;assert.equal((await pg.query('SELECT count(*)::int n FROM convocacoes')).rows[0].n,1);}finally{await pg.close();}});
 test('Supervisor cannot change another supervisor or financial protected values',async()=>{const {pg,sql}=await fixture();try{let db=await readDatabase(sql),next=structuredClone(db.state);conv(next);next.convocacoes[0].supervisor='FELIPE';assert.throws(()=>buildOperations(db,next,actor,now),/própria equipe/);next=structuredClone(db.state);conv(next);attendance(next,'draft-conv');db=(await save(sql,next,actor)).after;next=structuredClone(db.state);next.apontamentos[0].itens[0].status='Falta';assert.throws(()=>buildOperations(db,next,finance,now),/só altera pagamentos/);next=structuredClone(db.state);next.apontamentos[0].itens[0].financeiro=180;db=(await save(sql,next,finance)).after;assert.equal(Number(db.raw.apontamentos[0].custo_pago),180);assert.equal(db.raw.apontamentos[0].apontado_por,'EDUARDO');assert.equal(db.raw.apontamentos[0].custo_pago_definido_financeiro,true);assert.throws(()=>buildOperations(db,db.state,{role:'VISUALIZAR',user:'VISUALIZAR'},now),/somente visualização/);}finally{await pg.close();}});
+test('Convocação da tarde com outro supervisor e unidade é aceita após apontamento da manhã já gravado',async()=>{
+ const {pg,sql}=await fixture();
+ try{
+  let db=await readDatabase(sql),morning=structuredClone(db.state);
+  conv(morning);morning.convocacoes[0].turno='Manhã';
+  morning.convocacoes[0].supervisor='EDUARDO';
+  attendance(morning,'draft-conv');
+  morning.apontamentos[0].itens[0].status='Presente (Só Manhã)';
+  morning.apontamentos[0].itens[0].servicos=[{obraId:'1',periodo:'Manhã'}];
+  db=(await save(sql,morning,actor)).after;
+  assert.equal(db.state.convocacoes.length,1);
+  assert.equal(db.state.apontamentos.length,1);
+  assert.equal(db.state.convocacoes[0].turno,'Manhã');
+  const afternoon=structuredClone(db.state);
+  afternoon.convocacoes.push({id:'conv-tarde-qa',supervisor:'JOEL',dataServico:'2026-10-07',unidade:'SEBRAE',obraId:'',turno:'Tarde',colaboradores:['1']});
+  db=(await save(sql,afternoon,admin)).after;
+  const all=db.state.convocacoes.filter(c=>c.dataServico==='2026-10-07'&&c.colaboradores.includes('1'));
+  assert.equal(all.length,2,'Dois registros independentes no mesmo dia');
+  assert.deepEqual(all.map(c=>c.turno).sort(),['Manhã','Tarde']);
+  assert.equal(db.state.apontamentos.length,1,'A manhã apontada continua intacta; a tarde aguarda confirmação');
+  const follow=structuredClone(db.state),newConv=follow.convocacoes.find(c=>c.turno==='Tarde');
+  follow.apontamentos.push({id:'ap-tarde-qa',convocacaoId:newConv.id,supervisor:'JOEL',dataServico:'2026-10-07',retroativo:true,itens:[{colaboradorId:'1',status:'Presente (Só Tarde)',extra:'Não',financeiro:0,noturno:0,acordo:0,observacao:'',servicos:[{obraId:'3',periodo:'Tarde'}]}]});
+  db=(await save(sql,follow,admin)).after;
+  assert.equal(db.state.apontamentos.length,2);
+  assert.equal(db.raw.apontamentos.length,2);
+  assert.equal(db.raw.apontamentos.filter(a=>String(a.colaborador_id)==='1'&&new Date(a.data_servico).toISOString().slice(0,10)==='2026-10-07').length,2);
+  assert.equal(new Set(db.raw.apontamentos.map(a=>a.convocacao_id)).size,2);
+ }finally{await pg.close();}
+});
+
+test('Registros já apontados no turno da manhã não bloqueiam tarde, mas impedem uma segunda manhã',async()=>{
+ const {pg,sql}=await fixture();
+ try{
+  let db=await readDatabase(sql),morning=structuredClone(db.state);
+  conv(morning);morning.convocacoes[0].turno='Manhã';attendance(morning,'draft-conv');
+  morning.apontamentos[0].itens[0].status='Presente (Só Manhã)';
+  morning.apontamentos[0].itens[0].servicos=[{obraId:'1',periodo:'Manhã'}];
+  db=(await save(sql,morning,actor)).after;
+  const next=structuredClone(db.state),second={id:'other-qa',supervisor:'JOEL',dataServico:'2026-10-07',unidade:'SEBRAE',obraId:'',turno:'Tarde',colaboradores:['1']};
+  next.convocacoes.push(second);
+  assert.doesNotThrow(()=>buildOperations(db,next,admin,now));
+  next.convocacoes[1].turno='Manhã';
+  assert.throws(()=>buildOperations(db,next,admin,now),/Conflito/);
+  next.convocacoes[1].turno='Integral';
+  assert.throws(()=>buildOperations(db,next,admin,now),/Conflito/);
+ }finally{await pg.close();}
+});
+
 test('Cross-unit overlapping turns are rejected while morning/evening coexist',async()=>{const {pg,sql}=await fixture();try{const db=await readDatabase(sql),next=structuredClone(db.state);conv(next);next.convocacoes[0].turno='Manhã';next.convocacoes.push({...next.convocacoes[0],id:'second',unidade:'SEBRAE',turno:'Tarde'});assert.doesNotThrow(()=>buildOperations(db,next,actor,now));next.convocacoes[1].turno='Integral';assert.throws(()=>buildOperations(db,next,actor,now),/Conflito/);}finally{await pg.close();}});
 test('Integral means daytime only: allow Soares at night and retain morning conflict',async()=>{
  const {pg,sql}=await fixture();
