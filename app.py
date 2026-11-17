@@ -5269,74 +5269,6 @@ def obras_reais_da_unidade(unidade):
     """Lista somente Obras/Serviços reais, ocultando o registro temporário."""
     return [o for o in obras if o.get("unidade") == unidade and not eh_obra_placeholder(o)]
 
-
-def mapa_obras_para_rateio_entre_unidades(
-    obras_disponiveis, lista_em_execucao_id="", ids_preservar=()
-):
-    """
-    Obras de qualquer unidade disponíveis para rateio do serviço ADICIONAL.
-    Quando o snapshot Trello está disponível, prioriza a lista EM EXECUÇÃO.
-    Obras manuais e serviços já lançados permanecem acessíveis.
-    Não altera o serviço principal nem a convocação.
-    """
-    mapa = {}
-    preservados = {str(x) for x in ids_preservar if x is not None}
-    candidatas = sorted(
-        (
-            o for o in obras_disponiveis
-            if o.get("id") is not None
-            and str(o.get("nome") or "").strip()
-            and not eh_obra_placeholder(o)
-            and (
-                not lista_em_execucao_id
-                or not o.get("trello_card_id")
-                or str(o.get("trello_list_id") or "")
-                == str(lista_em_execucao_id)
-                or str(o.get("id")) in preservados
-            )
-        ),
-        key=lambda o: (
-            normalizar(o.get("unidade") or ""),
-            normalizar(o.get("nome") or ""),
-            str(o.get("id")),
-        ),
-    )
-    for obra in candidatas:
-        rotulo = (
-            f"{str(obra.get('nome') or '').strip()}"
-            f" — {str(obra.get('unidade') or 'SEM UNIDADE').strip()}"
-        )
-        if rotulo in mapa:
-            rotulo += f" (ID {obra.get('id')})"
-        mapa[rotulo] = obra.get("id")
-    return mapa
-
-
-@st.cache_data(ttl=300, show_spinner=False)
-def _id_lista_em_execucao_para_rateio():
-    """Consulta leve e somente-leitura ao snapshot já existente no Neon."""
-    try:
-        dados = (
-            supabase.table("trello_snapshot")
-            .select("listas")
-            .eq("snapshot_id", 1)
-            .limit(1)
-            .execute().data or []
-        )
-        listas = dados[0].get("listas") or [] if dados else []
-        alvo = normalizar(TRELLO_LISTA_PRINCIPAL)
-        for lista in listas:
-            if (
-                not lista.get("closed", False)
-                and normalizar(lista.get("name") or "") == alvo
-            ):
-                return str(lista.get("id") or "")
-    except Exception:
-        pass
-    # Sem snapshot, continua oferecendo obras reais, sem travar o apontamento.
-    return ""
-
-
 OBS_META_MARKER = " ||APROAR_META|| "
 try:
     TZ_APROAR = ZoneInfo("America/Fortaleza")
@@ -18571,17 +18503,6 @@ elif modo_campo:
                         )
                     )
 
-                    # Só o serviço adicional pode pertencer a outra unidade.
-                    # Obra principal/convocação permanecem na unidade original.
-                    mapa_obras_rateio = mapa_obras_para_rateio_entre_unidades(
-                        obras,
-                        _id_lista_em_execucao_para_rateio(),
-                        ids_preservar=(
-                            adic.get("obra_id")
-                            for adic in todos_adicionais_atuais
-                        ),
-                    )
-
                     adicionais_unidade_atual = []
                     adicionais_outras_unidades = []
 
@@ -18917,12 +18838,10 @@ elif modo_campo:
                                         )
                                     )
 
-                                # Opções de rateio: obras de TODAS as unidades.
-                                # Não altera o filtro da obra principal.
                                 opcoes_adic = (
                                     ["— Selecione —"]
                                     + list(
-                                        mapa_obras_rateio.keys()
+                                        mapa_obras.keys()
                                     )
                                 )
 
@@ -18948,35 +18867,6 @@ elif modo_campo:
                                             "servico"
                                         )
                                         or ""
-                                    )
-                                    id_servico_atual = str(
-                                        existente_adic.get("obra_id") or ""
-                                    )
-                                    if not id_servico_atual and servico_atual_adic:
-                                        _obra_encontrada = next(
-                                            (
-                                                o for o in obras
-                                                if normalizar(o.get("nome") or "")
-                                                == normalizar(servico_atual_adic)
-                                                and normalizar(o.get("unidade") or "")
-                                                == normalizar(
-                                                    existente_adic.get("unidade")
-                                                    or unidade
-                                                )
-                                            ),
-                                            None,
-                                        )
-                                        id_servico_atual = str(
-                                            (_obra_encontrada or {}).get("id") or ""
-                                        )
-                                    rotulo_servico_atual = next(
-                                        (
-                                            rotulo
-                                            for rotulo, obra_id in
-                                            mapa_obras_rateio.items()
-                                            if str(obra_id) == id_servico_atual
-                                        ),
-                                        "— Selecione —",
                                     )
 
                                     periodo_atual_adic = str(
@@ -19004,33 +18894,16 @@ elif modo_campo:
                                         f"{c_id}_{idx_adic}"
                                     )
 
-                                    # Migra seleção antiga (apenas nome da
-                                    # obra) para o novo rótulo com unidade,
-                                    # sem descartar o serviço já preenchido.
-                                    if key_obra_adic in st.session_state:
-                                        selecao_anterior = str(
-                                            st.session_state[key_obra_adic]
-                                        )
-                                        if selecao_anterior not in opcoes_adic:
-                                            obra_id_anterior = str(
-                                                mapa_obras.get(selecao_anterior)
-                                                or ""
-                                            )
-                                            selecao_convertida = next(
-                                                (
-                                                    rotulo for rotulo, obra_id in
-                                                    mapa_obras_rateio.items()
-                                                    if str(obra_id)
-                                                    == obra_id_anterior
-                                                ),
-                                                rotulo_servico_atual,
-                                            )
-                                            st.session_state[key_obra_adic] = (
-                                                selecao_convertida
-                                            )
-                                    elif rotulo_servico_atual in opcoes_adic:
-                                        st.session_state[key_obra_adic] = (
-                                            rotulo_servico_atual
+                                    if (
+                                        key_obra_adic
+                                        not in st.session_state
+                                        and servico_atual_adic
+                                        in opcoes_adic
+                                    ):
+                                        st.session_state[
+                                            key_obra_adic
+                                        ] = (
+                                            servico_atual_adic
                                         )
 
                                     if (
@@ -19105,7 +18978,6 @@ elif modo_campo:
                         "conv": conv,
                         "colab": colab,
                         "mapa_obras": mapa_obras,
-                        "mapa_obras_rateio": mapa_obras_rateio,
                         "obra_sel": obra_sel,
                         "status_sel": status_sel,
                         "periodo_principal": periodo_principal,
@@ -19163,9 +19035,8 @@ elif modo_campo:
                             f"{nome_pessoa}: informe o Financeiro quando houver Extra."
                         )
 
-                    # Comparar IDs reais, não rótulos (que incluem a unidade).
                     obras_usadas = {
-                        str(item["mapa_obras"].get(item["obra_sel"]) or "")
+                        str(item["obra_sel"])
                     }
 
                     for idx_adic, adic in enumerate(
@@ -19181,7 +19052,7 @@ elif modo_campo:
 
                         if (
                             servico_adic
-                            not in item["mapa_obras_rateio"]
+                            not in item["mapa_obras"]
                         ):
                             erros_validacao.append(
                                 (
@@ -19191,10 +19062,7 @@ elif modo_campo:
                             )
                             continue
 
-                        obra_id_adic = str(
-                            item["mapa_obras_rateio"][servico_adic]
-                        )
-                        if obra_id_adic in obras_usadas:
+                        if servico_adic in obras_usadas:
                             erros_validacao.append(
                                 (
                                     f"{nome_pessoa}: o serviço "
@@ -19204,7 +19072,7 @@ elif modo_campo:
                             continue
 
                         obras_usadas.add(
-                            obra_id_adic
+                            servico_adic
                         )
 
                 if erros_validacao:
@@ -19232,9 +19100,8 @@ elif modo_campo:
 
                         if item["contexto_eh_principal"]:
                             # A lista da tela representa TODOS os serviços
-                            # adicionais da unidade selecionada. Outros serviços
-                            # existentes são preservados e novos podem vir de
-                            # qualquer unidade, sem duplicar a diária.
+                            # adicionais desta unidade. Assim é possível adicionar
+                            # 2, 3, 4... serviços e salvar tudo junto.
                             adicionais_mesma_unidade = []
 
                             if not item["tem_conv_separada"]:
@@ -19251,13 +19118,13 @@ elif modo_campo:
                                     if (
                                         nome_adic
                                         not in item[
-                                            "mapa_obras_rateio"
+                                            "mapa_obras"
                                         ]
                                     ):
                                         continue
 
                                     _obra_adic_id = item[
-                                        "mapa_obras_rateio"
+                                        "mapa_obras"
                                     ][nome_adic]
 
                                     _obra_adic = dict_obras.get(
@@ -19266,9 +19133,7 @@ elif modo_campo:
                                     )
 
                                     adicionais_mesma_unidade.append({
-                                        "servico": str(
-                                            _obra_adic.get("nome") or nome_adic
-                                        ),
+                                        "servico": nome_adic,
                                         "periodo": str(
                                             adic_edit.get(
                                                 "periodo"
@@ -19351,12 +19216,6 @@ elif modo_campo:
                                     or ""
                                 ),
                             })
-
-                        # Ao salvar novamente, não duplicar um serviço de
-                        # outra unidade já registrado neste mesmo apontamento.
-                        adicionais = _normalizar_servicos_adicionais(
-                            {"servicos_adicionais": adicionais}
-                        )
 
                         meta = registrar_metadata_apontamento(
                             conv,
