@@ -57,6 +57,19 @@ class TestCatalogoRateio(unittest.TestCase):
         self.assertEqual(set(mapa.values()), {11, 22})
         self.assertEqual(len(mapa), 2)
 
+    def test_obras_em_execucao_e_historicos_preservados(self):
+        obras = [
+            {"id": 1, "nome": "Ativa", "unidade": "Centro",
+             "trello_card_id": "card-1", "trello_list_id": "em-execucao"},
+            {"id": 2, "nome": "Encerrada", "unidade": "FIEC",
+             "trello_card_id": "card-2", "trello_list_id": "finalizadas"},
+            {"id": 3, "nome": "Manual", "unidade": "São Gonçalo"},
+        ]
+        atual = self.mapa(obras, "em-execucao")
+        self.assertEqual(set(atual.values()), {1, 3})
+        preservado = self.mapa(obras, "em-execucao", ids_preservar=["2"])
+        self.assertEqual(set(preservado.values()), {1, 2, 3})
+
     def test_apenas_servico_adicional_usa_catalogo_geral(self):
         self.assertIn("mapa_obras_rateio.keys()", SOURCE)
         self.assertIn('"mapa_obras_rateio": mapa_obras_rateio', SOURCE)
