@@ -19,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: fix/apontamento-rateio-interunidades-interface-real-20261117
+          ref: main
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -33,7 +33,7 @@ jobs:
           node - <<'NODE'
           const fs=require('fs');
           const c=JSON.parse(fs.readFileSync('cloudflare-production/wrangler.jsonc','utf8'));
-          if(c.name!=='sistema-equipes-aproar'||c.assets?.binding!=='ASSETS'||c.assets?.directory!=='./public'||c.keep_vars!==true) throw Error('Configuração de produção sem todos os assets/segredos.');
+          if(c.name!=='sistema-equipes-aproar'||c.assets?.binding!=='ASSETS'||c.assets?.directory!=='./public'||c.assets?.run_worker_first!==true||c.keep_vars!==true) throw Error('Configuração de produção sem todos os assets/segredos.');
           const js=fs.readFileSync('cloudflare-production/public/app.js','utf8');
           if(!js.includes('Obra / Serviço adicional')||!js.includes('allocationWorkLabel')||!js.includes('const additional=index>0')) throw Error('Interface incorreta.');
           const w=fs.readFileSync('cloudflare-production/worker.js','utf8');
