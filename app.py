@@ -19335,6 +19335,12 @@ elif modo_campo:
                                 ),
                             })
 
+                        # Ao salvar novamente, não duplicar um serviço de
+                        # outra unidade já registrado neste mesmo apontamento.
+                        adicionais = _normalizar_servicos_adicionais(
+                            {"servicos_adicionais": adicionais}
+                        )
+
                         meta = registrar_metadata_apontamento(
                             conv,
                             data_apont,
