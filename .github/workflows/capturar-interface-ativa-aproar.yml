@@ -25,14 +25,14 @@ jobs:
           python3 - <<'PY'
           import urllib.request, pathlib
           root='https://sistema-equipes-aproar.helenacsss2002.workers.dev'
-          files=['index.html','app.js','financeiro-consolidado.js','pdf-lib.min.js']
+          files=['construction-background-hq.webp','aproar-favicon.ico']
           dest=pathlib.Path('cloudflare-production/public')
           for name in files:
               req=urllib.request.Request(root+'/'+name,headers={'User-Agent':'APROAR-Source-Backup/1.0'})
               with urllib.request.urlopen(req,timeout=35) as f:
                   content=f.read()
                   ct=f.headers.get('Content-Type','')
-              assert len(content)>1000, (name,'size unexpected',len(content))
+              assert len(content)>100, (name,'size unexpected',len(content))
               assert b'Interface ainda' not in content
               if name=='app.js':
                   assert b'function allocationRow' in content
