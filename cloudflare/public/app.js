@@ -759,8 +759,8 @@
 
   let serviceListSeq=0;
   function allocationRow(unit,service={},index=0){
-    const works=OBRAS.filter(o=>o.unidade===unit),listId='service-works-'+(++serviceListSeq);
-    return `<div class="allocation-row"><div>${field(index?'Obra / Serviço adicional '+index:'Obra / Serviço',`<input class="control service-work" list="${listId}" value="${escapeHtml(works.find(o=>o.id===service.obraId)?.nome||'')}" placeholder="Selecione ou digite para buscar a obra..." autocomplete="off"><datalist id="${listId}">${works.map(o=>`<option value="${escapeHtml(o.nome)}"></option>`).join('')}</datalist>`)}</div><div>${field('Período',`<select class="control service-period">${['Integral','Manhã','Tarde','Noite'].map(x=>`<option ${x===(service.periodo||'Integral')?'selected':''}>${x}</option>`).join('')}</select>`)}</div></div>`;
+    const works=index>0?[...OBRAS].sort((a,b)=>String(a.unidade).localeCompare(String(b.unidade),'pt-BR')||String(a.nome).localeCompare(String(b.nome),'pt-BR')):OBRAS.filter(o=>o.unidade===unit),listId='service-works-'+(++serviceListSeq);
+    return `<div class="allocation-row"><div>${field(index?'Obra / Serviço adicional '+index:'Obra / Serviço',`<input class="control service-work" list="${listId}" value="${escapeHtml((()=>{const selected=works.find(o=>String(o.id)===String(service.obraId||''));return selected?(index>0?selected.unidade+' · ':'')+selected.nome:'';})())}" placeholder="Selecione ou digite para buscar a obra..." autocomplete="off"><datalist id="${listId}">${works.map(o=>`<option value="${escapeHtml(index>0?o.unidade+' · '+o.nome:o.nome)}"></option>`).join('')}</datalist>`)}</div><div>${field('Período',`<select class="control service-period">${['Integral','Manhã','Tarde','Noite'].map(x=>`<option ${x===(service.periodo||'Integral')?'selected':''}>${x}</option>`).join('')}</select>`)}</div></div>`;
   }
   function itemServices(item,defaultObra){
     if(item?.servicos?.length)return item.servicos;
@@ -892,7 +892,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
   }
   function bindServiceRows(){
     $$('.person-card .service-work').forEach(input=>{
-      wireLiveSuggestions(input,()=>OBRAS.filter(o=>o.unidade===input.closest('.person-card')?.dataset.unit).map(o=>({label:o.nome,id:o.id})),()=>input.dispatchEvent(new Event('change',{bubbles:true})));
+      wireLiveSuggestions(input,()=>{const additional=Boolean(input.closest('.additional-services'));return OBRAS.filter(o=>additional||o.unidade===input.closest('.person-card')?.dataset.unit).map(o=>({label:additional?o.unidade+' · '+o.nome:o.nome,id:o.id,searchText:String(o.id)}));},()=>input.dispatchEvent(new Event('change',{bubbles:true})));
     });
     $$('.person-card').forEach(card=>{
       bindExtraWorkSearch(card);
@@ -920,7 +920,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       field('.add-service').onclick=()=>{
         field('.additional-services').insertAdjacentHTML('beforeend',allocationRow(card.dataset.unit,{},card.querySelectorAll('.allocation-row').length));
         const added=card.querySelector('.additional-services .allocation-row:last-child .service-work');
-        wireLiveSuggestions(added,()=>OBRAS.filter(o=>o.unidade===card.dataset.unit).map(o=>({label:o.nome,id:o.id})),()=>added.dispatchEvent(new Event('change',{bubbles:true})));
+        wireLiveSuggestions(added,()=>OBRAS.map(o=>({label:o.unidade+' · '+o.nome,id:o.id,searchText:String(o.id)})),()=>added.dispatchEvent(new Event('change',{bubbles:true})));
         countServices();card.dispatchEvent(new Event('change',{bubbles:true}));
       };
       field('.remove-last-service').onclick=()=>{field('.additional-services .allocation-row:last-child')?.remove();countServices();card.dispatchEvent(new Event('change',{bubbles:true}));};
@@ -972,8 +972,11 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
   function readPersonRows(ids,scope=document){
     return ids.map(cid=>{
       const row=scope.querySelector(`[data-person="${cid}"]`),
-            servicos=[...row.querySelectorAll('.allocation-row')].map(r=>({
-              obraId:OBRAS.find(o=>o.unidade===row.dataset.unit&&clean(o.nome)===clean(r.querySelector('.service-work').value))?.id||'',
+            servicos=[...row.querySelectorAll('.allocation-row')].map((r,index)=>({
+              // Serviço principal mantém a unidade da convocação; adicionais incluem a unidade no rótulo.
+              obraId:OBRAS.find(o=>index===0
+                ?o.unidade===row.dataset.unit&&clean(o.nome)===clean(r.querySelector('.service-work').value)
+                :clean(o.unidade+' · '+o.nome)===clean(r.querySelector('.service-work').value))?.id||'',
               periodo:r.querySelector('.service-period').value
             })),
             category=row.querySelector('.row-extra')?.value||'Não',
@@ -1013,7 +1016,8 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
   }
   function validServices(items,unit){
     for(const i of items){if(!presence(i.status))continue;const ss=i.servicos;
-      if(!ss.length||ss.some(x=>!x.obraId||obraById(x.obraId)?.unidade!==unit)){toast('Escolha os serviços de cada colaborador dentro da unidade selecionada.',true);return false;}
+      if(!ss.length||!ss[0].obraId||obraById(ss[0].obraId)?.unidade!==unit){toast('O serviço principal deve pertencer à unidade selecionada.',true);return false;}
+      if(ss.slice(1).some(x=>!x.obraId||!obraById(x.obraId))){toast('Escolha um serviço adicional válido de qualquer unidade.',true);return false;}
       if(new Set(ss.map(x=>x.obraId+'|'+x.periodo)).size!==ss.length){toast('Há um serviço repetido no mesmo período para o colaborador.',true);return false;}
     }return true;
   }
@@ -3283,6 +3287,7 @@ function renderEquipeDia(){
         cents(item[k])===cents(target[k]));
     });
   }
+  let pendingUnconfirmedSave=null;
   function saveData(onSuccess=null,verifyPersisted=null,onFailure=null){
     if(!onlineSession||!onlineWritable||onlineSession.role==='VISUALIZAR'){
       if(onlineConfirmed){state=copy(onlineConfirmed);OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);}
@@ -3295,15 +3300,26 @@ function renderEquipeDia(){
     if(onlineQueued||onlineSaving){const message='Já existe um salvamento em andamento. Aguarde a confirmação antes de enviar outro apontamento.';showToast(message,true);showSaveFeedback(message,true);if(typeof onFailure==='function')onFailure(message);return false;}
     showSaveFeedback('Enviando apontamento para gravação no banco…',false,40000);
     const pendingNightChanges=nightChangesToVerify(onlineConfirmed,state);
-    state.obras=OBRAS;state.colaboradores=COLABORADORES;onlineQueued=true;lockOnline(true);
+    state.obras=OBRAS;state.colaboradores=COLABORADORES;
+    // Se houve queda após o POST, a próxima tentativa reutiliza o mesmo requestId.
+    const snapshot=JSON.stringify(copy(state));
+    if(pendingUnconfirmedSave&&pendingUnconfirmedSave.snapshot!==snapshot){
+      const message='Existe um salvamento sem confirmação. Confira o histórico e não altere outro apontamento até resolver o envio pendente.';
+      showSaveFeedback(message,true,60000);showToast(message,true);
+      if(typeof onFailure==='function')onFailure(message);
+      return false;
+    }
+    onlineQueued=true;lockOnline(true);
     queueMicrotask(async()=>{
       onlineQueued=false;onlineSaving=true;
       let savedOnServer=false;
       try{
-        const requestId=typeof crypto!=='undefined'&&typeof crypto.randomUUID==='function'
+        const requestId=pendingUnconfirmedSave?.requestId||(
+          typeof crypto!=='undefined'&&typeof crypto.randomUUID==='function'
           ?crypto.randomUUID()
-          :'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return(c==='x'?r:(r&0x3|0x8)).toString(16);});
-        const payload=JSON.stringify({requestId,version:onlineVersion,state:copy(state)});
+          :'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return(c==='x'?r:(r&0x3|0x8)).toString(16);}));
+        const payload=pendingUnconfirmedSave?.payload||JSON.stringify({requestId,version:onlineVersion,state:copy(state)});
+        if(!pendingUnconfirmedSave)pendingUnconfirmedSave={requestId,payload,snapshot};
         if(typeof payload!=='string')throw new Error('Não foi possível preparar os dados para salvar.');
         // Reenviar EXATAMENTE o mesmo requestId e payload é seguro: aproar_web_apply
         // é idempotente e registra o ID atomicamente na mesma transação.
@@ -3353,6 +3369,7 @@ function renderEquipeDia(){
             'Não foi possível confirmar o salvamento após recuperar a conexão. Confira as pendências e o histórico antes de lançar novamente. Nenhum segundo apontamento foi criado automaticamente.'
           ),{status:lastTransient?.status||503,unconfirmed:true});
         }
+        pendingUnconfirmedSave=null;
         // A gravação já está confirmada pelo banco. Nunca tratar a falha de
         // atualização da tela como uma falha do próprio apontamento.
         // A resposta compacta apenas confirma a transação; para adicional noturno
@@ -3390,6 +3407,16 @@ function renderEquipeDia(){
           return;
         }
         const message=String(error?.message||'Não foi possível salvar o apontamento. Confira a conexão e tente novamente.');
+        if(error?.unconfirmed){
+          // O POST pode ter feito COMMIT sem entregar o ACK. Não destruir o rascunho
+          // nem gerar outro ID na próxima confirmação solicitada pelo usuário.
+          onlineSaving=false;
+          const notice=message+' A mesma requisição será reutilizada caso você clique em Salvar novamente, sem duplicar o apontamento.';
+          if(typeof onFailure==='function')onFailure(notice);
+          showSaveFeedback(notice,true,60000);showToast(notice,true);
+          return;
+        }
+        pendingUnconfirmedSave=null;
         try{applyOnline(await restoreOnlineSession());}
         catch(refreshError){
           console.error('APROAR state refresh after save failure',String(refreshError?.message||refreshError).slice(0,240));

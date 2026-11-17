@@ -30,7 +30,7 @@ function setup({post,check,bootstrap}){
   document:{querySelector:()=>null},
   lockOnline:()=>{},
   render:()=>{ui.render++;resolveDone();},
-  showSaveFeedback:(message,error)=>alerts.push({message,error}),
+  showSaveFeedback:(message,error)=>{alerts.push({message,error});if(error&&message.includes('A mesma requisição será reutilizada'))resolveDone();},
   showToast:(message,error)=>alerts.push({message,error}),
   toast:(message,error)=>alerts.push({message,error}),
   restoreOnlineSession:async()=>typeof bootstrap==='function'?await bootstrap():({state,version:'v2',session:{role:'SUPERVISOR',user:'EDUARDO'},writesEnabled:true,stage:'producao'}),
@@ -145,7 +145,8 @@ test('Após 2 respostas 502 sem confirmação, nenhum pedido novo é criado auto
  await x.done;
  assert.equal(ids.length,2,'Tentativas limitadas a duas para não sobrecarregar o servidor');
  assert.equal(new Set(ids).size,1,'Nunca cria outra operação para a mesma confirmação');
- assert.equal(x.ui.synced,1,'Falha atualiza base para não insistir cegamente');
+ assert.equal(x.ui.synced,0,'Falha incerta não substitui rascunho por estado remoto');
+ assert.equal(x.ui.render,0,'Falha incerta não provoca re-renderização destrutiva');
  assert(x.alerts.some(a=>/Nenhum segundo apontamento foi criado automaticamente/.test(a.message)));
 });
 
