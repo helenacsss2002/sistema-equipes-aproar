@@ -7,6 +7,36 @@ async function save(sql,next,session,version){const before=await readDatabase(sq
 function conv(state){state.convocacoes.push({id:'draft-conv',supervisor:'EDUARDO',dataServico:'2026-10-07',unidade:'FIEC',obraId:'',turno:'Integral',colaboradores:['1']});}
 function attendance(state,id){state.apontamentos.push({id:'draft-ap',convocacaoId:id,supervisor:'EDUARDO',dataServico:'2026-10-07',retroativo:true,itens:[{colaboradorId:'1',status:'Presente (Integral)',extra:'Meia diária',financeiro:120,noturno:0,acordo:20,observacao:'Teste',servicos:[{obraId:'1',periodo:'Manhã'},{obraId:'2',periodo:'Tarde'}]}]});}
 test('Atomic creation, multiple services, exact costs and dual-write compatibility',async()=>{const {pg,sql}=await fixture();try{const initial=await readDatabase(sql),next=structuredClone(initial.state);conv(next);attendance(next,'draft-conv');const {after,ops}=await save(sql,next,actor);assert.equal(after.state.convocacoes.length,1);assert.equal(after.state.apontamentos.length,1);assert.equal(after.raw.servicos_apontamento.length,2);assert.equal(Number(after.raw.apontamentos[0].valor_extra),120.87);assert.equal(Number(after.raw.apontamentos[0].custo_encargos_base),362.61);assert.equal(after.raw.apontamentos[0].tipo_diaria,'Meia diária');assert.equal(Number(after.raw.convocacoes[0].custo_pago),120);assert.equal(after.state.apontamentos[0].executor,'EDUARDO');assert(!ops.some(o=>o.table==='colaboradores'));assert.notEqual(initial.version,after.version);}finally{await pg.close();}});
+test('Additional service may come from another unit while principal stays in the convocation unit',async()=>{
+ const {pg,sql}=await fixture();
+ try{
+  const original=await readDatabase(sql),next=structuredClone(original.state);
+  conv(next);attendance(next,'draft-conv');
+  next.apontamentos[0].itens[0].servicos[1]={obraId:'3',periodo:'Tarde'};
+  const {after}=await save(sql,next,actor);
+  assert.equal(after.raw.servicos_apontamento.length,2);
+  const principal=after.raw.servicos_apontamento.find(s=>s.principal);
+  const adicional=after.raw.servicos_apontamento.find(s=>!s.principal);
+  assert.equal(String(principal.obra_id),'1');
+  assert.equal(principal.unidade_snapshot,'FIEC');
+  assert.equal(String(adicional.obra_id),'3');
+  assert.equal(adicional.unidade_snapshot,'SEBRAE');
+  assert.equal(after.state.convocacoes[0].unidade,'FIEC');
+  assert.equal(after.state.apontamentos[0].itens[0].servicos[1].obraId,'3');
+ }finally{await pg.close();}
+});
+test('Principal service still requires the convocation unit and additional services must exist',async()=>{
+ const {pg,sql}=await fixture();
+ try{
+  const db=await readDatabase(sql),next=structuredClone(db.state);
+  conv(next);attendance(next,'draft-conv');
+  next.apontamentos[0].itens[0].servicos[0].obraId='3';
+  assert.throws(()=>buildOperations(db,next,actor,now),/principal precisa ser da unidade/);
+  next.apontamentos[0].itens[0].servicos[0].obraId='1';
+  next.apontamentos[0].itens[0].servicos[1].obraId='99999';
+  assert.throws(()=>buildOperations(db,next,actor,now),/serviços adicionais cadastrados/);
+ }finally{await pg.close();}
+});
 test('Stale write rolls back all operations',async()=>{const {pg,sql}=await fixture();try{const initial=await readDatabase(sql),next=structuredClone(initial.state);conv(next);await pg.exec("UPDATE colaboradores SET nome='Alterado no Streamlit' WHERE id=1");const ops=buildOperations(initial,next,actor,now);await assert.rejects(async()=>await sql`SELECT aproar_web_apply(${initial.version},${crypto.randomUUID()},${actor.user},${'hash'},${JSON.stringify(ops)}::jsonb)`,/APROAR_STALE/);assert.equal((await pg.query('SELECT count(*)::int n FROM convocacoes')).rows[0].n,0);}finally{await pg.close();}});
 test('Invalid statement after a valid insert rolls back the entire transaction',async()=>{const {pg,sql}=await fixture();try{const db=await readDatabase(sql),ops=[{table:'obras',action:'insert',id:'temp',data:{nome:'New',unidade:'FIEC'}},{table:'obras',action:'insert',id:'bad',data:{nome:null,unidade:'FIEC'}}];await assert.rejects(async()=>await sql`SELECT aproar_web_apply(${db.version},${crypto.randomUUID()},${admin.user},${'hash'},${JSON.stringify(ops)}::jsonb)`);assert.equal((await pg.query('SELECT count(*)::int n FROM obras')).rows[0].n,3);}finally{await pg.close();}});
 test('Retries of the same request cannot create duplicate convocations',async()=>{const {pg,sql}=await fixture();try{const db=await readDatabase(sql),next=structuredClone(db.state);conv(next);const ops=buildOperations(db,next,actor,now),id=crypto.randomUUID();await sql`SELECT aproar_web_apply(${db.version},${id},${actor.user},${'hash'},${JSON.stringify(ops)}::jsonb)`;await sql`SELECT aproar_web_apply(${db.version},${id},${actor.user},${'hash'},${JSON.stringify(ops)}::jsonb)`;assert.equal((await pg.query('SELECT count(*)::int n FROM convocacoes')).rows[0].n,1);}finally{await pg.close();}});
