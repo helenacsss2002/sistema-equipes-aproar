@@ -61,6 +61,15 @@ export default {async fetch(request,env){const url=new URL(request.url),path=url
     const result=await sincronizarTrello(sql,{listId:payload.listId,cardId:payload.cardId});
     return json({ok:true,...result});
    }
+   // Consulta de leitura para confirmar uma gravação após perda da resposta HTTP.
+   // O identificador é associado ao usuário autenticado; não é criada outra gravação.
+   if(path==='/api/save-status'&&request.method==='GET'){
+    const requestId=url.searchParams.get('requestId')||'';
+    if(!/^[a-f0-9-]{36}$/i.test(requestId))return json({error:'Identificador inválido.'},400);
+    const existing=await sql`SELECT actor FROM aproar_web_requests WHERE id=${requestId}`;
+    if(!existing.length||existing[0].actor!==session.user)return json({applied:false});
+    return json({...summary(await readDatabase(sql),session,env),applied:true});
+   }
    if(path==='/api/bootstrap'&&request.method==='GET')return json(summary(await readDatabase(sql),session,env));
    if(path==='/api/save'&&request.method==='POST'){
     if(!sameOrigin(request))return json({error:'Origem não autorizada.'},403);if(!writes(env))return json({error:'Gravação desativada. Configure APP_ENV=homologacao e WRITES_ENABLED=true para a branch de testes.'},403);
