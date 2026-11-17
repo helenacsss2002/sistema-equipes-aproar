@@ -1,4 +1,4 @@
-name: Verificar preview do rateio APROAR
+name: Verificar produção após publicar rateio APROAR
 
 on:
   push:
@@ -21,7 +21,7 @@ jobs:
         run: |
           python3 - <<'PY'
           import urllib.request,urllib.error,json
-          root='https://363ed96f-sistema-equipes-aproar.helenacsss2002.workers.dev'
+          root='https://sistema-equipes-aproar.helenacsss2002.workers.dev'
           paths=['/','/index.html','/app.js?v=aproar-rateio-interunidades-20261117-1','/financeiro-consolidado.js','/pdf-lib.min.js','/construction-background-hq.webp','/aproar-favicon.ico','/api/health']
           for p in paths:
             try:
@@ -49,9 +49,7 @@ jobs:
               raise RuntimeError('login de teste não deveria autenticar')
           except urllib.error.HTTPError as e:
             print('LOGIN_TEST',e.code,e.headers.get('Content-Type'))
-            if e.code==403 and 'text/plain' in (e.headers.get('Content-Type') or ''):
-              print('NOTA: Version URL recusou POST na borda do Cloudflare; verificar login após canário seguro.')
-            elif e.code!=401:raise
+            if e.code!=401:raise
           PY
       - name: Testar HTML no Chromium (sem fazer login)
         shell: bash
@@ -67,7 +65,7 @@ jobs:
             const page=await browser.newPage();
             const errors=[];
             page.on('pageerror',e=>errors.push(e.message));
-            const response=await page.goto('https://363ed96f-sistema-equipes-aproar.helenacsss2002.workers.dev/',{waitUntil:'networkidle',timeout:30000});
+            const response=await page.goto('https://sistema-equipes-aproar.helenacsss2002.workers.dev/',{waitUntil:'networkidle',timeout:30000});
             console.log('BROWSER_STATUS',response.status());
             console.log('BROWSER_TITLE',await page.title());
             console.log('BROWSER_HAS_SUPERVISOR',await page.getByText('Portal do Supervisor').count());
