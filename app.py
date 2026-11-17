@@ -19024,6 +19024,20 @@ elif modo_campo:
                                         f"{c_id}_{idx_adic}"
                                     )
 
+                                    # Ao publicar a nova lista global, o
+                                    # widget pode guardar uma opção antiga
+                                    # desta unidade na sessão atual.
+                                    # Remapear sem descartar a obra já salva.
+                                    if (
+                                        key_obra_adic in st.session_state
+                                        and st.session_state[key_obra_adic]
+                                        not in opcoes_adic
+                                    ):
+                                        st.session_state.pop(
+                                            key_obra_adic,
+                                            None,
+                                        )
+
                                     if (
                                         key_obra_adic
                                         not in st.session_state
