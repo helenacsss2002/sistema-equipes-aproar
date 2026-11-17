@@ -521,8 +521,9 @@
 
 
   function allocationRow(unit,service={},index=0){
-    const works=OBRAS.filter(o=>o.unidade===unit);
-    return `<div class="allocation-row"><div>${field(index?'Obra / Serviço adicional '+index:'Obra / Serviço',`<select class="control service-work"><option value="">— Selecione o serviço —</option>${works.map(o=>`<option value="${o.id}" ${o.id===service.obraId?'selected':''}>${escapeHtml(o.nome)}</option>`).join('')}</select>`)}</div><div>${field('Período',`<select class="control service-period">${['Integral','Manhã','Tarde','Noite'].map(x=>`<option ${x===(service.periodo||'Integral')?'selected':''}>${x}</option>`).join('')}</select>`)}</div></div>`;
+    // Somente serviços adicionais podem ser de qualquer unidade.
+    const works=index>0?[...OBRAS].sort((a,b)=>String(a.unidade).localeCompare(String(b.unidade),'pt-BR')||String(a.nome).localeCompare(String(b.nome),'pt-BR')):OBRAS.filter(o=>o.unidade===unit);
+    return `<div class="allocation-row"><div>${field(index?'Obra / Serviço adicional '+index:'Obra / Serviço',`<select class="control service-work"><option value="">— Selecione o serviço —</option>${works.map(o=>`<option value="${o.id}" ${String(o.id)===String(service.obraId||'')?'selected':''}>${escapeHtml(index>0?'['+o.unidade+'] '+o.nome:o.nome)}</option>`).join('')}</select>`)}</div><div>${field('Período',`<select class="control service-period">${['Integral','Manhã','Tarde','Noite'].map(x=>`<option ${x===(service.periodo||'Integral')?'selected':''}>${x}</option>`).join('')}</select>`)}</div></div>`;
   }
   function itemServices(item,defaultObra){
     if(item?.servicos?.length)return item.servicos;
@@ -551,7 +552,8 @@
   }
   function validServices(items,unit){
     for(const i of items){if(!presence(i.status))continue;const ss=i.servicos;
-      if(!ss.length||ss.some(x=>!x.obraId||obraById(x.obraId)?.unidade!==unit)){toast('Escolha os serviços de cada colaborador dentro da unidade selecionada.',true);return false;}
+      if(!ss.length||!ss[0].obraId||obraById(ss[0].obraId)?.unidade!==unit){toast('O serviço principal deve pertencer à unidade selecionada.',true);return false;}
+      if(ss.slice(1).some(x=>!x.obraId||!obraById(x.obraId))){toast('Escolha um serviço válido para cada serviço adicional, de qualquer unidade.',true);return false;}
       if(new Set(ss.map(x=>x.obraId+'|'+x.periodo)).size!==ss.length){toast('Há um serviço repetido no mesmo período para o colaborador.',true);return false;}
     }return true;
   }
