@@ -3417,7 +3417,7 @@ function renderEquipeDia(){
           return;
         }
         pendingUnconfirmedSave=null;
-        try{applyOnline(await restoreOnlineSession());
+        try{applyOnline(await restoreOnlineSession());}
         catch(refreshError){
           console.error('APROAR state refresh after save failure',String(refreshError?.message||refreshError).slice(0,240));
           if(onlineConfirmed){state=copy(onlineConfirmed);OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);}
