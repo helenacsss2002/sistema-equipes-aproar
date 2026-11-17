@@ -1,0 +1,48 @@
+name: Diagnostico navegador APROAR sem deploy
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/diagnostico-navegador-aproar.yml']
+permissions:
+  contents: read
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Executar navegador Chromium isolado
+        shell: bash
+        run: |
+          mkdir -p /tmp/aproar-browser
+          cd /tmp/aproar-browser
+          npm install --silent playwright@1.56.1
+          npx playwright install --with-deps chromium >/dev/null
+          node - <<'NODE'
+          const {chromium}=require('playwright');
+          (async()=>{
+            const browser=await chromium.launch({headless:true});
+            const page=await browser.newPage();
+            const errors=[];
+            page.on('pageerror',e=>errors.push(String(e.message).slice(0,200)));
+            page.on('response',r=>{if(r.status()>=500)console.log('ERROR_HTTP',r.status(),r.url().slice(0,230))});
+            try{
+              const resp=await page.goto('https://apontamentosaproar.ct.ws/',{waitUntil:'domcontentloaded',timeout:25000});
+              await page.waitForTimeout(4000);
+              console.log('PORTAL_HTTP',resp?.status());
+              console.log('PORTAL_URL',page.url());
+              console.log('PORTAL_TITLE',(await page.title()).slice(0,170));
+              const info=await page.evaluate(()=>{
+                const scripts=[...document.querySelectorAll('script[src]')].map(e=>e.src);
+                const text=document.body?.innerText||'';
+                return {scripts:scripts.slice(0,20),text:text.slice(0,700),links:[...document.querySelectorAll('a[href]')].slice(0,10).map(e=>e.href)};
+              });
+              console.log('PORTAL_INFO',JSON.stringify(info));
+              console.log('BROWSER_ERRORS',JSON.stringify(errors.slice(0,7)));
+            }catch(e){console.log('PORTAL_ERROR',String(e.message).slice(0,250));}
+            await browser.close();
+          })().catch(e=>{console.log('BROWSER_RUN_ERROR',String(e).slice(0,200));});
+          NODE
