@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isoDay, turnosSeSobrepoem, validateConvocacao, validateApontamento,
+import { isoDay, turnosSeSobrepoem, turnoEfetivo, validateConvocacao, validateApontamento,
          apontamentoRetroativo, writeConfiguration, convocacaoAtrasada } from './write-validation.js';
 
 test('rejects invalid and impossible dates',()=>{
@@ -54,4 +54,15 @@ test('rejects reserved metadata delimiters and unsupported payload fields',()=>{
   assert.equal(validateConvocacao({...c,observacao:'teste ||APROAR_META|| {}'}).ok,false);
   assert.equal(validateConvocacao({...c,custoPago:99}).ok,false);
   assert.equal(validateApontamento({convocacaoId:7,status:'Falta',custoPago:99}).ok,false);
+});
+
+test('apontamento parcial ocupa apenas o turno realizado, sem apagar convocação original',()=>{
+  assert.equal(turnoEfetivo('Integral','Presente (Só Manhã)'), 'Manhã');
+  assert.equal(turnoEfetivo('Integral','Presente (Só Tarde)'), 'Tarde');
+  assert.equal(turnoEfetivo('Integral','Presente (Integral)'), 'Integral');
+  assert.equal(turnoEfetivo('Integral','Falta'), 'Integral');
+  assert.equal(turnoEfetivo('Manhã','Presente (Só Tarde)'), 'Manhã');
+  assert.equal(turnosSeSobrepoem(turnoEfetivo('Integral','Presente (Só Manhã)'),'Tarde'),false);
+  assert.equal(turnosSeSobrepoem(turnoEfetivo('Integral','Presente (Só Manhã)'),'Manhã'),true);
+  assert.equal(turnosSeSobrepoem('Integral','Noite'),false);
 });
