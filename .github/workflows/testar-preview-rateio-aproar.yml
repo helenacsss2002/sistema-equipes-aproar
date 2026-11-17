@@ -1,0 +1,76 @@
+name: Verificar preview do rateio APROAR
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/testar-preview-rateio-aproar.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  testar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Testes HTTP não destrutivos na versão preview
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import urllib.request,urllib.error,json
+          root='https://525a55e5-sistema-equipes-aproar.helenacsss2002.workers.dev'
+          paths=['/','/index.html','/app.js?v=aproar-rateio-interunidades-20261117-1','/financeiro-consolidado.js','/pdf-lib.min.js','/construction-background-hq.webp','/aproar-favicon.ico','/api/health']
+          for p in paths:
+            try:
+              with urllib.request.urlopen(urllib.request.Request(root+p,headers={'User-Agent':'APROAR-Version-Preview-Check/1.0'}),timeout=20) as response:
+                body=response.read()
+                print('CHECK',p,'STATUS',response.status,'BYTES',len(body),'TYPE',response.headers.get('Content-Type'))
+                if response.status!=200 or len(body)<8: raise RuntimeError('Asset inválido')
+                if p=='/api/health':
+                  data=json.loads(body)
+                  if data.get('application')!='APROAR' or data.get('stage')!='producao' or data.get('databaseConfigured')!=True:raise RuntimeError('API não configurada')
+                if p.startswith('/app.js'):
+                  text=body.decode()
+                  if 'function allocationWorkLabel' not in text or 'const additional=index>0' not in text:raise RuntimeError('App não contém a correção')
+                if p=='/':
+                  html=body.decode()
+                  if 'rateio-interunidades-20261117-1' not in html:raise RuntimeError('HTML não atualizou JS')
+            except Exception as error:
+              print('ERROR',p,type(error).__name__,str(error)[:250])
+              raise
+          payload=json.dumps({'role':'SUPERVISOR','supervisor':'JOEL','password':'INVALIDO_TESTE_SEM_CREDENCIAL'}).encode()
+          req=urllib.request.Request(root+'/api/login',data=payload,headers={'Origin':root,'Content-Type':'application/json'},method='POST')
+          try:
+            with urllib.request.urlopen(req,timeout=30) as r:
+              print('ERROR_LOGIN_EXPECTED_401_GOT',r.status)
+              raise RuntimeError('login de teste não deveria autenticar')
+          except urllib.error.HTTPError as e:
+            print('LOGIN_TEST',e.code,e.headers.get('Content-Type'))
+            if e.code!=401:raise
+          PY
+      - name: Testar HTML no Chromium (sem fazer login)
+        shell: bash
+        run: |
+          mkdir /tmp/aproar-preview-browser
+          cd /tmp/aproar-preview-browser
+          npm install --silent playwright@1.56.1
+          npx playwright install --with-deps chromium >/dev/null
+          node - <<'NODE'
+          const { chromium }=require('playwright');
+          (async()=>{
+            const browser=await chromium.launch({headless:true});
+            const page=await browser.newPage();
+            const errors=[];
+            page.on('pageerror',e=>errors.push(e.message));
+            const response=await page.goto('https://525a55e5-sistema-equipes-aproar.helenacsss2002.workers.dev/',{waitUntil:'networkidle',timeout:30000});
+            console.log('BROWSER_STATUS',response.status());
+            console.log('BROWSER_TITLE',await page.title());
+            console.log('BROWSER_HAS_SUPERVISOR',await page.getByText('Portal do Supervisor').count());
+            console.log('BROWSER_ERRORS',JSON.stringify(errors.slice(0,6)));
+            if(response.status()!==200||errors.length||!(await page.getByText('Portal do Supervisor').count()))throw Error('Preview HTML com problema');
+            await browser.close();
+          })().catch(e=>{console.error('ERROR',e);process.exit(1)});
+          NODE
