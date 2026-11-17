@@ -759,8 +759,8 @@
 
   let serviceListSeq=0;
   function allocationRow(unit,service={},index=0){
-    const works=OBRAS.filter(o=>o.unidade===unit),listId='service-works-'+(++serviceListSeq);
-    return `<div class="allocation-row"><div>${field(index?'Obra / Serviço adicional '+index:'Obra / Serviço',`<input class="control service-work" list="${listId}" value="${escapeHtml(works.find(o=>o.id===service.obraId)?.nome||'')}" placeholder="Selecione ou digite para buscar a obra..." autocomplete="off"><datalist id="${listId}">${works.map(o=>`<option value="${escapeHtml(o.nome)}"></option>`).join('')}</datalist>`)}</div><div>${field('Período',`<select class="control service-period">${['Integral','Manhã','Tarde','Noite'].map(x=>`<option ${x===(service.periodo||'Integral')?'selected':''}>${x}</option>`).join('')}</select>`)}</div></div>`;
+    const works=index>0?[...OBRAS].sort((a,b)=>String(a.unidade).localeCompare(String(b.unidade),'pt-BR')||String(a.nome).localeCompare(String(b.nome),'pt-BR')):OBRAS.filter(o=>o.unidade===unit),listId='service-works-'+(++serviceListSeq);
+    return `<div class="allocation-row"><div>${field(index?'Obra / Serviço adicional '+index:'Obra / Serviço',`<input class="control service-work" list="${listId}" value="${escapeHtml((()=>{const selected=works.find(o=>String(o.id)===String(service.obraId||''));return selected?(index>0?selected.unidade+' · ':'')+selected.nome:'';})())}" placeholder="Selecione ou digite para buscar a obra..." autocomplete="off"><datalist id="${listId}">${works.map(o=>`<option value="${escapeHtml(index>0?o.unidade+' · '+o.nome:o.nome)}"></option>`).join('')}</datalist>`)}</div><div>${field('Período',`<select class="control service-period">${['Integral','Manhã','Tarde','Noite'].map(x=>`<option ${x===(service.periodo||'Integral')?'selected':''}>${x}</option>`).join('')}</select>`)}</div></div>`;
   }
   function itemServices(item,defaultObra){
     if(item?.servicos?.length)return item.servicos;
@@ -892,7 +892,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
   }
   function bindServiceRows(){
     $$('.person-card .service-work').forEach(input=>{
-      wireLiveSuggestions(input,()=>OBRAS.filter(o=>o.unidade===input.closest('.person-card')?.dataset.unit).map(o=>({label:o.nome,id:o.id})),()=>input.dispatchEvent(new Event('change',{bubbles:true})));
+      wireLiveSuggestions(input,()=>{const additional=Boolean(input.closest('.additional-services'));return OBRAS.filter(o=>additional||o.unidade===input.closest('.person-card')?.dataset.unit).map(o=>({label:additional?o.unidade+' · '+o.nome:o.nome,id:o.id,searchText:String(o.id)}));},()=>input.dispatchEvent(new Event('change',{bubbles:true})));
     });
     $$('.person-card').forEach(card=>{
       bindExtraWorkSearch(card);
@@ -920,7 +920,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
       field('.add-service').onclick=()=>{
         field('.additional-services').insertAdjacentHTML('beforeend',allocationRow(card.dataset.unit,{},card.querySelectorAll('.allocation-row').length));
         const added=card.querySelector('.additional-services .allocation-row:last-child .service-work');
-        wireLiveSuggestions(added,()=>OBRAS.filter(o=>o.unidade===card.dataset.unit).map(o=>({label:o.nome,id:o.id})),()=>added.dispatchEvent(new Event('change',{bubbles:true})));
+        wireLiveSuggestions(added,()=>OBRAS.map(o=>({label:o.unidade+' · '+o.nome,id:o.id,searchText:String(o.id)})),()=>added.dispatchEvent(new Event('change',{bubbles:true})));
         countServices();card.dispatchEvent(new Event('change',{bubbles:true}));
       };
       field('.remove-last-service').onclick=()=>{field('.additional-services .allocation-row:last-child')?.remove();countServices();card.dispatchEvent(new Event('change',{bubbles:true}));};
@@ -972,8 +972,11 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
   function readPersonRows(ids,scope=document){
     return ids.map(cid=>{
       const row=scope.querySelector(`[data-person="${cid}"]`),
-            servicos=[...row.querySelectorAll('.allocation-row')].map(r=>({
-              obraId:OBRAS.find(o=>o.unidade===row.dataset.unit&&clean(o.nome)===clean(r.querySelector('.service-work').value))?.id||'',
+            servicos=[...row.querySelectorAll('.allocation-row')].map((r,index)=>({
+              // Serviço principal mantém a unidade da convocação; adicionais incluem a unidade no rótulo.
+              obraId:OBRAS.find(o=>index===0
+                ?o.unidade===row.dataset.unit&&clean(o.nome)===clean(r.querySelector('.service-work').value)
+                :clean(o.unidade+' · '+o.nome)===clean(r.querySelector('.service-work').value))?.id||'',
               periodo:r.querySelector('.service-period').value
             })),
             category=row.querySelector('.row-extra')?.value||'Não',
@@ -1013,7 +1016,8 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
   }
   function validServices(items,unit){
     for(const i of items){if(!presence(i.status))continue;const ss=i.servicos;
-      if(!ss.length||ss.some(x=>!x.obraId||obraById(x.obraId)?.unidade!==unit)){toast('Escolha os serviços de cada colaborador dentro da unidade selecionada.',true);return false;}
+      if(!ss.length||!ss[0].obraId||obraById(ss[0].obraId)?.unidade!==unit){toast('O serviço principal deve pertencer à unidade selecionada.',true);return false;}
+      if(ss.slice(1).some(x=>!x.obraId||!obraById(x.obraId))){toast('Escolha um serviço adicional válido de qualquer unidade.',true);return false;}
       if(new Set(ss.map(x=>x.obraId+'|'+x.periodo)).size!==ss.length){toast('Há um serviço repetido no mesmo período para o colaborador.',true);return false;}
     }return true;
   }
