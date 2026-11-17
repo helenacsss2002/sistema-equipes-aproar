@@ -7,5 +7,9 @@
   "keep_vars": true,
   "observability": {
     "enabled": true
+  },
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
   }
 }

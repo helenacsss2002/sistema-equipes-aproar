@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - 'cloudflare/**'
+      - 'cloudflare-production/public/**'
+      - 'tests/test_apontamento_servicos_interunidades.mjs'
       - 'app.py'
       - 'tests/test_turnos_conflito.py'
       - '.github/workflows/aproar-html-tests.yml'
@@ -24,6 +26,10 @@ jobs:
         run: npm --prefix cloudflare install --no-audit
       - name: Validar sintaxe JavaScript
         run: npm --prefix cloudflare run check
+      - name: Validar a interface real do supervisor e rateio entre unidades
+        run: |
+          node --check cloudflare-production/public/app.js
+          node --test tests/test_apontamento_servicos_interunidades.mjs
       - name: Executar testes de integracao em banco isolado
         run: npm --prefix cloudflare test
       - name: Validar turnos do Streamlit (sem acessar banco)
