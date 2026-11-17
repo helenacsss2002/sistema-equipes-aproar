@@ -1,0 +1,30 @@
+name: Diagnosticar bloqueio 403 no login com Worker restaurado
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/diagnosticar-bloqueio-login.yml']
+permissions:
+  contents: read
+jobs:
+  diagnostico:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 4
+    steps:
+      - name: Comparar respostas de login inválido por agente, sem usar credenciais reais
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import urllib.request,urllib.error,json
+          base='https://sistema-equipes-aproar.helenacsss2002.workers.dev'
+          body=json.dumps({'role':'SUPERVISOR','supervisor':'JOEL','password':'DIAGNOSTICO_SEM_CREDENCIAIS_REAIS'}).encode()
+          for ua in ('APROAR-Version-Preview-Check/1.0','APROAR-Diagnostic/1.0','Mozilla/5.0'):
+            req=urllib.request.Request(base+'/api/login',data=body,headers={'Content-Type':'application/json','Origin':base,'User-Agent':ua},method='POST')
+            try:
+              with urllib.request.urlopen(req,timeout=20) as resp:
+                print('UA',ua,'STATUS',resp.status,'CONTENT_TYPE',resp.headers.get('content-type'))
+            except urllib.error.HTTPError as e:
+              print('UA',ua,'STATUS',e.code,'CONTENT_TYPE',e.headers.get('content-type'),'SERVER',e.headers.get('server'),'RAY',e.headers.get('cf-ray'),'BODY',e.read(200).decode('utf-8','replace')[:130])
+            except Exception as e:
+              print('UA',ua,'ERROR',type(e).__name__,str(e)[:170])
+          PY
