@@ -3287,6 +3287,7 @@ function renderEquipeDia(){
         cents(item[k])===cents(target[k]));
     });
   }
+  let pendingUnconfirmedSave=null;
   function saveData(onSuccess=null,verifyPersisted=null,onFailure=null){
     if(!onlineSession||!onlineWritable||onlineSession.role==='VISUALIZAR'){
       if(onlineConfirmed){state=copy(onlineConfirmed);OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);}
@@ -3299,15 +3300,26 @@ function renderEquipeDia(){
     if(onlineQueued||onlineSaving){const message='Já existe um salvamento em andamento. Aguarde a confirmação antes de enviar outro apontamento.';showToast(message,true);showSaveFeedback(message,true);if(typeof onFailure==='function')onFailure(message);return false;}
     showSaveFeedback('Enviando apontamento para gravação no banco…',false,40000);
     const pendingNightChanges=nightChangesToVerify(onlineConfirmed,state);
-    state.obras=OBRAS;state.colaboradores=COLABORADORES;onlineQueued=true;lockOnline(true);
+    state.obras=OBRAS;state.colaboradores=COLABORADORES;
+    // Se houve queda após o POST, a próxima tentativa reutiliza o mesmo requestId.
+    const snapshot=JSON.stringify(copy(state));
+    if(pendingUnconfirmedSave&&pendingUnconfirmedSave.snapshot!==snapshot){
+      const message='Existe um salvamento sem confirmação. Confira o histórico e não altere outro apontamento até resolver o envio pendente.';
+      showSaveFeedback(message,true,60000);showToast(message,true);
+      if(typeof onFailure==='function')onFailure(message);
+      return false;
+    }
+    onlineQueued=true;lockOnline(true);
     queueMicrotask(async()=>{
       onlineQueued=false;onlineSaving=true;
       let savedOnServer=false;
       try{
-        const requestId=typeof crypto!=='undefined'&&typeof crypto.randomUUID==='function'
+        const requestId=pendingUnconfirmedSave?.requestId||(
+          typeof crypto!=='undefined'&&typeof crypto.randomUUID==='function'
           ?crypto.randomUUID()
-          :'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return(c==='x'?r:(r&0x3|0x8)).toString(16);});
-        const payload=JSON.stringify({requestId,version:onlineVersion,state:copy(state)});
+          :'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{const r=Math.random()*16|0;return(c==='x'?r:(r&0x3|0x8)).toString(16);}));
+        const payload=pendingUnconfirmedSave?.payload||JSON.stringify({requestId,version:onlineVersion,state:copy(state)});
+        if(!pendingUnconfirmedSave)pendingUnconfirmedSave={requestId,payload,snapshot};
         if(typeof payload!=='string')throw new Error('Não foi possível preparar os dados para salvar.');
         // Reenviar EXATAMENTE o mesmo requestId e payload é seguro: aproar_web_apply
         // é idempotente e registra o ID atomicamente na mesma transação.
@@ -3357,6 +3369,7 @@ function renderEquipeDia(){
             'Não foi possível confirmar o salvamento após recuperar a conexão. Confira as pendências e o histórico antes de lançar novamente. Nenhum segundo apontamento foi criado automaticamente.'
           ),{status:lastTransient?.status||503,unconfirmed:true});
         }
+        pendingUnconfirmedSave=null;
         // A gravação já está confirmada pelo banco. Nunca tratar a falha de
         // atualização da tela como uma falha do próprio apontamento.
         // A resposta compacta apenas confirma a transação; para adicional noturno
@@ -3394,7 +3407,17 @@ function renderEquipeDia(){
           return;
         }
         const message=String(error?.message||'Não foi possível salvar o apontamento. Confira a conexão e tente novamente.');
-        try{applyOnline(await restoreOnlineSession());}
+        if(error?.unconfirmed){
+          // O POST pode ter feito COMMIT sem entregar o ACK. Não destruir o rascunho
+          // nem gerar outro ID na próxima confirmação solicitada pelo usuário.
+          onlineSaving=false;
+          const notice=message+' A mesma requisição será reutilizada caso você clique em Salvar novamente, sem duplicar o apontamento.';
+          if(typeof onFailure==='function')onFailure(notice);
+          showSaveFeedback(notice,true,60000);showToast(notice,true);
+          return;
+        }
+        pendingUnconfirmedSave=null;
+        try{applyOnline(await restoreOnlineSession());
         catch(refreshError){
           console.error('APROAR state refresh after save failure',String(refreshError?.message||refreshError).slice(0,240));
           if(onlineConfirmed){state=copy(onlineConfirmed);OBRAS.splice(0,OBRAS.length,...state.obras);COLABORADORES.splice(0,COLABORADORES.length,...state.colaboradores);}
