@@ -1,16 +1,6 @@
 name: Validar e publicar APROAR (Cloudflare produção)
 
 on:
-  pull_request:
-    paths:
-      - "cloudflare-production/**"
-      - ".github/workflows/deploy-aproar-producao.yml"
-  push:
-    branches:
-      - main
-    paths:
-      - "cloudflare-production/**"
-      - ".github/workflows/deploy-aproar-producao.yml"
   workflow_dispatch:
 
 permissions:
@@ -47,7 +37,7 @@ jobs:
 
   publicar:
     needs: validar
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment: production
     timeout-minutes: 20
