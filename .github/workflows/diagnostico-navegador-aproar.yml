@@ -52,8 +52,9 @@ jobs:
                 const sels=await page.locator('select').count();
                 const pw=await page.locator('input[type=password]').count();
                 console.log('SUPERVISOR_INPUTS',sels,pw);
+                console.log('SUPERVISOR_SELECTS',JSON.stringify(await page.evaluate(()=>[...document.querySelectorAll('select')].map(e=>({id:e.id,visible:!!e.getClientRects().length,optionLabels:[...e.options].slice(0,12).map(o=>o.label)})))));
                 if(sels&&pw) {
-                   await page.locator('select').first().selectOption({label:'JOEL'});
+                   await page.locator('select:visible').first().selectOption({label:'JOEL'});
                    await page.locator('input[type=password]').first().fill('DIAGNOSTICO-INVALIDO-SEM-DADOS');
                    await page.getByRole('button',{name:'ENTRAR'}).first().click();
                    await page.waitForTimeout(3500);
