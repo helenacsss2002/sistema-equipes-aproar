@@ -1,4 +1,4 @@
-name: Validar versão APROAR antes de publicar (sem deploy)
+name: Validar versão mínima APROAR (sem deploy)
 
 on:
   push:
