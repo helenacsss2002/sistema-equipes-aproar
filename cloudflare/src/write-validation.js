@@ -14,7 +14,15 @@ export function isoDay(date) {
   return Number.isFinite(d.valueOf()) && d.toISOString().slice(0, 10) === date;
 }
 export function turnosSeSobrepoem(a, b) {
-  return a === 'Integral' || b === 'Integral' || a === b;
+  // Jornada integral cobre manhã e tarde, não o turno da noite.
+  return a === b || (a === 'Integral' && b !== 'Noite') || (b === 'Integral' && a !== 'Noite');
+}
+export function turnoEfetivo(turnoConvocado, statusApontado) {
+  // O apontamento corrigido limita a ocupação efetiva da convocação integral.
+  // Mantemos a convocação original intacta para auditoria e financeiro.
+  if (turnoConvocado === 'Integral' && statusApontado === 'Presente (Só Manhã)') return 'Manhã';
+  if (turnoConvocado === 'Integral' && statusApontado === 'Presente (Só Tarde)') return 'Tarde';
+  return turnoConvocado;
 }
 export function validateConvocacao(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return { ok:false, error:'Payload inválido.' };
