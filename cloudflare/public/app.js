@@ -521,8 +521,10 @@
 
 
   function allocationRow(unit,service={},index=0){
-    const works=OBRAS.filter(o=>o.unidade===unit);
-    return `<div class="allocation-row"><div>${field(index?'Obra / Serviço adicional '+index:'Obra / Serviço',`<select class="control service-work"><option value="">— Selecione o serviço —</option>${works.map(o=>`<option value="${o.id}" ${o.id===service.obraId?'selected':''}>${escapeHtml(o.nome)}</option>`).join('')}</select>`)}</div><div>${field('Período',`<select class="control service-period">${['Integral','Manhã','Tarde','Noite'].map(x=>`<option ${x===(service.periodo||'Integral')?'selected':''}>${x}</option>`).join('')}</select>`)}</div></div>`;
+    // A unidade da convocação não limita os serviços efetivamente prestados.
+    const unidades=[...new Set(OBRAS.map(o=>o.unidade))].sort((a,b)=>a.localeCompare(b,'pt-BR'));
+    const works=unidades.map(u=>`<optgroup label="${escapeHtml(u)}">${OBRAS.filter(o=>o.unidade===u).sort((a,b)=>a.nome.localeCompare(b.nome,'pt-BR',{numeric:true})).map(o=>`<option value="${escapeHtml(o.id)}" ${String(o.id)===String(service.obraId)?'selected':''}>${escapeHtml(o.nome)}</option>`).join('')}</optgroup>`).join('');
+    return `<div class="allocation-row"><div>${field(index?'Obra / Serviço adicional '+index:'Obra / Serviço',`<select class="control service-work"><option value="">— Selecione o serviço (qualquer unidade) —</option>${works}</select>`)}</div><div>${field('Período',`<select class="control service-period">${['Integral','Manhã','Tarde','Noite'].map(x=>`<option ${x===(service.periodo||'Integral')?'selected':''}>${x}</option>`).join('')}</select>`)}</div></div>`;
   }
   function itemServices(item,defaultObra){
     if(item?.servicos?.length)return item.servicos;
@@ -532,26 +534,33 @@
   }
   function personRow(cid,item=null,unit='',defaultObra=''){
     const c=colaboradorById(cid),services=itemServices(item,defaultObra);
+    const usaSebrae=services.some(s=>clean(obraById(s.obraId)?.unidade)==='SEBRAE');
     return `<div class="person-row person-card" data-person="${cid}" data-unit="${escapeHtml(unit)}" data-extra-original="${item?.valorExtraOriginal||0}" data-finance-adjusted="${item?.financeAdjusted?'true':'false'}"><div class="person-name">${escapeHtml(c?.nome||cid)}<br><small>${escapeHtml(c?.funcao||'')} · ${escapeHtml(unit)}</small></div>
       <div class="person-top">${field('Status',`<select class="control row-status">${STATUS_OPTIONS.map(x=>`<option ${x===(item?.status||'Presente (Integral)')?'selected':''}>${x}</option>`).join('')}</select>`)}</div>
       <div class="person-services"><div class="allocations principal-service">${allocationRow(unit,services[0],0)}</div>
       <div class="form-grid">${field('Extra',`<select class="control row-extra">${[...EXTRA_OPTIONS,...(item?.extra==='Valor específico'?['Valor específico']:[])].map(x=>`<option ${x===(item?.extra||'Não')?'selected':''}>${x}</option>`).join('')}</select>`)}${field('Financeiro (R$)',`<input class="control row-financeiro" type="number" min="0" step="0.01" value="${item?.financeiro??0}">`)}${field('Acordos / Bonificações (R$)',`<input class="control row-acordo" type="number" min="0" step="0.01" value="${item?.acordo||0}">`)}</div>
-      <details class="more-services"><summary>Mais opções</summary>${field('Observação / justificativa',`<input class="control row-obs" value="${escapeHtml(item?.observacao||'')}">`)}${field('Adic. noturno (SEBRAE)',`<input class="control row-noturno" type="number" min="0" step="0.01" value="${unit==='SEBRAE'&&presence(item?.status||'Presente (Integral)')?(item?.financeAdjusted?(item?.noturno||0):Math.max(90,item?.noturno||0)):0}" readonly>`)}<div class="additional-services">${services.slice(1).map((x,i)=>allocationRow(unit,x,i+1)).join('')}</div><div class="inline-actions section"><button type="button" class="btn btn-primary add-service">+ Adicionar serviço</button><button type="button" class="btn btn-secondary remove-last-service">− Remover último</button><span class="service-count">${Math.max(0,services.length-1)} serviço(s) adicional(is)</span></div></details></div></div>`;
+      <details class="more-services"><summary>Mais opções</summary>${field('Observação / justificativa',`<input class="control row-obs" value="${escapeHtml(item?.observacao||'')}">`)}${field('Adic. noturno (SEBRAE)',`<input class="control row-noturno" type="number" min="0" step="0.01" value="${usaSebrae&&presence(item?.status||'Presente (Integral)')?(item?.financeAdjusted?(item?.noturno||0):Math.max(90,item?.noturno||0)):0}" readonly>`)}<div class="additional-services">${services.slice(1).map((x,i)=>allocationRow(unit,x,i+1)).join('')}</div><div class="inline-actions section"><button type="button" class="btn btn-primary add-service">+ Adicionar serviço</button><button type="button" class="btn btn-secondary remove-last-service">− Remover último</button><span class="service-count">${Math.max(0,services.length-1)} serviço(s) adicional(is)</span></div></details></div></div>`;
   }
   function bindServiceRows(){
-    $$('.person-card').forEach(card=>{
+    $('.person-card').forEach(card=>{
       const update=()=>card.querySelector('.service-count').textContent=card.querySelectorAll('.additional-services .allocation-row').length+' serviço(s) adicional(is)';
-      card.querySelector('.add-service').onclick=()=>{card.querySelector('.additional-services').insertAdjacentHTML('beforeend',allocationRow(card.dataset.unit,{},card.querySelectorAll('.allocation-row').length));update();};
-      card.querySelector('.row-status').onchange=()=>{const n=card.querySelector('.row-noturno');n.value=card.dataset.unit==='SEBRAE'&&presence(card.querySelector('.row-status').value)?(card.dataset.financeAdjusted==='true'?n.value:Math.max(90,Number(n.value)||0)):0;};
-      card.querySelector('.remove-last-service').onclick=()=>{card.querySelector('.additional-services .allocation-row:last-child')?.remove();update();};
+      const updateNoturno=()=>{
+        const n=card.querySelector('.row-noturno');
+        const sebrae=[...card.querySelectorAll('.service-work')].some(el=>clean(obraById(el.value)?.unidade)==='SEBRAE');
+        n.value=sebrae&&presence(card.querySelector('.row-status').value)?(card.dataset.financeAdjusted==='true'?n.value:Math.max(90,Number(n.value)||0)):0;
+      };
+      card.querySelector('.add-service').onclick=()=>{card.querySelector('.additional-services').insertAdjacentHTML('beforeend',allocationRow(card.dataset.unit,{},card.querySelectorAll('.allocation-row').length));updateNoturno();update();};
+      card.querySelector('.row-status').onchange=updateNoturno;
+      card.addEventListener('change',event=>{if(event.target.matches('.service-work'))updateNoturno();});
+      card.querySelector('.remove-last-service').onclick=()=>{card.querySelector('.additional-services .allocation-row:last-child')?.remove();updateNoturno();update();};
     });
   }
   function readPersonRows(ids,scope=document){
     return ids.map(cid=>{const row=scope.querySelector(`[data-person="${cid}"]`);const servicos=[...row.querySelectorAll('.allocation-row')].map(r=>({obraId:r.querySelector('.service-work').value,periodo:r.querySelector('.service-period').value}));return {colaboradorId:cid,status:row.querySelector('.row-status').value,extra:row.querySelector('.row-extra').value,valorExtraOriginal:Number(row.dataset.extraOriginal)||0,observacao:row.querySelector('.row-obs').value.trim(),servicos,obraId:servicos[0]?.obraId||'',financeAdjusted:row.dataset.financeAdjusted==='true',financeiro:Number(row.querySelector('.row-financeiro').value||0),noturno:Number(row.querySelector('.row-noturno').value),acordo:Number(row.querySelector('.row-acordo').value)};});
   }
-  function validServices(items,unit){
+  function validServices(items){
     for(const i of items){if(!presence(i.status))continue;const ss=i.servicos;
-      if(!ss.length||ss.some(x=>!x.obraId||obraById(x.obraId)?.unidade!==unit)){toast('Escolha os serviços de cada colaborador dentro da unidade selecionada.',true);return false;}
+      if(!ss.length||ss.some(x=>!x.obraId||!obraById(x.obraId))){toast('Escolha um serviço cadastrado para cada colaborador. A unidade pode ser diferente da convocação.',true);return false;}
       if(new Set(ss.map(x=>x.obraId+'|'+x.periodo)).size!==ss.length){toast('Há um serviço repetido no mesmo período para o colaborador.',true);return false;}
     }return true;
   }
@@ -833,7 +842,7 @@
   function brazilTime(date,hour,minute=0){return new Date(date+'T'+String(hour).padStart(2,'0')+':'+String(minute).padStart(2,'0')+':00-03:00');}
   function completeConv(c){const ap=apForConv(c.id);return !!ap&&c.colaboradores.every(id=>ap.itens.some(i=>i.colaboradorId===id));}
   function serviceList(i,c){const raw=i.servicos?.length?i.servicos:itemServices(i,c.obraId);const seen=new Set();return raw.filter(s=>{if(!s.obraId)return false;const key=s.obraId+'|'+(s.periodo||c.turno);if(seen.has(key))return false;seen.add(key);return true;}).map(s=>({...s,periodo:s.periodo||c.turno||'Integral'}));}
-  function hasSebrae(i,c){return clean(c.unidade)==='SEBRAE'||serviceList(i,c).some(s=>clean(obraById(s.obraId)?.unidade)==='SEBRAE');}
+  function hasSebrae(i,c){return serviceList(i,c).some(s=>clean(obraById(s.obraId)?.unidade)==='SEBRAE');}
   function nocturnal(i,c){if(!presence(i.status)||!hasSebrae(i,c))return 0;const v=Math.max(0,Number(i.noturno)||0);return roundMoney(i.financeAdjusted?v:Math.max(90,v));}
   function periodBlocks(p){return p==='Manhã'?{M:.5}:p==='Tarde'?{T:.5}:p==='Noite'?{N:1}:{M:.5,T:.5};}
   function presenceBlocks(i,c){if(!presence(i.status))return {};if(i.status==='Presente (Só Manhã)')return {M:.5};if(i.status==='Presente (Só Tarde)')return {T:.5};if(i.status==='Saída Antecipada')return c.turno==='Noite'?{N:.5}:c.turno==='Tarde'?{T:.5}:{M:.5};return periodBlocks(c.turno);}

@@ -14,7 +14,7 @@ export function mapNeonData(db){
   const convocacoes=[],apontamentos=[],warnings=[];
   for(const c of db.convocacoes||[]){
     const key=id(c.id),person=id(c.colaborador_id),work=id(c.obra_id),{text,meta}=metadata(c.observacao),turno=c.turno||text.match(/Turno:\s*(Integral|Manhã|Tarde|Noite)/i)?.[1]||'Integral';
-    convocacoes.push({id:key,supervisor:c.engenheiro,dataServico:isoDate(c.data),unidade:works.get(work)?.unidade||'',obraId:meta.servico_a_definir?'':work,turno,colaboradores:[person],criadoEm:c.criado_em||meta.convocado_em||null,executor:c.criado_por||meta.convocado_por||c.engenheiro,origem:'neon'});
+    convocacoes.push({id:key,supervisor:c.engenheiro,dataServico:isoDate(c.data),unidade:meta.unidade_convocada||works.get(work)?.unidade||'',obraId:meta.servico_a_definir?'':work,turno,colaboradores:[person],criadoEm:c.criado_em||meta.convocado_em||null,executor:c.criado_por||meta.convocado_por||c.engenheiro,origem:'neon'});
     // The initial presence status of a convocation is NOT an attendance entry.
     const a=pointed.get(key);if(!a&&!meta.apontado_em&&c.custos_separados!==true)continue;
     const source=a||c,raw=services.get(key)||[],additional=meta.servicos_adicionais||[];
