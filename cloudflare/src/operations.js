@@ -1,5 +1,6 @@
 import {metadata} from './neon-adapter.js';
 import {supervisors,visibleState} from './data.js';
+import {turnosSeSobrepoem,turnoEfetivo} from './write-validation.js';
 const numericId=v=>/^\d+$/.test(String(v));
 const clean=v=>String(v||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toUpperCase().trim();
 const money=v=>Math.round(Number(v)*100)/100;
@@ -15,7 +16,7 @@ const mult=e=>({'Não':0,'Meia diária':.5,'Diária':1,'Uma e meia diária':1.5,
 const editableAp=['status','extra','observacao','servicos','financeiro','noturno','acordo'];
 const normServices=i=>(i?.servicos||[]).map(s=>({obraId:String(s.obraId||''),periodo:s.periodo||'Integral'}));
 const apView=i=>({...field(i,editableAp),servicos:normServices(i)});
-const overlap=(a,b)=>a==='Integral'||b==='Integral'||a===b;
+const overlap=turnosSeSobrepoem;
 const isoToday=t=>new Intl.DateTimeFormat('en-CA',{timeZone:'America/Fortaleza',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date(t));
 const own=(s,c)=>s.role==='CONTROLADORIA'||s.role==='SUPERVISOR'&&c.supervisor===s.user;
 export function buildOperations(db,next,session,timestamp=new Date().toISOString()){
@@ -38,10 +39,24 @@ export function buildOperations(db,next,session,timestamp=new Date().toISOString
   }
  }
  const pointed=new Map();for(const a of next.apontamentos){if(!Array.isArray(a.itens)||!a.itens.length)fail('Apontamento vazio.');for(const i of a.itens){const key=byGroup.get(String(a.convocacaoId)+'|'+String(i.colaboradorId));if(!key)fail('Apontamento sem convocação correspondente.');if(pointed.has(key))fail('Apontamento duplicado.');pointed.set(key,{a,i});}}
- // Only changes to scheduling are checked; existing historic inconsistencies do not block unrelated edits.
- for(const record of records.values()){const {key,c,pid,changed}=record;if(!changed)continue;
-  for(const other of records.values())if(other.key!==key&&other.pid===pid&&other.c.dataServico===c.dataServico&&overlap(other.c.turno,c.turno))fail(`Conflito: ${staff.get(pid).nome} já está convocado por ${other.c.supervisor}, em ${other.c.unidade}, no turno ${other.c.turno}.`,409,{colaboradorId:pid,supervisor:other.c.supervisor,unidade:other.c.unidade,turno:other.c.turno});
-  const blocked=db.state.indisponibilidades.find(x=>x.colaboradorId===pid&&x.inicio<=c.dataServico&&x.fim>=c.dataServico);if(blocked&&present(pointed.get(key)?.i.status||'Presente (Integral)'))fail(`${staff.get(pid).nome} está indisponível: ${blocked.motivo}.`,409);
+ // Um supervisor não recebe os apontamentos de outro na interface: consultar
+ // o estado completo do servidor para validar o turno já cumprido por outra equipe.
+ const originalStatus=new Map();for(const a of db.state.apontamentos)for(const i of a.itens||[])originalStatus.set(String(a.convocacaoId)+'|'+String(i.colaboradorId),i.status);
+ const occupied=(c,pid)=>{
+  const row=pointed.get(byGroup.get(String(c.id)+'|'+pid));
+  const prior=session.role==='SUPERVISOR'&&c.supervisor!==session.user?originalStatus.get(String(c.id)+'|'+pid):undefined;
+  return turnoEfetivo(c.turno,row?.i.status??prior);
+ };
+ // Revalidar tanto novas convocações quanto correções de apontamento que ampliem a ocupação.
+ // Alterações apenas financeiras ou administrativas sem impacto no turno não reabrem conflitos legados.
+ for(const record of records.values()){const {key,c,pid,changed,old}=record,booked=occupied(c,pid);
+  const original=old?turnoEfetivo(old.turno,originalStatus.get(String(old.id)+'|'+pid)):null;
+  if(!changed&&booked===original)continue;
+  for(const other of records.values())if(other.key!==key&&other.pid===pid&&other.c.dataServico===c.dataServico){
+   const otherTurn=occupied(other.c,pid);
+   if(overlap(otherTurn,booked))fail(`Conflito: ${staff.get(pid).nome} já está convocado por ${other.c.supervisor}, em ${other.c.unidade}, no turno ${otherTurn}.`,409,{colaboradorId:pid,supervisor:other.c.supervisor,unidade:other.c.unidade,turno:otherTurn});
+  }
+  const blocked=db.state.indisponibilidades.find(x=>x.colaboradorId===pid&&x.inicio<=c.dataServico&&x.fim>=c.dataServico);if(changed&&blocked&&present(pointed.get(key)?.i.status||'Presente (Integral)'))fail(`${staff.get(pid).nome} está indisponível: ${blocked.motivo}.`,409);
  }
  // Remove dependents first, explicitly and atomically.
  for(const old of base.convocacoes){if(records.has(old.id))continue;if(!own(session,old))fail('Sem permissão para excluir esta convocação.',403);for(const s of db.raw.servicos_apontamento.filter(x=>String(x.convocacao_id)===old.id))add('servicos_apontamento','delete',s.id);const ap=rawAps.get(old.id);if(ap)add('apontamentos','delete',ap.id);add('convocacoes','delete',old.id);}
