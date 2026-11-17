@@ -9906,6 +9906,31 @@ def ratear_registros_por_servico(registros):
                 base_dia_ctrl_por_servico[chave] += parte_dia_ctrl
                 extra_ctrl_por_servico[chave] += parte_extra_ctrl
 
+        # Para um único apontamento com principal e N adicionais, o custo
+        # pertence igualmente aos N serviços, sem ponderar por período.
+        # Convocações independentes mantêm a proteção por blocos trabalhados.
+        if len(regs) == 1 and len(servicos) > 1:
+            def partes_iguais(alocacao):
+                total_centavos = int(round(
+                    sum(float(v) for v in alocacao.values()) * 100
+                ))
+                parcela, resto = divmod(total_centavos, len(servicos))
+                return {
+                    chave: (parcela + (1 if idx < resto else 0)) / 100
+                    for idx, chave in enumerate(servicos)
+                }
+
+            base_fin_por_servico = partes_iguais(base_fin_por_servico)
+            base_fin_padrao_por_servico = partes_iguais(
+                base_fin_padrao_por_servico
+            )
+            base_dia_ctrl_por_servico = partes_iguais(
+                base_dia_ctrl_por_servico
+            )
+            extra_ctrl_por_servico = partes_iguais(
+                extra_ctrl_por_servico
+            )
+
         for chave_serv, serv in servicos.items():
             base_fin_rateada = round(float(base_fin_por_servico.get(chave_serv, 0.0)), 2)
             base_fin_padrao_rateada = round(
@@ -15715,6 +15740,16 @@ elif modo_campo:
                         ))
 
                 ids_unicos = list(dict.fromkeys(ids_lote))
+                if len(ids_unicos) != len(ids_lote):
+                    raise RuntimeError(
+                        "Convocação duplicada no mesmo lote de apontamento."
+                    )
+                servicos_esperados = {}
+                for linha_servico in servicos_rows:
+                    id_conv = str(linha_servico[0])
+                    servicos_esperados[id_conv] = (
+                        servicos_esperados.get(id_conv, 0) + 1
+                    )
 
                 with supabase._connect() as conn:
                     try:
@@ -15851,6 +15886,39 @@ elif modo_campo:
                                     raise RuntimeError(
                                         "A confirmação estruturada do apontamento "
                                         f"falhou ({qtd_ap}/{len(ids_unicos)})."
+                                    )
+
+                                # O lote só pode ser confirmado quando TODOS
+                                # os serviços também foram gravados no Neon.
+                                cur.execute(
+                                    """
+                                    SELECT CAST(convocacao_id AS TEXT) AS conv_id,
+                                           COUNT(*) AS qtd
+                                      FROM servicos_apontamento
+                                     WHERE CAST(convocacao_id AS TEXT) = ANY(%s)
+                                     GROUP BY CAST(convocacao_id AS TEXT)
+                                    """,
+                                    (ids_unicos,),
+                                )
+                                servicos_gravados = {}
+                                for registro in cur.fetchall():
+                                    id_reg = (
+                                        str(registro["conv_id"])
+                                        if isinstance(registro, dict)
+                                        else str(registro[0])
+                                    )
+                                    qtd_reg = (
+                                        int(registro["qtd"])
+                                        if isinstance(registro, dict)
+                                        else int(registro[1])
+                                    )
+                                    servicos_gravados[id_reg] = qtd_reg
+
+                                if servicos_gravados != servicos_esperados:
+                                    raise RuntimeError(
+                                        "O Neon não confirmou todos os "
+                                        "serviços do rateio. O lote não "
+                                        "será confirmado."
                                     )
 
                         conn.commit()
@@ -18409,6 +18477,18 @@ elif modo_campo:
                         "— Selecione o serviço —"
                     ] + list(mapa_obras.keys())
 
+                    # O principal continua na unidade convocada, mas os
+                    # adicionais podem ser de qualquer unidade/obra.
+                    mapa_obras_adic = {
+                        (
+                            f"{o.get('unidade') or '-'} · "
+                            f"{o.get('nome') or '-'} "
+                            f"[#{o.get('id')}]"
+                        ): o.get("id")
+                        for o in obras
+                        if not eh_obra_placeholder(o)
+                    }
+
                     obra_atual = dict_obras.get(
                         conv.get("obra_id"),
                         {},
@@ -18538,6 +18618,14 @@ elif modo_campo:
                             adicionais_outras_unidades.append(
                                 _adic
                             )
+
+                    # No card principal, mostrar todos os adicionais
+                    # vinculados, inclusive os de outras unidades após F5.
+                    if contexto_eh_principal:
+                        adicionais_unidade_atual = list(
+                            todos_adicionais_atuais
+                        )
+                        adicionais_outras_unidades = []
 
                     # Quando esta unidade representa um serviço adicional,
                     # o próprio serviço de contexto não deve aparecer como
@@ -18840,8 +18928,9 @@ elif modo_campo:
 
                                 opcoes_adic = (
                                     ["— Selecione —"]
-                                    + list(
-                                        mapa_obras.keys()
+                                    + sorted(
+                                        mapa_obras_adic.keys(),
+                                        key=normalizar,
                                     )
                                 )
 
@@ -18862,12 +18951,53 @@ elif modo_campo:
                                         else {}
                                     )
 
-                                    servico_atual_adic = str(
-                                        existente_adic.get(
-                                            "servico"
-                                        )
+                                    # Reabrir o serviço gravado pelo ID,
+                                    # evitando confundir obras homônimas.
+                                    obra_id_existente = str(
+                                        existente_adic.get("obra_id")
                                         or ""
                                     )
+                                    servico_atual_adic = next(
+                                        (
+                                            rotulo
+                                            for rotulo, obra_id in
+                                            mapa_obras_adic.items()
+                                            if str(obra_id)
+                                            == obra_id_existente
+                                        ),
+                                        "",
+                                    )
+                                    if not servico_atual_adic:
+                                        servico_atual_adic = next(
+                                            (
+                                                rotulo
+                                                for rotulo, obra_id in
+                                                mapa_obras_adic.items()
+                                                if normalizar(
+                                                    (
+                                                        dict_obras.get(
+                                                            obra_id, {}
+                                                        ) or {}
+                                                    ).get("nome")
+                                                ) == normalizar(
+                                                    existente_adic.get(
+                                                        "servico"
+                                                    )
+                                                )
+                                                and normalizar(
+                                                    (
+                                                        dict_obras.get(
+                                                            obra_id, {}
+                                                        ) or {}
+                                                    ).get("unidade")
+                                                ) == normalizar(
+                                                    existente_adic.get(
+                                                        "unidade"
+                                                    )
+                                                )
+                                            ),
+                                            "",
+                                        )
 
                                     periodo_atual_adic = str(
                                         existente_adic.get(
@@ -18978,6 +19108,7 @@ elif modo_campo:
                         "conv": conv,
                         "colab": colab,
                         "mapa_obras": mapa_obras,
+                        "mapa_obras_adic": mapa_obras_adic,
                         "obra_sel": obra_sel,
                         "status_sel": status_sel,
                         "periodo_principal": periodo_principal,
@@ -19036,7 +19167,7 @@ elif modo_campo:
                         )
 
                     obras_usadas = {
-                        str(item["obra_sel"])
+                        str(item["mapa_obras"].get(item["obra_sel"]))
                     }
 
                     for idx_adic, adic in enumerate(
@@ -19052,7 +19183,7 @@ elif modo_campo:
 
                         if (
                             servico_adic
-                            not in item["mapa_obras"]
+                            not in item["mapa_obras_adic"]
                         ):
                             erros_validacao.append(
                                 (
@@ -19062,7 +19193,10 @@ elif modo_campo:
                             )
                             continue
 
-                        if servico_adic in obras_usadas:
+                        obra_adic_id = str(
+                            item["mapa_obras_adic"][servico_adic]
+                        )
+                        if obra_adic_id in obras_usadas:
                             erros_validacao.append(
                                 (
                                     f"{nome_pessoa}: o serviço "
@@ -19072,7 +19206,7 @@ elif modo_campo:
                             continue
 
                         obras_usadas.add(
-                            servico_adic
+                            obra_adic_id
                         )
 
                 if erros_validacao:
@@ -19102,7 +19236,13 @@ elif modo_campo:
                             # A lista da tela representa TODOS os serviços
                             # adicionais desta unidade. Assim é possível adicionar
                             # 2, 3, 4... serviços e salvar tudo junto.
-                            adicionais_mesma_unidade = []
+                            adicionais_mesma_unidade = (
+                                [dict(x) for x in item[
+                                    "adicionais_unidade_atual"
+                                ]]
+                                if item["tem_conv_separada"]
+                                else []
+                            )
 
                             if not item["tem_conv_separada"]:
                                 for adic_edit in item[
@@ -19118,13 +19258,13 @@ elif modo_campo:
                                     if (
                                         nome_adic
                                         not in item[
-                                            "mapa_obras"
+                                            "mapa_obras_adic"
                                         ]
                                     ):
                                         continue
 
                                     _obra_adic_id = item[
-                                        "mapa_obras"
+                                        "mapa_obras_adic"
                                     ][nome_adic]
 
                                     _obra_adic = dict_obras.get(
@@ -19133,7 +19273,10 @@ elif modo_campo:
                                     )
 
                                     adicionais_mesma_unidade.append({
-                                        "servico": nome_adic,
+                                        "servico": str(
+                                            _obra_adic.get("nome")
+                                            or nome_adic
+                                        ),
                                         "periodo": str(
                                             adic_edit.get(
                                                 "periodo"
