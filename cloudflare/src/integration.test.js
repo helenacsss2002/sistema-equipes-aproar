@@ -66,7 +66,7 @@ test('Convocação da tarde com outro supervisor e unidade é aceita após apont
   db=(await save(sql,follow,admin)).after;
   assert.equal(db.state.apontamentos.length,2);
   assert.equal(db.raw.apontamentos.length,2);
-  assert.equal(db.raw.apontamentos.filter(a=>a.colaborador_id==='1'&&String(a.data_servico).startsWith('2026-10-07')).length,2);
+  assert.equal(db.raw.apontamentos.filter(a=>String(a.colaborador_id)==='1'&&new Date(a.data_servico).toISOString().slice(0,10)==='2026-10-07').length,2);
   assert.equal(new Set(db.raw.apontamentos.map(a=>a.convocacao_id)).size,2);
  }finally{await pg.close();}
 });
