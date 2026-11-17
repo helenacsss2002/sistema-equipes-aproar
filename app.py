@@ -19004,15 +19004,32 @@ elif modo_campo:
                                         f"{c_id}_{idx_adic}"
                                     )
 
-                                    if (
-                                        key_obra_adic
-                                        not in st.session_state
-                                        and rotulo_servico_atual
-                                        in opcoes_adic
-                                    ):
-                                        st.session_state[
-                                            key_obra_adic
-                                        ] = (
+                                    # Migra seleção antiga (apenas nome da
+                                    # obra) para o novo rótulo com unidade,
+                                    # sem descartar o serviço já preenchido.
+                                    if key_obra_adic in st.session_state:
+                                        selecao_anterior = str(
+                                            st.session_state[key_obra_adic]
+                                        )
+                                        if selecao_anterior not in opcoes_adic:
+                                            obra_id_anterior = str(
+                                                mapa_obras.get(selecao_anterior)
+                                                or ""
+                                            )
+                                            selecao_convertida = next(
+                                                (
+                                                    rotulo for rotulo, obra_id in
+                                                    mapa_obras_rateio.items()
+                                                    if str(obra_id)
+                                                    == obra_id_anterior
+                                                ),
+                                                rotulo_servico_atual,
+                                            )
+                                            st.session_state[key_obra_adic] = (
+                                                selecao_convertida
+                                            )
+                                    elif rotulo_servico_atual in opcoes_adic:
+                                        st.session_state[key_obra_adic] = (
                                             rotulo_servico_atual
                                         )
 
