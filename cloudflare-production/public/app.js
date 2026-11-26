@@ -765,7 +765,20 @@
             aria-label="Remover da convocação: ${escapeHtml(colaboradorById(cid)?.nome||cid)}"
             title="Remover somente esta inclusão ainda sem apontamento">×</button>`:''}
       </div>`;
-    }).join('')}<details class="section"><summary>Incluir colaborador que não estava na convocação</summary><select class="control" id="admin-ap-add-${index}"><option value="">Selecione</option>${options(alphabeticalPeople(COLABORADORES.filter(c=>!c.inativo&&!conv.colaboradores.includes(c.id))))}</select><button class="btn btn-secondary section" id="admin-ap-include-${index}" type="button">Incluir na equipe</button></details><div class="form-actions"><button class="btn btn-primary">${ap?'Atualizar':'Salvar'} apontamento · ${escapeHtml(conv.turno)}</button></div></form></section>`;}).join(''):'<div class="empty">Nenhuma convocação nesta data para o supervisor selecionado. Use o retroativo para um serviço sem convocação prévia.</div>';bindServiceRows();convs.forEach((conv,index)=>{const form=$('#admin-ap-form-'+index);bindPersonSearch(form.querySelector('.admin-person-search'),()=>[...form.querySelectorAll('.person-card')]);form.noValidate=true;form.onsubmit=e=>{e.preventDefault();const itens=readPersonRows(conv.colaboradores,form);if(!validateExtraAmounts(itens,form))return;if(!validServices(itens,conv.unidade))return;if(!applyInlineExtras(itens,conv.dataServico,conv.supervisor))return;const ap=apForConv(conv.id);if(ap){ap.itens=itens;ap.atualizadoEm=now().toISOString();}else state.apontamentos.push({id:uid('ap'),convocacaoId:conv.id,supervisor:conv.supervisor,executor:'CONTROLADORIA',dataServico:conv.dataServico,apontadoEm:now().toISOString(),retroativo:false,itens});audit('Apontamento administrativo',conv.supervisor+' · '+conv.unidade);captureAdminApDrafts();if(!saveData(()=>{adminApDrafts.delete(String(conv.id));renderApontamentoNormal();}))return;};form.querySelectorAll('[data-admin-remove-conv]').forEach(button=>{
+    }).join('')}<details class="section"><summary>Incluir colaborador que não estava na convocação</summary><select class="control" id="admin-ap-add-${index}"><option value="">Selecione</option>${options(alphabeticalPeople(COLABORADORES.filter(c=>!c.inativo&&!conv.colaboradores.includes(c.id))))}</select><button class="btn btn-secondary section" id="admin-ap-include-${index}" type="button">Incluir na equipe</button></details><div class="form-actions"><button class="btn btn-primary">${ap?'Atualizar':'Salvar'} apontamento · ${escapeHtml(conv.turno)}</button></div></form></section>`;}).join(''):'<div class="empty">Nenhuma convocação nesta data para o supervisor selecionado. Use o retroativo para um serviço sem convocação prévia.</div>';bindServiceRows();convs.forEach((conv,index)=>{const form=$('#admin-ap-form-'+index);bindPersonSearch(form.querySelector('.admin-person-search'),()=>[...form.querySelectorAll('.person-card')]);form.noValidate=true;form.onsubmit=e=>{e.preventDefault();const itens=readPersonRows(conv.colaboradores,form);if(!validateExtraAmounts(itens,form))return;if(!validServices(itens,conv.unidade))return;if(!applyInlineExtras(itens,conv.dataServico,conv.supervisor))return;const ap=apForConv(conv.id);if(ap){ap.itens=itens;ap.atualizadoEm=now().toISOString();}else state.apontamentos.push({id:uid('ap'),convocacaoId:conv.id,supervisor:conv.supervisor,executor:'CONTROLADORIA',dataServico:conv.dataServico,apontadoEm:now().toISOString(),retroativo:false,itens});audit('Apontamento administrativo',conv.supervisor+' · '+conv.unidade);captureAdminApDrafts();
+    const serviceKey=x=>String(x.obraId||'')+'|'+String(x.periodo||'Integral')+'|'+String(x.extra||'Não')+'|'+Boolean(x.extraIndependente);
+    const verifyAdminServices=confirmed=>{
+      const persistedConv=(confirmed?.convocacoes||[]).find(c=>String(c.id)===String(conv.id));
+      const persisted=(confirmed?.apontamentos||[]).find(a=>String(a.convocacaoId)===String(persistedConv?.id));
+      if(!persistedConv||!persisted)return false;
+      return itens.every(i=>{
+        const saved=persisted.itens?.find(x=>String(x.colaboradorId)===String(i.colaboradorId));
+        if(!saved)return false;
+        return JSON.stringify((saved.servicos||[]).map(serviceKey).sort())===
+          JSON.stringify((i.servicos||[]).map(serviceKey).sort());
+      });
+    };
+    if(!saveData(()=>{adminApDrafts.delete(String(conv.id));renderApontamentoNormal();},verifyAdminServices))return;};form.querySelectorAll('[data-admin-remove-conv]').forEach(button=>{
       button.onclick=()=>removeUnpointedAdminConvocation(button.dataset.adminRemoveConv,button.dataset.adminRemovePerson);
     });
     $('#admin-ap-include-'+index).onclick=()=>{
@@ -783,7 +796,8 @@
     const additional=index>0;
     const works=OBRAS.filter(o=>additional||o.unidade===unit),listId='service-works-'+(++serviceListSeq);
     const selected=works.find(o=>String(o.id)===String(service.obraId||''));
-    return `<div class="allocation-row"><div>${field(index?'Obra / Serviço adicional '+index:'Obra / Serviço',`<input class="control service-work" data-work-id="${escapeHtml(selected?.id||'')}" list="${listId}" value="${escapeHtml(selected?allocationWorkLabel(selected,additional):'')}" placeholder="Selecione ou digite para buscar a obra..." autocomplete="off"><datalist id="${listId}">${works.map(o=>`<option value="${escapeHtml(allocationWorkLabel(o,additional))}"></option>`).join('')}</datalist>`)}</div><div>${field('Período',`<select class="control service-period">${['Integral','Manhã','Tarde','Noite'].map(x=>`<option ${x===(service.periodo||'Integral')?'selected':''}>${x}</option>`).join('')}</select>`)}</div></div>`;
+    const tipoExtra=EXTRA_OPTIONS.includes(service.extra)?service.extra:'Não';
+    return `<div class="allocation-row"><div>${field(index?'Obra / Serviço adicional '+index:'Obra / Serviço',`<input class="control service-work" data-work-id="${escapeHtml(selected?.id||'')}" list="${listId}" value="${escapeHtml(selected?allocationWorkLabel(selected,additional):'')}" placeholder="Selecione ou digite para buscar a obra..." autocomplete="off"><datalist id="${listId}">${works.map(o=>`<option value="${escapeHtml(allocationWorkLabel(o,additional))}"></option>`).join('')}</datalist>`)}</div><div>${field('Período',`<select class="control service-period">${['Integral','Manhã','Tarde','Noite'].map(x=>`<option ${x===(service.periodo||'Integral')?'selected':''}>${x}</option>`).join('')}</select>`)}</div>${additional?`<div>${field('Houve extra? · custo integral SEINFRA nesta obra',`<select class="control service-extra" aria-label="Extra do serviço adicional ${index}">${APONTAMENTO_EXTRA_OPTIONS.map(([value,label])=>`<option value="${escapeHtml(value)}" ${tipoExtra===value?'selected':''}>${escapeHtml(label)}</option>`).join('')}</select>`)}</div><div class="additional-service-independent"><label><input type="checkbox" class="service-extra-independent" ${service.extraIndependente?'checked':''}> Serviço independente: apenas a extra nesta obra, sem rateio da diária</label></div>`:''}</div>`;
   }
   function itemServices(item,defaultObra){
     if(item?.servicos?.length)return item.servicos;
@@ -1011,7 +1025,12 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
               const work=OBRAS.find(o=>String(o.id)===String(input.dataset.workId||''))
                 ||OBRAS.find(o=>(additional||o.unidade===row.dataset.unit)
                   &&clean(allocationWorkLabel(o,additional))===clean(input.value));
-              return {obraId:work?.id||'',periodo:r.querySelector('.service-period').value};
+              return {
+                obraId:work?.id||'',
+                periodo:r.querySelector('.service-period').value,
+                extra:additional?(r.querySelector('.service-extra')?.value||'Não'):'Não',
+                extraIndependente:additional&&Boolean(r.querySelector('.service-extra-independent')?.checked)
+              };
             }),
             category=row.querySelector('.row-extra')?.value||'Não',
             enabled=category!=='Não';
@@ -1052,6 +1071,12 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
     for(const i of items){if(!presence(i.status))continue;const ss=i.servicos;
       if(!ss.length||ss.some((x,index)=>!x.obraId||!obraById(x.obraId)||(index===0&&obraById(x.obraId).unidade!==unit))){toast('Selecione a obra principal da unidade convocada e serviços adicionais cadastrados de qualquer unidade.',true);return false;}
       if(new Set(ss.map(x=>x.obraId+'|'+x.periodo)).size!==ss.length){toast('Há um serviço repetido no mesmo período para o colaborador.',true);return false;}
+      if(ss.slice(1).some(x=>!EXTRA_OPTIONS.includes(x.extra||'Não'))){
+        toast('Selecione uma categoria válida na lista suspensa de extra do serviço adicional.',true);return false;
+      }
+      if(ss.slice(1).some(x=>x.extraIndependente&&(x.extra||'Não')==='Não')){
+        toast('Serviço independente exige selecionar uma extra para a respectiva obra. Se for rateio normal, desmarque a opção independente.',true);return false;
+      }
     }return true;
   }
 
@@ -1765,34 +1790,53 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
     for(const regs of groups.values()){
       const p=colaboradorById(regs[0].i.colaboradorId),services=new Map(),blocks={daily:{},extra:{},finance:{}},refs=regs.map(x=>x.i);
       for(const {c,i} of regs){const ss=serviceList(i,c);if(!ss.length){if(!presence(i.status)){const fake={obraId:c.obraId||'',periodo:c.turno};ss.push(fake);}else continue;}
-        const isPresent=presence(i.status),serviceBlocks=[...new Set(ss.flatMap(s=>Object.keys(periodBlocks(s.periodo))))];
+        // Uma extra independente pertence apenas à obra escolhida: não
+        // entra na divisão da diária, do complemento ou das passagens.
+        const servicosRateio=ss.filter(s=>!s.extraIndependente);
+        const isPresent=presence(i.status),serviceBlocks=[...new Set(servicosRateio.flatMap(s=>Object.keys(periodBlocks(s.periodo))))];
         const financial=isPresent?Math.max(0,Number(i.financeiro)||0):0,extra=isPresent?(i.extra==='Valor específico'?Number(i.valorExtraOriginal)||0:roundMoney(dayCost(p)*extraMultiplier(i.extra))):0;
         for(const b of serviceBlocks){blocks.finance[b]=Math.max(blocks.finance[b]||0,financial/serviceBlocks.length);blocks.extra[b]=Math.max(blocks.extra[b]||0,extra/serviceBlocks.length);}
         const dailyBlocks=presenceBlocks(i,c),avulsoDiaria=p?.avulso==='Sim'&&AVULSO_DIARIA_OPTIONS.includes(i.tipoDiariaAvulso)?extraMultiplier(i.tipoDiariaAvulso):null;
         const dailyWeights=Object.entries(dailyBlocks),weightSum=dailyWeights.reduce((sum,[,w])=>sum+w,0);
         for(const [b,w] of dailyWeights)blocks.daily[b]=Math.max(blocks.daily[b]||0,roundMoney(dayCost(p)*(avulsoDiaria===null?w:avulsoDiaria*w/(weightSum||1))));
-        const sb=ss.filter(s=>clean(obraById(s.obraId)?.unidade||c.unidade)==='SEBRAE');
+        const sb=servicosRateio.filter(s=>clean(obraById(s.obraId)?.unidade||c.unidade)==='SEBRAE');
         const nightParts=splitMoneyExactly(isPresent?nocturnal(i,c):0,sb.length);
-        const bonusParts=splitMoneyExactly(isPresent?i.acordo:0,ss.length);
-        const travelParts=splitMoneyExactly(isPresent?i.ajudaCusto:0,ss.length);
-        for(const [serviceIndex,s] of ss.entries()){
+        const bonusParts=splitMoneyExactly(isPresent?i.acordo:0,servicosRateio.length);
+        const travelParts=splitMoneyExactly(isPresent?i.ajudaCusto:0,servicosRateio.length);
+        for(const s of ss){
           const key=s.obraId||'unassigned_'+c.unidade;
           let row=services.get(key);
           if(!row){row={c:{...c,obraId:s.obraId,unidade:obraById(s.obraId)?.unidade||c.unidade},i,p,refs,blocks:new Set(),periods:new Set(),supervisors:new Set(),statuses:new Set(),extras:new Set(),daily:0,extra:0,finance:0,night:0,bonus:0,ajudaCusto:0,danger:0,share:1};services.set(key,row);}
-          Object.keys(periodBlocks(s.periodo)).forEach(b=>row.blocks.add(b));
+          if(!s.extraIndependente)Object.keys(periodBlocks(s.periodo)).forEach(b=>row.blocks.add(b));
           row.periods.add(s.periodo);row.supervisors.add(c.supervisor);
           row.statuses.add(i.status);row.extras.add(i.extra||'Não');
-          const nightIndex=sb.indexOf(s);
+          // Extra por serviço: valor SEINFRA cheio, sem ratear com outras obras.
+          if(isPresent&&s.extra&&s.extra!=='Não'){
+            row.extra+=roundMoney(dayCost(p)*extraMultiplier(s.extra));
+            row.extras.add(s.extra);
+          }
+          const rateioIndex=servicosRateio.indexOf(s),nightIndex=sb.indexOf(s);
           if(nightIndex>=0)row.night+=nightParts[nightIndex];
-          row.bonus+=bonusParts[serviceIndex];
-          row.ajudaCusto+=travelParts[serviceIndex];
+          if(rateioIndex>=0){
+            row.bonus+=bonusParts[rateioIndex];
+            row.ajudaCusto+=travelParts[rateioIndex];
+          }
         }
       }
-      for(const b of new Set([...Object.keys(blocks.daily),...Object.keys(blocks.extra),...Object.keys(blocks.finance)])){
-        let participants=[...services.values()].filter(x=>x.blocks.has(b));
-        if(!participants.length)participants=[...services.values()];
-        for(const field of ['daily','extra','finance']){
-          const shares=splitMoneyExactly(blocks[field][b]||0,participants.length);
+      const normal=[...services.values()].filter(row=>row.blocks.size);
+      for(const field of ['daily','extra','finance']){
+        const amounts=Object.entries(blocks[field]);
+        if(regs.length===1){
+          // A base da convocação é rateada por obra. Extras por serviço
+          // já estão em suas respectivas obras e são somadas integralmente.
+          const shares=splitMoneyExactly(amounts.reduce((sum,[,value])=>sum+value,0),normal.length);
+          normal.forEach((row,index)=>row[field]+=shares[index]);
+          continue;
+        }
+        for(const [block,value] of amounts){
+          const matching=normal.filter(row=>row.blocks.has(block));
+          const participants=matching.length?matching:normal;
+          const shares=splitMoneyExactly(value,participants.length);
           participants.forEach((row,index)=>row[field]+=shares[index]);
         }
       }
@@ -2216,7 +2260,7 @@ function renderEquipeDia(){
    const numbers=['valorExtraDisponivel','financeiro','noturno','acordo','ajudaCusto'];
    if(numbers.some(k=>amount(item?.[k])!==amount(saved[k])))return true;
    if(['status','observacao','tipoDiariaAvulso'].some(k=>String(item?.[k]??'')!==String(saved[k]??'')))return true;
-   const canonical=xs=>JSON.stringify((xs||[]).map(x=>[String(x.obraId||''),String(x.periodo||'Integral')]));
+   const canonical=xs=>JSON.stringify((xs||[]).map(x=>[String(x.obraId||''),String(x.periodo||'Integral'),String(x.extra||'Não'),Boolean(x.extraIndependente)]));
    if(canonical(item?.servicos)!==canonical(saved.servicos))return true;
    const extra=extraRecordFor(portalDate,id,supervisorAtual),draftExtra=item?.extraLancamento||{};
    if(Boolean(draftExtra.enabled)!==Boolean(extra))return true;
@@ -2499,13 +2543,44 @@ function renderEquipeDia(){
     if(selectedExternal){const day=mainWorkForPersonOnDate(selectedExternal,portalDate);extraBatch.push({colaboradorId:selectedExternal,status:'Extra independente',extra:'Não',servicos:[],extraLancamento:{enabled:toggleExternal,extra:$('#day-extra-kind').value,valorExtraOriginal:Number($('#day-extra-amount').value),obraId:$('#day-extra-work').value,observacao:$('#day-extra-obs').value.trim(),dayWorkId:day.workId}});}
     if(!applyInlineExtras(extraBatch,portalDate,supervisorAtual))return;
     for(const c of convs){const selected=items.filter(i=>c.colaboradores.includes(i.colaboradorId));if(!selected.length)continue;let ap=apForConv(c.id);if(ap){ap.itens=[...ap.itens.filter(i=>!selected.some(x=>x.colaboradorId===i.colaboradorId)),...selected];ap.atualizadoEm=now().toISOString();}else state.apontamentos.push({executor:supervisorAtual||perfilLabel(perfilAtual),id:uid('ap'),convocacaoId:c.id,supervisor:c.supervisor,dataServico:c.dataServico,apontadoEm:now().toISOString(),retroativo:false,itens:selected});}
+    // A confirmação precisa incluir os vínculos e a categoria da extra de
+    // cada serviço. Só apagar o rascunho após reler o estado do Neon.
+    const expectedPoints=items.map(item=>{
+      const conv=people.get(item.colaboradorId)?.conv;
+      return {
+        colaboradorId:String(item.colaboradorId),
+        supervisor:String(conv?.supervisor||''),
+        dataServico:String(conv?.dataServico||''),
+        unidade:String(conv?.unidade||''),
+        turno:String(conv?.turno||''),
+        servicos:(item.servicos||[]).map(x=>
+          String(x.obraId)+'|'+String(x.periodo||'Integral')+'|'+
+          String(x.extra||'Não')+'|'+Boolean(x.extraIndependente)).sort()
+      };
+    });
+    const verifyDayServices=confirmed=>expectedPoints.every(target=>{
+      const conv=(confirmed?.convocacoes||[]).find(c=>
+        String(c.supervisor)===target.supervisor&&
+        String(c.dataServico)===target.dataServico&&
+        String(c.unidade)===target.unidade&&
+        String(c.turno)===target.turno&&
+        (c.colaboradores||[]).some(id=>String(id)===target.colaboradorId));
+      if(!conv)return false;
+      const ap=(confirmed?.apontamentos||[]).find(a=>String(a.convocacaoId)===String(conv.id));
+      const saved=ap?.itens?.find(i=>String(i.colaboradorId)===target.colaboradorId);
+      if(!saved)return false;
+      const services=(saved.servicos||[]).map(x=>
+        String(x.obraId)+'|'+String(x.periodo||'Integral')+'|'+
+        String(x.extra||'Não')+'|'+Boolean(x.extraIndependente)).sort();
+      return JSON.stringify(services)===JSON.stringify(target.servicos);
+    });
     audit('Apontamento da equipe',portalDate);if(!saveData(()=>{
       dayUnsavedDrafts.delete(dayKey);
       clearStoredDraft(storageKey);
       if(supervisorAtual)clearStoredDraft(draftKey('last',supervisorAtual));
       dayPendingAdds.clear();
       render();
-    }))return;toast('Apontamento do dia e extras salvos.');
+    },verifyDayServices))return;toast('Apontamento do dia e extras enviados para confirmação.');
   }catch(error){
     console.error('APROAR day-form submit failure',String(error?.message||error).slice(0,240));
     showToast('Não foi possível preparar o apontamento. Confira os campos e tente novamente.',true);showSaveFeedback('Não foi possível preparar o apontamento. Confira os campos e tente novamente.',true);
@@ -3532,7 +3607,7 @@ function renderEquipeDia(){
   function retroactiveRecordsConfirmed(confirmed,expected){
     if(!confirmed||!Array.isArray(confirmed.convocacoes)||!Array.isArray(confirmed.apontamentos)||!expected?.length)return false;
     const cents=v=>Math.round((Number(v)||0)*100);
-    const serviceKeys=ss=>(ss||[]).map(s=>String(s.obraId||'')+'|'+String(s.periodo||'Integral')).sort().join(';');
+    const serviceKeys=ss=>(ss||[]).map(s=>String(s.obraId||'')+'|'+String(s.periodo||'Integral')+'|'+String(s.extra||'Não')+'|'+Boolean(s.extraIndependente)).sort().join(';');
     return expected.every(target=>{
       const conv=confirmed.convocacoes.find(c=>c.dataServico===target.dataServico&&
         c.supervisor===target.supervisor&&c.unidade===target.unidade&&
@@ -3625,12 +3700,20 @@ function renderEquipeDia(){
         // atualização da tela como uma falha do próprio apontamento.
         // A resposta compacta apenas confirma a transação; para adicional noturno
         // buscamos o valor efetivo no banco antes de dar a operação como concluída.
-        const result=pendingNightChanges.length?await restoreOnlineSession():(reply?.state?reply:await restoreOnlineSession());
+        // Verificar sempre no banco quando a tarefa exige confirmar serviços.
+        const result=(pendingNightChanges.length||typeof verifyPersisted==='function')
+          ?await restoreOnlineSession():(reply?.state?reply:await restoreOnlineSession());
         if(!result||!result.state||typeof result.version!=='string'||!result.session)
           throw new Error('O apontamento foi gravado, mas não foi possível atualizar os dados da tela.');
         const nightConfirmed=nightValuesMatch(result.state,pendingNightChanges);
         if(typeof verifyPersisted==='function'&&!verifyPersisted(result.state)){
-          throw Object.assign(new Error(preserveConvocationForm?'O banco confirmou a transação, mas nem todos os participantes da convocação foram localizados na conferência do Neon. Verifique o histórico antes de tentar novamente.':'O servidor confirmou a operação, mas não foi possível localizar no Neon todos os apontamentos retroativos selecionados. Consulte o histórico antes de tentar novamente.'),preserveConvocationForm?{convocationUnverified:true}:{retroUnverified:true});
+          const normalUnverified=viewAtual==='apontamento'&&apontamentoTab==='normal';
+          const error=preserveConvocationForm
+            ?'A transação foi registrada, mas nem todos os convocados foram encontrados no Neon.'
+            :normalUnverified
+            ?'O Neon não confirmou todos os serviços e categorias de extra do apontamento. Rascunho preservado.'
+            :'O Neon não confirmou todos os apontamentos retroativos selecionados. Confira o histórico antes de reenviar.';
+          throw Object.assign(new Error(error),preserveConvocationForm?{convocationUnverified:true}:normalUnverified?{normalUnverified:true}:{retroUnverified:true});
         }
         applyOnline(result);onlineSaving=false;
         if(!nightConfirmed){
@@ -3653,6 +3736,8 @@ function renderEquipeDia(){
             ?'O Neon confirmou a transação, mas não foi possível conferir todos os convocados. O espelho permanece aberto. Confira a equipe no histórico antes de reenviar; nenhuma segunda convocação foi gerada automaticamente.'
             :error?.retroUnverified
             ?'O Neon confirmou a transação, mas o retroativo selecionado não foi localizado na conferência. Seus dados permanecem no rascunho. Consulte o histórico antes de repetir.'
+            :error?.normalUnverified
+            ?'O Neon confirmou a transação, mas algum serviço adicional ou sua extra não apareceu na releitura do banco. Rascunho preservado. Confira o histórico antes de reenviar para evitar duplicidade.'
             :'O banco confirmou a gravação, mas a atualização da tela falhou. Pressione Ctrl + F5 para conferir o histórico. Não lance novamente.';
           if(typeof onFailure==='function')onFailure(notice);
           showSaveFeedback(notice,true,60000);
