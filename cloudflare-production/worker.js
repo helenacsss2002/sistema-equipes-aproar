@@ -5645,7 +5645,19 @@ function mapNeonData(db) {
     convocacoes.push({ id: key2, supervisor: c.engenheiro, dataServico: isoDate(c.data), unidade: works.get(work)?.unidade || "", obraId: meta.servico_a_definir ? "" : work, turno, colaboradores: [person], criadoEm: c.criado_em || meta.convocado_em || null, executor: c.criado_por || meta.convocado_por || c.engenheiro, origem: "neon" });
     if (!a2 && !meta.apontado_em && c.custos_separados !== true) continue;
     const source = a2 || c, raw = services.get(key2) || [], additional = meta.servicos_adicionais || [];
-    const mapped = raw.length ? raw.map((s) => ({ obraId: id(s.obra_id) || worksByName.get(s.obra_nome_snapshot)?.id || "", periodo: s.periodo || turno })) : [{ obraId: work, periodo: meta.periodo_principal || turno }, ...additional.map((s) => ({ obraId: id(s.obra_id) || worksByName.get(s.servico)?.id || "", periodo: s.periodo || turno }))];
+    // As tabelas guardam o vínculo da obra; a classificação e a independência
+    // da extra permanecem no metadado estruturado da convocação.
+    const readExtraForService = (obraId, periodo) => additional.find(s =>
+      String(s.obra_id || "") === String(obraId) &&
+      String(s.periodo || turno) === String(periodo || turno));
+    const mapped = raw.length ? raw.map((s) => {
+      const obraId=id(s.obra_id) || worksByName.get(s.obra_nome_snapshot)?.id || "",periodo=s.periodo||turno;
+      const details=Boolean(s.principal)?null:readExtraForService(obraId,periodo);
+      return {obraId,periodo,extra:details?.extra||"Não",extraIndependente:details?.extra_independente===true};
+    }) : [
+      {obraId:work,periodo:meta.periodo_principal||turno,extra:"Não",extraIndependente:false},
+      ...additional.map(s=>({obraId:id(s.obra_id)||worksByName.get(s.servico)?.id||"",periodo:s.periodo||turno,extra:s.extra||"Não",extraIndependente:s.extra_independente===true}))
+    ];
     if (mapped.some((s) => !s.obraId)) warnings.push({ code: "UNMAPPED_SERVICE", convocacaoId: key2 });
     const cost = people.get(person)?.custo || 0, extra = amount(source.valor_extra), savedType = ["N\xE3o", "Meia di\xE1ria", "Di\xE1ria", "Uma e meia di\xE1ria", "Duas di\xE1rias"].includes(source.tipo_diaria) ? source.tipo_diaria : null;
     if (extra && extraLabel(extra, cost) === "Valor espec\xEDfico") warnings.push({ code: "NONSTANDARD_EXTRA", convocacaoId: key2, value: extra });
@@ -5998,7 +6010,12 @@ var mult = /* @__PURE__ */ __name((e) => ({ "N\xE3o": 0, "Meia di\xE1ria": 0.5, 
 var editableAp = ["status", "extra", "observacao", "servicos", "financeiro", "noturno", "acordo", "ajudaCusto", "tipoDiariaAvulso", "valorExtraDisponivel"];
 var avulsoDailyTypes = ["Meia di\xE1ria", "Di\xE1ria", "Uma e meia di\xE1ria", "Duas di\xE1rias"];
 var pendingAvulsoInvalid = /* @__PURE__ */ __name((i, p2) => i.tipoDiariaAvulso != null && (!p2 || p2.avulso !== "Sim" || !avulsoDailyTypes.includes(i.tipoDiariaAvulso)), "pendingAvulsoInvalid");
-var normServices = /* @__PURE__ */ __name((i) => (i?.servicos || []).map((s) => ({ obraId: String(s.obraId || ""), periodo: s.periodo || "Integral" })), "normServices");
+var normServices = /* @__PURE__ */ __name((i) => (i?.servicos || []).map((s, index) => ({
+  obraId: String(s.obraId || ""),
+  periodo: s.periodo || "Integral",
+  extra: index > 0 ? String(s.extra || "Não") : "Não",
+  extraIndependente: index > 0 && s.extraIndependente === true
+})), "normServices");
 var apView = /* @__PURE__ */ __name((i) => ({ ...field(i, editableAp), ajudaCusto: Number(i?.ajudaCusto) || 0, servicos: normServices(i) }), "apView");
 var overlap = /* @__PURE__ */ __name((a2, b2) => a2 === b2 || a2 === "Integral" && ["Manh\xE3", "Tarde"].includes(b2) || b2 === "Integral" && ["Manh\xE3", "Tarde"].includes(a2), "overlap");
 var isoToday = /* @__PURE__ */ __name((t) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Fortaleza", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(t)), "isoToday");
@@ -6173,9 +6190,13 @@ function buildOperations(db, next, session, timestamp = (/* @__PURE__ */ new Dat
       if (oldPoint && Number(ap.i.ajudaCusto ?? 0) !== Number(oldPoint.ajudaCusto ?? 0) && session.role !== "FINANCEIRO" && (session.role !== "SUPERVISOR" || financeLocked)) fail("Somente o Financeiro pode alterar passagens/ajuda de custo ap\xF3s o ajuste financeiro.", 403);
       const ss2 = normServices(ap.i);
       if (present(ap.i.status) && (!ss2.length || ss2.some((s) => !works.has(s.obraId)))) fail("Defina servi\xE7os cadastrados para o colaborador. Os servi\xE7os podem pertencer a qualquer unidade.");
-      for (const s of ss2) {
+      for (const [index, s] of ss2.entries()) {
         if (!s.obraId) continue;
         period(s.periodo);
+        if (index === 0 && (s.extra !== "Não" || s.extraIndependente)) fail("O serviço principal usa o campo de extra existente na ficha.");
+        if (!["Não", "Meia diária", "Diária", "Uma e meia diária", "Duas diárias"].includes(s.extra)) fail("Extra do serviço adicional inválida.");
+        if (s.extraIndependente && s.extra === "Não") fail("Serviço independente sem extra selecionada.");
+        if (!present(ap.i.status) && s.extra !== "Não") fail("Não é permitido extra por serviço em apontamento de falta ou atestado.");
       }
       if (new Set(ss2.map((s) => s.obraId + "|" + s.periodo)).size !== ss2.length) fail("Servi\xE7o repetido no mesmo per\xEDodo.");
       if (ap.i.extra === "Valor espec\xEDfico" && (!oldPoint || oldPoint.extra !== "Valor espec\xEDfico")) fail("Extra espec\xEDfico deve existir no registro original.");
@@ -6248,7 +6269,7 @@ function buildOperations(db, next, session, timestamp = (/* @__PURE__ */ new Dat
       categoria: p2.categoria || "",
       criado_em: oldMeta.avulso_eventual?.criado_em || timestamp
     } } : {};
-    const first = ss[0], meta = { ...oldMeta, ...eventSnapshot, valor_extra_disponivel: money(Number(i.valorExtraDisponivel ?? 0)), apontado_em: pointTime, apontado_por: executor, custos_separados: true, custo_pago: money(finance), valor_acordo: money(bonus), valor_adicional_noturno: money(night), valor_ajuda_custo: money(ajudaCusto), servico_a_definir: !first, tipo_diaria_avulso: p2.avulso === "Sim" ? i.tipoDiariaAvulso || "Di\xE1ria" : null, periodo_principal: first?.periodo || c.turno, servicos_adicionais: ss.slice(1).map((s) => ({ servico: works.get(s.obraId)?.nome, obra_id: s.obraId, periodo: s.periodo })) };
+    const first = ss[0], meta = { ...oldMeta, ...eventSnapshot, valor_extra_disponivel: money(Number(i.valorExtraDisponivel ?? 0)), apontado_em: pointTime, apontado_por: executor, custos_separados: true, custo_pago: money(finance), valor_acordo: money(bonus), valor_adicional_noturno: money(night), valor_ajuda_custo: money(ajudaCusto), servico_a_definir: !first, tipo_diaria_avulso: p2.avulso === "Sim" ? i.tipoDiariaAvulso || "Di\xE1ria" : null, periodo_principal: first?.periodo || c.turno, servicos_adicionais: ss.slice(1).map((s) => ({ servico: works.get(s.obraId)?.nome, obra_id: s.obraId, periodo: s.periodo, extra: s.extra, extra_independente: s.extraIndependente })) };
     add("convocacoes", "update", key2, { ...values, obra_id: first?.obraId || work, observacao: "Turno: " + c.turno + (i.observacao ? " | Obs: " + i.observacao : "") + " ||APROAR_META|| " + JSON.stringify(meta) });
     if (!same(normServices(oldPoint), ss)) {
       const previousServices = (rawServicesByConv.get(key2) || []).slice().sort((a2, b2) => Number(b2.principal) - Number(a2.principal) || Number(a2.id) - Number(b2.id));
