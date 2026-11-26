@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { strict as assert } from 'node:assert';
 import vm from 'node:vm';
+import { spawnSync } from 'node:child_process';
 
 const source = readFileSync(new URL('../cloudflare-production/public/app.js', import.meta.url), 'utf8');
 const works = [
@@ -130,7 +131,8 @@ assert(source.includes('const verifyAdminServices=confirmed=>'), 'Controladoria 
 assert(source.includes('},verifyDayServices))return;'), 'Supervisor deve verificar os serviços após salvar');
 assert(source.includes('typeof verifyPersisted===\'function\''), 'leitura do Neon deve validar os serviços');
 
-assert.doesNotThrow(()=>new vm.Script(worker,{filename:'worker.js'}), 'o Worker compilado precisa ser JS válido');
+const syntax=spawnSync(process.execPath,['--input-type=module','--check'],{input:worker,encoding:'utf8'});
+assert.equal(syntax.status,0,'o Worker de produção deve compilar: '+syntax.stderr);
 const adapter=vm.createContext({
   id: value=>String(value??''),
   amount: value=>Number(value)||0,
