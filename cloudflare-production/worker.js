@@ -5644,7 +5644,8 @@ function mapNeonData(db) {
     }
     convocacoes.push({ id: key2, supervisor: c.engenheiro, dataServico: isoDate(c.data), unidade: works.get(work)?.unidade || "", obraId: meta.servico_a_definir ? "" : work, turno, colaboradores: [person], criadoEm: c.criado_em || meta.convocado_em || null, executor: c.criado_por || meta.convocado_por || c.engenheiro, origem: "neon" });
     if (!a2 && !meta.apontado_em && c.custos_separados !== true) continue;
-    const source = a2 || c, raw = services.get(key2) || [], additional = meta.servicos_adicionais || [];
+    const source = a2 || c, raw = (services.get(key2) || []).slice().sort((a,b)=>
+      Number(b.principal)-Number(a.principal)||Number(a.id)-Number(b.id)), additional = meta.servicos_adicionais || [];
     // As tabelas guardam o vínculo da obra; a classificação e a independência
     // da extra permanecem no metadado estruturado da convocação.
     const readExtraForService = (obraId, periodo) => additional.find(s =>
