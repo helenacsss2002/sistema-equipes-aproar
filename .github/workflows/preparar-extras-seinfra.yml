@@ -1,0 +1,33 @@
+name: Preparar versão de extras Seinfra do APROAR
+on:
+  push:
+    branches: [feat/extra-por-servico-adicional-seinfra-20261126]
+    paths: ['.github/workflows/preparar-extras-seinfra.yml']
+permissions:
+  contents: read
+jobs:
+  validar-e-carregar:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validar apontamento e integração
+        run: |
+          node --check cloudflare-production/public/app.js
+          node --check cloudflare-production/worker.js
+          node --test tests/test_apontamento_servicos_interunidades.mjs
+          node cloudflare-production/test-worker.mjs
+          npm --prefix cloudflare ci --no-audit
+          npm --prefix cloudflare test
+      - name: Carregar versão e arquivos estáticos
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"
+          test -n "$CLOUDFLARE_ACCOUNT_ID"
+          sed -i 's/aproar-rateio-interunidades-20261117-1/aproar-extras-seinfra-20261126-1/' cloudflare-production/public/index.html
+          npx --yes wrangler@4 versions upload --config cloudflare-production/wrangler.jsonc --keep-vars --message "APROAR extras Seinfra 7f8ce0f"
