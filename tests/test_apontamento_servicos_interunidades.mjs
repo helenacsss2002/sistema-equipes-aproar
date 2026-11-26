@@ -129,4 +129,41 @@ assert(worker.includes('Number(b.principal)-Number(a.principal)'), 'a obra princ
 assert(source.includes('const verifyAdminServices=confirmed=>'), 'Controladoria também deve conferir extras no Neon');
 assert(source.includes('},verifyDayServices))return;'), 'Supervisor deve verificar os serviços após salvar');
 assert(source.includes('typeof verifyPersisted===\'function\''), 'leitura do Neon deve validar os serviços');
+
+assert.doesNotThrow(()=>new vm.Script(worker,{filename:'worker.js'}), 'o Worker compilado precisa ser JS válido');
+const adapter=vm.createContext({
+  id: value=>String(value??''),
+  amount: value=>Number(value)||0,
+  isoDate: value=>String(value).slice(0,10),
+  metadata: observation=>{
+    const [text,serialized]=String(observation||'').split(' ||APROAR_META|| ');
+    return {text,meta:serialized?JSON.parse(serialized):{}};
+  },
+  extraLabel: (value,base)=>Number(value)===0?'Não':'Valor específico'
+});
+const adapterStart=worker.indexOf('function mapNeonData(');
+const adapterEnd=worker.indexOf('__name(mapNeonData,',adapterStart);
+assert(adapterStart>=0&&adapterEnd>adapterStart);
+vm.runInContext(worker.slice(adapterStart,adapterEnd),adapter);
+const meta={servicos_adicionais:[
+  {obra_id:'2',periodo:'Integral',extra:'Diária',extra_independente:true},
+  {obra_id:'3',periodo:'Integral',extra:'Meia diária',extra_independente:false}
+],periodo_principal:'Integral'};
+const converted=adapter.mapNeonData({
+  colaboradores:[{id:'fabiano',nome:'Fabiano',funcao:'Pedreiro',valor_diaria:241.74,ativo:true}],
+  obras:works,
+  convocacoes:[{id:10,obra_id:'1',colaborador_id:'fabiano',data:'2026-11-25',engenheiro:'EDUARDO',turno:'Integral',observacao:'Turno: Integral ||APROAR_META|| '+JSON.stringify(meta),custos_separados:true}],
+  apontamentos:[{id:20,convocacao_id:10,valor_extra:0,custo_pago:0,tipo_diaria:'Não',status:'Presente (Integral)',apontado_em:'2026-11-25T14:00:00Z'}],
+  servicos_apontamento:[
+    {id:1,convocacao_id:10,obra_id:'1',periodo:'Integral',principal:true},
+    {id:2,convocacao_id:10,obra_id:'2',periodo:'Integral',principal:false},
+    {id:3,convocacao_id:10,obra_id:'3',periodo:'Integral',principal:false}
+  ],
+  indisponibilidades:[],conflitos_convocacao:[],auditoria:[]
+});
+const recuperado=converted.apontamentos[0].itens[0].servicos;
+assert.deepEqual(Array.from(recuperado,x=>[x.obraId,x.extra,x.extraIndependente]),[
+  ['1','Não',false],['2','Diária',true],['3','Meia diária',false]
+], 'o Neon deve devolver categoria e independência dos serviços após F5');
+
 console.log('OK: seleção de extras por serviço, independente sem rateio, custo SEINFRA integral, preservação no Worker.');
