@@ -1803,7 +1803,7 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
         const nightParts=splitMoneyExactly(isPresent?nocturnal(i,c):0,sb.length);
         const bonusParts=splitMoneyExactly(isPresent?i.acordo:0,servicosRateio.length);
         const travelParts=splitMoneyExactly(isPresent?i.ajudaCusto:0,servicosRateio.length);
-        for(const [serviceIndex,s] of ss.entries()){
+        for(const s of ss){
           const key=s.obraId||'unassigned_'+c.unidade;
           let row=services.get(key);
           if(!row){row={c:{...c,obraId:s.obraId,unidade:obraById(s.obraId)?.unidade||c.unidade},i,p,refs,blocks:new Set(),periods:new Set(),supervisors:new Set(),statuses:new Set(),extras:new Set(),daily:0,extra:0,finance:0,night:0,bonus:0,ajudaCusto:0,danger:0,share:1};services.set(key,row);}
@@ -1823,36 +1823,21 @@ function extraWorkOptions(selected=""){const works=OBRAS.filter(o=>o&&o.id).slic
           }
         }
       }
-      for(const b of new Set([...Object.keys(blocks.daily),...Object.keys(blocks.extra),...Object.keys(blocks.finance)])){
-        let participants=[...services.values()].filter(x=>x.blocks.has(b));
-        if(!participants.length)participants=[...services.values()].filter(x=>x.blocks.size);
-        if(!participants.length)continue;
-        for(const field of ['daily','extra','finance']){
-          const shares=splitMoneyExactly(blocks[field][b]||0,participants.length);
-          participants.forEach((row,index)=>row[field]+=shares[index]);
+      const normal=[...services.values()].filter(row=>row.blocks.size);
+      for(const field of ['daily','extra','finance']){
+        const amounts=Object.entries(blocks[field]);
+        if(regs.length===1){
+          // A base da convocação é rateada por obra. Extras por serviço
+          // já estão em suas respectivas obras e são somadas integralmente.
+          const shares=splitMoneyExactly(amounts.reduce((sum,[,value])=>sum+value,0),normal.length);
+          normal.forEach((row,index)=>row[field]+=shares[index]);
+          continue;
         }
-      }
-      // O rateio normal de uma única convocação com várias obras é igualitário,
-      // independentemente do período. Extras individuais nunca são divididas.
-      if(regs.length===1){
-        const normal=[...services.values()].filter(x=>x.blocks.size);
-        if(normal.length>1){
-          for(const field of ['daily','finance']){
-            const shares=splitMoneyExactly(normal.reduce((sum,x)=>sum+x[field],0),normal.length);
-            normal.forEach((row,index)=>{row[field]=shares[index];});
-          }
-          // O i.extra principal é rateado normalmente; extras de serviço foram
-          // adicionadas diretamente a sua obra e devem permanecer inteiras.
-          const totalExtraPrincipal=roundMoney(regs.reduce((sum,{i})=>sum+
-            (presence(i.status)?(i.extra==='Valor específico'?Number(i.valorExtraOriginal)||0:roundMoney(dayCost(p)*extraMultiplier(i.extra))):0),0));
-          const mainShares=splitMoneyExactly(totalExtraPrincipal,normal.length);
-          // Reconstituir apenas os acréscimos por serviço e o rateio principal.
-          for(const [index,row] of normal.entries()){
-            const propriaExtra=regs.reduce((sum,{c,i})=>sum+
-              serviceList(i,c).filter(s=>String(s.obraId)===String(row.c.obraId)&&s.extra&&s.extra!=='Não')
-                .reduce((v,s)=>v+roundMoney(dayCost(p)*extraMultiplier(s.extra)),0),0);
-            row.extra=roundMoney(mainShares[index]+propriaExtra);
-          }
+        for(const [block,value] of amounts){
+          const matching=normal.filter(row=>row.blocks.has(block));
+          const participants=matching.length?matching:normal;
+          const shares=splitMoneyExactly(value,participants.length);
+          participants.forEach((row,index)=>row[field]+=shares[index]);
         }
       }
       for(const row of services.values()){row.daily=roundMoney(row.daily);row.extra=roundMoney(row.extra);row.finance=roundMoney(row.finance);row.night=roundMoney(row.night);row.bonus=roundMoney(row.bonus);row.ajudaCusto=roundMoney(row.ajudaCusto);if(dangerEligible(p))row.danger=roundMoney(row.daily*1.3)-row.daily+roundMoney(row.extra*1.3)-row.extra;row.danger=roundMoney(row.danger);row.service={obraId:row.c.obraId,periodo:[...row.periods].join(' + ')};row.c.supervisor=[...row.supervisors].join(' / ');row.displayStatus=[...row.statuses].join(' / ')+(p?.avulso==='Sim'&&AVULSO_DIARIA_OPTIONS.includes(row.i?.tipoDiariaAvulso)?' · '+row.i.tipoDiariaAvulso:'');row.displayExtra=[...row.extras].join(' / ');if(reportFilters.obra==='Todas'||row.c.obraId===reportFilters.obra)out.push(row);}

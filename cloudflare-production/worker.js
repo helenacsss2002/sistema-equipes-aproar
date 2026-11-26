@@ -5642,7 +5642,7 @@ function mapNeonData(db) {
       extras.push({ id: key2, supervisor: c.engenheiro, dataServico: isoDate(c.data), unidade: works.get(targetWork)?.unidade || meta.extra_unidade || works.get(work)?.unidade || "", obraId: targetWork, colaboradorId: person, extra: savedType2 || extraLabel(extra2, cost2), valorExtraOriginal: extra2, observacao: String(meta.extra_observacao || a2.observacao || ""), criadoEm: a2.apontado_em || meta.extra_lancado_em || c.criado_em || null, executor: a2.apontado_por || meta.extra_lancado_por || c.engenheiro, servicoDiaId: id(meta.extra_dia_obra_id || "") });
       continue;
     }
-    convocacoes.push({ id: key2, supervisor: c.engenheiro, dataServico: isoDate(c.data), unidade: works.get(work)?.unidade || "", obraId: meta.servico_a_definir ? "" : work, turno, colaboradores: [person], criadoEm: c.criado_em || meta.convocado_em || null, executor: c.criado_por || meta.convocado_por || c.engenheiro, origem: "neon" });
+    convocacoes.push({ id: key2, supervisor: c.engenheiro, dataServico: isoDate(c.data), unidade: meta.unidade_convocada || works.get(work)?.unidade || "", obraId: meta.servico_a_definir ? "" : work, turno, colaboradores: [person], criadoEm: c.criado_em || meta.convocado_em || null, executor: c.criado_por || meta.convocado_por || c.engenheiro, origem: "neon" });
     if (!a2 && !meta.apontado_em && c.custos_separados !== true) continue;
     const source = a2 || c, raw = (services.get(key2) || []).slice().sort((a,b)=>
       Number(b.principal)-Number(a.principal)||Number(a.id)-Number(b.id)), additional = meta.servicos_adicionais || [];
@@ -6208,7 +6208,7 @@ function buildOperations(db, next, session, timestamp = (/* @__PURE__ */ new Dat
       if (raw && !own(session, c) && session.role !== "FINANCEIRO") fail("Sem permiss\xE3o para alterar convoca\xE7\xE3o.", 403);
       if (raw && session.role === "FINANCEIRO") fail("Financeiro n\xE3o altera convoca\xE7\xF5es.", 403);
       const { meta: meta2 } = metadata(raw?.observacao), created = raw?.criado_em || meta2.convocado_em || timestamp;
-      Object.assign(meta2, { convocado_em: created, convocado_por: raw?.criado_por || meta2.convocado_por || session.user, servico_a_definir: !c.obraId });
+      Object.assign(meta2, { convocado_em: created, convocado_por: raw?.criado_por || meta2.convocado_por || session.user, servico_a_definir: !c.obraId, unidade_convocada: meta2.unidade_convocada || c.unidade });
       if (isEventAvulso(person)) {
         Object.assign(meta2, { avulso_eventual: {
           id: pid,
@@ -6270,7 +6270,7 @@ function buildOperations(db, next, session, timestamp = (/* @__PURE__ */ new Dat
       categoria: p2.categoria || "",
       criado_em: oldMeta.avulso_eventual?.criado_em || timestamp
     } } : {};
-    const first = ss[0], meta = { ...oldMeta, ...eventSnapshot, valor_extra_disponivel: money(Number(i.valorExtraDisponivel ?? 0)), apontado_em: pointTime, apontado_por: executor, custos_separados: true, custo_pago: money(finance), valor_acordo: money(bonus), valor_adicional_noturno: money(night), valor_ajuda_custo: money(ajudaCusto), servico_a_definir: !first, tipo_diaria_avulso: p2.avulso === "Sim" ? i.tipoDiariaAvulso || "Di\xE1ria" : null, periodo_principal: first?.periodo || c.turno, servicos_adicionais: ss.slice(1).map((s) => ({ servico: works.get(s.obraId)?.nome, obra_id: s.obraId, periodo: s.periodo, extra: s.extra, extra_independente: s.extraIndependente })) };
+    const first = ss[0], meta = { ...oldMeta, ...eventSnapshot, unidade_convocada: oldMeta.unidade_convocada || c.unidade, valor_extra_disponivel: money(Number(i.valorExtraDisponivel ?? 0)), apontado_em: pointTime, apontado_por: executor, custos_separados: true, custo_pago: money(finance), valor_acordo: money(bonus), valor_adicional_noturno: money(night), valor_ajuda_custo: money(ajudaCusto), servico_a_definir: !first, tipo_diaria_avulso: p2.avulso === "Sim" ? i.tipoDiariaAvulso || "Di\xE1ria" : null, periodo_principal: first?.periodo || c.turno, servicos_adicionais: ss.slice(1).map((s) => ({ servico: works.get(s.obraId)?.nome, obra_id: s.obraId, periodo: s.periodo, extra: s.extra, extra_independente: s.extraIndependente })) };
     add("convocacoes", "update", key2, { ...values, obra_id: first?.obraId || work, observacao: "Turno: " + c.turno + (i.observacao ? " | Obs: " + i.observacao : "") + " ||APROAR_META|| " + JSON.stringify(meta) });
     // Conferir tanto o que o apontamento apresenta quanto os vínculos reais:
     // metadados legados podem parecer iguais enquanto falta uma linha no Neon.
