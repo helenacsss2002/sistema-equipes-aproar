@@ -6271,8 +6271,14 @@ function buildOperations(db, next, session, timestamp = (/* @__PURE__ */ new Dat
     } } : {};
     const first = ss[0], meta = { ...oldMeta, ...eventSnapshot, valor_extra_disponivel: money(Number(i.valorExtraDisponivel ?? 0)), apontado_em: pointTime, apontado_por: executor, custos_separados: true, custo_pago: money(finance), valor_acordo: money(bonus), valor_adicional_noturno: money(night), valor_ajuda_custo: money(ajudaCusto), servico_a_definir: !first, tipo_diaria_avulso: p2.avulso === "Sim" ? i.tipoDiariaAvulso || "Di\xE1ria" : null, periodo_principal: first?.periodo || c.turno, servicos_adicionais: ss.slice(1).map((s) => ({ servico: works.get(s.obraId)?.nome, obra_id: s.obraId, periodo: s.periodo, extra: s.extra, extra_independente: s.extraIndependente })) };
     add("convocacoes", "update", key2, { ...values, obra_id: first?.obraId || work, observacao: "Turno: " + c.turno + (i.observacao ? " | Obs: " + i.observacao : "") + " ||APROAR_META|| " + JSON.stringify(meta) });
-    if (!same(normServices(oldPoint), ss)) {
-      const previousServices = (rawServicesByConv.get(key2) || []).slice().sort((a2, b2) => Number(b2.principal) - Number(a2.principal) || Number(a2.id) - Number(b2.id));
+    // Conferir tanto o que o apontamento apresenta quanto os vínculos reais:
+    // metadados legados podem parecer iguais enquanto falta uma linha no Neon.
+    const previousServices = (rawServicesByConv.get(key2) || []).slice().sort((a2, b2) => Number(b2.principal) - Number(a2.principal) || Number(a2.id) - Number(b2.id));
+    const samePersistedServices=previousServices.length===ss.length&&previousServices.every((row,index)=>
+      String(row.obra_id||"")===String(ss[index].obraId||"")&&
+      String(row.periodo||"Integral")===String(ss[index].periodo||"Integral")&&
+      Boolean(row.principal)===(index===0));
+    if (!same(normServices(oldPoint), ss) || !samePersistedServices) {
       ss.forEach((service, index) => {
         const work2 = works.get(service.obraId), previous = previousServices[index];
         const values2 = { convocacao_id: key2, obra_id: service.obraId, obra_nome_snapshot: work2.nome, unidade_snapshot: work2.unidade, periodo: service.periodo, principal: index === 0, atualizado_em: timestamp };
