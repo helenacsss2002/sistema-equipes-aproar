@@ -124,4 +124,9 @@ const worker=readFileSync(new URL('../cloudflare-production/worker.js',import.me
 assert(worker.includes('extra_independente: s.extraIndependente'));
 assert(worker.includes('extra:details?.extra||"Não"'));
 assert(worker.includes('s.extraIndependente && s.extra === "Não"'));
+assert(worker.includes('const samePersistedServices='), 'vínculos físicos devem ser conferidos');
+assert(worker.includes('Number(b.principal)-Number(a.principal)'), 'a obra principal deve aparecer primeiro após F5');
+assert(source.includes('const verifyAdminServices=confirmed=>'), 'Controladoria também deve conferir extras no Neon');
+assert(source.includes('},verifyDayServices))return;'), 'Supervisor deve verificar os serviços após salvar');
+assert(source.includes('typeof verifyPersisted===\'function\''), 'leitura do Neon deve validar os serviços');
 console.log('OK: seleção de extras por serviço, independente sem rateio, custo SEINFRA integral, preservação no Worker.');
